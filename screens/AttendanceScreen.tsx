@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, memo } from 'react';
 import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { db } from '../database';
@@ -12,6 +12,53 @@ const RadioButton = ({ selected, onPress, label, color = '#2196F3' }: any) => (
     <Text style={styles.radioLabel}>{label}</Text>
   </TouchableOpacity>
 );
+const StudentItem = memo(({ item, onUpdate }: { item: any; onUpdate: (id: number, status: string) => void }) => (
+  <View style={styles.studentCard}>
+    <View style={styles.studentInfoRow}>
+      <Text style={styles.studentText}>
+        <Text style={styles.bold}>Salon:</Text> {item.salon} | <Text style={styles.bold}>Sıra:</Text> {item.sira}
+      </Text>
+      <Text style={styles.studentText}>
+        <Text style={styles.bold}>Sınıf:</Text> {item.sinifDüzey}-{item.sube}
+      </Text>
+    </View>
+    <View style={styles.studentInfoRow}>
+      <Text style={styles.studentText}>
+        <Text style={styles.bold}>No:</Text> {item.ogrenciNo}
+      </Text>
+      <Text style={styles.studentText} numberOfLines={1}>
+        <Text style={styles.bold}>Ad:</Text> {item.adSoyad}
+      </Text>
+    </View>
+
+    <View style={styles.radioGroup}>
+      <RadioButton
+        label="Var"
+        color="#4CAF50"
+        selected={item.geldiMi === 'var'}
+        onPress={() => onUpdate(item.id, 'var')}
+      />
+      <RadioButton
+        label="Yok"
+        color="#F44336"
+        selected={item.geldiMi === 'yok'}
+        onPress={() => onUpdate(item.id, 'yok')}
+      />
+      <RadioButton
+        label="Geç"
+        color="#FF9800"
+        selected={item.geldiMi === 'geç'}
+        onPress={() => onUpdate(item.id, 'geç')}
+      />
+      <RadioButton
+        label="Bilinmiyor"
+        color="#9E9E9E"
+        selected={item.geldiMi === 'kontrol edilmedi'}
+        onPress={() => onUpdate(item.id, 'kontrol edilmedi')}
+      />
+    </View>
+  </View>
+));
 
 export default function AttendanceScreen({ route }: any) {
   const { exam } = route.params;
@@ -96,64 +143,19 @@ export default function AttendanceScreen({ route }: any) {
     fetchStudents();
   }, [fetchStudents]);
 
-  const updateAttendance = (id: number, status: string) => {
+  const updateAttendance = useCallback((id: number, status: string) => {
     try {
       db.runSync(`UPDATE tbl_salonlisteleri SET geldiMi = ? WHERE id = ?`, [status, id]);
-
-      // Optimistic UI update
+      // Optimistic UI update (only the changed row)
       setStudents(prev => prev.map(s => s.id === id ? { ...s, geldiMi: status } : s));
     } catch (error) {
       console.error('Error updating status:', error);
     }
-  };
+  }, []);
 
-  const renderItem = ({ item }: { item: any }) => (
-    <View style={styles.studentCard}>
-      <View style={styles.studentInfoRow}>
-        <Text style={styles.studentText}>
-          <Text style={styles.bold}>Salon:</Text> {item.salon} | <Text style={styles.bold}>Sıra:</Text> {item.sira}
-        </Text>
-        <Text style={styles.studentText}>
-          <Text style={styles.bold}>Sınıf:</Text> {item.sinifDüzey}-{item.sube}
-        </Text>
-      </View>
-      <View style={styles.studentInfoRow}>
-        <Text style={styles.studentText}>
-          <Text style={styles.bold}>No:</Text> {item.ogrenciNo}
-        </Text>
-        <Text style={styles.studentText} numberOfLines={1}>
-          <Text style={styles.bold}>Ad:</Text> {item.adSoyad}
-        </Text>
-      </View>
-
-      <View style={styles.radioGroup}>
-        <RadioButton
-          label="Var"
-          color="#4CAF50"
-          selected={item.geldiMi === 'var'}
-          onPress={() => updateAttendance(item.id, 'var')}
-        />
-        <RadioButton
-          label="Yok"
-          color="#F44336"
-          selected={item.geldiMi === 'yok'}
-          onPress={() => updateAttendance(item.id, 'yok')}
-        />
-        <RadioButton
-          label="Geç"
-          color="#FF9800"
-          selected={item.geldiMi === 'geç'}
-          onPress={() => updateAttendance(item.id, 'geç')}
-        />
-        <RadioButton
-          label="Bilinmiyor"
-          color="#9E9E9E"
-          selected={item.geldiMi === 'kontrol edilmedi'}
-          onPress={() => updateAttendance(item.id, 'kontrol edilmedi')}
-        />
-      </View>
-    </View>
-  );
+  const renderItem = useCallback(({ item }: { item: any }) => (
+    <StudentItem item={item} onUpdate={updateAttendance} />
+  ), [updateAttendance]);
 
   return (
     <View style={styles.container}>
@@ -211,6 +213,11 @@ export default function AttendanceScreen({ route }: any) {
           keyExtractor={(item) => item.id.toString()}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
+          initialNumToRender={10}
+          maxToRenderPerBatch={10}
+          windowSize={7}
+          removeClippedSubviews={true}
+          updateCellsBatchingPeriod={30}
         />
       )}
     </View>

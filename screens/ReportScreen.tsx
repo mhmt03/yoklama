@@ -17,11 +17,11 @@ export default function ReportScreen({ route, navigation }: any) {
 
   const fetchStats = useCallback(() => {
     try {
-      const total = db.getFirstSync<CountResult>('SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ?', [exam.sinavId]).cnt;
-      const varCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'var'", [exam.sinavId]).cnt;
-      const yokCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'yok'", [exam.sinavId]).cnt;
-      const gecCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'geç'", [exam.sinavId]).cnt;
-      const kontrolCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'kontrol edilmedi'", [exam.sinavId]).cnt;
+      const total = db.getFirstSync<CountResult>('SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ?', [exam.sinavId])?.cnt ?? 0;
+      const varCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'var'", [exam.sinavId])?.cnt ?? 0;
+      const yokCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'yok'", [exam.sinavId])?.cnt ?? 0;
+      const gecCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'geç'", [exam.sinavId])?.cnt ?? 0;
+      const kontrolCnt = db.getFirstSync<CountResult>("SELECT COUNT(*) as cnt FROM tbl_salonlisteleri WHERE sinavId = ? AND geldiMi = 'kontrol edilmedi'", [exam.sinavId])?.cnt ?? 0;
       setStats({ total, var: varCnt, yok: yokCnt, gec: gecCnt, kontrol: kontrolCnt });
     } catch (e) {
       console.error(e);
@@ -36,7 +36,16 @@ export default function ReportScreen({ route, navigation }: any) {
 
   const generateExcel = async () => {
     try {
-      const rows = db.getAllSync(`
+      interface ReportRow {
+        salon: string;
+        ogrenciNo: string;
+        sube: string;
+        adSoyad: string;
+        sinifDüzey: string;
+        geldiMi: string;
+      }
+
+      const rows = db.getAllSync<ReportRow>(`
         SELECT sl.salon, sl.ogrenciNo, ol.sube, ol.adSoyad, ol.sinifDüzey, sl.geldiMi
         FROM tbl_salonlisteleri sl
         LEFT JOIN tbl_ogrenciListe ol ON sl.ogrenciNo = ol.ogrenciNo
@@ -48,7 +57,9 @@ export default function ReportScreen({ route, navigation }: any) {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Rapor');
       const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
-      const uri = FileSystem.documentDirectory + `rapor_${exam.sinavId}.xlsx`;
+      // Create a safe filename using exam name and date
+      const safeName = `${exam.sinavAd.replace(/\s+/g, '_')}_${exam.tarih.replace(/\s+/g, '_')}`;
+      const uri = FileSystem.documentDirectory + `${safeName}.xlsx`;
       await FileSystem.writeAsStringAsync(uri, b64, { encoding: 'base64' });
       return uri;
     } catch (e) {
@@ -59,7 +70,16 @@ export default function ReportScreen({ route, navigation }: any) {
 
   const generatePDF = async () => {
     try {
-      const rows = db.getAllSync(`
+      interface ReportRow {
+        salon: string;
+        ogrenciNo: string;
+        sube: string;
+        adSoyad: string;
+        sinifDüzey: string;
+        geldiMi: string;
+      }
+
+      const rows = db.getAllSync<ReportRow>(`
         SELECT sl.salon, sl.ogrenciNo, ol.sube, ol.adSoyad, ol.sinifDüzey, sl.geldiMi
         FROM tbl_salonlisteleri sl
         LEFT JOIN tbl_ogrenciListe ol ON sl.ogrenciNo = ol.ogrenciNo
@@ -71,8 +91,12 @@ export default function ReportScreen({ route, navigation }: any) {
         <html><head><style>table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px}</style></head>
         <body><h2>${exam.sinavAd} - Rapor</h2>
         <table><thead><tr><th>Salon</th><th>No</th><th>Şube</th><th>Ad Soyad</th><th>Sınıf</th><th>Durum</th></tr></thead><tbody>${htmlRows}</tbody></table></body></html>`;
-      const { uri } = await Print.printToFileAsync({ html });
-      return uri;
+      const { uri: tempUri } = await Print.printToFileAsync({ html });
+      // Rename PDF using exam name and date
+      const safeName = `${exam.sinavAd.replace(/\s+/g, '_')}_${exam.tarih.replace(/\s+/g, '_')}`;
+      const destUri = FileSystem.documentDirectory + `${safeName}.pdf`;
+      await FileSystem.moveAsync({ from: tempUri, to: destUri });
+      return destUri;
     } catch (e) {
       console.error(e);
       return null;
