@@ -1,9 +1,10 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Button, TextInput, Modal, Pressable } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Button, TextInput, Modal, Pressable, ScrollView } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as XLSX from 'xlsx';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Picker } from '@react-native-picker/picker';
 import { db } from '../database';
 
 export default function StudentListScreen({ navigation }: any) {
@@ -18,6 +19,14 @@ export default function StudentListScreen({ navigation }: any) {
   const [editSube, setEditSube] = useState('');
   const [editAdSoyad, setEditAdSoyad] = useState('');
   const [editSinif, setEditSinif] = useState('');
+
+  // Excel Import Mapping
+  const [subeCol, setSubeCol] = useState('A');
+  const [noCol, setNoCol] = useState('B');
+  const [adCol, setAdCol] = useState('C');
+  const [sinifCol, setSinifCol] = useState('D');
+  const [importStartRow, setImportStartRow] = useState('2');
+  const [showImportSettings, setShowImportSettings] = useState(false);
 
   const fetchStudents = useCallback(() => {
     try {
@@ -54,70 +63,125 @@ export default function StudentListScreen({ navigation }: any) {
     return matchesSube && matchesNo && matchesAd && matchesSinif;
   });
 
-  const loadStudentLists = () => {
-    Alert.alert(
-      'Excel Şablonu',
-      'Lütfen aşağıdaki sütun başlıklarıyla bir Excel dosyası hazırlayın:\n\nŞube, Öğrenci No, Ad Soyad, Sınıf Düzeyi',
-      [
-        {
-          text: 'Tamam',
-          onPress: async () => {
-            try {
-              const result = await DocumentPicker.getDocumentAsync({
-                type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
-                copyToCacheDirectory: true,
-              });
+  const loadStudentLists = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
+        copyToCacheDirectory: true,
+      });
 
-              if (!result.canceled) {
-                let fileUri: string | undefined;
-                if ((result as any).uri) {
-                  fileUri = (result as any).uri;
-                } else if ((result as any).assets && (result as any).assets.length > 0) {
-                  fileUri = (result as any).assets[0].uri;
-                }
-                if (!fileUri) return;
+      if (result.canceled) return;
 
-                const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: 'base64' });
-                const workbook = XLSX.read(base64, { type: 'base64' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+      let fileUri: string | undefined;
+      if ((result as any).uri) {
+        fileUri = (result as any).uri;
+      } else if ((result as any).assets && (result as any).assets.length > 0) {
+        fileUri = (result as any).assets[0].uri;
+      }
+      if (!fileUri) return;
 
-                if (jsonData.length > 1) {
-                  db.execSync('BEGIN TRANSACTION;');
-                  try {
-                    for (let i = 1; i < jsonData.length; i++) {
-                      const row = jsonData[i];
-                      if (!row || row.length === 0 || !row[1]) continue;
+      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: 'base64' });
+      const workbook = XLSX.read(base64, { type: 'base64' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-                      const sube = row[0] ? String(row[0]) : '';
-                      const ogrenciNo = String(row[1]);
-                      const adSoyad = row[2] ? String(row[2]) : '';
-                      const sinifDuzey = row[3] ? String(row[3]) : '';
+      if (jsonData.length === 0) return;
 
-                      db.runSync(
-                        `INSERT OR REPLACE INTO tbl_ogrenciListe (ogrenciNo, sinifDüzey, sube, adSoyad) VALUES (?, ?, ?, ?)`,
-                        [ogrenciNo, sinifDuzey, sube, adSoyad]
-                      );
-                    }
-                    db.execSync('COMMIT;');
-                    Alert.alert('Başarılı', 'Öğrenci listesi başarıyla yüklendi.');
-                    fetchStudents();
-                  } catch (e) {
-                    db.execSync('ROLLBACK;');
-                    Alert.alert('Hata', 'Veritabanına kaydedilirken hata oluştu.');
-                  }
-                }
-              }
-            } catch (error) {
-              Alert.alert('Hata', 'Dosya okunurken bir hata oluştu.');
+      const colToIndex = (col: string) => col.charCodeAt(0) - 65;
+      const sIdx = colToIndex(subeCol);
+      const nIdx = colToIndex(noCol);
+      const aIdx = colToIndex(adCol);
+      const gIdx = colToIndex(sinifCol);
+      const startIdx = Math.max(0, parseInt(importStartRow, 10) - 1);
+
+      const studentsToProcess: any[] = [];
+      const studentNosInExcel = new Set<string>();
+
+      // 1. ÖN KONTROL: Sayısal doğrulama ve boş satır temizleme
+      for (let i = startIdx; i < jsonData.length; i++) {
+        const row = jsonData[i];
+        if (!row || row.length === 0) continue;
+        
+        const rawNo = row[nIdx];
+        if (rawNo === undefined || rawNo === null || String(rawNo).trim() === '') continue;
+
+        const studentNo = String(rawNo).trim();
+
+        // Sayısal kontrol
+        if (!/^\d+$/.test(studentNo)) {
+          Alert.alert('Hata', `Geçersiz öğrenci numarası: "${studentNo}" (Satır: ${i + 1}). Öğrenci numaraları sadece rakamlardan oluşmalıdır. Yükleme iptal edildi.`);
+          return;
+        }
+
+        studentsToProcess.push({
+          ogrenciNo: studentNo,
+          sube: row[sIdx] ? String(row[sIdx]).trim() : '',
+          adSoyad: row[aIdx] ? String(row[aIdx]).trim() : '',
+          sinifDuzey: row[gIdx] ? String(row[gIdx]).trim() : ''
+        });
+        studentNosInExcel.add(studentNo);
+      }
+
+      if (studentsToProcess.length === 0) {
+        Alert.alert('Uyarı', 'Yüklenecek geçerli öğrenci bulunamadı.');
+        return;
+      }
+
+      // 2. ÇAKIŞMA KONTROLÜ
+      const existingStudents = await db.getAllAsync<{ ogrenciNo: string }>(
+        `SELECT ogrenciNo FROM tbl_ogrenciListe WHERE ogrenciNo IN (${Array.from(studentNosInExcel).map(() => '?').join(',')})`,
+        Array.from(studentNosInExcel)
+      );
+      const existingSet = new Set(existingStudents.map(s => String(s.ogrenciNo)));
+
+      const processImport = (shouldUpdateExisting: boolean) => {
+        db.execSync('BEGIN TRANSACTION;');
+        try {
+          let count = 0;
+          studentsToProcess.forEach(s => {
+            const exists = existingSet.has(s.ogrenciNo);
+            if (exists && !shouldUpdateExisting) {
+              // Var olanı koru, dokunma
+              return;
             }
-          },
-        },
-        { text: 'İptal', style: 'cancel' },
-      ]
-    );
+            // Yeni ekle veya var olanı güncelle (shouldUpdateExisting true ise buraya düşer)
+            db.runSync(
+              `INSERT OR REPLACE INTO tbl_ogrenciListe (ogrenciNo, sinifDüzey, sube, adSoyad) VALUES (?, ?, ?, ?)`,
+              [s.ogrenciNo, s.sinifDuzey, s.sube, s.adSoyad]
+            );
+            count++;
+          });
+          db.execSync('COMMIT;');
+          Alert.alert('Başarılı', `${count} kayıt işlendi.`);
+          setShowImportSettings(false);
+          fetchStudents();
+        } catch (e) {
+          db.execSync('ROLLBACK;');
+          Alert.alert('Hata', 'Veritabanına kaydedilirken hata oluştu.');
+        }
+      };
+
+      if (existingSet.size > 0) {
+        Alert.alert(
+          'Çakışma Tespit Edildi',
+          `Yüklemeye çalıştığınız ${existingSet.size} öğrenci sistemde zaten kayıtlı. Sistemde var olan öğrenciler güncellensin mi?`,
+          [
+            { text: 'Güncelle (Üzerine Yaz)', onPress: () => processImport(true) },
+            { text: 'Korun (Sadece Yenileri Ekle)', onPress: () => processImport(false) },
+            { text: 'İptal', style: 'cancel' }
+          ]
+        );
+      } else {
+        processImport(true); // Hiç çakışma yoksa doğrudan ekle
+      }
+
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Hata', 'Dosya okunurken bir hata oluştu.');
+    }
   };
+   // ... rest of the functions
 
   const deleteAllStudents = () => {
     Alert.alert('Tümünü Sil', 'Tüm öğrenci listesini silmek istediğinize emin misiniz? Bu işlem geri alınamaz.', [
@@ -235,8 +299,8 @@ export default function StudentListScreen({ navigation }: any) {
     <View style={styles.container}>
       <View style={styles.managementHeader}>
         <View style={styles.managementRow}>
-          <TouchableOpacity style={[styles.mBtn, { backgroundColor: '#4CAF50' }]} onPress={loadStudentLists}>
-            <Text style={styles.mBtnText}>Yükle (Excel)</Text>
+          <TouchableOpacity style={[styles.mBtn, { backgroundColor: '#4CAF50' }]} onPress={() => setShowImportSettings(true)}>
+            <Text style={styles.mBtnText}>Excel'den Yükle</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.mBtn, { backgroundColor: '#F44336' }]} onPress={deleteAllStudents}>
             <Text style={styles.mBtnText}>Tümünü Sil</Text>
@@ -248,6 +312,59 @@ export default function StudentListScreen({ navigation }: any) {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Excel Import Settings Modal */}
+      <Modal visible={showImportSettings} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Excel Yükleme Ayarları</Text>
+            <ScrollView style={{ maxHeight: 400 }}>
+              <View style={styles.pickerWrapper}>
+                <Text style={styles.pickerLabel}>Öğrenci No Sütunu</Text>
+                <Picker selectedValue={noCol} onValueChange={setNoCol} style={styles.picker}>
+                  {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(c => <Picker.Item label={c} value={c} key={c} />)}
+                </Picker>
+              </View>
+              <View style={styles.pickerWrapper}>
+                <Text style={styles.pickerLabel}>Ad Soyad Sütunu</Text>
+                <Picker selectedValue={adCol} onValueChange={setAdCol} style={styles.picker}>
+                  {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(c => <Picker.Item label={c} value={c} key={c} />)}
+                </Picker>
+              </View>
+              <View style={styles.pickerWrapper}>
+                <Text style={styles.pickerLabel}>Şube Sütunu</Text>
+                <Picker selectedValue={subeCol} onValueChange={setSubeCol} style={styles.picker}>
+                  {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(c => <Picker.Item label={c} value={c} key={c} />)}
+                </Picker>
+              </View>
+              <View style={styles.pickerWrapper}>
+                <Text style={styles.pickerLabel}>Sınıf Düzeyi Sütunu</Text>
+                <Picker selectedValue={sinifCol} onValueChange={setSinifCol} style={styles.picker}>
+                  {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'].map(c => <Picker.Item label={c} value={c} key={c} />)}
+                </Picker>
+              </View>
+              <View style={styles.rowInputWrapper}>
+                <Text style={styles.pickerLabel}>Veri Başlangıç Satırı</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={importStartRow}
+                  onChangeText={setImportStartRow}
+                  keyboardType="numeric"
+                  placeholder="2"
+                />
+              </View>
+            </ScrollView>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: '#4CAF50' }]} onPress={loadStudentLists}>
+                <Text style={styles.modalBtnText}>Dosya Seç ve Yükle</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalBtn, { backgroundColor: '#999' }]} onPress={() => setShowImportSettings(false)}>
+                <Text style={styles.modalBtnText}>İptal</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.filterContainer}>
         <TextInput placeholder="Şube" value={filterSube} onChangeText={setFilterSube} style={styles.input} />
@@ -313,4 +430,14 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', justifyContent: 'space-around' },
   modalBtn: { paddingVertical: 8, paddingHorizontal: 20, backgroundColor: '#2196F3', borderRadius: 6 },
   modalBtnText: { color: '#fff', fontWeight: '600' },
+  pickerWrapper: { marginBottom: 10 },
+  pickerLabel: { fontSize: 13, marginBottom: 2, color: '#555', fontWeight: 'bold' },
+  picker: {
+    height: 50,
+    backgroundColor: '#f9f9f9',
+    borderColor: '#ddd',
+    borderWidth: 1,
+    borderRadius: 4,
+  },
+  rowInputWrapper: { marginVertical: 6 },
 });

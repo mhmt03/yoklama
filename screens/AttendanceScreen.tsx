@@ -1,58 +1,68 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
-import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar, Dimensions } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { db } from '../database';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 
-// Simple Custom Radio Button
-const RadioButton = ({ selected, onPress, label, color = '#2196F3' }: any) => (
-  <TouchableOpacity style={styles.radioContainer} onPress={onPress}>
-    <View style={[styles.radioOuter, { borderColor: selected ? color : '#999' }]}>
-      {selected && <View style={[styles.radioInner, { backgroundColor: color }]} />}
-    </View>
-    <Text style={styles.radioLabel}>{label}</Text>
+const { width } = Dimensions.get('window');
+
+// Premium Status Button Component
+const StatusButton = ({ selected, onPress, label, color, icon }: any) => (
+  <TouchableOpacity
+    style={[
+      styles.statusBtn,
+      selected ? { backgroundColor: color, borderColor: color } : { backgroundColor: '#fff', borderColor: '#E5E7EB' }
+    ]}
+    onPress={onPress}
+  >
+    <Ionicons name={icon} size={16} color={selected ? '#fff' : '#6B7280'} />
+    <Text style={[styles.statusLabel, selected ? { color: '#fff' } : { color: '#6B7280' }]}>{label}</Text>
   </TouchableOpacity>
 );
+
 const StudentItem = memo(({ item, onUpdate }: { item: any; onUpdate: (id: number, status: string) => void }) => (
   <View style={styles.studentCard}>
-    <View style={styles.studentInfoRow}>
-      <Text style={styles.studentText}>
-        <Text style={styles.bold}>Salon:</Text> {item.salon} | <Text style={styles.bold}>Sıra:</Text> {item.sira}
-      </Text>
-      <Text style={styles.studentText}>
-        <Text style={styles.bold}>Sınıf:</Text> {item.sinifDüzey}-{item.sube}
-      </Text>
-    </View>
-    <View style={styles.studentInfoRow}>
-      <Text style={styles.studentText}>
-        <Text style={styles.bold}>No:</Text> {item.ogrenciNo}
-      </Text>
-      <Text style={styles.studentText} numberOfLines={1}>
-        <Text style={styles.bold}>Ad:</Text> {item.adSoyad}
-      </Text>
+    <View style={styles.cardHeader}>
+      <View style={styles.studentMainInfo}>
+        <Text style={styles.studentName}>{item.adSoyad || 'İsimsiz Öğrenci'}</Text>
+        <Text style={styles.studentNo}>
+          NO: {item.ogrenciNo}  •  {item.sinifDüzey}-{item.sube}
+        </Text>
+      </View>
+      <View style={[styles.badge, { backgroundColor: item.salon ? '#EEF2FF' : '#F3F4F6' }]}>
+        <Text style={styles.badgeText}>{item.salon} / {item.sira}</Text>
+      </View>
     </View>
 
-    <View style={styles.radioGroup}>
-      <RadioButton
-        label="Var"
-        color="#4CAF50"
+    <View style={styles.cardDivider} />
+
+    <View style={styles.statusGroup}>
+      <StatusButton
+        label="VAR"
+        icon="checkmark-circle"
+        color="#10B981"
         selected={item.geldiMi === 'var'}
         onPress={() => onUpdate(item.id, 'var')}
       />
-      <RadioButton
-        label="Yok"
-        color="#F44336"
+      <StatusButton
+        label="YOK"
+        icon="close-circle"
+        color="#EF4444"
         selected={item.geldiMi === 'yok'}
         onPress={() => onUpdate(item.id, 'yok')}
       />
-      <RadioButton
-        label="Geç"
-        color="#FF9800"
+      <StatusButton
+        label="GEÇ"
+        icon="time"
+        color="#F59E0B"
         selected={item.geldiMi === 'geç'}
         onPress={() => onUpdate(item.id, 'geç')}
       />
-      <RadioButton
-        label="Bilinmiyor"
-        color="#9E9E9E"
+      <StatusButton
+        label="Belirsiz"
+        icon="refresh-circle"
+        color="#6B7280"
         selected={item.geldiMi === 'kontrol edilmedi'}
         onPress={() => onUpdate(item.id, 'kontrol edilmedi')}
       />
@@ -60,7 +70,7 @@ const StudentItem = memo(({ item, onUpdate }: { item: any; onUpdate: (id: number
   </View>
 ));
 
-export default function AttendanceScreen({ route }: any) {
+export default function AttendanceScreen({ route, navigation }: any) {
   const { exam } = route.params;
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,7 +132,6 @@ export default function AttendanceScreen({ route }: any) {
   }, [exam.sinavId, subeFilter, salonFilter, noFilter, nameFilter]);
 
   useEffect(() => {
-    // Initial fetch to populate dropdowns
     try {
       const allData: any[] = db.getAllSync(`
         SELECT DISTINCT sl.salon, ol.sube 
@@ -153,78 +162,112 @@ export default function AttendanceScreen({ route }: any) {
   const updateAttendance = useCallback((id: number, status: string) => {
     try {
       db.runSync(`UPDATE tbl_salonlisteleri SET geldiMi = ? WHERE id = ?`, [status, id]);
-      // Optimistic UI update (only the changed row)
       setStudents(prev => prev.map(s => s.id === id ? { ...s, geldiMi: status } : s));
     } catch (error) {
       console.error('Error updating status:', error);
     }
   }, []);
 
-  const renderItem = useCallback(({ item }: { item: any }) => (
-    <StudentItem item={item} onUpdate={updateAttendance} />
-  ), [updateAttendance]);
+  const stats = {
+    total: students.length,
+    present: students.filter(s => s.geldiMi === 'var').length,
+    absent: students.filter(s => s.geldiMi === 'yok').length,
+  };
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.examTitle}>{exam.sinavAd}</Text>
-        <Text style={styles.examDate}>{exam.tarih}</Text>
-      </View>
+      <StatusBar barStyle="light-content" />
 
-      <View style={styles.filters}>
-        <View style={styles.filterRow}>
-          <View style={styles.pickerContainer}>
-            <Text style={styles.filterLabel}>Şube:</Text>
-            <Picker
-              selectedValue={subeFilter}
-              style={styles.picker}
-              onValueChange={(val) => setSubeFilter(val)}>
-              <Picker.Item label="Hepsi" value="hepsi" />
-              {subeList.map(s => <Picker.Item key={s} label={s} value={s} />)}
-            </Picker>
+      <LinearGradient colors={['#4F46E5', '#3730A3']} style={styles.header}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+
+        <View style={styles.headerContent}>
+          <Text style={styles.examTitle}>{exam.sinavAd}</Text>
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statVal}>{stats.present}</Text>
+              <Text style={styles.statLabel}>Var</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statVal}>{stats.absent}</Text>
+              <Text style={styles.statLabel}>Yok</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statVal}>{stats.total}</Text>
+              <Text style={styles.statLabel}>Toplam</Text>
+            </View>
           </View>
-          <View style={styles.pickerContainer}>
-            <Text style={styles.filterLabel}>Salon:</Text>
-            <Picker
-              selectedValue={salonFilter}
-              style={styles.picker}
-              onValueChange={(val) => setSalonFilter(val)}>
-              <Picker.Item label="Hepsi" value="hepsi" />
-              {salonList.map(s => <Picker.Item key={s} label={s} value={s} />)}
-            </Picker>
+        </View>
+      </LinearGradient>
+
+      <View style={styles.filterSection}>
+        <View style={styles.filterGrid}>
+          <View style={styles.pickerWrapper}>
+            <Text style={styles.inputLabel}>Şube</Text>
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={subeFilter}
+                style={styles.picker}
+                onValueChange={(val) => setSubeFilter(val)}>
+                <Picker.Item label="Hepsi" value="hepsi" />
+                {subeList.map(s => <Picker.Item key={s} label={s} value={s} />)}
+              </Picker>
+            </View>
+          </View>
+          <View style={styles.pickerWrapper}>
+            <Text style={styles.inputLabel}>Salon</Text>
+            <View style={styles.pickerContainer}>
+              <Picker
+                selectedValue={salonFilter}
+                style={styles.picker}
+                onValueChange={(val) => setSalonFilter(val)}>
+                <Picker.Item label="Hepsi" value="hepsi" />
+                {salonList.map(s => <Picker.Item key={s} label={s} value={s} />)}
+              </Picker>
+            </View>
           </View>
         </View>
 
-        <View style={styles.filterRow}>
-          <TextInput
-            style={[styles.input, { flex: 1, marginRight: 5 }]}
-            placeholder="Öğrenci No"
-            value={noFilter}
-            onChangeText={setNoFilter}
-            keyboardType="numeric"
-          />
-          <TextInput
-            style={[styles.input, { flex: 2, marginLeft: 5 }]}
-            placeholder="Ad Soyad"
-            value={nameFilter}
-            onChangeText={setNameFilter}
-          />
+        <View style={styles.searchRow}>
+          <View style={styles.searchInputWrapper}>
+            <Ionicons name="search" size={18} color="#9BA3AF" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="İsim veya No ile ara..."
+              value={nameFilter || noFilter}
+              onChangeText={(val) => {
+                if (/^\d+$/.test(val)) {
+                  setNoFilter(val);
+                  setNameFilter('');
+                } else {
+                  setNameFilter(val);
+                  setNoFilter('');
+                }
+              }}
+            />
+          </View>
         </View>
       </View>
 
       {loading ? (
-        <ActivityIndicator size="large" color="#2196F3" style={{ marginTop: 20 }} />
+        <ActivityIndicator size="large" color="#4F46E5" style={{ marginTop: 40 }} />
       ) : (
         <FlatList
           data={students}
           keyExtractor={(item) => item.id.toString()}
-          renderItem={renderItem}
+          renderItem={({ item }) => <StudentItem item={item} onUpdate={updateAttendance} />}
           contentContainerStyle={styles.listContent}
-          initialNumToRender={10}
-          maxToRenderPerBatch={10}
-          windowSize={7}
-          removeClippedSubviews={true}
-          updateCellsBatchingPeriod={30}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="search-outline" size={48} color="#D1D5DB" />
+              <Text style={styles.emptyText}>Aradığınız kriterlerde öğrenci bulunamadı.</Text>
+            </View>
+          }
         />
       )}
     </View>
@@ -232,24 +275,105 @@ export default function AttendanceScreen({ route }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { padding: 15, backgroundColor: '#2196F3', alignItems: 'center' },
-  examTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  examDate: { fontSize: 14, color: '#e0e0e0', marginTop: 5 },
-  filters: { padding: 10, backgroundColor: '#fff', elevation: 2, marginBottom: 5 },
-  filterRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  pickerContainer: { flex: 1, marginHorizontal: 5, borderWidth: 1, borderColor: '#ddd', borderRadius: 4, height: 40, justifyContent: 'center' },
-  picker: { height: 50 },
-  filterLabel: { position: 'absolute', top: -10, left: 10, backgroundColor: '#fff', fontSize: 10, color: '#666', zIndex: 1, paddingHorizontal: 2 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 4, paddingHorizontal: 10, height: 40 },
-  listContent: { padding: 10 },
-  studentCard: { backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 10, elevation: 1 },
-  studentInfoRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  studentText: { fontSize: 14, color: '#333', flex: 1 },
-  bold: { fontWeight: 'bold' },
-  radioGroup: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#eee' },
-  radioContainer: { flexDirection: 'row', alignItems: 'center' },
-  radioOuter: { height: 20, width: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center', marginRight: 4 },
-  radioInner: { height: 10, width: 10, borderRadius: 5 },
-  radioLabel: { fontSize: 11, color: '#555' }
+  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  header: {
+    paddingTop: 50,
+    paddingHorizontal: 20,
+    paddingBottom: 25,
+    borderBottomLeftRadius: 25,
+    borderBottomRightRadius: 25,
+  },
+  backBtn: { marginBottom: 10 },
+  headerContent: { alignItems: 'center' },
+  examTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff', textAlign: 'center', marginBottom: 15 },
+  statsRow: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 15,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    width: '100%',
+  },
+  statItem: { flex: 1, alignItems: 'center' },
+  statVal: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  statLabel: { color: '#E0E7FF', fontSize: 10, marginTop: 2 },
+  statDivider: { width: 1, height: 20, backgroundColor: 'rgba(255, 255, 255, 0.2)' },
+
+  filterSection: {
+    padding: 15,
+    backgroundColor: '#fff',
+    marginHorizontal: 15,
+    marginTop: -15,
+    borderRadius: 15,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+  },
+  filterGrid: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  pickerWrapper: { flex: 1 },
+  inputLabel: { fontSize: 11, fontWeight: 'bold', color: '#6B7280', marginBottom: 4, marginLeft: 4 },
+  pickerContainer: {
+    height: 40,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    justifyContent: 'center',
+    overflow: 'hidden'
+  },
+  picker: { height: 55, marginTop: -2 },
+  searchRow: { flexDirection: 'row', alignItems: 'center' },
+  searchInputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 45,
+  },
+  searchIcon: { marginRight: 8 },
+  searchInput: { flex: 1, fontSize: 14, color: '#111827' },
+
+  listContent: { paddingHorizontal: 15, paddingTop: 15, paddingBottom: 30 },
+  studentCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+  },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  studentMainInfo: { flex: 1 },
+  studentName: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
+  studentNo: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8
+  },
+  badgeText: { fontSize: 11, fontWeight: 'bold', color: '#4F46E5' },
+
+  cardDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 },
+
+  statusGroup: { flexDirection: 'row', gap: 8 },
+  statusBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 4
+  },
+  statusLabel: { fontSize: 10, fontWeight: 'bold' },
+
+  emptyContainer: { alignItems: 'center', marginTop: 50, opacity: 0.5 },
+  emptyText: { color: '#6B7280', marginTop: 10, textAlign: 'center' },
 });
