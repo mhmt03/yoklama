@@ -30,52 +30,77 @@ export default function AddExamScreen({ navigation }: any) {
   };
 
   const loadSeatingPlan = async () => {
-  try {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
-      copyToCacheDirectory: true,
-    });
-    if (!result.canceled && result.assets && result.assets.length > 0) {
-      const fileUri = result.assets[0].uri;
-      const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: 'base64' });
-      const workbook = XLSX.read(base64, { type: 'base64' });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-      const colToIndex = (col: string) => col.charCodeAt(0) - 65;
-      const studentIdx = colToIndex(studentNoCol);
-      const salonIdx = colToIndex(salonCol);
-      const rowIdx = colToIndex(rowCol);
-      const startIdx = Math.max(0, parseInt(startRow, 10) - 1);
-      if (jsonData.length > 1) {
-        const parsedData = [];
-        for (let i = startIdx; i < jsonData.length; i++) {
-          const row = jsonData[i];
-          const studentNo = String(row[studentIdx]);
-          const salon = row[salonIdx] ? String(row[salonIdx]) : '';
-          const oturma = row[rowIdx] ? String(row[rowIdx]) : '';
-          const studentInfo = await db.getFirstAsync<{ sinifDüzey: string; sube: string; adSoyad: string }>(
-            `SELECT sinifDüzey, sube, adSoyad FROM tbl_ogrenciListe WHERE ogrenciNo = ?`,
-            [studentNo]
-          );
-          parsedData.push({
-            sinifDuzey: studentInfo?.sinifDüzey ?? '',
-            sube: studentInfo?.sube ?? '',
-            ogrenciNo: studentNo,
-            adSoyad: studentInfo?.adSoyad ?? '',
-            salonAd: salon,
-            oturmaSirasi: oturma,
-          });
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
+        copyToCacheDirectory: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const fileUri = result.assets[0].uri;
+        const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: 'base64' });
+        const workbook = XLSX.read(base64, { type: 'base64' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        // Sistemdeki mevcut öğrencileri al (Hızlı kontrol için Set kullanıyoruz)
+        const allStudents = await db.getAllAsync<{ ogrenciNo: string }>(
+          'SELECT ogrenciNo FROM tbl_ogrenciListe'
+        );
+        const existingStudentNos = new Set(allStudents.map(s => String(s.ogrenciNo)));
+
+        const colToIndex = (col: string) => col.charCodeAt(0) - 65;
+        const studentIdx = colToIndex(studentNoCol);
+        const salonIdx = colToIndex(salonCol);
+        const rowIdx = colToIndex(rowCol);
+        const startIdx = Math.max(0, parseInt(startRow, 10) - 1);
+
+        if (jsonData.length > 1) {
+          const parsedData = [];
+          for (let i = startIdx; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            if (!row || row[studentIdx] === undefined || row[studentIdx] === null || String(row[studentIdx]).trim() === '') {
+              continue; // Boş satırları atla
+            }
+
+            const studentNo = String(row[studentIdx]).trim();
+            const salon = row[salonIdx] ? String(row[salonIdx]) : '';
+            const oturma = row[rowIdx] ? String(row[rowIdx]) : '';
+
+            // Öğrenci sistemde var mı kontrol et
+            if (!existingStudentNos.has(studentNo)) {
+              Alert.alert(
+                'Hata',
+                `Sistemde kayıtlı olmayan öğrenci numarası bulundu: ${studentNo}\n\nYükleme iptal edildi. Lütfen önce öğrenciyi sisteme ekleyiniz.`
+              );
+              return; // Tamamen iptal et
+            }
+
+            // Öğrenci bilgilerini çek (zaten var olduğunu biliyoruz)
+            const studentInfo = await db.getFirstAsync<{ sinifDüzey: string; sube: string; adSoyad: string }>(
+              `SELECT sinifDüzey, sube, adSoyad FROM tbl_ogrenciListe WHERE ogrenciNo = ?`,
+              [studentNo]
+            );
+
+            parsedData.push({
+              sinifDuzey: studentInfo?.sinifDüzey ?? '',
+              sube: studentInfo?.sube ?? '',
+              ogrenciNo: studentNo,
+              adSoyad: studentInfo?.adSoyad ?? '',
+              salonAd: salon,
+              oturmaSirasi: oturma,
+            });
+          }
+          setSeatingData(parsedData);
+          Alert.alert('Başarılı', `${parsedData.length} öğrenci için oturma planı yüklendi.`);
         }
-        setSeatingData(parsedData);
-        Alert.alert('Başarılı', `${parsedData.length} öğrenci için oturma planı yüklendi.`);
       }
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Hata', 'Dosya okunurken bir hata oluştu.');
     }
-  } catch (error) {
-    console.error(error);
-    Alert.alert('Hata', 'Dosya okunurken bir hata oluştu.');
-  }
-};
+  };
 
   const createExam = () => {
     if (!examName) {
@@ -100,15 +125,9 @@ export default function AddExamScreen({ navigation }: any) {
 
         db.execSync('BEGIN TRANSACTION;');
         seatingData.forEach((student) => {
-          // Öğrenci tbl_ogrenciListe tablosunda yoksa ekle/güncelle (optional based on user request, but safe to do)
-          db.runSync(
-            `INSERT OR IGNORE INTO tbl_ogrenciListe (ogrenciNo, sinifDüzey, sube, adSoyad) VALUES (?, ?, ?, ?)`,
-            [student.ogrenciNo, student.sinifDuzey, student.sube, student.adSoyad]
-          );
-
           db.runSync(
             `INSERT INTO tbl_salonlisteleri (sinavId, ogrenciNo, salon, sira, geldiMi) VALUES (?, ?, ?, ?, ?)`,
-            [sinavId, student.salonAd, student.oturmaSirasi, 'kontrol edilmedi']
+            [sinavId, student.ogrenciNo, student.salonAd, student.oturmaSirasi, 'kontrol edilmedi']
           );
         });
         db.execSync('COMMIT;');
@@ -216,7 +235,16 @@ export default function AddExamScreen({ navigation }: any) {
 
 
         {seatingData.length > 0 && (
-          <Text style={styles.infoText}>{seatingData.length} öğrenci yüklendi hazır.</Text>
+          <View style={styles.seatingView}>
+            <Text style={styles.seatingTitle}>Yükleme Önizleme (İlk 3 Örnek):</Text>
+            {seatingData.slice(0, 3).map((s: any, idx: number) => (
+              <View key={idx} style={styles.seatingItem}>
+                <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#333' }}>No: {s.ogrenciNo} | Ad: {s.adSoyad}</Text>
+                <Text style={{ fontSize: 12, color: '#666' }}>Salon: {s.salonAd} | Sıra: {s.oturmaSirasi}</Text>
+              </View>
+            ))}
+            <Text style={styles.infoText}>{seatingData.length} öğrenci yüklendi hazır.</Text>
+          </View>
         )}
 
         <View style={styles.marginBtn}>

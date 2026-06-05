@@ -78,8 +78,15 @@ export default function AttendanceScreen({ route }: any) {
   const fetchStudents = useCallback(() => {
     try {
       let query = `
-        SELECT sl.id, sl.ogrenciNo, sl.salon, sl.sira, sl.geldiMi,
-               ol.sinifDüzey, ol.sube, ol.adSoyad
+        SELECT 
+          sl.id, 
+          sl.ogrenciNo, 
+          sl.salon AS salon, 
+          sl.sira AS sira, 
+          sl.geldiMi,
+          ol.sinifDüzey, 
+          ol.sube, 
+          ol.adSoyad
         FROM tbl_salonlisteleri sl
         LEFT JOIN tbl_ogrenciListe ol ON sl.ogrenciNo = ol.ogrenciNo
         WHERE sl.sinavId = ?

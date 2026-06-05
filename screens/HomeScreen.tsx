@@ -2,9 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Button } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { db } from '../database';
-import * as DocumentPicker from 'expo-document-picker';
-import * as XLSX from 'xlsx';
-import * as FileSystem from 'expo-file-system/legacy';
+
 interface CountResult { cnt: number; }
 
 export default function HomeScreen({ navigation }: any) {
@@ -48,78 +46,6 @@ export default function HomeScreen({ navigation }: any) {
     ]);
   };
 
-
-  const loadStudentLists = () => {
-    console.log('loadStudentLists called');
-    Alert.alert(
-      'Excel Şablonu',
-      'Lütfen aşağıdaki sütun başlıklarıyla bir Excel dosyası hazırlayın:\n\nŞube, Öğrenci No, Ad Soyad, Sınıf Düzeyi',
-      [
-        {
-          text: 'Tamam',
-          onPress: async () => {
-            try {
-              const result = await DocumentPicker.getDocumentAsync({
-                type: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'],
-                copyToCacheDirectory: true,
-              });
-
-              if (!result.canceled) {
-                // Handle both legacy (assets) and new (uri) result formats
-                let fileUri: string | undefined;
-                if ((result as any).uri) {
-                  fileUri = (result as any).uri;
-                } else if ((result as any).assets && (result as any).assets.length > 0) {
-                  fileUri = (result as any).assets[0].uri;
-                }
-                if (!fileUri) {
-                  return;
-                }
-                const base64 = await FileSystem.readAsStringAsync(fileUri, { encoding: 'base64' });
-                const workbook = XLSX.read(base64, { type: 'base64' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-
-                const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-
-                if (jsonData.length > 1) {
-                  db.execSync('BEGIN TRANSACTION;');
-                  try {
-                    // skip header row
-                    for (let i = 1; i < jsonData.length; i++) {
-                      const row = jsonData[i];
-                      if (row.length === 0 || !row[1]) continue; // if empty or no student number
-
-                      const sube = row[0] ? String(row[0]) : '';
-                      const ogrenciNo = String(row[1]);
-                      const adSoyad = row[2] ? String(row[2]) : '';
-                      const sinifDuzey = row[3] ? String(row[3]) : '';
-
-                      db.runSync(
-                        `INSERT OR REPLACE INTO tbl_ogrenciListe (ogrenciNo, sinifDüzey, sube, adSoyad) VALUES (?, ?, ?, ?)`,
-                        [ogrenciNo, sinifDuzey, sube, adSoyad]
-                      );
-                    }
-                    db.execSync('COMMIT;');
-                    Alert.alert('Başarılı', 'Öğrenci listesi başarıyla yüklendi.');
-                  } catch (e) {
-                    db.execSync('ROLLBACK;');
-                    console.error(e);
-                    Alert.alert('Hata', 'Veritabanına kaydedilirken hata oluştu.');
-                  }
-                }
-              }
-            } catch (error) {
-              console.error(error);
-              Alert.alert('Hata', 'Dosya okunurken bir hata oluştu.');
-            }
-          },
-        },
-        { text: 'İptal', style: 'cancel' },
-      ]
-    );
-  };
-
   const renderItem = ({ item }: { item: any }) => (
     <View style={styles.examCard}>
       <View style={styles.examInfo}>
@@ -145,9 +71,6 @@ export default function HomeScreen({ navigation }: any) {
       <View style={styles.headerButtons}>
         <Button title="Öğrenci Yönetimi" onPress={() => navigation.navigate('Students')} color="#FF5722" />
         <Button title="Yeni Sınav Ekle" onPress={() => navigation.navigate('AddExam')} />
-        <View style={{ marginTop: 10 }}>
-          <Button title="Öğrenci Listelerini Yükle" onPress={loadStudentLists} color="#4CAF50" />
-        </View>
       </View>
       <FlatList
         data={exams}
