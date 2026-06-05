@@ -7,9 +7,11 @@
     "icon": "./assets/derstakipicon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mhmt03.yoklama"
     },
     "android": {
+      "package": "com.mhmt03.yoklama",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/foreground.png"
