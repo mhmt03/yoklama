@@ -178,7 +178,7 @@ export default function AttendanceScreen({ route, navigation }: any) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      <LinearGradient colors={['#4F46E5', '#3730A3']} style={styles.header}>
+      <LinearGradient colors={['#4F46E5', '#32b8f5ff']} style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
@@ -254,7 +254,7 @@ export default function AttendanceScreen({ route, navigation }: any) {
       </View>
 
       {loading ? (
-        <ActivityIndicator size="large" color="#4F46E5" style={{ marginTop: 40 }} />
+        <ActivityIndicator size="small" color="#46a5e5ff" style={{ marginTop: 10 }} />
       ) : (
         <FlatList
           data={students}
@@ -277,15 +277,15 @@ export default function AttendanceScreen({ route, navigation }: any) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
   header: {
-    paddingTop: 50,
-    paddingHorizontal: 20,
-    paddingBottom: 25,
+    paddingTop: 1,
+    paddingHorizontal: 30,
+    paddingBottom: 1,
     borderBottomLeftRadius: 25,
     borderBottomRightRadius: 25,
   },
-  backBtn: { marginBottom: 10 },
+  backBtn: { marginBottom: 5 },
   headerContent: { alignItems: 'center' },
-  examTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff', textAlign: 'center', marginBottom: 15 },
+  examTitle: { fontSize: 30, fontWeight: 'bold', color: '#fff', textAlign: 'center', marginBottom: 15 },
   statsRow: {
     flexDirection: 'row',
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8
   },
-  badgeText: { fontSize: 11, fontWeight: 'bold', color: '#4F46E5' },
+  badgeText: { fontSize: 11, fontWeight: 'bold', color: '#1d221eff' },
 
   cardDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 },
 
