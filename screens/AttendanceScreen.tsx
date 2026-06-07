@@ -275,7 +275,7 @@ export default function AttendanceScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  container: { flex: 1, backgroundColor: '#F9FAFB', paddingBottom: 150 },
   header: {
     paddingTop: 1,
     paddingHorizontal: 30,

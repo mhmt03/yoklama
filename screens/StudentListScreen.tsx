@@ -377,7 +377,7 @@ export default function StudentListScreen({ navigation }: any) {
         keyExtractor={(item) => item.ogrenciNo}
         renderItem={renderItem}
         ListEmptyComponent={<Text style={styles.empty}>Kayıt bulunamadı.</Text>}
-        contentContainerStyle={{ paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 150 }}
       />
 
       <Modal visible={!!editingStudent} transparent animationType="slide">

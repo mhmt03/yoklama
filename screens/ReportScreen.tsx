@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
   pickerContainer: { backgroundColor: '#fff', marginBottom: 10, borderRadius: 6, elevation: 1 },
   pickerLabel: { marginLeft: 10, marginTop: 5, fontSize: 12, color: '#777' },
   picker: { height: 55 },
-  buttonsRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 15 },
+  buttonsRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 15, marginBottom: 150 },
   btn: { flex: 0.45, padding: 12, borderRadius: 6, alignItems: 'center' },
   btnExcel: { backgroundColor: '#4CAF50' },
   btnPdf: { backgroundColor: '#FF9800' },

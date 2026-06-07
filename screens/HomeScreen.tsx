@@ -170,7 +170,7 @@ export default function HomeScreen({ navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB' },
+  container: { flex: 1, backgroundColor: '#F9FAFB', paddingBottom: 150 },
   header: {
     paddingTop: 60,
     paddingHorizontal: 20,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, Button, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, ScrollView } from 'react-native';
 
 
 // Bilgilendirme: Excel dosyası şablonu
@@ -146,7 +146,7 @@ export default function AddExamScreen({ navigation }: any) {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
       <View style={styles.card}>
         <Text style={styles.label}>Sınav Adı:</Text>
         <TextInput
@@ -258,12 +258,13 @@ export default function AddExamScreen({ navigation }: any) {
         </View>
 
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 15, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  scrollContent: { padding: 15, paddingBottom: 150 },
   card: { backgroundColor: '#fff', padding: 20, borderRadius: 8, elevation: 2 },
   label: { fontSize: 16, fontWeight: 'bold', marginBottom: 5, color: '#333' },
   input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 10, fontSize: 16, marginBottom: 15 },
