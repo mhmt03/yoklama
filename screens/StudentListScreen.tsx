@@ -102,7 +102,7 @@ export default function StudentListScreen({ navigation }: any) {
       for (let i = startIdx; i < jsonData.length; i++) {
         const row = jsonData[i];
         if (!row || row.length === 0) continue;
-        
+
         const rawNo = row[nIdx];
         if (rawNo === undefined || rawNo === null || String(rawNo).trim() === '') continue;
 
@@ -181,7 +181,7 @@ export default function StudentListScreen({ navigation }: any) {
       Alert.alert('Hata', 'Dosya okunurken bir hata oluştu.');
     }
   };
-   // ... rest of the functions
+  // ... rest of the functions
 
   const deleteAllStudents = () => {
     Alert.alert('Tümünü Sil', 'Tüm öğrenci listesini silmek istediğinize emin misiniz? Bu işlem geri alınamaz.', [
@@ -272,14 +272,14 @@ export default function StudentListScreen({ navigation }: any) {
   const renderItem = ({ item }: { item: any }) => {
     const isSelected = selectedStudentNos.has(item.ogrenciNo);
     return (
-      <TouchableOpacity 
-        style={[styles.card, isSelected && styles.selectedCard]} 
+      <TouchableOpacity
+        style={[styles.card, isSelected && styles.selectedCard]}
         onPress={() => toggleSelection(item.ogrenciNo)}
         activeOpacity={0.7}
       >
         <View style={styles.cardHeader}>
-           <Text style={styles.itemTextNo}>No: {item.ogrenciNo}</Text>
-           {isSelected && <Text style={styles.selectedBadge}>SEÇİLDİ</Text>}
+          <Text style={styles.itemTextNo}>No: {item.ogrenciNo}</Text>
+          {isSelected && <Text style={styles.selectedBadge}>SEÇİLDİ</Text>}
         </View>
         <Text style={styles.itemText}>Şube: {item.sube} | Sınıf: {item.sinifDüzey}</Text>
         <Text style={styles.itemTextName}>{item.adSoyad}</Text>
@@ -429,12 +429,12 @@ const styles = StyleSheet.create({
   modalInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 6, padding: 8, marginBottom: 10 },
   modalActions: { flexDirection: 'row', justifyContent: 'space-around' },
   modalBtn: { paddingVertical: 8, paddingHorizontal: 20, backgroundColor: '#2196F3', borderRadius: 6 },
-  modalBtnText: { color: '#fff', fontWeight: '600' },
+  modalBtnText: { color: '#62f0faff', fontWeight: '600' },
   pickerWrapper: { marginBottom: 10 },
   pickerLabel: { fontSize: 13, marginBottom: 2, color: '#555', fontWeight: 'bold' },
   picker: {
     height: 50,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#f88484ff',
     borderColor: '#ddd',
     borderWidth: 1,
     borderRadius: 4,

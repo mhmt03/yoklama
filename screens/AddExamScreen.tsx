@@ -293,6 +293,6 @@ const styles = StyleSheet.create({
   },
   seatingView: { marginTop: 15, backgroundColor: '#e8f5e9', padding: 15, borderRadius: 6, borderWidth: 1, borderColor: '#c5e1a5' },
   seatingTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 10, color: '#2e7d32' },
-  seatingItem: { marginBottom: 6, padding: 8, backgroundColor: '#fff', borderRadius: 4, borderWidth: 1, borderColor: '#e8f5e9' },
+  seatingItem: { marginBottom: 26, padding: 8, backgroundColor: '#fff', borderRadius: 4, borderWidth: 1, borderColor: '#e8f5e9' },
   flatListContent: { paddingBottom: 80 }
 });
