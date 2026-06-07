@@ -4,7 +4,7 @@
     "slug": "yoklama",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/derstakipicon.png",
+    "icon": "./assets/derstakip-icon.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
