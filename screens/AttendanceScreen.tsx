@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
-import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar, Dimensions } from 'react-native';
+import { View, Text, TextInput, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, StatusBar, Alert } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { db } from '../database';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-
-const { width } = Dimensions.get('window');
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Premium Status Button Component
 const StatusButton = ({ selected, onPress, label, color, icon }: any) => (
@@ -16,7 +15,7 @@ const StatusButton = ({ selected, onPress, label, color, icon }: any) => (
     ]}
     onPress={onPress}
   >
-    <Ionicons name={icon} size={16} color={selected ? '#fff' : '#6B7280'} />
+    <Ionicons name={icon} size={14} color={selected ? '#fff' : '#6B7280'} />
     <Text style={[styles.statusLabel, selected ? { color: '#fff' } : { color: '#6B7280' }]}>{label}</Text>
   </TouchableOpacity>
 );
@@ -25,17 +24,18 @@ const StudentItem = memo(({ item, onUpdate }: { item: any; onUpdate: (id: number
   <View style={styles.studentCard}>
     <View style={styles.cardHeader}>
       <View style={styles.studentMainInfo}>
-        <Text style={styles.studentName}>{item.adSoyad || 'İsimsiz Öğrenci'}</Text>
-        <Text style={styles.studentNo}>
-          NO: {item.ogrenciNo}  •  {item.sinifDüzey}-{item.sube}
-        </Text>
+        <View style={styles.nameRow}>
+          <Text style={styles.studentName}>{item.adSoyad || 'İsimsiz Öğrenci'}</Text>
+          <View style={styles.classBadge}>
+            <Text style={styles.classBadgeText}>{item.sinifDüzey}-{item.sube}</Text>
+          </View>
+        </View>
+        <Text style={styles.studentNo}>No: {item.ogrenciNo}</Text>
       </View>
       <View style={[styles.badge, { backgroundColor: item.salon ? '#EEF2FF' : '#F3F4F6' }]}>
         <Text style={styles.badgeText}>{item.salon} / {item.sira}</Text>
       </View>
     </View>
-
-    <View style={styles.cardDivider} />
 
     <View style={styles.statusGroup}>
       <StatusButton
@@ -60,7 +60,7 @@ const StudentItem = memo(({ item, onUpdate }: { item: any; onUpdate: (id: number
         onPress={() => onUpdate(item.id, 'geç')}
       />
       <StatusButton
-        label="Belirsiz"
+        label="?"
         icon="refresh-circle"
         color="#6B7280"
         selected={item.geldiMi === 'kontrol edilmedi'}
@@ -70,10 +70,13 @@ const StudentItem = memo(({ item, onUpdate }: { item: any; onUpdate: (id: number
   </View>
 ));
 
+type SortMode = 'name' | 'seat';
+
 export default function AttendanceScreen({ route, navigation }: any) {
   const { exam } = route.params;
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sortMode, setSortMode] = useState<SortMode>('seat');
 
   // Filters
   const [subeFilter, setSubeFilter] = useState('hepsi');
@@ -120,7 +123,11 @@ export default function AttendanceScreen({ route, navigation }: any) {
         params.push(`%${nameFilter}%`);
       }
 
-      query += ` ORDER BY sl.salon ASC, sl.sira ASC`;
+      if (sortMode === 'name') {
+        query += ` ORDER BY ol.adSoyad ASC`;
+      } else {
+        query += ` ORDER BY sl.salon ASC, sl.sira ASC`;
+      }
 
       const result = db.getAllSync(query, params);
       setStudents(result);
@@ -129,9 +136,10 @@ export default function AttendanceScreen({ route, navigation }: any) {
     } finally {
       setLoading(false);
     }
-  }, [exam.sinavId, subeFilter, salonFilter, noFilter, nameFilter]);
+  }, [exam.sinavId, subeFilter, salonFilter, noFilter, nameFilter, sortMode]);
 
   useEffect(() => {
+    navigation.setOptions({ headerShown: false });
     try {
       const allData: any[] = db.getAllSync(`
         SELECT DISTINCT sl.salon, ol.sube 
@@ -168,6 +176,36 @@ export default function AttendanceScreen({ route, navigation }: any) {
     }
   }, []);
 
+  // Ekrandaki (filtrelenmiş) öğrencilere toplu işlem
+  const bulkUpdate = useCallback((status: string) => {
+    const labelMap: Record<string, string> = {
+      var: 'Tümü VAR',
+      yok: 'Tümü YOK',
+      'kontrol edilmedi': 'Tümü Belirsiz',
+    };
+    Alert.alert(
+      'Toplu İşlem',
+      `Ekrandaki ${students.length} öğrenci "${labelMap[status]}" olarak işaretlenecek. Devam edilsin mi?`,
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Evet',
+          onPress: () => {
+            try {
+              const ids = students.map(s => s.id);
+              ids.forEach(id => {
+                db.runSync(`UPDATE tbl_salonlisteleri SET geldiMi = ? WHERE id = ?`, [status, id]);
+              });
+              setStudents(prev => prev.map(s => ({ ...s, geldiMi: status })));
+            } catch (error) {
+              console.error('Bulk update error:', error);
+            }
+          },
+        },
+      ]
+    );
+  }, [students]);
+
   const stats = {
     total: students.length,
     present: students.filter(s => s.geldiMi === 'var').length,
@@ -179,12 +217,15 @@ export default function AttendanceScreen({ route, navigation }: any) {
       <StatusBar barStyle="light-content" />
 
       <LinearGradient colors={['#4F46E5', '#32b8f5ff']} style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
+        <SafeAreaView>
+          <View style={styles.headerTop}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.examTitle}>{exam.sinavAd}</Text>
+            <View style={{ width: 24 }} />
+          </View>
 
-        <View style={styles.headerContent}>
-          <Text style={styles.examTitle}>{exam.sinavAd}</Text>
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Text style={styles.statVal}>{stats.present}</Text>
@@ -201,10 +242,11 @@ export default function AttendanceScreen({ route, navigation }: any) {
               <Text style={styles.statLabel}>Toplam</Text>
             </View>
           </View>
-        </View>
+        </SafeAreaView>
       </LinearGradient>
 
       <View style={styles.filterSection}>
+        {/* Şube & Salon Picker */}
         <View style={styles.filterGrid}>
           <View style={styles.pickerWrapper}>
             <Text style={styles.inputLabel}>Şube</Text>
@@ -232,12 +274,14 @@ export default function AttendanceScreen({ route, navigation }: any) {
           </View>
         </View>
 
+        {/* Arama + Sıralama + Toplu İşlem */}
         <View style={styles.searchRow}>
           <View style={styles.searchInputWrapper}>
-            <Ionicons name="search" size={18} color="#9BA3AF" style={styles.searchIcon} />
+            <Ionicons name="search" size={16} color="#9BA3AF" style={styles.searchIcon} />
             <TextInput
               style={styles.searchInput}
-              placeholder="İsim veya No ile ara..."
+              placeholder="İsim veya No..."
+              placeholderTextColor="#9BA3AF"
               value={nameFilter || noFilter}
               onChangeText={(val) => {
                 if (/^\d+$/.test(val)) {
@@ -250,6 +294,39 @@ export default function AttendanceScreen({ route, navigation }: any) {
               }}
             />
           </View>
+
+          {/* Sıralama butonları */}
+          <TouchableOpacity
+            style={[styles.iconBtn, sortMode === 'name' && styles.iconBtnActive]}
+            onPress={() => setSortMode('name')}
+          >
+            <Ionicons name="text" size={15} color={sortMode === 'name' ? '#fff' : '#4F46E5'} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.iconBtn, sortMode === 'seat' && styles.iconBtnActive]}
+            onPress={() => setSortMode('seat')}
+          >
+            <Ionicons name="grid" size={15} color={sortMode === 'seat' ? '#fff' : '#4F46E5'} />
+          </TouchableOpacity>
+
+          {/* Toplu işlem butonları */}
+          <TouchableOpacity style={[styles.iconBtn, { borderColor: '#10B981' }]} onPress={() => bulkUpdate('var')}>
+            <Ionicons name="checkmark-circle" size={15} color="#10B981" />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.iconBtn, { borderColor: '#EF4444' }]} onPress={() => bulkUpdate('yok')}>
+            <Ionicons name="close-circle" size={15} color="#EF4444" />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.iconBtn, { borderColor: '#6B7280' }]} onPress={() => bulkUpdate('kontrol edilmedi')}>
+            <Ionicons name="help-circle" size={15} color="#6B7280" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Sıralama & toplu işlem etiketleri */}
+        <View style={styles.hintRow}>
+          <Text style={styles.hintText}>
+            {sortMode === 'name' ? '↑ Ada göre sıralı' : '↑ Oturma sırasına göre sıralı'}
+          </Text>
+          <Text style={styles.hintText}>✓ / ✗ / ? toplu işlem</Text>
         </View>
       </View>
 
@@ -275,105 +352,159 @@ export default function AttendanceScreen({ route, navigation }: any) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F9FAFB', paddingBottom: 150 },
+  container: { flex: 1, backgroundColor: '#F9FAFB', paddingBottom: 100 },
+
+  // Header
   header: {
-    paddingTop: 1,
-    paddingHorizontal: 30,
+    paddingTop: 10,
+    paddingHorizontal: 20,
     paddingBottom: 1,
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
   },
-  backBtn: { marginBottom: 5 },
-  headerContent: { alignItems: 'center' },
-  examTitle: { fontSize: 30, fontWeight: 'bold', color: '#fff', textAlign: 'center', marginBottom: 15 },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  examTitle: { fontSize: 17, fontWeight: 'bold', color: '#fff', textAlign: 'center' },
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: 15,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 16,
     alignItems: 'center',
     width: '100%',
+    marginBottom: 16,
   },
   statItem: { flex: 1, alignItems: 'center' },
-  statVal: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
-  statLabel: { color: '#E0E7FF', fontSize: 10, marginTop: 2 },
-  statDivider: { width: 1, height: 20, backgroundColor: 'rgba(255, 255, 255, 0.2)' },
+  statVal: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
+  statLabel: { color: '#fa7b05ff', fontSize: 10, marginTop: 1 },
+  statDivider: { width: 1, height: 18, backgroundColor: 'rgba(255,255,255,0.2)' },
 
+  // Filter Section
   filterSection: {
-    padding: 15,
+    padding: 10,
     backgroundColor: '#fff',
-    marginHorizontal: 15,
-    marginTop: -15,
-    borderRadius: 15,
+    marginHorizontal: 12,
+    marginTop: -12,
+    borderRadius: 14,
     elevation: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
   },
-  filterGrid: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  filterGrid: { flexDirection: 'row', gap: 8, marginBottom: 8 },
   pickerWrapper: { flex: 1 },
-  inputLabel: { fontSize: 11, fontWeight: 'bold', color: '#6B7280', marginBottom: 4, marginLeft: 4 },
+  inputLabel: { fontSize: 10, fontWeight: 'bold', color: '#6B7280', marginBottom: 2, marginLeft: 2 },
   pickerContainer: {
-    height: 40,
-    backgroundColor: '#F3F4F6',
+    height: 36,
+    backgroundColor: '#a8c1f3ff',
     borderRadius: 8,
     justifyContent: 'center',
-    overflow: 'hidden'
+    overflow: 'hidden',
   },
-  picker: { height: 55, marginTop: -2 },
-  searchRow: { flexDirection: 'row', alignItems: 'center' },
+  picker: { height: 50, marginTop: -4 },
+
+  // Search row
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   searchInputWrapper: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 45,
+    backgroundColor: '#93b5f7ff',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    height: 36,
   },
-  searchIcon: { marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 14, color: '#111827' },
+  searchIcon: { marginRight: 5 },
+  searchInput: { flex: 1, fontSize: 13, color: '#111827' },
 
-  listContent: { paddingHorizontal: 15, paddingTop: 15, paddingBottom: 30 },
+  // Icon buttons (sort + bulk)
+  iconBtn: {
+    width: 34,
+    height: 36,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#4F46E5',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconBtnActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4F46E5',
+  },
+
+  // Hint row
+  hintRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 5,
+    paddingHorizontal: 2,
+  },
+  hintText: { fontSize: 9, color: '#9CA3AF' },
+
+  // List
+  listContent: { paddingHorizontal: 12, paddingTop: 12, paddingBottom: 30 },
+
+  // Student Card
   studentCard: {
     backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 12,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 8,
+    marginBottom: 8,
     elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 5,
+    shadowRadius: 4,
   },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   studentMainInfo: { flex: 1 },
-  studentName: { fontSize: 16, fontWeight: 'bold', color: '#111827' },
-  studentNo: { fontSize: 12, color: '#6B7280', marginTop: 2 },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  studentName: { fontSize: 14, fontWeight: 'bold', color: '#111827' },
+  classBadge: {
+    backgroundColor: '#DBEAFE',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 5,
   },
-  badgeText: { fontSize: 11, fontWeight: 'bold', color: '#1d221eff' },
+  classBadgeText: { fontSize: 10, fontWeight: 'bold', color: '#1D4ED8' },
+  studentNo: { fontSize: 11, color: '#9CA3AF', marginTop: 1 },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 7,
+    marginLeft: 6,
+  },
+  badgeText: { fontSize: 10, fontWeight: 'bold', color: '#1d221eff' },
 
-  cardDivider: { height: 1, backgroundColor: '#F3F4F6', marginVertical: 12 },
-
-  statusGroup: { flexDirection: 'row', gap: 8 },
+  // Status buttons
+  statusGroup: { flexDirection: 'row', gap: 6 },
   statusBtn: {
     flex: 1,
     flexDirection: 'row',
-    height: 36,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
-    gap: 4
+    gap: 3,
   },
-  statusLabel: { fontSize: 10, fontWeight: 'bold' },
+  statusLabel: { fontSize: 9, fontWeight: 'bold' },
 
+  // Empty
   emptyContainer: { alignItems: 'center', marginTop: 50, opacity: 0.5 },
   emptyText: { color: '#6B7280', marginTop: 10, textAlign: 'center' },
 });
