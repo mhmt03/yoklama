@@ -1,0 +1,48 @@
+@model IEnumerable<yoklamaWeb.Models.TemporaryProctor>
+
+@{
+    ViewData["Title"] = "Yoklamacı Listesi";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2>Yoklamacı Listesi</h2>
+            <p class="text-muted mb-0">@ViewBag.ExamName sınavı için oluşturulmuş salon bazlı yoklamacılar.</p>
+        </div>
+        <a asp-action="Details" asp-route-id="ViewBag.ExamId" class="btn btn-secondary">Geri</a>
+    </div>
+
+    @if (!Model.Any())
+    {
+        <div class="alert alert-info">Bu sınav için henüz yoklamacı oluşturulmamış.</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-striped table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Salon</th>
+                        <th>Kullanıcı Adı</th>
+                        <th>Şifre</th>
+                        <th>Geçerlilik</th>
+                        <th>Saat Aralığı</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Model)
+                    {
+                        <tr>
+                            <td>@item.Room</td>
+                            <td>@item.User?.UserName</td>
+                            <td>@item.Password</td>
+                            <td>@item.ValidFrom.ToString("yyyy-MM-dd") - @item.ValidTo.ToString("yyyy-MM-dd")</td>
+                            <td>@(item.StartTime.HasValue ? item.StartTime.Value.ToString(@"hh\:mm") : "-") - @(item.EndTime.HasValue ? item.EndTime.Value.ToString(@"hh\:mm") : "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>

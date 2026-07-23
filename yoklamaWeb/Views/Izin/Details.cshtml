@@ -1,0 +1,150 @@
+@model yoklamaWeb.ViewModels.Pansiyon.IzinGirisiViewModel
+@using yoklamaWeb.Models.Enums
+@{
+    ViewData["Title"] = "İzin Detayları";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <div class="mb-3">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> İzin Listesine Dön</a>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0 fw-bold">İzin Detay Bilgileri</h4>
+        </div>
+        <div class="card-body p-4">
+            <table class="table table-striped align-middle">
+                <tr>
+                    <td class="fw-bold text-muted" style="width: 40%;">Öğrenci Adı Soyadı:</td>
+                    <td><strong>@Model.OgrenciAdSoyad</strong></td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Öğrenci No:</td>
+                    <td>@Model.OgrenciNo</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">İzin Türü:</td>
+                    <td><span class="badge bg-info text-dark">@Model.Tur.ToString()</span></td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Başlangıç Tarihi:</td>
+                    <td>@Model.BaslangicTarihi.ToString("dd.MM.yyyy")</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Bitiş Tarihi:</td>
+                    <td>@Model.BitisTarihi.ToString("dd.MM.yyyy")</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Süre:</td>
+                    <td>@Model.GunSayisi Gün</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Durum:</td>
+                    <td>
+                        @if (Model.Durum == IzinDurum.Bekliyor)
+                        {
+                            <span class="badge bg-warning text-dark">Bekliyor</span>
+                        }
+                        else if (Model.Durum == IzinDurum.Onaylandi)
+                        {
+                            <span class="badge bg-success">Onaylandı</span>
+                        }
+                        else if (Model.Durum == IzinDurum.Reddedildi)
+                        {
+                            <span class="badge bg-danger">Reddedildi</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary">İptal Edildi</span>
+                        }
+                    </td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Onaylayan Görevli:</td>
+                    <td>@(Model.OnaylayanAdSoyad ?? "-")</td>
+                </tr>
+                @if (Model.OnayTarihi.HasValue)
+                {
+                    <tr>
+                        <td class="fw-bold text-muted">Onay/Ret Tarihi:</td>
+                        <td>@Model.OnayTarihi.Value.ToString("dd.MM.yyyy HH:mm")</td>
+                    </tr>
+                }
+                <tr>
+                    <td class="fw-bold text-muted">Talep Tarihi:</td>
+                    <td>@Model.OlusturmaTarihi.ToString("dd.MM.yyyy HH:mm")</td>
+                </tr>
+                @if (!string.IsNullOrEmpty(Model.Aciklama))
+                {
+                    <tr>
+                        <td class="fw-bold text-muted" colspan="2">Açıklama / Not:</td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" class="bg-light p-3 rounded small text-wrap" style="white-space: pre-wrap;">@Model.Aciklama</td>
+                    </tr>
+                }
+            </table>
+
+            <!-- İşlem Butonları -->
+            <div class="d-flex justify-content-between mt-4">
+                <div>
+                    @if (Model.Durum == IzinDurum.Bekliyor)
+                    {
+                        <form asp-action="Onayla" asp-route-id="@Model.Id" method="post" class="d-inline">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(Model.RowVersion)" />
+                            <button type="submit" class="btn btn-success fw-semibold me-1"><i class="bi bi-check-circle"></i> Onayla</button>
+                        </form>
+                        
+                        <button type="button" class="btn btn-danger fw-semibold me-1" data-bs-toggle="modal" data-bs-target="#redModal"><i class="bi bi-x-circle"></i> Reddet</button>
+                    }
+                    @if (Model.Durum == IzinDurum.Onaylandi)
+                    {
+                        <form asp-action="Iptal" asp-route-id="@Model.Id" method="post" class="d-inline">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(Model.RowVersion)" />
+                            <button type="submit" class="btn btn-secondary fw-semibold me-1"><i class="bi bi-slash-circle"></i> İptal Et</button>
+                        </form>
+                    }
+                </div>
+
+                <div>
+                    <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-warning fw-semibold"><i class="bi bi-pencil"></i> Düzenle</a>
+                    <a asp-action="Delete" asp-route-id="@Model.Id" class="btn btn-outline-danger fw-semibold"><i class="bi bi-trash"></i> Sil</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Red Gerekçesi Modalı -->
+@if (Model.Durum == IzinDurum.Bekliyor)
+{
+    <div class="modal fade" id="redModal" tabindex="-1" aria-labelledby="redModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form asp-action="Reddet" asp-route-id="@Model.Id" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="rowVersion" value="@Convert.ToBase64String(Model.RowVersion)" />
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title" id="redModalLabel">İzin Talebi Reddetme Gerekçesi</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p><strong>@Model.OgrenciAdSoyad</strong> isimli öğrencinin izin talebini reddetmek üzeresiniz. Lütfen bir ret gerekçesi giriniz:</p>
+                        <div class="mb-3">
+                            <label for="redSebebi" class="form-label fw-bold">Ret Gerekçesi</label>
+                            <input type="text" class="form-control" id="redSebebi" name="redSebebi" required placeholder="Gerekçe giriniz..." />
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                        <button type="submit" class="btn btn-danger">Reddet ve Kaydet</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+}

@@ -1,0 +1,123 @@
+@model IEnumerable<yoklamaWeb.Models.Ogrenci>
+@{
+    ViewData["Title"] = "Öğrenci Listesi";
+    Layout = "_Layout";
+}
+<link href="~/css/site.css" rel="stylesheet" />
+<h2 class="mt-4 mb-3" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Öğrenci Listesi</h2>
+
+<div class="mb-3 row gx-2 gy-2">
+    <div class="col-md-3">
+        <input id="filterNo" type="text" class="form-control" placeholder="Öğrenci No ara" />
+    </div>
+    <div class="col-md-3">
+        <input id="filterName" type="text" class="form-control" placeholder="Ad Soyad ara" />
+    </div>
+    <div class="col-md-2">
+        <input id="filterClass" type="text" class="form-control" placeholder="Sınıf ara" />
+    </div>
+    <div class="col-md-2">
+        <input id="filterBranch" type="text" class="form-control" placeholder="Şube ara" />
+    </div>
+    <div class="col-md-2 text-end">
+        <a asp-action="Create" class="btn btn-primary w-100">Yeni Öğrenci Ekle</a>
+    </div>
+<div class="col-md-12 mt-3">
+<button type="button" class="btn btn-success" onclick="location.href='@Url.Action("ImportExcel", "Ogrenci")'">Excel'den İçe Aktar</button>
+
+    </div>
+
+    <a asp-action="ExportToExcel" class="btn btn-success">Excel Olarak Dışa Aktar</a>
+</div>
+
+<div class="table-responsive">
+    <table id="ogrenciTable" class="table table-bordered table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="0">Öğrenci No</button></th>
+                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="1">Ad Soyad</button></th>
+                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="2">Sınıf</button></th>
+                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="3">Şube</button></th>
+                <th>İşlemler</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model)
+            {
+                <tr>
+                    <td>@item.OgrenciNo</td>
+                    <td>@item.AdSoyad</td>
+                    <td>@item.SinifDuzeyi</td>
+                    <td>@item.Sube</td>
+                    <td>
+                        <a asp-action="Details" asp-route-id="@item.OgrenciNo" class="btn btn-outline-primary btn-sm me-1">Detay</a>
+                        <a asp-action="Edit" asp-route-id="@item.OgrenciNo" class="btn btn-outline-success btn-sm me-1">Düzenle</a>
+                        <a asp-action="Delete" asp-route-id="@item.OgrenciNo" class="btn btn-outline-danger btn-sm">Sil</a>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<script>
+    (function() {
+        const table = document.getElementById('ogrenciTable');
+        if (!table) return;
+
+        const tbody = table.querySelector('tbody');
+        const sortButtons = table.querySelectorAll('.sort-btn');
+        const inputs = [
+            document.getElementById('filterNo'),
+            document.getElementById('filterName'),
+            document.getElementById('filterClass'),
+            document.getElementById('filterBranch')
+        ];
+
+        let sortDirections = {};
+
+        sortButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const column = parseInt(button.dataset.col, 10);
+                const direction = sortDirections[column] === 'asc' ? 'desc' : 'asc';
+                sortDirections[column] = direction;
+                sortTable(column, direction);
+            });
+        });
+
+        inputs.forEach((input, idx) => {
+            input.addEventListener('input', () => applyFilters());
+        });
+
+        function sortTable(col, direction) {
+            const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => r.style.display !== 'none');
+            const multiplier = direction === 'asc' ? 1 : -1;
+
+            rows.sort((a, b) => {
+                const aText = a.children[col].textContent.trim();
+                const bText = b.children[col].textContent.trim();
+                const aNum = parseFloat(aText.replace(',', '.'));
+                const bNum = parseFloat(bText.replace(',', '.'));
+
+                if (!isNaN(aNum) && !isNaN(bNum)) {
+                    return (aNum - bNum) * multiplier;
+                }
+                return aText.localeCompare(bText, 'tr', { sensitivity: 'base' }) * multiplier;
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        function applyFilters() {
+            const filterValues = inputs.map(i => i.value.trim().toLowerCase());
+            tbody.querySelectorAll('tr').forEach(row => {
+                const cells = Array.from(row.children);
+                const visible = filterValues.every((value, index) => {
+                    if (!value) return true;
+                    return cells[index].textContent.trim().toLowerCase().includes(value);
+                });
+                row.style.display = visible ? '' : 'none';
+            });
+        }
+    })();
+</script>

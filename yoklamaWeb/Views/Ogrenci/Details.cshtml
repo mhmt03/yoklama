@@ -1,0 +1,21 @@
+@model yoklamaWeb.Models.Ogrenci
+@{
+    ViewData["Title"] = "Öğrenci Detayları";
+}
+<h2 class="mt-4">Öğrenci Detayları</h2>
+<div class="card">
+    <div class="card-body">
+        <dl class="row">
+            <dt class="col-sm-3">Öğrenci No</dt>
+            <dd class="col-sm-9">@Model.OgrenciNo</dd>
+            <dt class="col-sm-3">Ad Soyad</dt>
+            <dd class="col-sm-9">@Model.AdSoyad</dd>
+            <dt class="col-sm-3">Sınıf Düzeyi</dt>
+            <dd class="col-sm-9">@Model.SinifDuzeyi</dd>
+            <dt class="col-sm-3">Şube</dt>
+            <dd class="col-sm-9">@Model.Sube</dd>
+        </dl>
+        <a asp-action="Edit" asp-route-id="@Model.OgrenciNo" class="btn btn-primary me-2">Düzenle</a>
+        <a asp-action="Index" class="btn btn-secondary">Geri Dön</a>
+    </div>
+</div>

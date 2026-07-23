@@ -1,0 +1,295 @@
+is_global = true
+build_property.TargetFramework = net10.0
+build_property.TargetFramework = net10.0
+build_property.TargetPlatformMinVersion = 
+build_property.TargetPlatformMinVersion = 
+build_property.UsingMicrosoftNETSdkWeb = true
+build_property.UsingMicrosoftNETSdkWeb = true
+build_property.ProjectTypeGuids = 
+build_property.ProjectTypeGuids = 
+build_property.InvariantGlobalization = 
+build_property.InvariantGlobalization = 
+build_property.PlatformNeutralAssembly = 
+build_property.PlatformNeutralAssembly = 
+build_property.EnforceExtendedAnalyzerRules = 
+build_property.EnforceExtendedAnalyzerRules = 
+build_property._SupportedPlatformList = Linux,macOS,Windows
+build_property._SupportedPlatformList = Linux,macOS,Windows
+build_property.TargetFrameworkIdentifier = .NETCoreApp
+build_property.TargetFrameworkVersion = v10.0
+build_property.RootNamespace = yoklamaWeb
+build_property.RootNamespace = yoklamaWeb
+build_property.ProjectDir = F:\mehmetgundonergmail\developing\react\yoklamaWeb\
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 
+build_property.RazorLangVersion = 9.0
+build_property.SupportLocalizedComponentNames = 
+build_property.GenerateRazorMetadataSourceChecksumAttributes = 
+build_property.MSBuildProjectDirectory = F:\mehmetgundonergmail\developing\react\yoklamaWeb
+build_property._RazorSourceGeneratorDebug = 
+build_property.EffectiveAnalysisLevelStyle = 10.0
+build_property.EnableCodeStyleSeverity = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Account/Login.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWNjb3VudFxMb2dpbi5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Admin/CreateUser.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cQ3JlYXRlVXNlci5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Admin/EditUser.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cRWRpdFVzZXIuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Admin/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cSW5kZXguY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/ClassAttendance/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQ2xhc3NBdHRlbmRhbmNlXENyZWF0ZS5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/ClassAttendance/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQ2xhc3NBdHRlbmRhbmNlXERldGFpbHMuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/ClassAttendance/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQ2xhc3NBdHRlbmRhbmNlXEVkaXQuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/ClassAttendance/ImportStudents.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQ2xhc3NBdHRlbmRhbmNlXEltcG9ydFN0dWRlbnRzLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/ClassAttendance/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQ2xhc3NBdHRlbmRhbmNlXEluZGV4LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Exam/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcRXhhbVxDcmVhdGUuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Exam/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcRXhhbVxEZXRhaWxzLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Exam/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcRXhhbVxFZGl0LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Exam/ImportSeats.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcRXhhbVxJbXBvcnRTZWF0cy5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Exam/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcRXhhbVxJbmRleC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Exam/Proctors.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcRXhhbVxQcm9jdG9ycy5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Home/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcSG9tZVxJbmRleC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Izin/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcSXppblxDcmVhdGUuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Izin/Delete.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcSXppblxEZWxldGUuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Izin/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcSXppblxEZXRhaWxzLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Izin/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcSXppblxFZGl0LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Izin/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcSXppblxJbmRleC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Izin/OgrenciIzinleri.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcSXppblxPZ3JlbmNpSXppbmxlcmkuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/NobetciPlan/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcTm9iZXRjaVBsYW5cQ3JlYXRlLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/NobetciPlan/Delete.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcTm9iZXRjaVBsYW5cRGVsZXRlLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/NobetciPlan/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcTm9iZXRjaVBsYW5cRGV0YWlscy5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/NobetciPlan/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcTm9iZXRjaVBsYW5cRWRpdC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/NobetciPlan/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcTm9iZXRjaVBsYW5cSW5kZXguY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Oda/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2RhXENyZWF0ZS5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Oda/Delete.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2RhXERlbGV0ZS5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Oda/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2RhXERldGFpbHMuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Oda/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2RhXEVkaXQuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Oda/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2RhXEluZGV4LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Ogrenci/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2dyZW5jaVxDcmVhdGUuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Ogrenci/Delete.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2dyZW5jaVxEZWxldGUuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Ogrenci/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2dyZW5jaVxEZXRhaWxzLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Ogrenci/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2dyZW5jaVxFZGl0LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Ogrenci/ImportExcel.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2dyZW5jaVxJbXBvcnRFeGNlbC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Ogrenci/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcT2dyZW5jaVxJbmRleC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonGorevlisi/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25Hb3Jldmxpc2lcQ3JlYXRlLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonGorevlisi/Delete.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25Hb3Jldmxpc2lcRGVsZXRlLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonGorevlisi/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25Hb3Jldmxpc2lcRGV0YWlscy5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonGorevlisi/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25Hb3Jldmxpc2lcRWRpdC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonGorevlisi/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25Hb3Jldmxpc2lcSW5kZXguY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonOgrenci/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25PZ3JlbmNpXENyZWF0ZS5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonOgrenci/Delete.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25PZ3JlbmNpXERlbGV0ZS5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonOgrenci/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25PZ3JlbmNpXERldGFpbHMuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonOgrenci/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25PZ3JlbmNpXEVkaXQuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonOgrenci/Import.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25PZ3JlbmNpXEltcG9ydC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/PansiyonOgrenci/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUGFuc2l5b25PZ3JlbmNpXEluZGV4LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Shared/Error.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU2hhcmVkXEVycm9yLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Shared/_ValidationScriptsPartial.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU2hhcmVkXF9WYWxpZGF0aW9uU2NyaXB0c1BhcnRpYWwuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/SuperYoklamaci/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU3VwZXJZb2tsYW1hY2lcSW5kZXguY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/SuperYoklamaci/Rooms.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU3VwZXJZb2tsYW1hY2lcUm9vbXMuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/SuperYoklamaci/TakeAttendance.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU3VwZXJZb2tsYW1hY2lcVGFrZUF0dGVuZGFuY2UuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklamaci/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYWNpXEluZGV4LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklamaci/TakeAttendance.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYWNpXFRha2VBdHRlbmRhbmNlLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklama/Create.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYVxDcmVhdGUuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklama/Delete.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYVxEZWxldGUuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklama/Details.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYVxEZXRhaWxzLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklama/Edit.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYVxFZGl0LmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklama/GunlukYoklama.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYVxHdW5sdWtZb2tsYW1hLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklama/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYVxJbmRleC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Yoklama/OgrenciYoklamalari.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcWW9rbGFtYVxPZ3JlbmNpWW9rbGFtYWxhcmkuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/_ViewImports.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcX1ZpZXdJbXBvcnRzLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/_ViewStart.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcX1ZpZXdTdGFydC5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[F:/mehmetgundonergmail/developing/react/yoklamaWeb/Views/Shared/_Layout.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU2hhcmVkXF9MYXlvdXQuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = b-1w5phyarss

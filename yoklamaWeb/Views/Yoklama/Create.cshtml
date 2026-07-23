@@ -1,0 +1,70 @@
+@model yoklamaWeb.ViewModels.Pansiyon.YoklamaCreateViewModel
+@{
+    ViewData["Title"] = "Yeni Yoklama Kaydı Ekle";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0 fw-bold">Yeni Yoklama Ekle</h4>
+        </div>
+        <div class="card-body p-4">
+            <form method="post" asp-action="Create">
+                @Html.AntiForgeryToken()
+                
+                <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                <div class="mb-3">
+                    <label asp-for="PansiyonOgrenciId" class="form-label fw-bold">Öğrenci</label>
+                    <select asp-for="PansiyonOgrenciId" asp-items="ViewBag.Ogrenciler" class="form-select">
+                        <option value="">-- Öğrenci Seçiniz --</option>
+                    </select>
+                    <span asp-validation-for="PansiyonOgrenciId" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="YoklamaYapanId" class="form-label fw-bold">Yoklamayı Alan Görevli</label>
+                    <select asp-for="YoklamaYapanId" asp-items="ViewBag.Gorevlisiler" class="form-select">
+                        <option value="">-- Görevli Seçiniz --</option>
+                    </select>
+                    <span asp-validation-for="YoklamaYapanId" class="text-danger"></span>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="Tarih" class="form-label fw-bold"></label>
+                        <input asp-for="Tarih" type="date" class="form-control" />
+                        <span asp-validation-for="Tarih" class="text-danger"></span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="Saat" class="form-label fw-bold"></label>
+                        <input asp-for="Saat" type="time" class="form-control" />
+                        <span asp-validation-for="Saat" class="text-danger"></span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Durum" class="form-label fw-bold"></label>
+                    <select asp-for="Durum" asp-items="ViewBag.Durumlar" class="form-select"></select>
+                    <span asp-validation-for="Durum" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Aciklama" class="form-label fw-bold"></label>
+                    <textarea asp-for="Aciklama" class="form-control" rows="3" placeholder="Notlar / Açıklama..."></textarea>
+                    <span asp-validation-for="Aciklama" class="text-danger"></span>
+                </div>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

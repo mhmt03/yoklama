@@ -1,0 +1,297 @@
+@model yoklamaWeb.ViewModels.Pansiyon.OdaViewModel
+@{
+    ViewData["Title"] = "Oda Detayları";
+    Layout = "_Layout";
+    var tumOgrenciler = ViewBag.TumOgrenciler as List<yoklamaWeb.ViewModels.Pansiyon.PansiyonOgrenciViewModel> ?? new();
+}
+
+<div class="container mt-4">
+    <div class="mb-3 d-flex justify-content-between align-items-center">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Odalara Dön</a>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i> @TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i> @TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    <div class="row">
+        <!-- Sol Sütun: Oda Bilgileri -->
+        <div class="col-md-4 mb-4">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0 fw-bold">Oda @Model.OdaNo Bilgileri</h4>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless align-middle mb-0">
+                        <tr>
+                            <td class="fw-bold text-muted" style="width: 40%;">Durum:</td>
+                            <td>
+                                @if (Model.Aktif)
+                                {
+                                    <span class="badge bg-success">Aktif</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Pasif</span>
+                                }
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Kat:</td>
+                            <td>@Model.Kat. Kat</td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Cinsiyet:</td>
+                            <td>@Model.Cinsiyet</td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Kapasite:</td>
+                            <td>@Model.DoluSayisi / @Model.Kapasite</td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Boş Yer:</td>
+                            <td>@(Model.Kapasite - Model.DoluSayisi) Kişilik</td>
+                        </tr>
+                        @if (!string.IsNullOrEmpty(Model.Aciklama))
+                        {
+                            <tr>
+                                <td class="fw-bold text-muted" colspan="2">Açıklama:</td>
+                            </tr>
+                            <tr>
+                                <td colspan="2" class="bg-light p-2 rounded small text-wrap">@Model.Aciklama</td>
+                            </tr>
+                        }
+                    </table>
+                </div>
+                <div class="card-footer bg-white border-0 d-flex justify-content-between p-3">
+                    <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-warning w-100 fw-semibold me-2"><i class="bi bi-pencil"></i> Düzenle</a>
+                    <a asp-action="Delete" asp-route-id="@Model.Id" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-trash"></i> Sil</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sağ Sütun: Odadaki Öğrenciler -->
+        <div class="col-md-8 mb-4">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center py-3">
+                    <h4 class="mb-0 fw-bold">Odadaki Öğrenciler (@Model.DoluSayisi)</h4>
+                    @if (Model.DoluSayisi < Model.Kapasite)
+                    {
+                        <button type="button" class="btn btn-primary btn-sm fw-semibold" data-bs-toggle="modal" data-bs-target="#ogrenciEkleModal">
+                            <i class="bi bi-person-plus-fill"></i> Öğrenci Ekle
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-primary btn-sm fw-semibold" disabled title="Oda Kapasitesi Dolu">
+                            <i class="bi bi-person-plus-fill"></i> Öğrenci Ekle (Dolu)
+                        </button>
+                    }
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0 align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">Öğrenci No</th>
+                                    <th>Ad Soyad</th>
+                                    <th>Sınıf / Şube</th>
+                                    <th class="text-end pe-3" style="width: 250px;">İşlem</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (Model.Ogrenciler.Any())
+                                {
+                                    @foreach (var ogr in Model.Ogrenciler)
+                                    {
+                                        <tr>
+                                            <td class="ps-3">@ogr.OgrenciNo</td>
+                                            <td><strong>@ogr.AdSoyad</strong></td>
+                                            <td>@ogr.SinifDuzeyi / @ogr.Sube</td>
+                                            <td class="text-end pe-3">
+                                                <a asp-controller="PansiyonOgrenci" asp-action="Details" asp-route-id="@ogr.Id" class="btn btn-sm btn-info me-1">
+                                                    <i class="bi bi-eye"></i> Profil Git
+                                                </a>
+                                                <form asp-action="RemoveStudent" asp-route-id="@Model.Id" asp-route-ogrenciId="@ogr.Id" method="post" class="d-inline" onsubmit="return confirm('@ogr.AdSoyad isimli öğrenciyi odadan çıkarmak istediğinize emin misiniz?');">
+                                                    @Html.AntiForgeryToken()
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                        <i class="bi bi-person-dash"></i> Odadan Çıkar
+                                                    </button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted py-4">Bu odada kalan öğrenci bulunamadı.</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Öğrenci Ekleme Modalı -->
+<div class="modal fade" id="ogrenciEkleModal" tabindex="-1" aria-labelledby="ogrenciEkleModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <form asp-action="AddStudents" asp-route-id="@Model.Id" method="post">
+                @Html.AntiForgeryToken()
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold" id="ogrenciEkleModalLabel"><i class="bi bi-person-plus-fill"></i> Odaya Öğrenci Ekle</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4 " style="max-height: 70vh; overflow-y: auto;">
+                    <p class="text-muted">Bu odaya yerleştirmek istediğiniz öğrencileri seçiniz. Başka bir odada kayıtlı olan öğrenciler bu odaya taşındığında otomatik olarak eski odalarından çıkarılacaklardır.</p>
+                    
+                    <div class="alert alert-info py-2 small">
+                        <strong>Kapasite Durumu:</strong> Bu odada şu an <strong>@(Model.Kapasite - Model.DoluSayisi) kişilik</strong> boş yer bulunmaktadır.
+                    </div>
+
+                    <!-- Arama Çubuğu -->
+                    <div class="input-group mb-3 shadow-sm">
+                        <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                        <input type="text" id="modalOgrenciAra" class="form-control border-start-0 ps-0" placeholder="Öğrenci adı veya numarası ile ara..." onkeyup="modalOgrenciFiltrele()" />
+                    </div>
+
+                    <div class="border rounded">
+                        <table class="table table-hover align-middle mb-0" id="modalOgrenciTablosu">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width: 40px;" class="ps-3">Seç</th>
+                                    <th>Öğrenci No</th>
+                                    <th>Ad Soyad</th>
+                                    <th>Mevcut Odası</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (tumOgrenciler.Any())
+                                {
+                                    @foreach (var ogr in tumOgrenciler)
+                                    {
+                                        var isAlreadyInThisRoom = ogr.OdaId == Model.Id;
+                                        <tr class="ogrenci-satir">
+                                            <td class="ps-3">
+                                                @if (isAlreadyInThisRoom)
+                                                {
+                                                    <input type="checkbox" class="form-check-input" checked disabled />
+                                                }
+                                                else
+                                                {
+                                                    <input type="checkbox" name="selectedStudentIds" value="@ogr.Id" class="form-check-input ogrenci-checkbox" onchange="secilenSayisiniGuncelle()" />
+                                                }
+                                            </td>
+                                            <td class="ogrenci-no">@ogr.OgrenciNo</td>
+                                            <td class="ogrenci-ad"><strong>@ogr.AdSoyad</strong></td>
+                                            <td>
+                                                @if (isAlreadyInThisRoom)
+                                                {
+                                                    <span class="badge bg-success"><i class="bi bi-check-circle-fill"></i> Zaten Bu Odada</span>
+                                                }
+                                                else if (ogr.OdaId.HasValue)
+                                                {
+                                                    <span class="badge bg-warning text-dark"><i class="bi bi-house-door-fill"></i> Oda @ogr.OdaNo</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-secondary"><i class="bi bi-slash-circle"></i> Odasız</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td colspan="4" class="text-center text-muted py-4">Sistemde kayıtlı öğrenci bulunamadı.</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light d-flex justify-content-between">
+                    <div>
+                        <span class="small text-muted fw-bold" id="secilenOgrenciOzeti">Seçilen Öğrenci: 0 / @(Model.Kapasite - Model.DoluSayisi) (Boş Yer)</span>
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#ogrenciEkleModal">Vazgeç</button>
+                        <button type="submit" id="modalKaydetButon" class="btn btn-primary fw-semibold" disabled>Seçilenleri Odaya Ekle</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        function modalOgrenciFiltrele() {
+            var input = document.getElementById("modalOgrenciAra");
+            var filter = input.value.toUpperCase();
+            var table = document.getElementById("modalOgrenciTablosu");
+            var trs = table.getElementsByClassName("ogrenci-satir");
+
+            for (var i = 0; i < trs.length; i++) {
+                var noTd = trs[i].getElementsByClassName("ogrenci-no")[0];
+                var nameTd = trs[i].getElementsByClassName("ogrenci-ad")[0];
+                if (noTd && nameTd) {
+                    var noText = noTd.textContent || noTd.innerText;
+                    var nameText = nameTd.textContent || nameTd.innerText;
+                    if (noText.toUpperCase().indexOf(filter) > -1 || nameText.toUpperCase().indexOf(filter) > -1) {
+                        trs[i].style.display = "";
+                    } else {
+                        trs[i].style.display = "none";
+                    }
+                }
+            }
+        }
+
+        function secilenSayisiniGuncelle() {
+            var checkboxes = document.querySelectorAll(".ogrenci-checkbox:checked");
+            var secilenSayisi = checkboxes.length;
+            var bosYer = @(Model.Kapasite - Model.DoluSayisi);
+            
+            var ozetSpan = document.getElementById("secilenOgrenciOzeti");
+            var kaydetButon = document.getElementById("modalKaydetButon");
+            
+            ozetSpan.innerText = "Seçilen Öğrenci: " + secilenSayisi + " / " + bosYer + " (Boş Yer)";
+            
+            if (secilenSayisi > 0) {
+                kaydetButon.disabled = false;
+                
+                // Kapasite aşımı kontrolü (client-side uyarı ve kilitleme)
+                if (secilenSayisi > bosYer) {
+                    ozetSpan.classList.add("text-danger");
+                    ozetSpan.classList.remove("text-muted");
+                    ozetSpan.innerText = "Kapasite Aşıldı! Seçilen: " + secilenSayisi + " / " + bosYer + " (Boş Yer)";
+                    kaydetButon.disabled = true;
+                } else {
+                    ozetSpan.classList.remove("text-danger");
+                    ozetSpan.classList.add("text-muted");
+                }
+            } else {
+                kaydetButon.disabled = true;
+                ozetSpan.classList.remove("text-danger");
+                ozetSpan.classList.add("text-muted");
+            }
+        }
+    </script>
+}

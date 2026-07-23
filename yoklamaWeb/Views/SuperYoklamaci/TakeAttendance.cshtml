@@ -1,0 +1,569 @@
+@model yoklamaWeb.Models.SuperYoklamaciTakeAttendanceViewModel
+@{
+    ViewData["Title"] = "Yoklama Al (Süper) — " + Model.ExamName;
+    var statuses = new[]
+    {
+        (yoklamaWeb.Models.AttendanceStatus.KontrolEdilmedi, "Belirsiz",  "status-unknown"),
+        (yoklamaWeb.Models.AttendanceStatus.Katildi,         "Var",       "status-present"),
+        (yoklamaWeb.Models.AttendanceStatus.Katilmadi,       "Yok",       "status-absent"),
+        (yoklamaWeb.Models.AttendanceStatus.Gec,             "Geç",       "status-late")
+    };
+}
+
+<style>
+    :root {
+        --primary: #7c3aed;
+        --primary-light: #a78bfa;
+        --success: #10b981;
+        --danger: #ef4444;
+        --warning: #f59e0b;
+        --surface: #1e1e2e;
+        --surface2: #2a2a3e;
+        --surface3: #313150;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --border: rgba(255,255,255,0.08);
+        --card-radius: 14px;
+    }
+    body { background: #13131f; color: var(--text); font-family: 'Inter', sans-serif; margin: 0; }
+
+    /* HEADER */
+    .ta-header {
+        background: linear-gradient(135deg, #3b0764 0%, #1e1e2e 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 20px 32px;
+    }
+    .ta-breadcrumb { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px; }
+    .ta-breadcrumb a { color: var(--primary-light); text-decoration: none; }
+    .ta-breadcrumb a:hover { text-decoration: underline; }
+    .ta-header-row { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+    .ta-title { font-size: 1.4rem; font-weight: 700; color: #fff; margin: 0; }
+    .ta-meta { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
+    .ta-badge {
+        display: inline-flex; align-items: center; gap: 6px;
+        background: rgba(124,58,237,.18); border: 1px solid rgba(124,58,237,.35);
+        color: #ddd6fe; padding: 5px 14px; border-radius: 20px;
+        font-size: 0.8rem; font-weight: 600;
+    }
+    .ta-badge.green { background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.3); color: #6ee7b7; }
+    .ta-badge.red { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.3); color: #fca5a5; }
+
+    /* TOOLBAR */
+    .ta-toolbar {
+        background: var(--surface2);
+        border-bottom: 1px solid var(--border);
+        padding: 14px 32px;
+        display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+    }
+    .sort-label, .filter-label { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
+    .pill-btn {
+        background: var(--surface3);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+        text-decoration: none; cursor: pointer; transition: all .15s;
+        white-space: nowrap;
+    }
+    .pill-btn:hover, .pill-btn.active {
+        background: rgba(124,58,237,.25); border-color: rgba(124,58,237,.5);
+        color: #ddd6fe;
+    }
+    .pill-filter.f-present.active  { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.4); color: #6ee7b7; }
+    .pill-filter.f-absent.active   { background: rgba(239,68,68,.15);  border-color: rgba(239,68,68,.4);  color: #fca5a5; }
+    .pill-filter.f-late.active     { background: rgba(245,158,11,.15); border-color: rgba(245,158,11,.4); color: #fcd34d; }
+    .pill-filter.f-unknown.active  { background: rgba(148,163,184,.1); border-color: rgba(148,163,184,.3); color: #94a3b8; }
+    .toolbar-sep { flex: 1; min-width: 20px; }
+    .count-chip { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+    .count-chip strong { color: var(--primary-light); }
+
+    .search-box {
+        background: var(--surface3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 6px 14px; border-radius: 20px;
+        font-size: 0.8rem; min-width: 200px;
+        outline: none;
+        transition: border-color .15s;
+    }
+    .search-box:focus { border-color: rgba(167,139,250,.6); }
+
+    /* CONTENT */
+    .ta-content { padding: 8px 12px; max-width: 1100px; margin: 0 auto; }
+
+    /* TABLE */
+    .yk-table-wrap {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--card-radius);
+        overflow: hidden;
+        margin: 0;
+    }
+    table.yk-table {
+        width: 100%; border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+    .yk-table thead th {
+        background: var(--surface3);
+        color: var(--text-muted);
+        font-size: 0.72rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+    }
+    .yk-table tbody tr {
+        border-bottom: 1px solid var(--border);
+        transition: background .15s;
+    }
+    .yk-table tbody tr:last-child { border-bottom: none; }
+    .yk-table tbody tr:hover { background: rgba(255,255,255,.025); }
+    .yk-table td { padding: 6px 12px; vertical-align: middle; }
+
+    .seat-no {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 28px; height: 28px; border-radius: 6px;
+        background: rgba(124,58,237,.18); border: 1px solid rgba(124,58,237,.3);
+        color: #ddd6fe; font-weight: 700; font-size: 0.78rem;
+    }
+    .student-name { font-weight: 600; color: #fff; }
+    .student-no { font-size: 0.78rem; color: var(--text-muted); }
+    .class-badge {
+        background: rgba(148,163,184,.1); border: 1px solid rgba(148,163,184,.2);
+        color: var(--text-muted); padding: 2px 6px; border-radius: 8px;
+        font-size: 0.72rem; white-space: nowrap;
+    }
+
+    /* Status select */
+    .status-select {
+        background: var(--surface3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 5px 8px; border-radius: 6px;
+        font-size: 0.8rem; min-width: 100px;
+        cursor: pointer; outline: none;
+        transition: border-color .15s;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 8px center;
+        padding-right: 24px;
+    }
+    .status-select:focus { border-color: rgba(124,58,237,.5); }
+    .status-select.s-present { border-color: rgba(16,185,129,.5); color: #6ee7b7; }
+    .status-select.s-absent  { border-color: rgba(239,68,68,.5);  color: #fca5a5; }
+    .status-select.s-late    { border-color: rgba(245,158,11,.5); color: #fcd34d; }
+
+    /* Note input */
+    .note-input {
+        background: var(--surface3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 5px 8px; border-radius: 6px;
+        font-size: 0.8rem; width: 120px;
+        transition: border-color .15s;
+    }
+    .note-input:focus { outline: none; border-color: rgba(124,58,237,.5); }
+    .note-input::placeholder { color: rgba(148,163,184,.4); }
+
+    /* FOOTER FORM */
+    .ta-footer {
+        position: sticky; bottom: 0;
+        background: rgba(30,30,46,.97);
+        border-top: 1px solid var(--border);
+        backdrop-filter: blur(16px);
+        padding: 14px 24px;
+        display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+        margin: 0;
+    }
+    .footer-field label {
+        display: block; font-size: 0.7rem; color: var(--text-muted);
+        text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; font-weight: 600;
+    }
+    .footer-input {
+        background: var(--surface3);
+        border: 1px solid var(--border);
+        color: var(--text);
+        padding: 6px 12px; border-radius: 6px; font-size: 0.82rem;
+        transition: border-color .15s;
+    }
+    .footer-input:focus { outline: none; border-color: rgba(124,58,237,.6); }
+    .footer-input.required-field { border-color: rgba(124,58,237,.35); }
+
+    .save-btn {
+        background: linear-gradient(135deg, #7c3aed, #4f46e5);
+        border: none; color: #fff;
+        padding: 8px 24px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+        cursor: pointer; transition: all .2s;
+        box-shadow: 0 4px 14px rgba(124,58,237,.4);
+        white-space: nowrap; margin-left: auto;
+    }
+    .save-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(124,58,237,.55); }
+    .save-btn:disabled {
+        background: #334155;
+        color: #64748b;
+        box-shadow: none;
+        cursor: not-allowed;
+        opacity: 0.6;
+    }
+
+    .req-star { color: #f87171; }
+
+    /* RESPONSIVE DESIGN (Max 768px) - Çift satır / Kart görünümü */
+    @@media (max-width: 768px) {
+        .ta-header { padding: 12px 16px; }
+        .ta-toolbar { padding: 10px 16px; gap: 8px; }
+        .search-box { width: 100%; min-width: 100%; order: -1; }
+        .ta-content { padding: 4px 6px; }
+        .ta-footer { padding: 12px 16px; flex-direction: column; align-items: stretch; }
+        .save-btn { margin-left: 0; width: 100%; padding: 10px; }
+
+        /* Tabloyu mobil kartlara çevirme */
+        .yk-table thead { display: none; }
+        .yk-table tbody, .yk-table tr, .yk-table td { display: block; width: 100%; }
+        
+        .yk-table tbody tr {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+
+        .yk-table td {
+            padding: 4px 0;
+            border: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Çift satırlı kart tasarımı için özelleştirmeler */
+        .yk-table td:nth-child(1) { display: none; } /* Sıra numarasını gizle */
+        
+        /* 1. Satır: Koltuk No & Öğrenci No, Sınıf Şube */
+        .yk-table td:nth-child(2) {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+            margin-bottom: 6px;
+            justify-content: flex-start;
+            gap: 8px;
+        }
+        .yk-table td:nth-child(3), .yk-table td:nth-child(5), .yk-table td:nth-child(6) {
+            display: none; /* Bunları üst satıra ve ad satırına gömeceğiz */
+        }
+        
+        /* 2. Satır: Ad Soyad */
+        .yk-table td:nth-child(4) {
+            font-size: 0.95rem;
+            margin-bottom: 6px;
+            display: block;
+        }
+        /* Mobile layout inline data injection */
+        .yk-table td:nth-child(4)::after {
+            content: " (" attr(data-student-info) ")";
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: normal;
+        }
+
+        /* Durum Seçici ve Not Girişi Yan Yana */
+        .yk-table td:nth-child(7), .yk-table td:nth-child(8) {
+            display: inline-flex;
+            width: 48%;
+            vertical-align: top;
+            padding: 4px 0;
+        }
+        .status-select, .note-input {
+            width: 100%;
+            min-width: 100%;
+            box-sizing: border-box;
+        }
+    }
+</style>
+
+<div class="ta-header">
+    <div class="ta-breadcrumb">
+        <a asp-controller="SuperYoklamaci" asp-action="Rooms" asp-route-examId="@Model.ExamId">← Salon Listesi</a>
+    </div>
+    <div class="ta-header-row">
+        <div>
+            <h1 class="ta-title">⚡ [Süper] @Model.ExamName</h1>
+            <div class="ta-meta">
+                <span class="ta-badge">🏛 Salon: @Model.Room</span>
+                <span class="ta-badge">📅 @Model.ApplicationDate.ToString("dd MMMM yyyy", new System.Globalization.CultureInfo("tr-TR"))</span>
+                <span class="ta-badge green">👥 @Model.Seats.Count öğrenci</span>
+                @if (!Model.IsTimeValid)
+                {
+                    <span class="ta-badge red">⚠️ Geçersiz Saat Aralığı (Sadece İzleme Modu)</span>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toolbar: filtrele + sırala + arama -->
+<div class="ta-toolbar">
+    <span class="sort-label">Sırala:</span>
+    <a class="pill-btn @(Model.SortBy == "Sira"    ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="Sira"    asp-route-filterStatus="@Model.FilterStatus">Sıra No</a>
+    <a class="pill-btn @(Model.SortBy == "AdSoyad" ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="AdSoyad" asp-route-filterStatus="@Model.FilterStatus">Ad Soyad</a>
+    <a class="pill-btn @(Model.SortBy == "OgrenciNo"? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="OgrenciNo" asp-route-filterStatus="@Model.FilterStatus">Öğrenci No</a>
+    <a class="pill-btn @(Model.SortBy == "Sinif"   ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="Sinif"   asp-route-filterStatus="@Model.FilterStatus">Sınıf/Şube</a>
+
+    <div class="toolbar-sep"></div>
+
+    <span class="filter-label">Filtrele:</span>
+    <a class="pill-btn pill-filter @(Model.FilterStatus == "Tumu"           ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="@Model.SortBy" asp-route-filterStatus="Tumu">Tümü</a>
+    <a class="pill-btn pill-filter f-unknown @(Model.FilterStatus == "KontrolEdilmedi" ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="@Model.SortBy" asp-route-filterStatus="KontrolEdilmedi">Belirsiz</a>
+    <a class="pill-btn pill-filter f-present @(Model.FilterStatus == "Katildi"         ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="@Model.SortBy" asp-route-filterStatus="Katildi">Var</a>
+    <a class="pill-btn pill-filter f-absent  @(Model.FilterStatus == "Katilmadi"       ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="@Model.SortBy" asp-route-filterStatus="Katilmadi">Yok</a>
+    <a class="pill-btn pill-filter f-late    @(Model.FilterStatus == "Gec"             ? "active" : "")" asp-action="TakeAttendance" asp-route-examId="@Model.ExamId" asp-route-room="@Model.Room" asp-route-sortBy="@Model.SortBy" asp-route-filterStatus="Gec">Geç</a>
+
+    <div class="toolbar-sep"></div>
+
+    <input type="text" id="liveSearchInput" class="search-box" placeholder="🔍 Öğrenci adı veya no ara..." onkeyup="filterByText()" />
+    <span class="count-chip">Toplam: <strong>@Model.Seats.Count</strong></span>
+</div>
+
+<form method="post" asp-controller="SuperYoklamaci" asp-action="SaveAttendance" id="attendanceForm">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="ExamId" value="@Model.ExamId" />
+    <input type="hidden" name="Room"   value="@Model.Room" />
+
+    <div class="ta-content">
+        @if (!Model.Seats.Any())
+        {
+            <div style="text-align:center;padding:60px 20px;color:var(--text-muted)">
+                <div style="font-size:2.5rem;margin-bottom:12px;opacity:.4">🪑</div>
+                <p>Bu salonda öğrenci ataması bulunamadı.</p>
+            </div>
+        }
+        else
+        {
+            <div class="yk-table-wrap">
+                <table class="yk-table">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Koltuk</th>
+                            <th>Öğrenci No</th>
+                            <th>Ad Soyad</th>
+                            <th>Sınıf</th>
+                            <th>Şube</th>
+                            <th>Durum</th>
+                            <th>Not</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentTableBody">
+                        @for (int i = 0; i < Model.Seats.Count; i++)
+                        {
+                            var seat = Model.Seats[i];
+                            var selectClass = seat.Status switch
+                            {
+                                yoklamaWeb.Models.AttendanceStatus.Katildi   => "s-present",
+                                yoklamaWeb.Models.AttendanceStatus.Katilmadi => "s-absent",
+                                yoklamaWeb.Models.AttendanceStatus.Gec       => "s-late",
+                                _                                              => ""
+                            };
+                            <tr data-status="@seat.Status" id="row-@seat.SeatId" class="student-row" data-searchname="@seat.AdSoyad.ToLower(new System.Globalization.CultureInfo("tr-TR"))" data-searchno="@seat.OgrenciNo">
+                                <td style="color:var(--text-muted);font-size:.8rem">@(i + 1)</td>
+                                <td>
+                                    <span class="seat-no">@seat.Sira</span>
+                                    <span class="class-badge d-inline d-md-none">@seat.SinifDuzeyi - @seat.Sube</span>
+                                    <input type="hidden" name="Seats[@i].SeatId"     value="@seat.SeatId" />
+                                    <input type="hidden" name="Seats[@i].OgrenciNo"  value="@seat.OgrenciNo" />
+                                    <input type="hidden" name="Seats[@i].AdSoyad"    value="@seat.AdSoyad" />
+                                    <input type="hidden" name="Seats[@i].SinifDuzeyi" value="@seat.SinifDuzeyi" />
+                                    <input type="hidden" name="Seats[@i].Sube"       value="@seat.Sube" />
+                                    <input type="hidden" name="Seats[@i].SeatNumber" value="@seat.SeatNumber" />
+                                    <input type="hidden" name="Seats[@i].Sira"       value="@seat.Sira" />
+                                </td>
+                                <td><span class="student-no">@seat.OgrenciNo</span></td>
+                                <td data-student-info="@seat.OgrenciNo - @seat.SinifDuzeyi-@seat.Sube"><span class="student-name">@seat.AdSoyad</span></td>
+                                <td><span class="class-badge">@seat.SinifDuzeyi</span></td>
+                                <td><span class="class-badge">@seat.Sube</span></td>
+                                <td>
+                                    @if (Model.IsTimeValid)
+                                    {
+                                        <select name="Seats[@i].Status"
+                                                class="status-select @selectClass"
+                                                id="status-@seat.SeatId"
+                                                onchange="onStatusChange(this, '@seat.SeatId')">
+                                            @foreach (var (val, label, css) in statuses)
+                                            {
+                                                if (seat.Status == val)
+                                                {
+                                                    <option value="@((int)val)" selected>@label</option>
+                                                }
+                                                else
+                                                {
+                                                    <option value="@((int)val)">@label</option>
+                                                }
+                                            }
+                                        </select>
+                                    }
+                                    else
+                                    {
+                                        <select disabled class="status-select @selectClass" id="status-@seat.SeatId">
+                                            @foreach (var (val, label, css) in statuses)
+                                            {
+                                                if (seat.Status == val)
+                                                {
+                                                    <option value="@((int)val)" selected>@label</option>
+                                                }
+                                            }
+                                        </select>
+                                        <input type="hidden" name="Seats[@i].Status" value="@((int)seat.Status)" />
+                                    }
+                                </td>
+                                <td>
+                                    @if (Model.IsTimeValid)
+                                    {
+                                        <input type="text"
+                                               name="Seats[@i].Not"
+                                               value="@seat.Not"
+                                               class="note-input"
+                                               placeholder="Not ekle…"
+                                               maxlength="200" />
+                                    }
+                                    else
+                                    {
+                                        <input type="text" disabled value="@seat.Not" class="note-input" placeholder="Yazılamaz" />
+                                        <input type="hidden" name="Seats[@i].Not" value="@seat.Not" />
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- İstatistik çipçikleri -->
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:20px" id="statsBar">
+                <span class="ta-badge" id="stat-var">✅ Var: <strong id="cnt-present">0</strong></span>
+                <span class="ta-badge" style="background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3);color:#fca5a5" id="stat-yok">❌ Yok: <strong id="cnt-absent">0</strong></span>
+                <span class="ta-badge" style="background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.3);color:#fcd34d" id="stat-gec">⏰ Geç: <strong id="cnt-late">0</strong></span>
+                <span class="ta-badge" style="background:rgba(148,163,184,.08);border-color:rgba(148,163,184,.2);color:#94a3b8" id="stat-bel">❓ Belirsiz: <strong id="cnt-unknown">0</strong></span>
+            </div>
+        }
+    </div>
+
+    <!-- Sticky footer -->
+    <div class="ta-footer">
+        <div class="footer-field">
+            <label for="YoklamaciIsmi">Yoklamacı İsmi <span class="req-star">*</span></label>
+            @if (Model.IsTimeValid)
+            {
+                <input type="text"
+                       id="YoklamaciIsmi"
+                       name="YoklamaciIsmi"
+                       class="footer-input required-field"
+                       placeholder="Adınızı giriniz"
+                       value="@Model.ProctorName"
+                       required
+                       maxlength="100"
+                       style="min-width:200px" />
+            }
+            else
+            {
+                <input type="text" disabled class="footer-input" value="@Model.ProctorName" placeholder="Belirtilmemiş" style="min-width:200px" />
+            }
+        </div>
+        <div class="footer-field">
+            <label for="SinavNotu">Sınav Notu <span style="color:var(--text-muted);font-weight:400">(isteğe bağlı)</span></label>
+            @if (Model.IsTimeValid)
+            {
+                <input type="text"
+                       id="SinavNotu"
+                       name="SinavNotu"
+                       class="footer-input"
+                       placeholder="Genel not…"
+                       value="@Model.ExamNote"
+                       maxlength="500"
+                       style="min-width:260px" />
+            }
+            else
+            {
+                <input type="text" disabled class="footer-input" value="@Model.ExamNote" placeholder="Belirtilmemiş" style="min-width:260px" />
+            }
+        </div>
+        @if (Model.IsTimeValid)
+        {
+            <button type="submit" class="save-btn" onclick="return validateForm()">
+                💾 Yoklamayı Kaydet
+            </button>
+        }
+        else
+        {
+            <button type="button" disabled class="save-btn">
+                🔒 Süre Dışı / Pasif
+            </button>
+        }
+    </div>
+</form>
+
+@section Scripts {
+<script>
+    // Durum renk güncelleme
+    function onStatusChange(select, seatId) {
+        select.className = 'status-select';
+        const v = parseInt(select.value);
+        if (v === 1) select.classList.add('s-present');
+        else if (v === 2) select.classList.add('s-absent');
+        else if (v === 3) select.classList.add('s-late');
+        updateStats();
+    }
+
+    // Metin tabanlı filtreleme fonksiyonu
+    function filterByText() {
+        const query = document.getElementById('liveSearchInput').value.trim().toLowerCase();
+        const rows = document.querySelectorAll('.student-row');
+        
+        rows.forEach(row => {
+            const name = row.getAttribute('data-searchname') || '';
+            const no = row.getAttribute('data-searchno') || '';
+            
+            if (name.includes(query) || no.includes(query)) {
+                row.style.setProperty('display', '', 'important');
+            } else {
+                row.style.setProperty('display', 'none', 'important');
+            }
+        });
+        updateStats();
+    }
+
+    function updateStats() {
+        let p = 0, a = 0, l = 0, u = 0;
+        // Sadece görünür satırların durumlarını say
+        document.querySelectorAll('.student-row').forEach(row => {
+            if (row.style.display !== 'none') {
+                const s = row.querySelector('.status-select');
+                if (s) {
+                    const v = parseInt(s.value);
+                    if (v === 1) p++;
+                    else if (v === 2) a++;
+                    else if (v === 3) l++;
+                    else u++;
+                }
+            }
+        });
+        document.getElementById('cnt-present').textContent = p;
+        document.getElementById('cnt-absent').textContent  = a;
+        document.getElementById('cnt-late').textContent    = l;
+        document.getElementById('cnt-unknown').textContent = u;
+    }
+
+    function validateForm() {
+        const ismi = document.getElementById('YoklamaciIsmi').value.trim();
+        if (!ismi) {
+            document.getElementById('YoklamaciIsmi').focus();
+            document.getElementById('YoklamaciIsmi').style.borderColor = '#ef4444';
+            alert('Lütfen yoklamacı isminizi giriniz.');
+            return false;
+        }
+        return true;
+    }
+
+    // Sayfa yüklenince istatistik hesapla
+    document.addEventListener('DOMContentLoaded', updateStats);
+</script>
+}

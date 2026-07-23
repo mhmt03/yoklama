@@ -1,0 +1,494 @@
+@model yoklamaWeb.Models.AdminExamDetailsViewModel
+
+@{
+    ViewData["Title"] = "Sınav Detayları";
+    Layout = "_Layout";
+    var statusValues = Enum.GetValues<AttendanceStatus>();
+}
+
+@functions{
+    string StatusLabel(AttendanceStatus status) => status switch
+    {
+        AttendanceStatus.Katildi => "Var",
+        AttendanceStatus.Katilmadi => "Yok",
+        AttendanceStatus.Gec => "Geç",
+        _ => "Belirsiz"
+    };
+
+    string StatusClass(AttendanceStatus status) => status switch
+    {
+        AttendanceStatus.Katildi => "status-present",
+        AttendanceStatus.Katilmadi => "status-absent",
+        AttendanceStatus.Gec => "status-late",
+        _ => "status-pending"
+    };
+}
+
+<div class="container py-2 exam-shell">
+    <div class="card shadow-sm border-0 mb-3 exam-header-card">
+        <div class="card-body py-3 px-3 px-lg-4">
+            <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
+                <div>
+                    <h1 class="h5 mb-1">@Model.ExamName</h1>
+                    <p class="text-muted small mb-0">@Model.ApplicationDate.ToString("dd.MM.yyyy") • Bina @Model.BuildingNumber</p>
+                </div>
+                <div class="d-flex flex-wrap gap-1 compact-actions align-items-center">
+                    <a asp-action="Details" asp-route-id="@Model.ExamId" class="btn btn-sm btn-outline-secondary compact-action-btn">Yenile</a>
+                    <button type="button" class="btn btn-sm btn-success compact-action-btn" data-bs-toggle="modal" data-bs-target="#exportExcelModal">Excel'e Aktar</button>
+                    <a asp-action="Edit" asp-route-id="@Model.ExamId" class="btn btn-sm btn-outline-primary compact-action-btn">Düzenle</a>
+                    <a asp-action="ImportSeats" asp-route-id="@Model.ExamId" class="btn btn-sm btn-success compact-action-btn">İçe Aktar</a>
+                    <form asp-action="GenerateProctors" asp-route-id="@Model.ExamId" method="post" class="d-inline">
+                        <button type="submit" class="btn btn-sm btn-warning compact-action-btn">Yoklamacı listesi</button>
+                    </form>
+                    <button type="button" class="btn btn-sm btn-primary compact-action-btn" data-bs-toggle="modal" data-bs-target="#addStudentModal">Öğrenci Ekle</button>
+                </div>
+            </div>
+            <div class="row g-2 mt-2">
+                <div class="col-md-6 col-lg-3">
+                    <div class="p-2 rounded-3 bg-light compact-stat-card">
+                        <div class="text-muted small">Geçerlilik</div>
+                        <div class="fw-semibold small">@Model.ValidFrom.ToString("dd.MM.yyyy") – @Model.ValidTo.ToString("dd.MM.yyyy")</div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-3">
+                    <div class="p-2 rounded-3 bg-light compact-stat-card">
+                        <div class="text-muted small">Saat</div>
+                        <div class="fw-semibold small">@(Model.StartTime.HasValue ? Model.StartTime.Value.ToString("hh\\:mm") : "—") – @(Model.EndTime.HasValue ? Model.EndTime.Value.ToString("hh\\:mm") : "—")</div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-3">
+                    <div class="p-2 rounded-3 bg-light compact-stat-card">
+                        <div class="text-muted small">Toplam</div>
+                        <div class="fw-semibold small">@Model.TotalStudents öğrenci</div>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-3">
+                    <div class="p-2 rounded-3 bg-light compact-stat-card">
+                        <div class="text-muted small">Durumlar</div>
+                        <div class="fw-semibold small">Var @Model.PresentCount • Yok @Model.AbsentCount • Geç @Model.LateCount • Beklemede @Model.PendingCount</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success">@TempData["SuccessMessage"]</div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger">@TempData["ErrorMessage"]</div>
+    }
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <div class="d-flex flex-column flex-md-row justify-content-between gap-2 mb-2">
+                <div>
+                    <h2 class="h6 mb-1">Koltuk Atamaları</h2>
+                    <input id="salonFilter" type="text" class="form-control form-control-sm compact-filter" placeholder="Salon filtre" />
+                </div>
+                <div>
+
+<input id="subeFilter" type="text" class="form-control form-control-sm compact-filter" placeholder="Şube filtre" />
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-2 compact-filters">
+                    <input id="seatSearch" type="text" class="form-control form-control-sm compact-filter" placeholder="Öğrenci ara" />
+                    
+                    
+                </div>
+            </div>
+
+            @if (Model.Seats.Any())
+            {
+                <div class="table-responsive d-none d-lg-block">
+                    <table id="seatTable" class="table align-middle mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Öğrenci</th>
+                                <th>Koltuk / Salon</th>
+                                <th>Durum</th>
+                                <th>Yoklama Notu</th>
+                                <th>Salon Notu</th>
+                                <th>Yoklamacı</th>
+                                <th>İşlem</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Model.Seats)
+                            {
+                                <tr class="seat-row @StatusClass(row.AttendanceStatus)" data-seat-id="@row.SeatId" data-salon="@row.SalonAdi" data-sube="@row.SinifDuzeyi @row.Sube">
+                                    <td>
+                                        <div class="fw-semibold">@row.AdSoyad</div>
+                                        <div class="small text-muted">@row.OgrenciNo • @row.SinifDuzeyi @row.Sube • Sıra @row.Sira</div>
+                                    </td>
+                                    <td>
+                                        <div class="fw-semibold text-primary">Salon @row.SalonAdi</div>
+                                        <div class="small text-muted">Koltuk @row.SeatNumber • Bina @row.BinaNo</div>
+                                    </td>
+                                    <td>
+                                        <form id="updateSeatForm-@row.SeatId" asp-action="UpdateSeat" method="post" class="d-flex flex-column gap-2">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="seatId" value="@row.SeatId" />
+                                            <select class="form-select form-select-sm" name="attendanceStatus" form="updateSeatForm-@row.SeatId">
+                                                @foreach (var status in statusValues)
+                                                {
+                                                    <option value="@((int)status)" selected="@(row.AttendanceStatus == status ? "selected" : null)">@StatusLabel(status)</option>
+                                                }
+                                            </select>
+                                            <button type="submit" class="btn btn-sm btn-primary">Güncelle</button>
+                                        </form>
+                                    </td>
+                                    <td>
+                                        <textarea class="form-control form-control-sm" name="note" rows="2" placeholder="Öğrenci notu" form="updateSeatForm-@row.SeatId">@row.Note</textarea>
+                                    </td>
+                                    <td>
+                                        <textarea class="form-control form-control-sm" name="roomNote" rows="2" placeholder="Salon notu" form="updateSeatForm-@row.SeatId">@row.RoomNote</textarea>
+                                    </td>
+                                    <td>
+                                        <input class="form-control form-control-sm" name="proctorName" value="@row.ProctorName" placeholder="Yoklamacı adı" form="updateSeatForm-@row.SeatId" />
+                                        <div class="small text-muted mt-1">Son güncelleme: @row.UpdatedAt.ToString("dd.MM.yyyy HH:mm")</div>
+                                    </td>
+                                    <td>
+                                        <div class="d-flex flex-column gap-1 action-cell">
+                                            <button type="button" class="btn btn-xs btn-outline-secondary icon-action-btn" data-bs-toggle="modal" data-bs-target="#seatEditModal" data-seat-id="@row.SeatId" data-seat-number="@row.SeatNumber" data-salon="@row.SalonAdi" data-sira="@row.Sira" data-bina="@row.BinaNo" title="Salon/Sıra Düzenle" aria-label="Salon/Sıra Düzenle">
+                                                ✎
+                                            </button>
+                                            <form asp-action="DeleteSeat" method="post" class="d-inline">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="seatId" value="@row.SeatId" />
+                                                <button type="submit" class="btn btn-xs btn-outline-danger icon-action-btn compact-delete-btn" onclick="return confirm('Bu öğrenciyi sınavdan kaldırmak istediğinize emin misiniz?');" title="Sınavdan Kaldır" aria-label="Sınavdan Kaldır">
+                                                    🗑
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="d-block d-lg-none">
+                    @foreach (var row in Model.Seats)
+                    {
+                        <div class="seat-card @StatusClass(row.AttendanceStatus) mb-2" data-salon="@row.SalonAdi" data-sube="@row.SinifDuzeyi @row.Sube">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-semibold">@row.AdSoyad</div>
+                                    <div class="small text-muted">@row.OgrenciNo • @row.SinifDuzeyi @row.Sube • Koltuk @row.SeatNumber</div>
+                                </div>
+                                <span class="badge rounded-pill bg-light text-dark">@StatusLabel(row.AttendanceStatus)</span>
+                            </div>
+                            <div class="small text-muted mt-2">Salon <span class="fw-semibold text-primary">@row.SalonAdi</span> • Sıra @row.Sira • Bina @row.BinaNo</div>
+                            <form asp-action="UpdateSeat" method="post" class="mt-3">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="seatId" value="@row.SeatId" />
+                                <div class="row g-2">
+                                    <div class="col-12">
+                                        <label class="form-label small">Durum</label>
+                                        <select class="form-select form-select-sm" name="attendanceStatus">
+                                            @foreach (var status in statusValues)
+                                            {
+                                                <option value="@((int)status)" selected="@(row.AttendanceStatus == status ? "selected" : null)">@StatusLabel(status)</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Yoklama Notu</label>
+                                        <textarea class="form-control form-control-sm" name="note" rows="2">@row.Note</textarea>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Salon Notu</label>
+                                        <textarea class="form-control form-control-sm" name="roomNote" rows="2">@row.RoomNote</textarea>
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Yoklamacı</label>
+                                        <input class="form-control form-control-sm" name="proctorName" value="@row.ProctorName" />
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2 mt-3">
+                                    <button type="submit" class="btn btn-sm btn-primary flex-grow-1">Güncelle</button>
+                                    <button type="button" class="btn btn-xs btn-outline-secondary icon-action-btn" data-bs-toggle="modal" data-bs-target="#seatEditModal" data-seat-id="@row.SeatId" data-seat-number="@row.SeatNumber" data-salon="@row.SalonAdi" data-sira="@row.Sira" data-bina="@row.BinaNo" title="Salon/Sıra Düzenle" aria-label="Salon/Sıra Düzenle">✎</button>
+                                </div>
+                            </form>
+                            <form asp-action="DeleteSeat" method="post" class="mt-2">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="seatId" value="@row.SeatId" />
+                                <button type="submit" class="btn btn-xs btn-outline-danger icon-action-btn compact-delete-btn" onclick="return confirm('Bu öğrenciyi sınavdan kaldırmak istediğinize emin misiniz?');" title="Sınavdan Kaldır" aria-label="Sınavdan Kaldır">🗑</button>
+                            </form>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <p class="text-muted mb-0">Henüz koltuk ataması yapılmadı.</p>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="exportExcelModal" tabindex="-1" aria-labelledby="exportExcelModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="exportExcelModalLabel">Excel'e Aktar</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <form asp-action="ExportToExcel" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="examId" value="@Model.ExamId" />
+                    <div class="mb-3">
+                        <label class="form-label" for="sortBy">Sıralama sütunu</label>
+                        <select id="sortBy" name="sortBy" class="form-select form-select-sm" required>
+                            <option value="OgrenciNo">Öğrenci No</option>
+                            <option value="AdSoyad">Adı Soyadı</option>
+                            <option value="SinifDuzeyi">Sınıf</option>
+                            <option value="Sube">Şube</option>
+                            <option value="SalonAdi">Salon</option>
+                            <option value="Sira">Sıra</option>
+                            <option value="AttendanceStatus">Durum</option>
+                            <option value="BinaNo">Bina</option>
+                            <option value="Note">Yoklama Notu</option>
+                            <option value="RoomNote">Salon Notu</option>
+                            <option value="ProctorName">Yoklamacı</option>
+                        </select>
+                    </div>
+                    <div class="text-muted small mb-3">Seçilen sütuna göre veriler sıralanacak ve Excel dosyası oluşturulacaktır.</div>
+                    <div class="d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Vazgeç</button>
+                        <button type="submit" class="btn btn-sm btn-success">Excel'e Aktar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addStudentModal" tabindex="-1" aria-labelledby="addStudentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addStudentModalLabel">Sınava Öğrenci Ekle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <form asp-action="AddStudent" method="post">
+                    <input type="hidden" name="examId" value="@Model.ExamId" />
+                    <div class="mb-3">
+                        <label class="form-label" for="ogrenciNo">Öğrenci No</label>
+                        <input class="form-control" id="ogrenciNo" name="ogrenciNo" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="seatNumber">Koltuk No</label>
+                        <input class="form-control" id="seatNumber" name="seatNumber" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="salonAdi">Salon</label>
+                        <input class="form-control" id="salonAdi" name="salonAdi" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="sira">Sıra</label>
+                        <input type="number" class="form-control" id="sira" name="sira" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="binaNo">Bina</label>
+                        <input class="form-control" id="binaNo" name="binaNo" required />
+                    </div>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="seatEditModal" tabindex="-1" aria-labelledby="seatEditModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="seatEditModalLabel">Salon / Sıra Düzenle</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <form asp-action="UpdateSeatLocation" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" id="editSeatId" name="seatId" />
+                    <div class="mb-3">
+                        <label class="form-label">Koltuk No</label>
+                        <input type="number" class="form-control" id="editSeatNumber" name="seatNumber" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Salon</label>
+                        <input class="form-control" id="editSalon" name="salonAdi" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Sıra</label>
+                        <input type="number" class="form-control" id="editSira" name="sira" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Bina</label>
+                        <input class="form-control" id="editBina" name="binaNo" required />
+                    </div>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .exam-shell { max-width: 100%; }
+    .exam-header-card .card-body { padding: 0.8rem 0.95rem; }
+    .compact-action-btn { padding: 0.2rem 0.5rem; font-size: 0.78rem; }
+    .compact-stat-card { font-size: 0.82rem; }
+    .compact-filters .compact-filter { min-width: 140px; }
+    .seat-row {
+        cursor: pointer;
+        transition: background-color .15s ease, transform .15s ease;
+    }
+    .seat-row:hover {
+        transform: translateY(-1px);
+    }
+    .seat-row.status-present {
+        background: rgba(17, 233, 161, 0.3);
+        border: 2px solid rgba(17, 233, 161, 0.45);
+    }
+    .seat-row.status-absent {
+        background: rgba(239,68,68,0.14);
+        border-left: 6px solid #ef4444;
+    }
+    .seat-row.status-late {
+        background: rgba(245,158,11,0.10);
+        border-left: 4px solid #f59e0b;
+    }
+    .seat-row.status-pending {
+        background: rgba(255,255,255,0.9);
+        border-left: 4px solid #64748b;
+    }
+    .seat-row.has-notes {
+        min-height: 132px;
+    }
+    .seat-card.status-present {
+        background: rgba(16,185,129,0.24);
+        border: 2px solid rgba(17, 233, 161, 0.45);
+    }
+    .seat-card.status-absent {
+        border-left: 8px solid #ef4444;
+        background: rgba(239,68,68,0.08);
+    }
+    .seat-card.status-late {
+        border-left: 6px solid #f59e0b;
+        background: rgba(245,158,11,0.08);
+    }
+    .seat-card.status-pending {
+        border-left: 6px solid #64748b;
+        background: rgba(148,163,184,0.08);
+    }
+    .seat-card {
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(0,0,0,0.08);
+    }
+    .icon-action-btn {
+        padding: 0.15rem 0.4rem;
+        font-size: 0.8rem;
+        line-height: 1;
+    }
+    .compact-delete-btn {
+        min-width: 1.8rem;
+        width: auto;
+        padding: 0.15rem 0.35rem;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .btn-xs {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+    }
+    .action-cell { min-width: 54px; }
+    .table td, .table th { padding: 0.35rem 0.4rem; }
+    @@media (min-width: 992px) {
+        .table td, .table th {
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+        .seat-row {
+            margin: 0;
+        }
+    }
+    @@media (max-width: 991px) {
+        .compact-filters .compact-filter { min-width: 100%; }
+        .table td, .table th { white-space: normal; }
+        .compact-delete-btn { min-width: 1.7rem; }
+    }
+</style>
+
+<script>
+    (function() {
+        const searchInput = document.getElementById('seatSearch');
+        const salonFilter = document.getElementById('salonFilter');
+        const subeFilter = document.getElementById('subeFilter');
+        const items = Array.from(document.querySelectorAll('.seat-row, .seat-card'));
+
+        function toggleNoteHeight(item) {
+            const noteFields = item.querySelectorAll('textarea[name="note"], textarea[name="roomNote"], input[name="proctorName"]');
+            const hasNotes = Array.from(noteFields).some(field => (field.value || '').trim().length > 0);
+            item.classList.toggle('has-notes', hasNotes);
+        }
+
+        function applySeatFilters() {
+            const query = (searchInput?.value || '').trim().toLowerCase();
+            const salonValue = (salonFilter?.value || '').trim().toLowerCase();
+            const subeValue = (subeFilter?.value || '').trim().toLowerCase();
+
+            items.forEach(item => {
+                const text = item.textContent.toLowerCase();
+                const salonText = (item.getAttribute('data-salon') || '').toLowerCase();
+                const subeText = (item.getAttribute('data-sube') || '').toLowerCase();
+                const matchesQuery = !query || text.includes(query);
+                const matchesSalon = !salonValue || salonText.includes(salonValue);
+                const matchesSube = !subeValue || subeText.includes(subeValue);
+                item.style.display = matchesQuery && matchesSalon && matchesSube ? '' : 'none';
+            });
+        }
+
+        items.forEach(item => {
+            toggleNoteHeight(item);
+            item.querySelectorAll('textarea[name="note"], textarea[name="roomNote"], input[name="proctorName"]').forEach(field => {
+                field.addEventListener('input', () => toggleNoteHeight(item));
+            });
+        });
+
+        [searchInput, salonFilter, subeFilter].forEach(input => {
+            if (input) {
+                input.addEventListener('input', applySeatFilters);
+            }
+        });
+
+        const editModal = document.getElementById('seatEditModal');
+        if (editModal) {
+            editModal.addEventListener('show.bs.modal', function (event) {
+                const button = event.relatedTarget;
+                document.getElementById('editSeatId').value = button.getAttribute('data-seat-id');
+                document.getElementById('editSeatNumber').value = button.getAttribute('data-seat-number');
+                document.getElementById('editSalon').value = button.getAttribute('data-salon');
+                document.getElementById('editSira').value = button.getAttribute('data-sira');
+                document.getElementById('editBina').value = button.getAttribute('data-bina');
+            });
+        }
+
+        document.querySelectorAll('.seat-row').forEach(row => {
+            row.addEventListener('click', event => {
+                const interactive = event.target.closest('a, button, input, textarea, select, label, form');
+                if (interactive) return;
+                const button = row.querySelector('[data-bs-toggle="modal"][data-bs-target="#seatEditModal"]');
+                if (button) {
+                    button.click();
+                }
+            });
+        });
+    })();
+</script>

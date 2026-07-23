@@ -1,0 +1,70 @@
+@model IEnumerable<yoklamaWeb.Models.ClassAttendance>
+
+@{
+    ViewData["Title"] = "Sınıf Yoklaması";
+    Layout = "_Layout";
+}
+
+<link href="~/css/site.css" rel="stylesheet" />
+
+<div class="d-flex flex-column flex-md-row align-items-center justify-content-between mt-4 mb-3 gap-3">
+    <div>
+        <h2 class="mb-1" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Sınıf Yoklaması</h2>
+        <p class="text-muted mb-0">Yeni sınıf yoklaması oluşturun veya mevcut yoklama etkinliklerini yönetin.</p>
+    </div>
+    <a asp-action="Create" class="btn btn-primary btn-lg">Yeni Yoklama Oluştur</a>
+</div>
+
+<div class="card mb-4 p-3 border-0 shadow-sm">
+    <form method="get" class="row g-3">
+        <div class="col-md-4">
+            <label class="form-label">Yoklama Adı</label>
+            <input name="nameFilter" value="@ViewData["NameFilter"]" class="form-control" placeholder="Ara..." />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Bina</label>
+            <input name="buildingFilter" value="@ViewData["BuildingFilter"]" class="form-control" placeholder="Bina..." />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Durum</label>
+            @{ var statusFilter = ViewData["StatusFilter"]?.ToString(); }
+            <select name="statusFilter" class="form-select">
+                <option value="All" selected="@(statusFilter == "All" ? "selected" : null)">Tümü</option>
+                <option value="Active" selected="@(statusFilter == "Active" ? "selected" : null)">Aktif</option>
+                <option value="Expired" selected="@(statusFilter == "Expired" ? "selected" : null)">Süresi Dolmuş</option>
+            </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-outline-primary w-100">Filtrele</button>
+        </div>
+    </form>
+</div>
+
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4">
+    @foreach (var attendance in Model)
+    {
+        <div class="col">
+            <div class="card h-100 shadow-sm border-0 rounded-4 overflow-hidden">
+                <div class="card-body d-flex flex-column">
+                    <div class="d-flex justify-content-between align-items-start mb-3">
+                        <div>
+                            <h5 class="card-title mb-1" style="color: #2c3e50;">@attendance.Name</h5>
+                            <span class="badge bg-secondary">Bina @attendance.BuildingNumber</span>
+                        </div>
+                        <span class="badge @(attendance.ValidFrom.Date <= DateTime.UtcNow.Date && attendance.ValidTo.Date >= DateTime.UtcNow.Date ? "bg-success" : "bg-danger")">
+                            @(attendance.ValidFrom.Date <= DateTime.UtcNow.Date && attendance.ValidTo.Date >= DateTime.UtcNow.Date ? "Aktif" : "Süresi Dolmuş")
+                        </span>
+                    </div>
+                    <p class="card-text text-muted mb-2"><strong>Geçerlilik:</strong> @attendance.ValidFrom.ToString("yyyy-MM-dd") - @attendance.ValidTo.ToString("yyyy-MM-dd")</p>
+                    <p class="card-text text-muted mb-3"><strong>Saat:</strong> @(attendance.StartTime.HasValue ? attendance.StartTime.Value.ToString(@"hh\:mm") : "—") - @(attendance.EndTime.HasValue ? attendance.EndTime.Value.ToString(@"hh\:mm") : "—")</p>
+                    <div class="mt-auto d-flex flex-wrap gap-2">
+                        <a asp-action="Details" asp-route-id="@attendance.Id" class="btn btn-primary btn-sm">Detay</a>
+                        <a asp-action="Edit" asp-route-id="@attendance.Id" class="btn btn-outline-secondary btn-sm">Düzenle</a>
+                        <a asp-action="ImportStudents" asp-route-id="@attendance.Id" class="btn btn-success btn-sm">Excel İçe Aktar</a>
+                        <a asp-action="ExportStudents" asp-route-id="@attendance.Id" class="btn btn-outline-success btn-sm">Excel Dışa Aktar</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>

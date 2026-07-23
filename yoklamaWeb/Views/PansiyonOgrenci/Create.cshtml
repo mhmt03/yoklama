@@ -1,0 +1,100 @@
+@model yoklamaWeb.ViewModels.Pansiyon.PansiyonOgrenciCreateViewModel
+@{
+    ViewData["Title"] = "Yeni Pansiyon Öğrencisi Ekle";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 700px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Yeni Pansiyon Öğrencisi Ekle</h4>
+        </div>
+        <div class="card-body p-4">
+            <form method="post" asp-action="Create">
+                @Html.AntiForgeryToken()
+                
+                <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="OgrenciNo" class="form-label fw-bold"></label>
+                        <input asp-for="OgrenciNo" class="form-control" placeholder="Öğrenci No" />
+                        <span asp-validation-for="OgrenciNo" class="text-danger"></span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="AdSoyad" class="form-label fw-bold"></label>
+                        <input asp-for="AdSoyad" class="form-control" placeholder="Ad Soyad" />
+                        <span asp-validation-for="AdSoyad" class="text-danger"></span>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="SinifDuzeyi" class="form-label fw-bold"></label>
+                        <select asp-for="SinifDuzeyi" class="form-select">
+                            <option value="">-- Sınıf Düzeyi Seçiniz --</option>
+                            <option value="9">9. Sınıf</option>
+                            <option value="10">10. Sınıf</option>
+                            <option value="11">11. Sınıf</option>
+                            <option value="12">12. Sınıf</option>
+                        </select>
+                        <span asp-validation-for="SinifDuzeyi" class="text-danger"></span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="Sube" class="form-label fw-bold"></label>
+                        <input asp-for="Sube" class="form-control" placeholder="Örn: A veya B-AMP" />
+                        <span asp-validation-for="Sube" class="text-danger"></span>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="Telefon" class="form-label fw-bold"></label>
+                        <input asp-for="Telefon" class="form-control" placeholder="Örn: 05001234567" />
+                        <span asp-validation-for="Telefon" class="text-danger"></span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="VeliTelefon" class="form-label fw-bold"></label>
+                        <input asp-for="VeliTelefon" class="form-control" placeholder="Örn: 05001234567" />
+                        <span asp-validation-for="VeliTelefon" class="text-danger"></span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="OdaId" class="form-label fw-bold">Oda</label>
+                    <select asp-for="OdaId" asp-items="ViewBag.Odalar" class="form-select">
+                        <option value="">-- Oda Atanmasın (Boşta kalsın) --</option>
+                    </select>
+                    <span asp-validation-for="OdaId" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Adres" class="form-label fw-bold"></label>
+                    <textarea asp-for="Adres" class="form-control" rows="3" placeholder="Ev adresi..."></textarea>
+                    <span asp-validation-for="Adres" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Sifre" class="form-label fw-bold"></label>
+                    <input asp-for="Sifre" class="form-control" placeholder="Öğrenci Portal Şifresi" />
+                    <span asp-validation-for="Sifre" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3 form-check">
+                    <input asp-for="Aktif" type="checkbox" class="form-check-input" id="Aktif" />
+                    <label class="form-check-label fw-semibold" for="Aktif">Öğrenci Aktif</label>
+                    <span asp-validation-for="Aktif" class="text-danger"></span>
+                </div>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    <button type="submit" class="btn btn-primary">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

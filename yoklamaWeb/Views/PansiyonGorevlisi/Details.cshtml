@@ -1,0 +1,124 @@
+@model yoklamaWeb.ViewModels.Pansiyon.PansiyonGorevlisiDetailViewModel
+@{
+    ViewData["Title"] = "Görevli Detayları";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4">
+    <div class="mb-3">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Görevli Listesine Dön</a>
+    </div>
+
+    <div class="row">
+        <!-- Sol Künye Kartı -->
+        <div class="col-md-4 mb-4">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white text-center py-4">
+                    <i class="bi bi-person-badge" style="font-size: 4rem;"></i>
+                    <h4 class="mt-2 mb-0 fw-bold">@Model.AdSoyad</h4>
+                    <span class="text-white-50">@@@Model.KullaniciAdi</span>
+                </div>
+                <div class="card-body">
+                    <table class="table table-borderless align-middle mb-0 small">
+                        <tr>
+                            <td class="fw-bold text-muted" style="width: 45%;">Durum:</td>
+                            <td>
+                                @if (Model.Aktif)
+                                {
+                                    <span class="badge bg-success">Aktif</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Pasif</span>
+                                }
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Sistem Rolü:</td>
+                            <td><span class="badge bg-secondary p-2">@Model.Rol</span></td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Telefon:</td>
+                            <td>@(Model.Telefon ?? "-")</td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">E-posta:</td>
+                            <td>@(Model.Email ?? "-")</td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Kayıt Tarihi:</td>
+                            <td>@Model.KayitTarihi.ToString("dd.MM.yyyy")</td>
+                        </tr>
+                        <tr>
+                            <td class="fw-bold text-muted">Son Giriş:</td>
+                            <td>@(Model.SonGirisTarihi?.ToString("dd.MM.yyyy HH:mm") ?? "Giriş yapılmadı")</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="card-footer bg-white border-0 d-flex justify-content-between p-3">
+                    <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-warning w-100 fw-semibold me-2"><i class="bi bi-pencil"></i> Düzenle</a>
+                    <a asp-action="Delete" asp-route-id="@Model.Id" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-trash"></i> Sil</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sağ Nöbet Planı Kartı -->
+        <div class="col-md-8 mb-4">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0 fw-bold">Görevlinin Nöbet Planları</h4>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover mb-0 align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="ps-3">Başlangıç Tarihi</th>
+                                    <th>Bitiş Tarihi</th>
+                                    <th>Nöbet Günü</th>
+                                    <th>Açıklama</th>
+                                    <th>Durum</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (Model.NobetciPlanlari.Any())
+                                {
+                                    @foreach (var n in Model.NobetciPlanlari)
+                                    {
+                                        var isPlanAktif = DateTime.Today >= n.BaslangicTarihi && DateTime.Today <= n.BitisTarihi;
+                                        <tr>
+                                            <td class="ps-3">@n.BaslangicTarihi.ToString("dd.MM.yyyy")</td>
+                                            <td>@n.BitisTarihi.ToString("dd.MM.yyyy")</td>
+                                            <td><span class="badge bg-secondary">@n.Gun</span></td>
+                                            <td>@(n.Aciklama ?? "-")</td>
+                                            <td>
+                                                @if (isPlanAktif)
+                                                {
+                                                    <span class="badge bg-success">Aktif</span>
+                                                }
+                                                else if (DateTime.Today > n.BitisTarihi)
+                                                {
+                                                    <span class="badge bg-dark">Geçmiş</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-info text-dark">Gelecek</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted py-4">Görevliye ait tanımlanmış nöbet planı bulunamadı.</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

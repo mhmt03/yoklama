@@ -1,0 +1,187 @@
+@model yoklamaWeb.ViewModels.Pansiyon.NobetciPlanListViewModel
+@{
+    ViewData["Title"] = "Nöbetçi Planları";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold mb-0">Nöbetçi Planı Yönetimi</h2>
+        <div>
+            <a asp-action="Create" class="btn btn-outline-primary btn-sm"><i class="bi bi-plus-circle"></i> Detaylı Plan Ekle (Eski)</a>
+        </div>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i> @TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i> @TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    <!-- Yeni Hızlı Nöbetçi Ekleme Kartı -->
+    <div class="card mb-4 shadow-sm border-0 bg-white">
+        <div class="card-header bg-primary text-white py-3">
+            <h5 class="mb-0 fw-bold"><i class="bi bi-calendar-plus-fillme-2"></i> Hızlı Nöbetçi Ata</h5>
+        </div>
+        <div class="card-body p-4">
+            <form method="post" asp-action="CreateQuick" class="row g-3 align-items-end">
+                @Html.AntiForgeryToken()
+                <div class="col-md-4">
+                    <label class="form-label fw-bold">Nöbetçi Görevli</label>
+                    <select name="pansiyonGorevlisiId" asp-items="ViewBag.Gorevlisiler" class="form-select" required>
+                        <option value="">-- Görevli Seçin --</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">Nöbet Tarihi</label>
+                    <input type="date" name="nobetTarihi" id="nobetTarihiInput" class="form-control" value="@DateTime.Today.ToString("yyyy-MM-dd")" required onchange="tarihGunuHesapla()" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Nöbet Günü</label>
+                    <input type="text" id="nobetGunuOutput" class="form-control bg-light" readonly value="" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">Açıklama (İsteğe Bağlı)</label>
+                    <input type="text" name="aciklama" class="form-control" placeholder="Örn: Gece nöbeti" />
+                </div>
+                <div class="col-12 text-end">
+                    <button type="submit" class="btn btn-success fw-bold px-4"><i class="bi bi-plus-lg"></i> Nöbeti Ekle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Filtre Kartı -->
+    <div class="card mb-4 shadow-sm border-0 bg-light">
+        <div class="card-body">
+            <form method="get" asp-action="Index" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">Görevli Filtresi</label>
+                    <select name="GorevlisiId" asp-items="ViewBag.Gorevlisiler" class="form-select">
+                        <option value="">-- Tüm Görevliler --</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Gün Filtresi</label>
+                    <select name="Gun" asp-items="ViewBag.Gunler" class="form-select">
+                        <option value="">-- Tüm Günler --</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Başlangıç</label>
+                    <input type="date" name="BaslangicTarihi" value="@(Model.Filter.BaslangicTarihi?.ToString("yyyy-MM-dd"))" class="form-control" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Bitiş</label>
+                    <input type="date" name="BitisTarihi" value="@(Model.Filter.BitisTarihi?.ToString("yyyy-MM-dd"))" class="form-control" />
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input type="checkbox" name="SadeceAktif" value="true" class="form-check-input" id="sadeceAktif" @(Model.Filter.SadeceAktif ? "checked" : "") />
+                        <label class="form-check-label fw-semibold" for="sadeceAktif">Sadece Aktifler</label>
+                    </div>
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <button type="submit" class="btn btn-secondary w-100">Filtrele</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Nöbet Listesi -->
+    <div class="table-responsive bg-white rounded shadow-sm">
+        <table class="table table-striped table-hover align-middle mb-0">
+            <thead class="table-dark">
+                <tr>
+                    <th class="ps-3">Görevli</th>
+                    <th>Nöbet Tarihi</th>
+                    <th>Nöbet Günü</th>
+                    <th>Açıklama</th>
+                    <th>Durum</th>
+                    <th class="text-end pe-3" style="width: 250px;">İşlemler</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (Model.Planlar.Any())
+                {
+                    @foreach (var plan in Model.Planlar)
+                    {
+                        var isPlanAktif = DateTime.Today >= plan.BaslangicTarihi.Date && DateTime.Today <= plan.BitisTarihi.Date;
+                        <tr>
+                            <td class="ps-3"><strong>@plan.GorevliAdSoyad</strong></td>
+                            <td>
+                                @if (plan.BaslangicTarihi.Date == plan.BitisTarihi.Date)
+                                {
+                                    <span>@plan.BaslangicTarihi.ToString("dd.MM.yyyy")</span>
+                                }
+                                else
+                                {
+                                    <span>@plan.BaslangicTarihi.ToString("dd.MM.yyyy") - @plan.BitisTarihi.ToString("dd.MM.yyyy")</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary p-2">@plan.Gun</span>
+                            </td>
+                            <td>@(string.IsNullOrWhiteSpace(plan.Aciklama) ? "-" : plan.Aciklama)</td>
+                            <td>
+                                @if (isPlanAktif)
+                                {
+                                    <span class="badge bg-success">Aktif</span>
+                                }
+                                else if (DateTime.Today > plan.BitisTarihi.Date)
+                                {
+                                    <span class="badge bg-dark">Geçmiş</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-info text-dark">Gelecek</span>
+                                }
+                            </td>
+                            <td class="text-end pe-3">
+                                <a asp-action="Details" asp-route-id="@plan.Id" class="btn btn-sm btn-info me-1"><i class="bi bi-eye"></i> Detay</a>
+                                <a asp-action="Edit" asp-route-id="@plan.Id" class="btn btn-sm btn-warning me-1"><i class="bi bi-pencil"></i> Düzenle</a>
+                                <a asp-action="Delete" asp-route-id="@plan.Id" class="btn btn-sm btn-danger"><i class="bi bi-trash"></i> Sil</a>
+                            </td>
+                        </tr>
+                    }
+                }
+                else
+                {
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">Filtrelere uygun nöbet planı bulunamadı.</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        function tarihGunuHesapla() {
+            var dateVal = document.getElementById("nobetTarihiInput").value;
+            if (!dateVal) {
+                document.getElementById("nobetGunuOutput").value = "";
+                return;
+            }
+            var date = new Date(dateVal);
+            var days = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
+            var dayName = days[date.getDay()];
+            document.getElementById("nobetGunuOutput").value = dayName;
+        }
+
+        // Run on load to set initial day name
+        document.addEventListener("DOMContentLoaded", function() {
+            tarihGunuHesapla();
+        });
+    </script>
+}

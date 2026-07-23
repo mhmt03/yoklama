@@ -1,0 +1,288 @@
+@model yoklamaWeb.ViewModels.Pansiyon.GunlukYoklamaViewModel
+@{
+    ViewData["Title"] = "Günlük Pansiyon Yoklaması";
+    Layout = "_Layout";
+
+    // Statistics calculations
+    var totalStudents = Model.Yoklamalar.Count;
+    var presentCount = Model.Yoklamalar.Count(y => y.Durum == "Var");
+    var absentCount = Model.Yoklamalar.Count(y => y.Durum == "Yok");
+    var leaveCount = Model.Yoklamalar.Count(y => y.Durum == "Izinli");
+    var lateCount = Model.Yoklamalar.Count(y => y.Durum == "Gecikmeli");
+    var unsavedCount = Model.Yoklamalar.Count(y => y.Id == 0);
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="fw-bold mb-0">Günlük Pansiyon Yoklaması</h2>
+        <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-clock-history"></i> Yoklama Geçmişi</a>
+    </div>
+
+    <!-- İstatistik Kartları -->
+    <div class="row g-3 mb-4">
+        <div class="col">
+            <div class="card border-0 shadow-sm bg-primary text-white h-100">
+                <div class="card-body py-3">
+                    <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Toplam Öğrenci</h6>
+                    <div class="h3 mb-0 fw-bold">@totalStudents</div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-0 shadow-sm bg-success text-white h-100">
+                <div class="card-body py-3">
+                    <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Mevcut (Var)</h6>
+                    <div class="h3 mb-0 fw-bold">@presentCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-0 shadow-sm bg-danger text-white h-100">
+                <div class="card-body py-3">
+                    <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Olmayan (Yok)</h6>
+                    <div class="h3 mb-0 fw-bold">@absentCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-0 shadow-sm bg-warning text-dark h-100">
+                <div class="card-body py-3">
+                    <h6 class="text-dark-50 small fw-bold text-uppercase mb-1">İzinli</h6>
+                    <div class="h3 mb-0 fw-bold">@leaveCount</div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="card border-0 shadow-sm bg-info text-dark h-100">
+                <div class="card-body py-3">
+                    <h6 class="text-dark-50 small fw-bold text-uppercase mb-1">Gecikmeli</h6>
+                    <div class="h3 mb-0 fw-bold">@lateCount</div>
+                </div>
+            </div>
+        </div>
+        @if (unsavedCount > 0)
+        {
+            <div class="col">
+                <div class="card border-0 shadow-sm bg-secondary text-white h-100 animate-pulse">
+                    <div class="card-body py-3">
+                        <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Girilmemiş</h6>
+                        <div class="h3 mb-0 fw-bold">@unsavedCount</div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Tarih Seçim Kartı -->
+    <div class="card mb-4 shadow-sm border-0 bg-light">
+        <div class="card-body">
+            <form method="get" asp-action="GunlukYoklama" class="row g-3">
+                <div class="col-md-4 col-sm-6">
+                    <label class="form-label fw-bold"><i class="bi bi-calendar3"></i> Yoklama Tarihi</label>
+                    <input type="date" name="tarih" value="@Model.Tarih.ToString("yyyy-MM-dd")" class="form-control" onchange="this.form.submit()" />
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <form method="post" asp-action="TopluYoklama">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="Tarih" value="@Model.Tarih.ToString("yyyy-MM-dd")" />
+
+        <div class="table-responsive bg-white rounded shadow-sm">
+            <table class="table table-striped table-hover align-middle mb-0" id="yoklamaTablosu">
+                <thead class="table-dark">
+                    <tr>
+                        <th onclick="sortTable(0, true)" style="cursor: pointer; width: 140px;" class="ps-3">
+                            Öğrenci No <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
+                        </th>
+                        <th onclick="sortTable(1)" style="cursor: pointer;">
+                            Ad Soyad <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
+                        </th>
+                        <th onclick="sortTable(2)" style="cursor: pointer; width: 130px;">
+                            Oda No <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
+                        </th>
+                        <th onclick="sortTable(3)" style="cursor: pointer; width: 340px;">
+                            Yoklama Durumu <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
+                        </th>
+                        <th>Açıklama</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (Model.Yoklamalar.Any())
+                    {
+                        @for (int i = 0; i < Model.Yoklamalar.Count; i++)
+                        {
+                            var yoklama = Model.Yoklamalar[i];
+                            <tr>
+                                <td class="ps-3">
+                                    @yoklama.OgrenciNo
+                                    <input type="hidden" name="Yoklamalar[@i].PansiyonOgrenciId" value="@yoklama.PansiyonOgrenciId" />
+                                    <input type="hidden" name="Yoklamalar[@i].Id" value="@yoklama.Id" />
+                                </td>
+                                <td>
+                                    <strong>@yoklama.OgrenciAdSoyad</strong>
+                                    @if (!string.IsNullOrWhiteSpace(yoklama.IzinBilgisi))
+                                    {
+                                        <span class="badge bg-warning text-dark ms-2 small"><i class="bi bi-person-slash"></i> @yoklama.IzinBilgisi</span>
+                                    }
+                                    @if (yoklama.Id > 0 && !string.IsNullOrWhiteSpace(yoklama.YoklamaYapanAdSoyad))
+                                    {
+                                        <div class="text-muted small mt-1">
+                                            <i class="bi bi-person-check-fill text-secondary"></i>
+                                            Yoklamacı: @yoklama.YoklamaYapanAdSoyad
+                                            @if (yoklama.Saat.HasValue)
+                                            {
+                                                <span class="ms-2">(@yoklama.Saat.Value.ToString(@"hh\:mm"))</span>
+                                            }
+                                        </div>
+                                    }
+                                </td>
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(yoklama.OdaNo))
+                                    {
+                                        <span class="badge bg-secondary">Oda @yoklama.OdaNo</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small">Odasız</span>
+                                    }
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group" aria-label="Yoklama Durumu">
+                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="belirtilmemis_@i" value="Belirtilmemiş" @(string.IsNullOrWhiteSpace(yoklama.Durum) || yoklama.Durum == "Belirtilmemiş" ? "checked" : "") />
+                                        <label class="btn btn-outline-secondary px-3 fw-bold" for="belirtilmemis_@i">Belirtilmemiş</label>
+                                        
+                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="var_@i" value="Var" @(yoklama.Durum == "Var" ? "checked" : "") />
+                                        <label class="btn btn-outline-success px-3 fw-bold" for="var_@i">Var</label>
+                                        
+                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="yok_@i" value="Yok" @(yoklama.Durum == "Yok" ? "checked" : "") />
+                                        <label class="btn btn-outline-danger px-3 fw-bold" for="yok_@i">Yok</label>
+                                        
+                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="izinli_@i" value="Izinli" @(yoklama.Durum == "Izinli" ? "checked" : "") />
+                                        <label class="btn btn-outline-warning px-3 fw-bold" for="izinli_@i">İzinli</label>
+                                        
+                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="gecikmeli_@i" value="Gecikmeli" @(yoklama.Durum == "Gecikmeli" ? "checked" : "") />
+                                        <label class="btn btn-outline-info px-3 fw-bold" for="gecikmeli_@i">Gecikmeli</label>
+                                    </div>
+                                </td>
+                                <td>
+                                    <input type="text" name="Yoklamalar[@i].Aciklama" value="@yoklama.Aciklama" class="form-control form-control-sm" placeholder="Not / Açıklama" />
+                                </td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">Yoklama alınacak aktif öğrenci bulunamadı.</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (Model.Yoklamalar.Any())
+        {
+            <div class="mt-3 text-end pb-5">
+                @if (ViewBag.IsAdmin != null && (bool)ViewBag.IsAdmin)
+                {
+                    <a asp-action="ExportExcel" asp-route-tarih="@Model.Tarih.ToString("yyyy-MM-dd")" class="btn btn-success btn-sm me-2"><i class="bi bi-file-earmark-excel"></i> Excel Raporu Al</a>
+                }
+                <button type="submit" class="btn btn-primary btn-lg fw-bold"><i class="bi bi-save"></i> Yoklamayı Kaydet</button>
+            </div>
+        }
+    </form>
+</div>
+
+@section Scripts {
+    <script>
+        let sortDirections = {};
+
+        function sortTable(columnIndex, isNumeric = false) {
+            const table = document.getElementById("yoklamaTablosu");
+            const tbody = table.querySelector("tbody");
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            if (rows.length === 0) return;
+            
+            // Toggle direction
+            const currentDirection = sortDirections[columnIndex] || 'asc';
+            const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+            sortDirections[columnIndex] = newDirection;
+            
+            // Update header icons
+            table.querySelectorAll("th .sort-icon").forEach(icon => {
+                icon.className = "bi bi-arrow-down-up ms-1 text-muted sort-icon small";
+            });
+            
+            const activeHeader = table.querySelectorAll("th")[columnIndex];
+            const activeIcon = activeHeader.querySelector(".sort-icon");
+            if (activeIcon) {
+                activeIcon.className = newDirection === 'asc' 
+                    ? "bi bi-arrow-up ms-1 text-primary sort-icon small" 
+                    : "bi bi-arrow-down ms-1 text-primary sort-icon small";
+            }
+
+            rows.sort((rowA, rowB) => {
+                let cellA = rowA.cells[columnIndex].innerText.trim();
+                let cellB = rowB.cells[columnIndex].innerText.trim();
+                
+                // If sorting status column, check the selected radio value
+                if (columnIndex === 3) {
+                    const radioA = rowA.querySelector('input[type="radio"]:checked');
+                    const radioB = rowB.querySelector('input[type="radio"]:checked');
+                    cellA = radioA ? radioA.value : "";
+                    cellB = radioB ? radioB.value : "";
+                }
+
+                if (isNumeric) {
+                    const numA = parseFloat(cellA) || 0;
+                    const numB = parseFloat(cellB) || 0;
+                    return newDirection === 'asc' ? numA - numB : numB - numA;
+                } else {
+                    return newDirection === 'asc' 
+                        ? cellA.localeCompare(cellB, 'tr') 
+                        : cellB.localeCompare(cellA, 'tr');
+                }
+            });
+
+            // Re-append rows in sorted order (doesn't affect form input index values)
+            rows.forEach(row => tbody.appendChild(row));
+        }
+
+        // Auto‑save on status change (global listener)
+        document.addEventListener('change', function (e) {
+            if (e.target.matches('input[name^="Yoklamalar"][type="radio"]')) {
+                const tr = e.target.closest('tr');
+                const id = tr.querySelector('input[name$=".Id"]').value;
+                const ogrenciId = tr.querySelector('input[name$=".PansiyonOgrenciId"]').value;
+                const durum = e.target.value;
+                const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+                fetch('/Yoklama/UpdateAttendanceStatus', {
+                    method: 'POST',
+                    headers: {
+                        'RequestVerificationToken': token,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ id: parseInt(id), pansiyonOgrenciId: parseInt(ogrenciId), durum, tarih: document.querySelector('input[name="Tarih"]').value })
+                }).then(r => r.json()).then(data => {
+                    if (!data.success) console.error('Attendance save failed');
+                }).catch(console.error);
+            }
+        });
+    </script>
+
+    <style>
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @@keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: .7;
+            }
+        }
+    </style>
+}

@@ -1,0 +1,32 @@
+@model yoklamaWeb.Models.Ogrenci
+@{
+    ViewData["Title"] = "Yeni Öğrenci";
+}
+<h2 class="mt-4">Yeni Öğrenci Ekle</h2>
+<form asp-action="Create" method="post" class="needs-validation" novalidate>
+    <div class="mb-3">
+        <label asp-for="OgrenciNo" class="form-label"></label>
+        <input asp-for="OgrenciNo" class="form-control" />
+        <span asp-validation-for="OgrenciNo" class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label asp-for="AdSoyad" class="form-label"></label>
+        <input asp-for="AdSoyad" class="form-control" />
+        <span asp-validation-for="AdSoyad" class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label asp-for="SinifDuzeyi" class="form-label"></label>
+        <input asp-for="SinifDuzeyi" class="form-control" />
+        <span asp-validation-for="SinifDuzeyi" class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label asp-for="Sube" class="form-label"></label>
+        <input asp-for="Sube" class="form-control" />
+        <span asp-validation-for="Sube" class="text-danger"></span>
+    </div>
+    <button type="submit" class="btn btn-primary">Kaydet</button>
+    <a asp-action="Index" class="btn btn-secondary ms-2">İptal</a>
+</form>
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

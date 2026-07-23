@@ -1,0 +1,142 @@
+@model yoklamaWeb.Models.SuperYoklamaciRoomsViewModel
+@{
+    ViewData["Title"] = "Salon Seçimi — " + Model.ExamName;
+}
+
+<style>
+    :root {
+        --primary: #4f46e5;
+        --primary-light: #818cf8;
+        --success: #10b981;
+        --danger: #ef4444;
+        --surface: #1e1e2e;
+        --surface2: #2a2a3e;
+        --surface3: #313150;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --border: rgba(255,255,255,0.08);
+        --card-radius: 14px;
+    }
+
+    body { background: #13131f; color: var(--text); font-family: 'Inter', sans-serif; }
+
+    .yk-header {
+        background: linear-gradient(135deg, #1e1b4b 0%, #1e1e2e 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 20px 32px;
+    }
+    .yk-breadcrumb { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px; }
+    .yk-breadcrumb a { color: var(--primary-light); text-decoration: none; }
+    .yk-breadcrumb a:hover { text-decoration: underline; }
+    .yk-title { font-size: 1.4rem; font-weight: 700; color: #fff; margin: 0; }
+
+    .yk-main { padding: 32px; max-width: 900px; margin: 0 auto; }
+
+    .grid-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 16px;
+        margin-top: 24px;
+    }
+
+    .room-card {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--card-radius);
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 12px;
+        transition: all .2s;
+        text-decoration: none;
+        color: inherit;
+    }
+    .room-card:hover {
+        background: var(--surface3);
+        border-color: rgba(131,138,248,.4);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(0,0,0,.3);
+    }
+
+    .room-name {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #fff;
+    }
+
+    .room-count {
+        font-size: 0.82rem;
+        color: var(--text-muted);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .room-count strong {
+        color: var(--primary-light);
+    }
+
+    .proctor-info {
+        font-size: 0.78rem;
+        color: #6ee7b7;
+        background: rgba(16,185,129,.12);
+        border: 1px solid rgba(16,185,129,.25);
+        padding: 4px 10px;
+        border-radius: 6px;
+        display: inline-block;
+        margin-top: 4px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        overflow: hidden;
+    }
+</style>
+
+<div class="yk-header">
+    <div class="yk-breadcrumb">
+        <a asp-controller="SuperYoklamaci" asp-action="Index">← Sınavlar</a>
+    </div>
+    <h1 class="yk-title">🚪 @Model.ExamName — Salonlar</h1>
+    <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">📅 Sınav Tarihi: @Model.ApplicationDate.ToString("dd.MM.yyyy")</div>
+</div>
+
+<div class="yk-main">
+    <div style="font-size:0.75rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">
+        Yoklamasını almak istediğiniz salonu seçin
+    </div>
+
+    @if (!Model.Rooms.Any())
+    {
+        <div style="text-align:center;padding:64px 32px;color:var(--text-muted)">
+            <div style="font-size:2.5rem;margin-bottom:12px;opacity:.4">🚪</div>
+            <p>Bu sınav için tanımlanmış herhangi bir salon bulunmamaktadır (Koltuk ataması yapılmamış).</p>
+        </div>
+    }
+    else
+    {
+        <div class="grid-container">
+            @foreach (var room in Model.Rooms)
+            {
+                <a class="room-card"
+                   asp-controller="SuperYoklamaci" asp-action="TakeAttendance"
+                   asp-route-examId="@Model.ExamId" asp-route-room="@room.RoomName">
+                    <div>
+                        <div class="room-name">🚪 @room.RoomName</div>
+                        <div class="room-count">👥 <strong>@room.StudentCount</strong> Öğrenci</div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(room.ProctorName))
+                    {
+                        <div>
+                            <div class="proctor-info">✍️ Yoklamacı: @room.ProctorName</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div>
+                            <div class="proctor-info" style="color:var(--text-muted);background:rgba(255,255,255,.03);border-color:var(--border)">✍️ Yoklama Alınmamış</div>
+                        </div>
+                    }
+                </a>
+            }
+        </div>
+    }
+</div>

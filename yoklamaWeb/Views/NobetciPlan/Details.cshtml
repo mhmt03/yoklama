@@ -1,0 +1,68 @@
+@model yoklamaWeb.ViewModels.Pansiyon.NobetciPlanViewModel
+@{
+    ViewData["Title"] = "Nöbet Planı Detayları";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <div class="mb-3">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Nöbetçi Planlarına Dön</a>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0 fw-bold">Nöbet Planı Detayları</h4>
+        </div>
+        <div class="card-body p-4">
+            <table class="table table-striped align-middle">
+                <tr>
+                    <td class="fw-bold text-muted" style="width: 40%;">Nöbetçi Görevli:</td>
+                    <td><strong>@Model.GorevliAdSoyad</strong></td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Başlangıç Tarihi:</td>
+                    <td>@Model.BaslangicTarihi.ToString("dd.MM.yyyy")</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Bitiş Tarihi:</td>
+                    <td>@Model.BitisTarihi.ToString("dd.MM.yyyy")</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Nöbet Günü:</td>
+                    <td><span class="badge bg-secondary p-2">@Model.Gun</span></td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Durum:</td>
+                    <td>
+                        @if (DateTime.Today >= Model.BaslangicTarihi && DateTime.Today <= Model.BitisTarihi)
+                        {
+                            <span class="badge bg-success">Aktif Nöbet</span>
+                        }
+                        else if (DateTime.Today > Model.BitisTarihi)
+                        {
+                            <span class="badge bg-dark">Geçmiş Nöbet</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-info text-dark">Gelecek Nöbet</span>
+                        }
+                    </td>
+                </tr>
+                @if (!string.IsNullOrEmpty(Model.Aciklama))
+                {
+                    <tr>
+                        <td class="fw-bold text-muted" colspan="2">Açıklama / Notlar:</td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" class="bg-light p-3 rounded small">@Model.Aciklama</td>
+                    </tr>
+                }
+            </table>
+
+            <div class="d-flex justify-content-between mt-4">
+                <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-warning fw-semibold"><i class="bi bi-pencil"></i> Düzenle</a>
+                <a asp-action="Delete" asp-route-id="@Model.Id" class="btn btn-danger fw-semibold"><i class="bi bi-trash"></i> Sil</a>
+            </div>
+        </div>
+    </div>
+</div>

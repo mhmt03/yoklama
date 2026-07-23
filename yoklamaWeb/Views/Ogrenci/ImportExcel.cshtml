@@ -1,0 +1,69 @@
+@model object
+@{
+    ViewData["Title"] = "Öğrenci Excel İçe Aktar";
+}
+<h2 class="mt-4">Öğrenci Excel İçe Aktar</h2>
+<p>Excel dosyasında aşağıdaki sütun sırası ve formatı beklenmektedir (ilk satır başlık olmalıdır):</p>
+<div class="table-responsive" style="max-width: 600px;">
+    <table class="table table-bordered table-sm text-center mb-3 align-middle bg-white shadow-sm">
+        <thead class="table-dark">
+            <tr>
+                <th>A Sütunu (1)</th>
+                <th>B Sütunu (2)</th>
+                <th>C Sütunu (3)</th>
+                <th>D Sütunu (4)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="table-secondary fw-semibold">
+                <td>OgrenciNo</td>
+                <td>AdSoyad</td>
+                <td>SinifDuzeyi</td>
+                <td>Sube</td>
+            </tr>
+            <tr class="text-muted">
+                <td>123</td>
+                <td>Ahmet Yılmaz</td>
+                <td>9</td>
+                <td>A</td>
+            </tr>
+            <tr class="text-muted">
+                <td>124</td>
+                <td>Zeynep Kaya</td>
+                <td>10</td>
+                <td>B</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+<p>İlk veri satırının başlık satırının hemen altında (varsayılan 2. satır) başladığından emin olun. Farklı bir satırdan başlatmak isterseniz "Başlangıç Satırı" alanını değiştirin.</p>
+@if (ViewData["Errors"] != null)
+{
+    var errors = (IEnumerable<string>)ViewData["Errors"];
+    <div class="alert alert-danger">
+        <strong>İçe aktarma hataları:</strong>
+        <ul>
+            @foreach (var err in errors)
+            {
+                <li>@err</li>
+            }
+        </ul>
+    </div>
+}
+<form asp-action="ImportExcel" method="post" enctype="multipart/form-data" class="needs-validation" novalidate>
+    <div class="mb-3">
+<label class="form-label">Excel Dosyası</label>
+<input class="form-control" type="file" name="excelFile" accept=".xlsx,.xls" required />
+        <span class="text-danger"></span>
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="startRow">Başlangıç Satırı</label>
+        <input class="form-control" type="number" name="startRow" value="2" min="1" />
+        <div class="form-text">Veri satırının başladığı satır numarası (başlık satırı sonrası).</div>
+    </div>
+    <button type="submit" class="btn btn-primary">İçe Aktar</button>
+    <a asp-action="Index" class="btn btn-secondary ms-2">İptal</a>
+</form>
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

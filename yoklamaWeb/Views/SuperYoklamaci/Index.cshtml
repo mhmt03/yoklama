@@ -1,0 +1,227 @@
+@model List<yoklamaWeb.Models.SuperYoklamaciExamItemViewModel>
+@{
+    ViewData["Title"] = "Süper Yoklamacı — Tüm Sınavlar";
+    var userName = User.Identity?.Name ?? "Anonim";
+    Layout = null;  
+}
+
+<style>
+    :root {
+        --primary: #4f46e5;
+        --primary-light: #818cf8;
+        --success: #10b981;
+        --danger: #ef4444;
+        --warning: #f59e0b;
+        --surface: #1e1e2e;
+        --surface2: #2a2a3e;
+        --surface3: #313150;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --border: rgba(255,255,255,0.08);
+        --card-radius: 16px;
+    }
+
+    body { background: #13131f; color: var(--text); font-family: 'Inter', sans-serif; }
+
+    .yk-header {
+        background: linear-gradient(135deg, #311042 0%, #1e1e2e 100%);
+        border-bottom: 1px solid var(--border);
+        padding: 24px 32px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+    .yk-header-left h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #fff;
+        margin: 0;
+    }
+    .yk-header-left p {
+        color: var(--text-muted);
+        font-size: 0.875rem;
+        margin: 4px 0 0;
+    }
+    .yk-logout {
+        background: rgba(239,68,68,.15);
+        border: 1px solid rgba(239,68,68,.3);
+        color: #f87171;
+        padding: 8px 20px;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all .2s;
+        text-decoration: none;
+    }
+    .yk-logout:hover { background: rgba(239,68,68,.3); color: #fca5a5; }
+
+    .yk-main { padding: 32px; max-width: 900px; margin: 0 auto; }
+
+    .alert-box {
+        border-radius: 12px;
+        padding: 14px 20px;
+        font-size: 0.9rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 24px;
+    }
+    .alert-success { background: rgba(16,185,129,.12); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
+    .alert-error   { background: rgba(239,68,68,.12);  border: 1px solid rgba(239,68,68,.3);  color: #fca5a5; }
+
+    .section-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+    }
+
+    .exam-card {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--card-radius);
+        padding: 20px 24px;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        transition: all .2s;
+        text-decoration: none;
+        color: inherit;
+    }
+    .exam-card:hover { background: var(--surface3); border-color: rgba(124,58,237,.4); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+
+    .exam-icon {
+        width: 48px; height: 48px;
+        border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.25rem;
+        flex-shrink: 0;
+    }
+    .exam-icon.open   { background: rgba(139,92,246,.2); }
+    .exam-icon.closed { background: rgba(148,163,184,.1); }
+
+    .exam-info { flex: 1; min-width: 0; }
+    .exam-name { font-size: 1rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .exam-meta { font-size: 0.8rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 12px; }
+    .exam-meta span { display: flex; align-items: center; gap: 5px; }
+
+    .badge-bina {
+        background: rgba(139,92,246,.15);
+        border: 1px solid rgba(139,92,246,.3);
+        color: #d8b4fe;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .status-pill {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .status-open   { background: rgba(16,185,129,.15); border: 1px solid rgba(16,185,129,.3); color: #6ee7b7; }
+    .status-closed { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.2); color: #fca5a5; }
+
+    .empty-state {
+        text-align: center;
+        padding: 64px 32px;
+        color: var(--text-muted);
+    }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 16px; opacity: .4; }
+</style>
+
+<div class="yk-header">
+    <div class="yk-header-left">
+        <h1>⚡ Süper Yoklamacı Kontrol Paneli</h1>
+        <p>Tüm sınavları yönetin — Hoş geldiniz, <strong style="color:#d8b4fe">@userName</strong></p>
+    </div>
+    <form method="post" asp-controller="Account" asp-action="Logout">
+        @Html.AntiForgeryToken()
+        <button type="submit" class="yk-logout">⏏ Çıkış Yap</button>
+    </form>
+</div>
+
+<div class="yk-main">
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert-box alert-success">✅ @TempData["SuccessMessage"]</div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert-box alert-error">⚠️ @TempData["ErrorMessage"]</div>
+    }
+
+    @if (!Model.Any())
+    {
+        <div class="empty-state">
+            <div class="icon">📭</div>
+            <p>Sistemde tanımlanmış sınav bulunmamaktadır.</p>
+        </div>
+    }
+    else
+    {
+        var openExams   = Model.Where(e => e.IsAccessible).ToList();
+        var closedExams = Model.Where(e => !e.IsAccessible).ToList();
+
+        if (openExams.Any())
+        {
+            <div class="section-title">⚡ Aktif Sınavlar (@openExams.Count)</div>
+            foreach (var exam in openExams)
+            {
+                <a class="exam-card"
+                   asp-controller="SuperYoklamaci" asp-action="Rooms"
+                   asp-route-examId="@exam.ExamId">
+                    <div class="exam-icon open">⚡</div>
+                    <div class="exam-info">
+                        <div class="exam-name">@exam.ExamName</div>
+                        <div class="exam-meta">
+                            <span>📅 @exam.ApplicationDate.ToString("dd.MM.yyyy")</span>
+                            @if (exam.StartTime.HasValue && exam.EndTime.HasValue)
+                            {
+                                <span>🕐 @exam.StartTime.Value.ToString(@"hh\:mm") – @exam.EndTime.Value.ToString(@"hh\:mm")</span>
+                            }
+                        </div>
+                    </div>
+                    <span class="badge-bina">Bina: @exam.BuildingNumber</span>
+                    <span class="status-pill status-open">✓ Süre İçinde</span>
+                </a>
+            }
+        }
+
+        if (closedExams.Any())
+        {
+            <div class="section-title" style="margin-top:28px">🔒 Süre Dışı / Arşiv Sınavlar (@closedExams.Count)</div>
+            foreach (var exam in closedExams)
+            {
+                <a class="exam-card"
+                   asp-controller="SuperYoklamaci" asp-action="Rooms"
+                   asp-route-examId="@exam.ExamId">
+                    <div class="exam-icon closed">🔒</div>
+                    <div class="exam-info">
+                        <div class="exam-name">@exam.ExamName</div>
+                        <div class="exam-meta">
+                            <span>📅 @exam.ApplicationDate.ToString("dd.MM.yyyy")</span>
+                            @if (exam.StartTime.HasValue && exam.EndTime.HasValue)
+                            {
+                                <span>🕐 @exam.StartTime.Value.ToString(@"hh\:mm") – @exam.EndTime.Value.ToString(@"hh\:mm")</span>
+                            }
+                        </div>
+                    </div>
+                    <span class="badge-bina" style="opacity:0.7">Bina: @exam.BuildingNumber</span>
+                    <span class="status-pill status-closed">Süre Dışı</span>
+                </a>
+            }
+        }
+    }
+</div>

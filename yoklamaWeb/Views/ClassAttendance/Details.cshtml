@@ -1,0 +1,138 @@
+@model yoklamaWeb.Models.ClassAttendanceDetailsViewModel
+
+@{
+    ViewData["Title"] = "Sınıf Yoklaması Detay";
+    Layout = "_Layout";
+}
+
+<link href="~/css/site.css" rel="stylesheet" />
+
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row align-items-start justify-content-between gap-3 mb-4">
+        <div>
+            <h2 class="mb-1" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">@Model.Name</h2>
+            <p class="text-muted mb-0">Bina @Model.BuildingNumber | @Model.ValidFrom.ToString("yyyy-MM-dd") - @Model.ValidTo.ToString("yyyy-MM-dd")</p>
+        </div>
+        <div class="text-end">
+            <a asp-action="Index" class="btn btn-outline-secondary me-2">Geri</a>
+            <a asp-action="ImportStudents" asp-route-id="@Model.Id" class="btn btn-success me-2">Excel İçe Aktar</a>
+            <a asp-action="ExportStudents" asp-route-id="@Model.Id" class="btn btn-outline-success me-2">Excel Dışa Aktar</a>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createDailyAttendanceModal">
+                Günlük Yoklama Listesi Oluştur
+            </button>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 rounded-4 mb-4">
+        <div class="card-body row gx-4 gy-3">
+            <div class="col-md-3">
+                <h6 class="text-uppercase text-muted mb-1">Geçerlilik</h6>
+                <p>@Model.ValidFrom.ToString("yyyy-MM-dd") - @Model.ValidTo.ToString("yyyy-MM-dd")</p>
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-uppercase text-muted mb-1">Saat</h6>
+                <p>@(Model.StartTime.HasValue ? Model.StartTime.Value.ToString(@"hh\:mm") : "—") - @(Model.EndTime.HasValue ? Model.EndTime.Value.ToString(@"hh\:mm") : "—")</p>
+            </div>
+            <div class="col-md-3">
+                <h6 class="text-uppercase text-muted mb-1">Sadece Kendi Gününde</h6>
+                <p>@(Model.OnlyCurrentDayAttendance ? "Evet" : "Hayır")</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th>Öğrenci No</th>
+                    <th>Ad Soyad</th>
+                    <th>Sınıf</th>
+                    <th>Şube</th>
+                    <th>Salon</th>
+                    <th>Sıra</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var student in Model.Students)
+                {
+                    <tr>
+                        <td>@student.OgrenciNo</td>
+                        <td>@student.AdSoyad</td>
+                        <td>@student.SinifDuzeyi</td>
+                        <td>@student.Sube</td>
+                        <td>@(string.IsNullOrWhiteSpace(student.Salon) ? "-" : student.Salon)</td>
+                        <td>@(string.IsNullOrWhiteSpace(student.Sira) ? "-" : student.Sira)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Modal for Daily Attendance List Creation -->
+<div class="modal fade" id="createDailyAttendanceModal" tabindex="-1" aria-labelledby="createDailyAttendanceModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createDailyAttendanceModalLabel">Günlük Yoklama Listesi Oluştur</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="createDailyAttendanceForm" asp-action="CreateDailyAttendanceLists" asp-route-id="@Model.Id" method="post">
+                <div class="modal-body">
+                    <input type="hidden" name="attendanceId" value="@Model.Id" />
+                    <div class="mb-3">
+                        <label for="startDate" class="form-label">Başlama Tarihi</label>
+                        <input type="date" class="form-control" id="startDate" name="startDate" required 
+                               min="@Model.ValidFrom.ToString("yyyy-MM-dd")" 
+                               max="@Model.ValidTo.ToString("yyyy-MM-dd")"
+                               value="@Model.ValidFrom.ToString("yyyy-MM-dd")" />
+                        <div class="form-text">Orijinal yoklama geçerlilik aralığı: @Model.ValidFrom.ToString("yyyy-MM-dd") - @Model.ValidTo.ToString("yyyy-MM-dd")</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="endDate" class="form-label">Bitiş Tarihi</label>
+                        <input type="date" class="form-control" id="endDate" name="endDate" required
+                               min="@Model.ValidFrom.ToString("yyyy-MM-dd")" 
+                               max="@Model.ValidTo.ToString("yyyy-MM-dd")"
+                               value="@Model.ValidTo.ToString("yyyy-MM-dd")" />
+                    </div>
+                    <div class="alert alert-info">
+                        <small>
+                            <strong>Bilgi:</strong> Seçilen tarih aralığındaki her gün için, orijinal yoklama listesi kopyalanarak yeni bir yoklama listesi oluşturulacaktır.
+                            <br />Her yeni liste: orijinal adı + tarih formatında isimlenecek (örn: "Matematik Sınavı 2024-01-15").
+                            <br />Saat aralığı, bina, öğrenci listesi (Salon/Sıra dahil) orijinal ile aynı olacaktır.
+                            <br />Oluşan her liste sadece 1 gün geçerli olacaktır.
+                        </small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary">Oluştur</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const startDateInput = document.getElementById('startDate');
+            const endDateInput = document.getElementById('endDate');
+
+            // Ensure end date is not before start date
+            startDateInput.addEventListener('change', function () {
+                if (endDateInput.value && endDateInput.value < startDateInput.value) {
+                    endDateInput.value = startDateInput.value;
+                }
+                endDateInput.min = startDateInput.value;
+            });
+
+            endDateInput.addEventListener('change', function () {
+                if (startDateInput.value && endDateInput.value < startDateInput.value) {
+                    startDateInput.value = endDateInput.value;
+                }
+                startDateInput.max = endDateInput.value;
+            });
+        });
+    </script>
+}

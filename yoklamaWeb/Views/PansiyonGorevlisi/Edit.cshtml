@@ -1,0 +1,77 @@
+@model yoklamaWeb.ViewModels.Pansiyon.PansiyonGorevlisiDetailViewModel
+@{
+    ViewData["Title"] = "Görevli Düzenle";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-warning text-dark">
+            <h4 class="mb-0 fw-bold">Görevli Düzenle (Kullanıcı: @Model.KullaniciAdi)</h4>
+        </div>
+        <div class="card-body p-4">
+            <form method="post" asp-action="Edit">
+                @Html.AntiForgeryToken()
+                
+                <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+                <input type="hidden" asp-for="Id" />
+                <input type="hidden" asp-for="RowVersion" />
+
+                <div class="mb-3">
+                    <label asp-for="KullaniciAdi" class="form-label fw-bold"></label>
+                    <input asp-for="KullaniciAdi" class="form-control" />
+                    <span asp-validation-for="KullaniciAdi" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Sifre" class="form-label fw-bold"></label>
+                    <input asp-for="Sifre" type="password" class="form-control" placeholder="Değiştirmek istemiyorsanız boş bırakın" />
+                    <span asp-validation-for="Sifre" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="AdSoyad" class="form-label fw-bold"></label>
+                    <input asp-for="AdSoyad" class="form-control" />
+                    <span asp-validation-for="AdSoyad" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Rol" class="form-label fw-bold"></label>
+                    <select asp-for="Rol" class="form-select">
+                        <option value="Gorevli" selected="@(Model.Rol == "Gorevli" ? "selected" : null)">Görevli</option>
+                        <option value="Admin" selected="@(Model.Rol == "Admin" ? "selected" : null)">Admin</option>
+                        <option value="Nobetci" selected="@(Model.Rol == "Nobetci" ? "selected" : null)">Nöbetçi</option>
+                    </select>
+                    <span asp-validation-for="Rol" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Telefon" class="form-label fw-bold"></label>
+                    <input asp-for="Telefon" class="form-control" />
+                    <span asp-validation-for="Telefon" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Email" class="form-label fw-bold"></label>
+                    <input asp-for="Email" type="email" class="form-control" />
+                    <span asp-validation-for="Email" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3 form-check">
+                    <input asp-for="Aktif" type="checkbox" class="form-check-input" id="Aktif" />
+                    <label class="form-check-label fw-semibold" for="Aktif">Görevli Aktif</label>
+                    <span asp-validation-for="Aktif" class="text-danger"></span>
+                </div>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    <button type="submit" class="btn btn-warning fw-semibold">Güncelle</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

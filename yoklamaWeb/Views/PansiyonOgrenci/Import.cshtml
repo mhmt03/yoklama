@@ -1,0 +1,50 @@
+@model yoklamaWeb.ViewModels.Pansiyon.PansiyonOgrenciImportViewModel
+@{
+    ViewData["Title"] = "Excel'den Toplu Öğrenci Yükle";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-success text-white">
+            <h4 class="mb-0 fw-bold">Excel'den Toplu Öğrenci Yükle</h4>
+        </div>
+        <div class="card-body p-4">
+            <p class="text-muted">Pansiyon öğrencilerini sisteme toplu aktarmak için Excel (.xlsx) dosyasını seçiniz. Excel dosyasındaki sütun yapısı aşağıdaki gibi olmalıdır:</p>
+            
+            <div class="bg-light p-3 rounded mb-4 small border">
+                <strong class="text-dark">Sütun Yapısı (1. Satır başlık olmalıdır):</strong>
+                <ol class="mb-0">
+                    <li>Öğrenci No (Zorunlu)</li>
+                    <li>Ad Soyad (Zorunlu)</li>
+                    <li>Sınıf Düzeyi (Zorunlu - 9, 10, 11 veya 12)</li>
+                    <li>Şube (Opsiyonel - A, B, C vb.)</li>
+                    <li>Telefon (Opsiyonel)</li>
+                    <li>Veli Telefon (Opsiyonel)</li>
+                    <li>Adres (Opsiyonel)</li>
+                    <li>Oda No (Opsiyonel - Oda eşleştirmesi için veritabanında aktif bir oda numarası ile eşleşmelidir)</li>
+                </ol>
+            </div>
+
+            <form method="post" asp-action="Import" enctype="multipart/form-data">
+                @Html.AntiForgeryToken()
+                <div asp-validation-summary="All" class="text-danger mb-3"></div>
+
+                <div class="mb-4">
+                    <label asp-for="ExcelFile" class="form-label fw-bold">Excel Dosyası Seçin</label>
+                    <input asp-for="ExcelFile" type="file" class="form-control" accept=".xlsx" required />
+                    <span asp-validation-for="ExcelFile" class="text-danger"></span>
+                </div>
+
+                <div class="d-flex justify-content-between">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    <button type="submit" class="btn btn-success fw-semibold"><i class="bi bi-file-earmark-arrow-up"></i> Yükle ve Aktar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

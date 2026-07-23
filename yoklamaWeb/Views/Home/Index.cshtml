@@ -1,0 +1,62 @@
+@{
+    ViewData["Title"] = "Ana Sayfa";
+}
+
+<div class="container mt-5">
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i> @TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i> @TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+    <div class="row justify-content-center">
+        <div class="col-lg-6">
+            <div class="card shadow-sm border-0">
+                <div class="card-body p-4">
+                    <h2 class="card-title text-center mb-3">YoklamaWeb Giriş</h2>
+                    <p class="text-center text-muted mb-4">Rolünüzü seçin, ardından kullanıcı adı ve şifrenizle giriş yapın.</p>
+
+                    <form asp-controller="Account" asp-action="Login" method="post">
+                        <div class="mb-3">
+                            <label class="form-label">Rol Seçimi</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="role" id="roleAdmin" value="Admin" checked />
+                                <label class="form-check-label" for="roleAdmin">Admin</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="role" id="roleYoklamaci" value="Yoklamaci" />
+                                <label class="form-check-label" for="roleYoklamaci">Yoklamacı</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="role" id="roleSuperYoklamaci" value="SuperYoklamaci" />
+                                <label class="form-check-label" for="roleSuperYoklamaci">Super Yoklamacı</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="role" id="rolePansiyonGorevlisi" value="PansiyonGorevlisi" />
+                                <label class="form-check-label" for="rolePansiyonGorevlisi">Pansiyon Görevlisi</label>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Kullanıcı Adı</label>
+                            <input type="text" name="username" class="form-control" id="username" placeholder="admin, yoklamaci, superyoklamaci" required />
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Şifre</label>
+                            <input type="password" name="password" class="form-control" id="password" placeholder="12345" required />
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Giriş Yap</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

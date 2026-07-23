@@ -1,0 +1,35 @@
+@model yoklamaWeb.ViewModels.Pansiyon.PansiyonIzinViewModel
+@{
+    ViewData["Title"] = "İzin Kaydı Sil";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 500px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-danger text-white">
+            <h4 class="mb-0 fw-bold">İzin Kaydı Silme Onayı</h4>
+        </div>
+        <div class="card-body p-4 text-center">
+            <div class="mb-4">
+                <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
+            </div>
+            
+            <p class="lead"><strong>@Model.OgrenciAdSoyad</strong> isimli öğrencinin <strong>@Model.BaslangicTarihi.ToString("dd.MM.yyyy") - @Model.BitisTarihi.ToString("dd.MM.yyyy")</strong> tarihleri arasındaki izin talebini silmek istediğinizden emin misiniz?</p>
+            
+            <div class="alert alert-warning text-start small">
+                <strong>Dikkat:</strong> Bu izin kaydı kalıcı olarak silinecektir.
+            </div>
+
+            <form method="post" asp-action="Delete">
+                @Html.AntiForgeryToken()
+                <input type="hidden" asp-for="Id" />
+                <input type="hidden" asp-for="RowVersion" />
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    <button type="submit" class="btn btn-danger fw-semibold">Evet, Sil</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

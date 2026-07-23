@@ -1,0 +1,73 @@
+@model yoklamaWeb.Models.Exam
+
+@{
+    ViewData["Title"] = "Sınav Düzenle";
+    Layout = "_Layout";
+}
+
+<link href="~/css/site.css" rel="stylesheet" />
+
+<div class="container mt-4">
+    <h2 class="mb-4" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Sınav Düzenle</h2>
+    <div class="card shadow-sm" style="border-radius: 12px; overflow: hidden; backdrop-filter: blur(8px); background: rgba(255,255,255,0.2);">
+        <div class="card-body">
+            <form asp-action="Edit" method="post" class="row g-3">
+                <input type="hidden" asp-for="Id" />
+                
+                <div class="col-md-6">
+                    <label asp-for="Name" class="form-label">Sınav Adı</label>
+                    <input asp-for="Name" class="form-control" placeholder="Sınav adı" />
+                    <span asp-validation-for="Name" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="ApplicationDate" class="form-label">Uygulama Tarihi</label>
+                    <input asp-for="ApplicationDate" class="form-control" type="date" />
+                    <span asp-validation-for="ApplicationDate" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="BuildingNumber" class="form-label">Bina Numarası</label>
+                    <input asp-for="BuildingNumber" class="form-control" placeholder="Bina numarası" />
+                    <span asp-validation-for="BuildingNumber" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="ValidFrom" class="form-label">Yoklama Başlangıç Tarihi</label>
+                    <input asp-for="ValidFrom" class="form-control" type="date" />
+                    <span asp-validation-for="ValidFrom" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="ValidTo" class="form-label">Yoklama Bitiş Tarihi</label>
+                    <input asp-for="ValidTo" class="form-control" type="date" />
+                    <span asp-validation-for="ValidTo" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="StartTime" class="form-label">Yoklama Başlangıç Saati</label>
+                    <input asp-for="StartTime" class="form-control" type="time" />
+                    <span asp-validation-for="StartTime" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="EndTime" class="form-label">Yoklama Bitiş Saati</label>
+                    <input asp-for="EndTime" class="form-control" type="time" />
+                    <span asp-validation-for="EndTime" class="text-danger"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="IsActive" class="form-label">Aktif</label>
+                    <div class="form-check">
+                        <input asp-for="IsActive" class="form-check-input" type="checkbox" id="isActive" />
+                        <label class="form-check-label" for="isActive">
+                            İşbu sınav aktifdir
+                        </label>
+                    </div>
+                    <span asp-validation-for="IsActive" class="text-danger"></span>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary btn-sm">Kaydet</button>
+                    <a asp-action="Index" class="btn btn-outline-secondary btn-sm ms-2">İptal</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

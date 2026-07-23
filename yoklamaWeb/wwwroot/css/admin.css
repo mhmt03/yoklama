@@ -1,0 +1,38 @@
+/* admin.css - Premium styling for Admin panel */
+body {
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    color: #fff;
+    font-family: 'Inter', sans-serif;
+}
+
+.container {
+    margin-top: 30px;
+}
+
+.card {
+    background: rgba(247, 133, 133, 0.2);
+    border: none;
+    border-radius: 15px;
+    backdrop-filter: blur(10px);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+.card h5 {
+    color: #ffdd57;
+}
+
+.card a.btn {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: #fff;
+    transition: background 0.3s ease;
+}
+
+.card a.btn:hover {
+    background: rgba(255, 255, 255, 0.4);
+}

@@ -1,0 +1,141 @@
+@model yoklamaWeb.ViewModels.Pansiyon.OdaListViewModel
+@{
+    ViewData["Title"] = "Oda Yönetimi";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2>Oda Yönetimi</h2>
+        <div>
+            <a asp-action="Create" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Yeni Oda Ekle</a>
+        </div>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            @TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            @TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    <div class="card mb-4 shadow-sm border-0 bg-light">
+        <div class="card-body">
+            <form method="get" asp-action="Index" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-bold">Oda No / Açıklama</label>
+                    <input type="text" name="Arama" value="@Model.Filter.Arama" class="form-control" placeholder="Ara..." />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Kat</label>
+                    <select name="Kat" class="form-select">
+                        <option value="">-- Tüm Katlar --</option>
+                        @if (ViewBag.Katlar != null)
+                        {
+                            foreach (var kat in ViewBag.Katlar)
+                            {
+                                if (Model.Filter.Kat == kat)
+                                {
+                                    <option value="@kat" selected>Kat @kat</option>
+                                }
+                                else
+                                {
+                                    <option value="@kat">Kat @kat</option>
+                                }
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Cinsiyet</label>
+                    <select name="Cinsiyet" class="form-select">
+                        <option value="">-- Tümü --</option>
+                        <option value="Kız" selected="@(Model.Filter.Cinsiyet == "Kız" ? "selected" : null)">Kız</option>
+                        <option value="Erkek" selected="@(Model.Filter.Cinsiyet == "Erkek" ? "selected" : null)">Erkek</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-bold">Doluluk</label>
+                    <select name="DolulukDurumu" class="form-select">
+                        <option value="">-- Tümü --</option>
+                        <option value="Bos" selected="@(Model.Filter.DolulukDurumu == yoklamaWeb.Models.Enums.DolulukDurumu.Bos ? "selected" : null)">Boş</option>
+                        <option value="Kismi" selected="@(Model.Filter.DolulukDurumu == yoklamaWeb.Models.Enums.DolulukDurumu.Kismi ? "selected" : null)">Kısmen Dolu</option>
+                        <option value="Dolu" selected="@(Model.Filter.DolulukDurumu == yoklamaWeb.Models.Enums.DolulukDurumu.Dolu ? "selected" : null)">Dolu</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input type="checkbox" name="SadeceAktif" value="true" class="form-check-input" id="sadeceAktifCheck" @(Model.Filter.SadeceAktif ? "checked" : "") />
+                        <label class="form-check-label fw-semibold" for="sadeceAktifCheck">Sadece Aktifler</label>
+                    </div>
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <button type="submit" class="btn btn-secondary w-100">Filtrele</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="row row-cols-1 row-cols-md-3 g-4">
+        @if (Model.Odalar.Any())
+        {
+            @foreach (var oda in Model.Odalar)
+            {
+                var dolulukYuzdesi = oda.Kapasite > 0 ? (double)oda.DoluSayisi / oda.Kapasite * 100 : 0;
+                var progressClass = dolulukYuzdesi >= 100 ? "bg-danger" : (dolulukYuzdesi > 50 ? "bg-warning" : "bg-success");
+                
+                <div class="col">
+                    <div class="card h-100 shadow-sm border-0">
+                        <div class="card-header d-flex justify-content-between align-items-center @(oda.Cinsiyet == "Kız" ? "bg-info text-dark" : "bg-primary text-white")">
+                            <h5 class="mb-0 fw-bold">Oda @oda.OdaNo</h5>
+                            <span class="badge @(oda.Aktif ? "bg-light text-dark" : "bg-secondary text-white")">
+                                @(oda.Aktif ? "Aktif" : "Pasif")
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <strong>Kat:</strong> @oda.Kat
+                            </div>
+                            <div class="mb-2">
+                                <strong>Cinsiyet:</strong> @oda.Cinsiyet
+                            </div>
+                            <div class="mb-3">
+                                <strong>Kapasite:</strong> @oda.DoluSayisi / @oda.Kapasite
+                                <div class="progress mt-2" style="height: 10px;">
+                                    <div class="progress-bar @progressClass" role="progressbar" style="width: @(dolulukYuzdesi)%;" aria-valuenow="@oda.DoluSayisi" aria-valuemin="0" aria-valuemax="@oda.Kapasite"></div>
+                                </div>
+                            </div>
+                            @if (!string.IsNullOrEmpty(oda.Aciklama))
+                            {
+                                <div class="mb-2 text-muted small text-truncate" title="@oda.Aciklama">
+                                    <strong>Açıklama:</strong> @oda.Aciklama
+                                </div>
+                            }
+                        </div>
+                        <div class="card-footer bg-white border-0 d-flex justify-content-between">
+                            <a asp-action="Details" asp-route-id="@oda.Id" class="btn btn-sm btn-outline-info"><i class="bi bi-eye"></i> Detay</a>
+                            <div>
+                                <a asp-action="Edit" asp-route-id="@oda.Id" class="btn btn-sm btn-outline-warning me-1"><i class="bi bi-pencil"></i> Düzenle</a>
+                                <a asp-action="Delete" asp-route-id="@oda.Id" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Sil</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="col-12 text-center text-muted py-5">
+                <h4>Kayıtlı oda bulunamadı.</h4>
+            </div>
+        }
+    </div>
+</div>

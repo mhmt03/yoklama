@@ -1,0 +1,56 @@
+@model yoklamaWeb.ViewModels.Pansiyon.OdaViewModel
+@{
+    ViewData["Title"] = "Oda Sil";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 500px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-danger text-white">
+            <h4 class="mb-0 fw-bold">Oda Silme Onayı</h4>
+        </div>
+        <div class="card-body p-4 text-center">
+            <div class="mb-4">
+                <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
+            </div>
+            
+            <p class="lead"><strong>Oda @Model.OdaNo</strong> isimli odayı silmek istediğinizden emin misiniz?</p>
+            
+            <div class="alert alert-warning text-start">
+                <strong>Oda Detayları:</strong>
+                <ul>
+                    <li>Kat: @Model.Kat</li>
+                    <li>Cinsiyet: @Model.Cinsiyet</li>
+                    <li>Kapasite: @Model.Kapasite Kişilik</li>
+                    <li>Şu An Kalan Öğrenci Sayısı: @Model.DoluSayisi</li>
+                </ul>
+            </div>
+
+            @if (Model.DoluSayisi > 0)
+            {
+                <div class="alert alert-danger text-start">
+                    <i class="bi bi-x-circle"></i> <strong>Hata:</strong> Bu odada aktif kalan öğrenciler bulunmaktadır. Odada kalan öğrenci varken oda silinemez. Lütfen önce öğrencileri başka bir odaya nakledin.
+                </div>
+            }
+
+            <form method="post" asp-action="Delete">
+                @Html.AntiForgeryToken()
+                <input type="hidden" asp-for="Id" />
+                <input type="hidden" asp-for="RowVersion" />
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    
+                    @if (Model.DoluSayisi > 0)
+                    {
+                        <button type="submit" class="btn btn-danger" disabled>Silinemez</button>
+                    }
+                    else
+                    {
+                        <button type="submit" class="btn btn-danger fw-semibold">Evet, Sil</button>
+                    }
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

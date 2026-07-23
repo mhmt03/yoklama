@@ -1,0 +1,53 @@
+@{
+    ViewData["Title"] = "Sınıf Yoklaması Öğrenci Yükle";
+    Layout = "_Layout";
+}
+
+<link href="~/css/site.css" rel="stylesheet" />
+
+<div class="container mt-4">
+    <h2 class="mb-4" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Sınıf Yoklaması için Öğrenci Listesi Yükle</h2>
+    <p class="text-muted">@ViewBag.ClassAttendanceName için Excel dosyası seçin.</p>
+
+    @if (ViewData["Errors"] is List<string> errors && errors.Any())
+    {
+        <div class="alert alert-danger">
+            <ul class="mb-0">
+                @foreach (var error in errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        </div>
+    }
+
+    <div class="mb-3 d-flex flex-wrap gap-2">
+        <a asp-action="DownloadTemplate" asp-route-id="@ViewBag.ClassAttendanceId" class="btn btn-outline-primary">Şablonu İndir</a>
+        <a asp-action="Details" asp-route-id="@ViewBag.ClassAttendanceId" class="btn btn-outline-secondary">İptal</a>
+    </div>
+
+    <form asp-action="ImportStudents" asp-route-id="@ViewBag.ClassAttendanceId" method="post" enctype="multipart/form-data" class="card shadow-sm border-0 rounded-4 p-4">
+        <div class="mb-3">
+            <label for="excelFile" class="form-label">Excel Dosyası</label>
+            <input type="file" name="excelFile" class="form-control" required />
+        </div>
+        <div class="mb-3">
+            <label for="startRow" class="form-label">Başlangıç Satırı</label>
+            <input type="number" name="startRow" value="2" min="1" class="form-control" />
+        </div>
+        <button type="submit" class="btn btn-success">Yükle</button>
+    </form>
+
+    <div class="alert alert-info mt-4">
+        <h5 class="alert-heading">Excel Formatı</h5>
+        <p>Lütfen ilk satıra aşağıdaki başlıkları yazın ve 2. satırdan itibaren verileri girin:</p>
+        <ul>
+            <li><strong>Öğrenci No</strong></li>
+            <li><strong>Ad Soyad</strong></li>
+            <li><strong>Sınıf Düzeyi</strong></li>
+            <li><strong>Şube</strong></li>
+            <li><strong>Salon</strong> (opsiyonel)</li>
+            <li><strong>Sıra</strong> (opsiyonel)</li>
+        </ul>
+    </div>
+</div>

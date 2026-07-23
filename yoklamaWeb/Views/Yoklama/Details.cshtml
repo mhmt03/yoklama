@@ -1,0 +1,72 @@
+@model yoklamaWeb.ViewModels.Pansiyon.PansiyonYoklamaViewModel
+@{
+    ViewData["Title"] = "Yoklama Kaydı Detayları";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <div class="mb-3">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Yoklama Geçmişine Dön</a>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0 fw-bold">Yoklama Detay Bilgileri</h4>
+        </div>
+        <div class="card-body p-4">
+            <table class="table table-striped align-middle">
+                <tr>
+                    <td class="fw-bold text-muted" style="width: 40%;">Öğrenci Adı Soyadı:</td>
+                    <td><strong>@Model.OgrenciAdSoyad</strong></td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Öğrenci No:</td>
+                    <td>@Model.OgrenciNo</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Yoklama Tarihi:</td>
+                    <td>@Model.Tarih.ToString("dd.MM.yyyy")</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Yoklama Saati:</td>
+                    <td>@(Model.Saat?.ToString(@"hh\:mm") ?? "-")</td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Yoklama Durumu:</td>
+                    <td>
+                        @if (Model.Durum == "Var")
+                        {
+                            <span class="badge bg-success">Var</span>
+                        }
+                        else if (Model.Durum == "Yok")
+                        {
+                            <span class="badge bg-danger">Yok / İzinli</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-warning text-dark">@Model.Durum</span>
+                        }
+                    </td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Yoklamayı Alan Görevli:</td>
+                    <td>@Model.YoklamaYapanAdSoyad</td>
+                </tr>
+                @if (!string.IsNullOrEmpty(Model.Aciklama))
+                {
+                    <tr>
+                        <td class="fw-bold text-muted" colspan="2">Açıklama / Not:</td>
+                    </tr>
+                    <tr>
+                        <td colspan="2" class="bg-light p-3 rounded small">@Model.Aciklama</td>
+                    </tr>
+                }
+            </table>
+
+            <div class="d-flex justify-content-between mt-4">
+                <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-warning fw-semibold"><i class="bi bi-pencil"></i> Düzenle</a>
+                <a asp-action="Delete" asp-route-id="@Model.Id" class="btn btn-danger fw-semibold"><i class="bi bi-trash"></i> Sil</a>
+            </div>
+        </div>
+    </div>
+</div>

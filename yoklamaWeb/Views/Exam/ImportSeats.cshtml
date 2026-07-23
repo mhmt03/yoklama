@@ -1,0 +1,48 @@
+@{
+    ViewData["Title"] = "Import Seat Assignments";
+    Layout = "_Layout";
+}
+
+<h1 class="display-4 text-center my-4">Import Seats for Exam @ViewBag.ExamId</h1>
+
+<div class="alert alert-info">
+    <h5 class="alert-heading">Excel import format</h5>
+    <p>The first row must contain these exact column headers in this order:</p>
+    <ul>
+        <li><strong>OgrenciNo</strong> – Öğrenci numarası</li>
+        <li><strong>SeatNumber</strong> – Koltuk numarası</li>
+        <li><strong>SalonAdi</strong> – Salon adı</li>
+        <li><strong>Sira</strong> – Sıra numarası</li>
+        <li><strong>BinaNo</strong> – Bina numarası</li>
+    </ul>
+    <p>Veri satırları ikinci satırdan itibaren başlamalıdır. Eksik veya hatalı bir satır varsa işlem iptal edilir.</p>
+</div>
+
+@if (TempData["SuccessMessage"] != null) {
+    <div class="alert alert-success" role="alert">@TempData["SuccessMessage"]</div>
+}
+@if (ViewData["Errors"] != null) {
+    var errors = ViewData["Errors"] as List<string>;
+    if (errors != null && errors.Any()) {
+        <div class="alert alert-danger" role="alert">
+            <ul>
+                @foreach (var err in errors) {
+                    <li>@err</li>
+                }
+            </ul>
+        </div>
+    }
+}
+
+<form asp-action="ImportSeats" asp-route-id="@ViewBag.ExamId" method="post" enctype="multipart/form-data">
+    <div class="mb-3">
+        <label for="excelFile" class="form-label">Excel File</label>
+        <input type="file" class="form-control" name="excelFile" required />
+    </div>
+    <div class="mb-3">
+        <label for="startRow" class="form-label">Start Row (default 2)</label>
+        <input type="number" class="form-control" name="startRow" value="2" min="1" />
+    </div>
+    <button type="submit" class="btn btn-success">Upload</button>
+    <a asp-action="Details" asp-route-id="@ViewBag.ExamId" class="btn btn-secondary ms-2">Cancel</a>
+</form>

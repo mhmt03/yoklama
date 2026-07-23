@@ -1,0 +1,49 @@
+@{
+    ViewData["Title"] = "Giriş";
+    var selectedRole = ViewBag.SelectedRole as string ?? "Admin";
+}
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" integrity="sha384-..." crossorigin="anonymous" />
+
+<div class="container mt-5" style="max-width: 420px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-4">
+            <h2 class="mb-4 text-center">Giriş</h2>
+            <form method="post" asp-action="Login" asp-controller="Account">
+                <div class="mb-3">
+                    <label class="form-label">Rol Seçimi</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="role" id="roleAdmin" value="Admin" @(selectedRole == "Admin" ? "checked" : "") />
+                        <label class="form-check-label" for="roleAdmin">Admin</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="role" id="roleYoklamaci" value="Yoklamaci" @(selectedRole == "Yoklamaci" ? "checked" : "") />
+                        <label class="form-check-label" for="roleYoklamaci">Yoklamacı</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="role" id="roleSuperYoklamaci" value="SuperYoklamaci" @(selectedRole == "SuperYoklamaci" ? "checked" : "") />
+                        <label class="form-check-label" for="roleSuperYoklamaci">Super Yoklamacı</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="role" id="rolePansiyonGorevlisi" value="PansiyonGorevlisi" @(selectedRole == "PansiyonGorevlisi" ? "checked" : "") />
+                        <label class="form-check-label" for="rolePansiyonGorevlisi">Pansiyon Görevlisi</label>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="username" class="form-label">Kullanıcı Adı</label>
+                    <input type="text" class="form-control" id="username" name="username" required />
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">Şifre</label>
+                    <input type="password" class="form-control" id="password" name="password" required />
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Giriş Yap</button>
+
+                <div class="mt-3">
+                    <div asp-validation-summary="All" class="text-danger"></div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
