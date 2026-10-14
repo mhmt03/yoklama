@@ -32,9 +32,12 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "concurrently": "^9.2.5",
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "dev": "concurrently -n \"API,APP\" -c \"blue,green\" \"dotnet run --project server/OgretmenAjanda.Api\" \"expo start\"",
+    "server": "dotnet run --project server/OgretmenAjanda.Api",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -42,3 +45,4 @@
   },
   "private": true
 }
+
