@@ -322,16 +322,25 @@ namespace OgretmenAjanda.Api.Models
         [MaxLength(30)]
         public string UserRole { get; set; } = string.Empty;
 
-        [Required, MaxLength(50)]
-        public string ActionType { get; set; } = string.Empty; // CREATE, UPDATE, DELETE, SEND_NOTIFICATION...
+        [MaxLength(100)]
+        public string? UserName { get; set; }
+
+        [MaxLength(150)]
+        public string? UserFullName { get; set; }
 
         [Required, MaxLength(50)]
-        public string EntityName { get; set; } = string.Empty; // Assignment, Evaluation, Student...
+        public string ActionType { get; set; } = string.Empty; // LOGIN, CREATE, UPDATE, DELETE, SCHEDULE_SYNC...
 
-        [MaxLength(50)]
+        [Required, MaxLength(50)]
+        public string EntityName { get; set; } = string.Empty; // User, Student, Class, Lesson, ScheduleItem, YearlyPlanItem...
+
+        [MaxLength(100)]
         public string? EntityId { get; set; }
 
-        public string? DetailsJson { get; set; } // Eski ve yeni değerler
+        [MaxLength(1000)]
+        public string? Description { get; set; }
+
+        public string? DetailsJson { get; set; } // Ek parametreler veya eski/yeni değerler
 
         public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 

@@ -19,9 +19,10 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Colors } from '../theme/colors';
-import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession } from '../services/apiClient';
+import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession, getAuthToken } from '../services/apiClient';
 import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult, readUriAsBase64 } from '../services/aiScheduleParser';
 import { parseStudentsFromExcel, saveParsedStudentsToServer, ParsedExcelStudent, generateStudentTemplateExcel } from '../services/excelStudentParser';
 import { analyzeUploadedDocument, convertRowsWithMapping, DocumentAnalysisResult, ColumnMappingSelection } from '../utils/columnMappingService';
@@ -43,7 +44,7 @@ import {
   GeminiUsageStats,
 } from '../utils/geminiScheduleService';
 
-type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'ai_settings';
+type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'logs' | 'ai_settings';
 
 export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Okul ve Genel State
@@ -77,6 +78,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('all');
   const [photoUploadingId, setPhotoUploadingId] = useState<string | null>(null);
+
+  // İşlem Logları & Denetim Raporu State
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [logUsers, setLogUsers] = useState<any[]>([]);
+  const [logActionTypes, setLogActionTypes] = useState<string[]>([]);
+  const [logStats, setLogStats] = useState<{ total: number; todayCount: number }>({ total: 0, todayCount: 0 });
+  const [selectedLogUser, setSelectedLogUser] = useState<string>('all');
+  const [selectedLogRole, setSelectedLogRole] = useState<string>('all');
+  const [selectedLogAction, setSelectedLogAction] = useState<string>('all');
+  const [selectedLogTime, setSelectedLogTime] = useState<'all' | 'today' | 'last7' | 'month'>('all');
+  const [logSearch, setLogSearch] = useState('');
+  const [exportingLogs, setExportingLogs] = useState(false);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
   // Okul Düzenleme Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -224,6 +239,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       loadClasses(schoolId),
       loadLessons(schoolId),
       loadStudents(schoolId),
+      loadAuditLogs(schoolId),
     ]);
   };
 
@@ -1372,6 +1388,126 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     return matchesSearch && `${s.grade}-${s.section}` === selectedClassFilter;
   });
 
+  // İşlem Loglarını Sunucudan Çek (Filtrelerle)
+  const loadAuditLogs = async (schoolId?: string, overrideFilters?: any) => {
+    const sId = schoolId || selectedSchool?.id;
+    if (!sId) return;
+
+    try {
+      setLoadingLogs(true);
+      let query = `schools/${sId}/audit-logs?limit=300`;
+
+      const userF = overrideFilters?.user !== undefined ? overrideFilters.user : selectedLogUser;
+      const roleF = overrideFilters?.role !== undefined ? overrideFilters.role : selectedLogRole;
+      const actionF = overrideFilters?.action !== undefined ? overrideFilters.action : selectedLogAction;
+      const timeF = overrideFilters?.time !== undefined ? overrideFilters.time : selectedLogTime;
+      const searchF = overrideFilters?.search !== undefined ? overrideFilters.search : logSearch;
+
+      if (userF && userF !== 'all') {
+        query += `&userId=${userF}`;
+      }
+      if (roleF && roleF !== 'all') {
+        query += `&userRole=${roleF}`;
+      }
+      if (actionF && actionF !== 'all') {
+        query += `&actionType=${encodeURIComponent(actionF)}`;
+      }
+      if (searchF && searchF.trim()) {
+        query += `&search=${encodeURIComponent(searchF.trim())}`;
+      }
+
+      const now = new Date();
+      if (timeF === 'today') {
+        query += `&startDate=${now.toISOString().split('T')[0]}`;
+      } else if (timeF === 'last7') {
+        const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        query += `&startDate=${d.toISOString().split('T')[0]}`;
+      } else if (timeF === 'month') {
+        const m = new Date(now.getFullYear(), now.getMonth(), 1);
+        query += `&startDate=${m.toISOString().split('T')[0]}`;
+      }
+
+      const res = await apiRequest<any>(query);
+      setLoadingLogs(false);
+
+      if (res.success && res.data) {
+        setLogs(res.data.logs || []);
+        setLogStats({
+          total: res.data.total || (res.data.logs?.length || 0),
+          todayCount: res.data.todayCount || 0,
+        });
+        if (res.data.users) setLogUsers(res.data.users);
+        if (res.data.actionTypes) setLogActionTypes(res.data.actionTypes);
+      }
+    } catch (e: any) {
+      setLoadingLogs(false);
+      console.error('Audit logs yükleme hatası:', e);
+    }
+  };
+
+  // Log Raporunu Dosya Olarak İndir / Paylaş (.txt veya .csv)
+  const handleExportLogs = async (format: 'txt' | 'csv') => {
+    if (!selectedSchool?.id) return;
+    try {
+      setExportingLogs(true);
+      let query = `schools/${selectedSchool.id}/audit-logs/export?format=${format}`;
+      if (selectedLogUser && selectedLogUser !== 'all') query += `&userId=${selectedLogUser}`;
+      if (selectedLogRole && selectedLogRole !== 'all') query += `&userRole=${selectedLogRole}`;
+      if (selectedLogAction && selectedLogAction !== 'all') query += `&actionType=${encodeURIComponent(selectedLogAction)}`;
+      if (logSearch.trim()) query += `&search=${encodeURIComponent(logSearch.trim())}`;
+
+      const now = new Date();
+      if (selectedLogTime === 'today') {
+        query += `&startDate=${now.toISOString().split('T')[0]}`;
+      } else if (selectedLogTime === 'last7') {
+        const d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        query += `&startDate=${d.toISOString().split('T')[0]}`;
+      } else if (selectedLogTime === 'month') {
+        const m = new Date(now.getFullYear(), now.getMonth(), 1);
+        query += `&startDate=${m.toISOString().split('T')[0]}`;
+      }
+
+      const session = await getActiveUserSession();
+      const token = await getAuthToken();
+      const url = `${DEFAULT_API_URL}${query}`;
+
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Rapor sunucudan alınamadı (${response.status})`);
+      }
+
+      const textData = await response.text();
+      const fileExt = format === 'csv' ? 'csv' : 'txt';
+      const cleanSchool = (selectedSchool.name || 'okul').replace(/[^a-zA-Z0-9]/g, '_');
+      const fileName = `${cleanSchool}_islem_loglari_${Date.now()}.${fileExt}`;
+      const filePath = `${FileSystem.cacheDirectory}${fileName}`;
+
+      await FileSystem.writeAsStringAsync(filePath, textData, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      setExportingLogs(false);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(filePath, {
+          mimeType: format === 'csv' ? 'text/csv' : 'text/plain',
+          dialogTitle: `${selectedSchool.name} İşlem Logları Raporu`,
+        });
+      } else {
+        await Clipboard.setStringAsync(textData.slice(0, 5000));
+        Alert.alert('Rapor Hazır', 'Rapor cihaz panosuna kopyalandı.');
+      }
+    } catch (e: any) {
+      setExportingLogs(false);
+      Alert.alert('Rapor Hatası', e?.message || 'Log raporu indirilemedi.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Üst Bar */}
@@ -1568,6 +1704,19 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             <Ionicons name="sparkles" size={15} color={activeTab === 'schedule' ? '#4F46E5' : '#64748B'} />
             <Text style={[styles.tabButtonText, activeTab === 'schedule' && styles.tabButtonTextActive]}>
               AI Çarşaf
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'logs' && styles.tabButtonActive]}
+            onPress={() => {
+              setActiveTab('logs');
+              loadAuditLogs();
+            }}
+          >
+            <Ionicons name="document-text" size={15} color={activeTab === 'logs' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'logs' && styles.tabButtonTextActive]}>
+              📜 Loglar {logStats.total > 0 ? `(${logStats.total})` : ''}
             </Text>
           </TouchableOpacity>
 
@@ -2054,7 +2203,284 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               </View>
             )}
 
-            {/* 6. AI & API AYARLARI SEKMESİ */}
+            {/* 6. İŞLEM LOGLARI & DENETİM RAPORU SEKMESİ */}
+            {activeTab === 'logs' && (
+              <View>
+                {/* Başlık ve Rapor Butonları */}
+                <View style={styles.sectionHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sectionTitle}>İşlem Logları & Rapor ({logStats.total})</Text>
+                    <Text style={styles.sectionSubTitle}>
+                      Tüm kullanıcıların okul içindeki işlemleri kayıt altındadır.
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                    <TouchableOpacity
+                      style={styles.logReportExportBtn}
+                      onPress={() => handleExportLogs('txt')}
+                      disabled={exportingLogs}
+                    >
+                      <Ionicons name="document-text-outline" size={13} color="#4F46E5" />
+                      <Text style={styles.logReportExportBtnText}>.TXT Raporu</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.logReportExportExcelBtn}
+                      onPress={() => handleExportLogs('csv')}
+                      disabled={exportingLogs}
+                    >
+                      <Ionicons name="stats-chart-outline" size={13} color="#059669" />
+                      <Text style={styles.logReportExportExcelBtnText}>Excel / CSV</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.logRefreshBtn}
+                      onPress={() => loadAuditLogs()}
+                      disabled={loadingLogs}
+                    >
+                      <Ionicons name="refresh" size={14} color="#64748B" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Özet Kartları */}
+                <View style={styles.logStatsRow}>
+                  <View style={styles.logStatCard}>
+                    <Ionicons name="layers" size={16} color="#4F46E5" />
+                    <Text style={styles.logStatValue}>{logStats.total}</Text>
+                    <Text style={styles.logStatLabel}>Toplam Kayıt</Text>
+                  </View>
+                  <View style={[styles.logStatCard, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
+                    <Ionicons name="time" size={16} color="#059669" />
+                    <Text style={[styles.logStatValue, { color: '#065F46' }]}>{logStats.todayCount}</Text>
+                    <Text style={styles.logStatLabel}>Bugünkü İşlemler</Text>
+                  </View>
+                  <View style={[styles.logStatCard, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}>
+                    <Ionicons name="people" size={16} color="#B45309" />
+                    <Text style={[styles.logStatValue, { color: '#92400E' }]}>{logUsers.length}</Text>
+                    <Text style={styles.logStatLabel}>Kayıtlı Kullanıcı</Text>
+                  </View>
+                </View>
+
+                {/* Arama Kutusu */}
+                <View style={styles.logSearchContainer}>
+                  <Ionicons name="search" size={16} color="#64748B" />
+                  <TextInput
+                    style={styles.logSearchInput}
+                    placeholder="Loglarda ara (Kullanıcı, işlem veya açıklama)..."
+                    placeholderTextColor="#94A3B8"
+                    value={logSearch}
+                    onChangeText={(text) => {
+                      setLogSearch(text);
+                    }}
+                    onSubmitEditing={() => loadAuditLogs(undefined, { search: logSearch })}
+                    returnKeyType="search"
+                  />
+                  {logSearch.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        setLogSearch('');
+                        loadAuditLogs(undefined, { search: '' });
+                      }}
+                    >
+                      <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Filtre: Zaman Dilimi */}
+                <View style={styles.filterSection}>
+                  <Text style={styles.filterSectionLabel}>ZAMAN FİLTRESİ:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
+                    {[
+                      { id: 'all', label: 'Tüm Zamanlar' },
+                      { id: 'today', label: 'Bugün' },
+                      { id: 'last7', label: 'Son 7 Gün' },
+                      { id: 'month', label: 'Bu Ay' },
+                    ].map((f) => {
+                      const isSel = selectedLogTime === f.id;
+                      return (
+                        <TouchableOpacity
+                          key={f.id}
+                          style={[styles.logFilterChip, isSel && styles.logFilterChipActive]}
+                          onPress={() => {
+                            setSelectedLogTime(f.id as any);
+                            loadAuditLogs(undefined, { time: f.id });
+                          }}
+                        >
+                          <Text style={[styles.logFilterChipText, isSel && styles.logFilterChipTextActive]}>{f.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                {/* Filtre: Kullanıcı Rolü */}
+                <View style={styles.filterSection}>
+                  <Text style={styles.filterSectionLabel}>KULLANICI ROLÜ:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
+                    {[
+                      { id: 'all', label: 'Tüm Roller' },
+                      { id: 'SchoolAdmin', label: '🛡️ Okul Admini' },
+                      { id: 'Teacher', label: '👨‍🏫 Öğretmen' },
+                      { id: 'Student', label: '🎓 Öğrenci' },
+                    ].map((r) => {
+                      const isSel = selectedLogRole === r.id;
+                      return (
+                        <TouchableOpacity
+                          key={r.id}
+                          style={[styles.logFilterChip, isSel && styles.logFilterChipActive]}
+                          onPress={() => {
+                            setSelectedLogRole(r.id);
+                            loadAuditLogs(undefined, { role: r.id });
+                          }}
+                        >
+                          <Text style={[styles.logFilterChipText, isSel && styles.logFilterChipTextActive]}>{r.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                {/* Filtre: Kullanıcı Seçici (Varsa) */}
+                {logUsers.length > 0 && (
+                  <View style={styles.filterSection}>
+                    <Text style={styles.filterSectionLabel}>KULLANICI SEÇ:</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
+                      <TouchableOpacity
+                        style={[styles.logFilterChip, selectedLogUser === 'all' && styles.logFilterChipActive]}
+                        onPress={() => {
+                          setSelectedLogUser('all');
+                          loadAuditLogs(undefined, { user: 'all' });
+                        }}
+                      >
+                        <Text style={[styles.logFilterChipText, selectedLogUser === 'all' && styles.logFilterChipTextActive]}>
+                          Tüm Kullanıcılar
+                        </Text>
+                      </TouchableOpacity>
+                      {logUsers.map((u) => {
+                        const isSel = selectedLogUser === u.id;
+                        return (
+                          <TouchableOpacity
+                            key={u.id}
+                            style={[styles.logFilterChip, isSel && styles.logFilterChipActive]}
+                            onPress={() => {
+                              setSelectedLogUser(u.id);
+                              loadAuditLogs(undefined, { user: u.id });
+                            }}
+                          >
+                            <Text style={[styles.logFilterChipText, isSel && styles.logFilterChipTextActive]}>
+                              {u.fullName || u.username}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* Filtre: İşlem Türü (ActionType) */}
+                {logActionTypes.length > 0 && (
+                  <View style={styles.filterSection}>
+                    <Text style={styles.filterSectionLabel}>İŞLEM TÜRÜ:</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
+                      <TouchableOpacity
+                        style={[styles.logFilterChip, selectedLogAction === 'all' && styles.logFilterChipActive]}
+                        onPress={() => {
+                          setSelectedLogAction('all');
+                          loadAuditLogs(undefined, { action: 'all' });
+                        }}
+                      >
+                        <Text style={[styles.logFilterChipText, selectedLogAction === 'all' && styles.logFilterChipTextActive]}>
+                          Tüm İşlemler
+                        </Text>
+                      </TouchableOpacity>
+                      {logActionTypes.map((act) => {
+                        const isSel = selectedLogAction === act;
+                        return (
+                          <TouchableOpacity
+                            key={act}
+                            style={[styles.logFilterChip, isSel && styles.logFilterChipActive]}
+                            onPress={() => {
+                              setSelectedLogAction(act);
+                              loadAuditLogs(undefined, { action: act });
+                            }}
+                          >
+                            <Text style={[styles.logFilterChipText, isSel && styles.logFilterChipTextActive]}>
+                              {act}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                )}
+
+                {/* Log Listesi */}
+                {loadingLogs ? (
+                  <ActivityIndicator size="small" color="#4F46E5" style={{ marginVertical: 24 }} />
+                ) : logs.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="document-text-outline" size={44} color="#94A3B8" />
+                    <Text style={styles.emptyText}>Seçilen filtrelere uygun işlem logu bulunamadı.</Text>
+                  </View>
+                ) : (
+                  logs.map((item) => {
+                    const isExpanded = expandedLogId === item.id;
+                    const isDelete = item.actionType.includes('DELETE');
+                    const isCreate = item.actionType.includes('CREATE') || item.actionType.includes('REGISTER');
+                    const isSchedule = item.actionType.includes('SCHEDULE') || item.actionType.includes('PLAN');
+                    const isLogin = item.actionType.includes('LOGIN');
+
+                    const badgeBg = isDelete ? '#FEE2E2' : isCreate ? '#DCFCE7' : isSchedule ? '#EDE9FE' : isLogin ? '#E0F2FE' : '#F1F5F9';
+                    const badgeColor = isDelete ? '#DC2626' : isCreate ? '#16A34A' : isSchedule ? '#7C3AED' : isLogin ? '#0284C7' : '#475569';
+
+                    return (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={styles.logCard}
+                        onPress={() => setExpandedLogId(isExpanded ? null : item.id)}
+                        activeOpacity={0.8}
+                      >
+                        {/* Üst Satır: İşlem Türü ve Tarih */}
+                        <View style={styles.logCardTop}>
+                          <View style={[styles.logActionBadge, { backgroundColor: badgeBg }]}>
+                            <Text style={[styles.logActionBadgeText, { color: badgeColor }]}>
+                              {item.actionType}
+                            </Text>
+                          </View>
+                          <Text style={styles.logTimestamp}>{item.localTimeString}</Text>
+                        </View>
+
+                        {/* Açıklama */}
+                        <Text style={styles.logDescription}>{item.description || item.actionType}</Text>
+
+                        {/* Kullanıcı ve Rol Bilgisi */}
+                        <View style={styles.logUserRow}>
+                          <Ionicons name="person-circle-outline" size={15} color="#64748B" />
+                          <Text style={styles.logUserName}>
+                            {item.userFullName || item.userName || 'Sistem'}
+                          </Text>
+                          <View style={styles.logRoleBadge}>
+                            <Text style={styles.logRoleBadgeText}>{item.userRole}</Text>
+                          </View>
+                          {item.ipAddress ? (
+                            <Text style={styles.logIpAddress}>• IP: {item.ipAddress}</Text>
+                          ) : null}
+                        </View>
+
+                        {/* Genişletilebilir Detay (DetailsJson) */}
+                        {isExpanded && item.detailsJson ? (
+                          <View style={styles.logDetailsBox}>
+                            <Text style={styles.logDetailsText}>{item.detailsJson}</Text>
+                          </View>
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  })
+                )}
+              </View>
+            )}
+
+            {/* 7. AI & API AYARLARI SEKMESİ */}
             {activeTab === 'ai_settings' && (
               <View>
                 {/* Bilgilendirme Banner */}
@@ -4820,5 +5246,200 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+  },
+  sectionSubTitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  logReportExportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  logReportExportBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  logReportExportExcelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  logReportExportExcelBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  logRefreshBtn: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  logStatCard: {
+    flex: 1,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 10,
+    padding: 10,
+    alignItems: 'center',
+  },
+  logStatValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#4F46E5',
+    marginTop: 2,
+  },
+  logStatLabel: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 1,
+    fontWeight: '600',
+  },
+  logSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    marginBottom: 10,
+  },
+  logSearchInput: {
+    flex: 1,
+    fontSize: 12,
+    color: '#1E293B',
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+  },
+  filterSection: {
+    marginBottom: 8,
+  },
+  filterSectionLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+    marginBottom: 4,
+  },
+  filterChipsRow: {
+    gap: 6,
+    paddingBottom: 2,
+  },
+  logFilterChip: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  logFilterChipActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4F46E5',
+  },
+  logFilterChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  logFilterChipTextActive: {
+    color: '#FFF',
+    fontWeight: '700',
+  },
+  logCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  logCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  logActionBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  logActionBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  logTimestamp: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  logDescription: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E293B',
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  logUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flexWrap: 'wrap',
+  },
+  logUserName: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  logRoleBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  logRoleBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  logIpAddress: {
+    fontSize: 10,
+    color: '#94A3B8',
+  },
+  logDetailsBox: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  logDetailsText: {
+    fontSize: 11,
+    color: '#475569',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
 });

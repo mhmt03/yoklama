@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using OgretmenAjanda.Api.Data;
 using OgretmenAjanda.Api.DTOs;
 using OgretmenAjanda.Api.Models;
+using OgretmenAjanda.Api.Services;
 
 namespace OgretmenAjanda.Api.Controllers
 {
@@ -17,14 +18,40 @@ namespace OgretmenAjanda.Api.Controllers
     public class SyncController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly IAuditLogService _auditLogService;
 
-        public SyncController(AppDbContext context)
+        public SyncController(AppDbContext context, IAuditLogService auditLogService)
         {
             _context = context;
+            _auditLogService = auditLogService;
         }
 
         private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         private string CurrentUserRole => User.FindFirstValue(ClaimTypes.Role)!;
+        private string? CurrentUserName => User.FindFirstValue(ClaimTypes.Name) ?? User.Identity?.Name;
+
+        private async Task LogActionAsync(Guid? schoolId, string actionType, string entityName, string? entityId, string description, string? detailsJson = null)
+        {
+            try
+            {
+                var user = await _context.Users.FindAsync(CurrentUserId);
+                await _auditLogService.LogAsync(
+                    _context,
+                    schoolId,
+                    CurrentUserId,
+                    user?.Username ?? CurrentUserName,
+                    user?.FullName,
+                    CurrentUserRole,
+                    actionType,
+                    entityName,
+                    entityId,
+                    description,
+                    detailsJson,
+                    HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                );
+            }
+            catch {}
+        }
 
         // 1. Öğrencileri Toplu Kaydet (Atomik Batch - Admin telefonu hazırlar, tek seferde kaydeder)
         [HttpPost("students/batch")]
@@ -357,6 +384,7 @@ namespace OgretmenAjanda.Api.Controllers
             });
 
             await _context.SaveChangesAsync();
+            await LogActionAsync(request.SchoolId, "BATCH_SCHEDULE_SYNCED", "ScheduleItem", null, $"{request.Schedules.Count} ders programı kaydı yüklendi. (Mod: {(request.OverwriteAll ? "Sıfırdan Yaz" : "Güncelle")})");
             return Ok(new { message = request.OverwriteAll ? "Ders programı sıfırlanıp yeniden yazıldı." : "Ders programı başarıyla güncellendi." });
         }
 
@@ -408,6 +436,7 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             await _context.SaveChangesAsync();
+            await LogActionAsync(request.SchoolId, "BATCH_YEARLY_PLANS_SYNCED", "YearlyPlanItem", null, $"{request.PlanItems.Count} adet haftalık yıllık plan kaydı sisteme yüklendi.");
             return Ok(new { message = "Yıllık planlar başarıyla kaydedildi." });
         }
 

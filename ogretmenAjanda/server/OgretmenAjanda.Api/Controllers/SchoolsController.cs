@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using OgretmenAjanda.Api.Data;
 using OgretmenAjanda.Api.DTOs;
 using OgretmenAjanda.Api.Models;
+using OgretmenAjanda.Api.Services;
 
 namespace OgretmenAjanda.Api.Controllers
 {
@@ -17,14 +18,40 @@ namespace OgretmenAjanda.Api.Controllers
     public class SchoolsController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly IAuditLogService _auditLogService;
 
-        public SchoolsController(AppDbContext context)
+        public SchoolsController(AppDbContext context, IAuditLogService auditLogService)
         {
             _context = context;
+            _auditLogService = auditLogService;
         }
 
         private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         private string CurrentUserRole => User.FindFirstValue(ClaimTypes.Role)!;
+        private string? CurrentUserName => User.FindFirstValue(ClaimTypes.Name) ?? User.Identity?.Name;
+
+        private async Task LogActionAsync(Guid? schoolId, string actionType, string entityName, string? entityId, string description, string? detailsJson = null)
+        {
+            try
+            {
+                var adminUser = await _context.Users.FindAsync(CurrentUserId);
+                await _auditLogService.LogAsync(
+                    _context,
+                    schoolId,
+                    CurrentUserId,
+                    adminUser?.Username ?? CurrentUserName,
+                    adminUser?.FullName,
+                    CurrentUserRole,
+                    actionType,
+                    entityName,
+                    entityId,
+                    description,
+                    detailsJson,
+                    HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                );
+            }
+            catch {}
+        }
 
         // Adminin tanımladığı okulları listele
         [HttpGet("my-schools")]
@@ -706,7 +733,76 @@ namespace OgretmenAjanda.Api.Controllers
             var students = await _context.Students.Where(s => s.SchoolId == schoolId).ToListAsync();
             _context.Students.RemoveRange(students);
             await _context.SaveChangesAsync();
+            await LogActionAsync(schoolId, "ALL_STUDENTS_DELETED", "Student", null, $"{students.Count} adet öğrenci kaydı silindi.");
             return Ok(new { message = $"{students.Count} adet öğrenci kaydı başarıyla silindi." });
+        }
+
+        // 15. Okul İşlem Loglarını Listele (Kullanıcı, Rol, İşlem Türü ve Tarih Filtreli)
+        [HttpGet("{schoolId}/audit-logs")]
+        public async Task<IActionResult> GetSchoolAuditLogs(
+            Guid schoolId,
+            [FromQuery] Guid? userId,
+            [FromQuery] string? userRole,
+            [FromQuery] string? actionType,
+            [FromQuery] string? search,
+            [FromQuery] DateTime? startDate,
+            [FromQuery] DateTime? endDate,
+            [FromQuery] int limit = 200
+        )
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (school.AdminUserId != CurrentUserId && CurrentUserRole != UserRoles.SuperAdmin)
+                return Forbid();
+
+            var result = await _auditLogService.GetSchoolLogsAsync(
+                _context,
+                schoolId,
+                userId,
+                userRole,
+                actionType,
+                search,
+                startDate,
+                endDate,
+                limit
+            );
+
+            return Ok(result);
+        }
+
+        // 16. Okul İşlem Loglarını Dosya Olarak İndir / Raporla (.txt veya .csv)
+        [HttpGet("{schoolId}/audit-logs/export")]
+        public async Task<IActionResult> ExportSchoolAuditLogs(
+            Guid schoolId,
+            [FromQuery] string format = "txt",
+            [FromQuery] Guid? userId = null,
+            [FromQuery] string? userRole = null,
+            [FromQuery] string? actionType = null,
+            [FromQuery] string? search = null,
+            [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null
+        )
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (school.AdminUserId != CurrentUserId && CurrentUserRole != UserRoles.SuperAdmin)
+                return Forbid();
+
+            var (content, contentType, fileName) = await _auditLogService.ExportLogsAsync(
+                _context,
+                schoolId,
+                format,
+                userId,
+                userRole,
+                actionType,
+                search,
+                startDate,
+                endDate
+            );
+
+            return File(content, contentType, fileName);
         }
     }
 
