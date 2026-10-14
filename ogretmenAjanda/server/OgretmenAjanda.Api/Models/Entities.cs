@@ -289,14 +289,20 @@ namespace OgretmenAjanda.Api.Models
 
         public Guid? ReceiverId { get; set; } // Bireysel ise
 
+        [MaxLength(120)]
+        public string? ReceiverName { get; set; }
+
         [MaxLength(30)]
         public string? TargetGrade { get; set; } // Sınıf geneliyse (örn: 10)
 
         [MaxLength(30)]
         public string? TargetSection { get; set; } // Şube geneliyse (örn: A)
 
-        [MaxLength(30)]
-        public string? TargetRole { get; set; } // "TEACHER", "STUDENT", "ALL"
+        [MaxLength(50)]
+        public string? TargetRole { get; set; } // "TEACHER", "STAFF", "MY_STUDENTS", "GRADE", "SECTION", "SPECIFIC_STUDENT", "SPECIFIC_TEACHER"
+
+        [MaxLength(150)]
+        public string? TargetDescription { get; set; }
 
         [Required]
         public string Content { get; set; } = string.Empty;

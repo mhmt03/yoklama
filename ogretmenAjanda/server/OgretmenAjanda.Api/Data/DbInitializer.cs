@@ -25,6 +25,8 @@ namespace OgretmenAjanda.Api.Data
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"LastAiRequestTime\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"LastTokensUsed\" INTEGER DEFAULT 0;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"ReceiverName\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"TargetDescription\" TEXT;"); } catch { }
 
             try
             {

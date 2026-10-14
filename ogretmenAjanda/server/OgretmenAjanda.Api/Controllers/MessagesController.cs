@@ -29,14 +29,24 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpGet]
         public async Task<IActionResult> GetMyMessages([FromQuery] Guid schoolId)
         {
+            var isStaffOrAdmin = CurrentUserRole.Equals("ADMIN", StringComparison.OrdinalIgnoreCase) ||
+                                 CurrentUserRole.Equals("STAFF", StringComparison.OrdinalIgnoreCase) ||
+                                 CurrentUserRole.Equals("SCHOOL_ADMIN", StringComparison.OrdinalIgnoreCase);
+
             var messages = await _context.AppMessages
                 .Where(m => m.SchoolId == schoolId &&
                            (m.ReceiverId == CurrentUserId ||
                             m.SenderId == CurrentUserId ||
                             m.TargetRole == "ALL" ||
-                            m.TargetRole == CurrentUserRole))
+                            m.TargetRole == "MY_STUDENTS" ||
+                            m.TargetRole == "GRADE" ||
+                            m.TargetRole == "SECTION" ||
+                            m.TargetRole == "SPECIFIC_STUDENT" ||
+                            m.TargetRole == "SPECIFIC_TEACHER" ||
+                            m.TargetRole == CurrentUserRole ||
+                            (isStaffOrAdmin && m.TargetRole == "STAFF")))
                 .OrderByDescending(m => m.CreatedAt)
-                .Take(50)
+                .Take(100)
                 .ToListAsync();
 
             return Ok(messages);
@@ -57,9 +67,11 @@ namespace OgretmenAjanda.Api.Controllers
                 SenderName = sender.FullName,
                 SenderRole = CurrentUserRole,
                 ReceiverId = request.ReceiverId,
+                ReceiverName = request.ReceiverName,
                 TargetGrade = request.TargetGrade,
                 TargetSection = request.TargetSection,
                 TargetRole = request.TargetRole,
+                TargetDescription = request.TargetDescription,
                 Content = request.Content.Trim(),
                 CreatedAt = DateTime.UtcNow,
                 IsRead = false
@@ -75,7 +87,7 @@ namespace OgretmenAjanda.Api.Controllers
                 ActionType = "MESSAGE_SENT",
                 EntityName = "AppMessage",
                 EntityId = message.Id.ToString(),
-                DetailsJson = $"Kime: {request.TargetRole ?? request.ReceiverId?.ToString() ?? "Hedef Sınıf"}, İçerik: {message.Content}",
+                DetailsJson = $"Kime: {request.TargetDescription ?? request.TargetRole ?? request.ReceiverName ?? "Alıcı"}, İçerik: {message.Content}",
                 Timestamp = DateTime.UtcNow
             });
 
@@ -101,9 +113,11 @@ namespace OgretmenAjanda.Api.Controllers
     {
         public Guid SchoolId { get; set; }
         public Guid? ReceiverId { get; set; }
+        public string? ReceiverName { get; set; }
         public string? TargetGrade { get; set; }
         public string? TargetSection { get; set; }
-        public string? TargetRole { get; set; } // "TEACHER", "STAFF", "STUDENT", "ALL"
+        public string? TargetRole { get; set; } // "TEACHER", "STAFF", "MY_STUDENTS", "GRADE", "SECTION", "SPECIFIC_STUDENT", "SPECIFIC_TEACHER"
+        public string? TargetDescription { get; set; }
         public string Content { get; set; } = string.Empty;
     }
 
