@@ -55,6 +55,7 @@ import { apiRequest } from '../services/apiClient';
 
 import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
 import { useDrawer } from '../context/DrawerContext';
+import { syncScheduleFromSchool } from '../services/scheduleSyncService';
 
 export const ScheduleScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -70,6 +71,7 @@ export const ScheduleScreen: React.FC = () => {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [courses, setCourses] = useState<CourseName[]>([]);
   const [activeSchool, setActiveSchool] = useState<School | null>(null);
+  const [syncingSchedule, setSyncingSchedule] = useState(false);
 
   // Schedule Photo State
   const [photoMenuVisible, setPhotoMenuVisible] = useState(false);
@@ -216,6 +218,35 @@ export const ScheduleScreen: React.FC = () => {
     } catch (e) {
       Alert.alert('Hata', 'Kayıt temizlenemedi.');
     }
+  };
+
+  const handleSyncScheduleFromSchool = async () => {
+    Alert.alert(
+      'Okuldan Ders Programını Çek',
+      'Okul idaresi (Admin) tarafından sisteme yüklenmiş olan çarşaf ders programından adınıza atanmış ders saatleri çekilecek ve haftalık programınız otomatik olarak güncellenecektir.\n\nDevam etmek istiyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Programı Çek ve Yükle',
+          onPress: async () => {
+            try {
+              setSyncingSchedule(true);
+              const res = await syncScheduleFromSchool(activeSchool?.code);
+              setSyncingSchedule(false);
+              if (res.success) {
+                Alert.alert('Başarılı ✨', res.message);
+                loadData();
+              } else {
+                Alert.alert('Bilgi', res.message);
+              }
+            } catch (e: any) {
+              setSyncingSchedule(false);
+              Alert.alert('Hata', e?.message || 'Ders programı çekilemedi.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleExportSchedule = async () => {
@@ -636,6 +667,23 @@ export const ScheduleScreen: React.FC = () => {
 
         <View style={styles.headerActionsBar}>
           <TouchableOpacity
+            style={styles.schoolSyncHeaderBtn}
+            onPress={handleSyncScheduleFromSchool}
+            disabled={syncingSchedule}
+            activeOpacity={0.8}
+            accessibilityLabel="Okuldan Programı Çek"
+          >
+            {syncingSchedule ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <>
+                <Ionicons name="cloud-download" size={15} color="#FFF" />
+                <Text style={styles.schoolSyncHeaderBtnText}>Okuldan Çek</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={styles.photoHeaderBtn}
             onPress={() => setPhotoMenuVisible(true)}
             activeOpacity={0.8}
@@ -760,11 +808,17 @@ export const ScheduleScreen: React.FC = () => {
             <Text style={styles.emptySlotsText}>Ders saati tanımlı değil.</Text>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
               <Button
+                title="Okuldan Programı Çek"
+                size="sm"
+                onPress={handleSyncScheduleFromSchool}
+                loading={syncingSchedule}
+              />
+              <Button
                 title="Saatleri Tanımla"
                 size="sm"
+                variant="outline"
                 onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'slots' })}
               />
-              
             </View>
           </Card>
         ) : (
@@ -2458,6 +2512,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.2,
+  },
+  schoolSyncHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#059669',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 8,
+    ...Shadows.small,
+  },
+  schoolSyncHeaderBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   photoHeaderBtn: {
     flexDirection: 'row',

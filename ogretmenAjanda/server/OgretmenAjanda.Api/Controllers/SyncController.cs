@@ -413,11 +413,26 @@ namespace OgretmenAjanda.Api.Controllers
 
         // 6. Yıllık Planı Çek
         [HttpGet("yearly-plans")]
-        public async Task<IActionResult> GetYearlyPlans([FromQuery] Guid schoolId, [FromQuery] string lessonName, [FromQuery] string grade)
+        public async Task<IActionResult> GetYearlyPlans([FromQuery] Guid schoolId, [FromQuery] string? lessonName, [FromQuery] string? grade)
         {
-            var plans = await _context.YearlyPlanItems
-                .Where(p => p.SchoolId == schoolId && p.LessonName == lessonName && p.Grade == grade)
-                .OrderBy(p => p.WeekNumber)
+            var query = _context.YearlyPlanItems.Where(p => p.SchoolId == schoolId);
+
+            if (!string.IsNullOrWhiteSpace(lessonName))
+            {
+                var normLesson = lessonName.Trim().ToLower();
+                query = query.Where(p => p.LessonName.ToLower() == normLesson || p.LessonName.ToLower().Contains(normLesson) || normLesson.Contains(p.LessonName.ToLower()));
+            }
+
+            if (!string.IsNullOrWhiteSpace(grade))
+            {
+                var normGrade = grade.Trim().ToLower();
+                query = query.Where(p => p.Grade.ToLower() == normGrade);
+            }
+
+            var plans = await query
+                .OrderBy(p => p.LessonName)
+                .ThenBy(p => p.Grade)
+                .ThenBy(p => p.WeekNumber)
                 .ToListAsync();
 
             return Ok(plans);

@@ -57,6 +57,7 @@ import {
 import { getTodayDateString, formatDateToTR } from '../utils/dateUtils';
 import { getGradeLevels } from '../database/operations/gradeLevelOperations';
 import { YearlyPlanItem, CourseName, ClassItem, GradeLevelItem } from '../types';
+import { syncYearlyPlansFromSchool } from '../services/yearlyPlanSyncService';
 
 import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
 export const YearlyPlanScreen: React.FC = () => {
@@ -68,6 +69,7 @@ export const YearlyPlanScreen: React.FC = () => {
   const [selectedGradeLevel, setSelectedGradeLevel] = useState<number>(11);
   const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
   const [plans, setPlans] = useState<YearlyPlanItem[]>([]);
+  const [syncingPlan, setSyncingPlan] = useState(false);
 
   // Schedule verification for selected course + grade level
   const [scheduleInfo, setScheduleInfo] = useState<CourseGradeScheduleInfo | null>(null);
@@ -278,6 +280,64 @@ export const YearlyPlanScreen: React.FC = () => {
               loadData();
             } catch (e) {
               Alert.alert('Hata', 'Kayıt silinemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSyncYearlyPlanFromSchool = async () => {
+    const currentCourse = courses.find((c) => c.id === selectedCourseId);
+    const currentCourseName = currentCourse ? currentCourse.name : '';
+
+    Alert.alert(
+      'Okuldan Müfredat Planını Çek',
+      'Okul idaresi (Admin) tarafından sisteme yüklenmiş olan yıllık müfredat planını sisteminize aktarmak istiyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: currentCourseName ? `Yalnızca "${currentCourseName}" Planını Çek` : 'Seçili Dersi Çek',
+          onPress: async () => {
+            try {
+              setSyncingPlan(true);
+              const res = await syncYearlyPlansFromSchool({
+                courseId: selectedCourseId,
+                courseName: currentCourseName,
+                gradeLevel: selectedGradeLevel,
+                syncAll: false,
+              });
+              setSyncingPlan(false);
+              if (res.success) {
+                Alert.alert('Başarılı ✨', res.message);
+                loadData();
+              } else {
+                Alert.alert('Bilgi', res.message);
+              }
+            } catch (e: any) {
+              setSyncingPlan(false);
+              Alert.alert('Hata', e?.message || 'Plan çekilemedi.');
+            }
+          },
+        },
+        {
+          text: 'Okuldaki Tüm Planları Çek',
+          onPress: async () => {
+            try {
+              setSyncingPlan(true);
+              const res = await syncYearlyPlansFromSchool({
+                syncAll: true,
+              });
+              setSyncingPlan(false);
+              if (res.success) {
+                Alert.alert('Başarılı ✨', res.message);
+                loadData();
+              } else {
+                Alert.alert('Bilgi', res.message);
+              }
+            } catch (e: any) {
+              setSyncingPlan(false);
+              Alert.alert('Hata', e?.message || 'Planlar çekilemedi.');
             }
           },
         },
@@ -803,6 +863,36 @@ export const YearlyPlanScreen: React.FC = () => {
               )}
             </View>
 
+            {/* Okuldan Plan Çekme Butonu */}
+            <View style={{ marginBottom: 10 }}>
+              <TouchableOpacity
+                style={styles.schoolSyncPlanBtn}
+                onPress={handleSyncYearlyPlanFromSchool}
+                disabled={syncingPlan}
+                activeOpacity={0.8}
+              >
+                <View style={styles.schoolSyncPlanIconWrap}>
+                  <Ionicons name="cloud-download" size={18} color="#FFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.schoolSyncPlanTitle}>Okuldan Planı Çek</Text>
+                    <View style={styles.schoolSyncPlanBadge}>
+                      <Text style={styles.schoolSyncPlanBadgeText}>İDARE / MEB</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.schoolSyncPlanSub}>
+                    {syncingPlan ? 'Planlar indiriliyor...' : 'Adminin eklediği müfredat planını kendi sisteminize tek tıkla aktarın'}
+                  </Text>
+                </View>
+                {syncingPlan ? (
+                  <ActivityIndicator size="small" color="#4F46E5" />
+                ) : (
+                  <Ionicons name="chevron-forward" size={18} color="#4F46E5" />
+                )}
+              </TouchableOpacity>
+            </View>
+
             {/* 4. Hızlı Aksiyon Şeridi (Excel/Word Yükle & Şablon İndir) */}
             <View style={styles.actionStrip}>
               <TouchableOpacity
@@ -923,13 +1013,26 @@ export const YearlyPlanScreen: React.FC = () => {
           </View>
         }
         ListEmptyComponent={
-          <EmptyState
-            icon="calendar-outline"
-            title={`${selectedGradeLevel}. Sınıf Planı Bulunmuyor`}
-            description={`Bu ders ve sınıf düzeyi için henüz haftalık müfredat planı yüklenmemiş. Hazır Excel dosyanızı tek tıkla yükleyebilirsiniz.`}
-            actionTitle="Excel ile Yükle"
-            onAction={handleOpenBulkModal}
-          />
+          <View>
+            <EmptyState
+              icon="calendar-outline"
+              title={`${selectedGradeLevel}. Sınıf Planı Bulunmuyor`}
+              description={`Bu ders ve sınıf düzeyi için henüz haftalık müfredat planı yüklenmemiş. İdarenin eklediği planı çekebilir veya Excel ile yükleyebilirsiniz.`}
+              actionTitle="Excel ile Yükle"
+              onAction={handleOpenBulkModal}
+            />
+            <View style={{ alignItems: 'center', marginTop: -6, marginBottom: 20 }}>
+              <TouchableOpacity
+                style={styles.emptySchoolSyncBtn}
+                onPress={handleSyncYearlyPlanFromSchool}
+                disabled={syncingPlan}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="cloud-download-outline" size={16} color="#4F46E5" />
+                <Text style={styles.emptySchoolSyncBtnText}>Okuldan Planı Çek</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         }
         renderItem={({ item }) => {
           const isCurrentWeek =
@@ -2408,5 +2511,61 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     marginTop: 2,
     lineHeight: 15,
+  },
+  schoolSyncPlanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  schoolSyncPlanIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#4F46E5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  schoolSyncPlanTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E1B4B',
+  },
+  schoolSyncPlanBadge: {
+    backgroundColor: '#E0E7FF',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  schoolSyncPlanBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#4338CA',
+  },
+  schoolSyncPlanSub: {
+    fontSize: 11,
+    color: '#4B5563',
+    marginTop: 2,
+  },
+  emptySchoolSyncBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  emptySchoolSyncBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4F46E5',
   },
 });
