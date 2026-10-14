@@ -170,6 +170,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [parsedSchedule, setParsedSchedule] = useState<ParsedScheduleResult | null>(null);
   const [aiStageText, setAiStageText] = useState('Belge hazırlanıyor...');
   const [aiElapsedSeconds, setAiElapsedSeconds] = useState(0);
+  const [aiActiveModel, setAiActiveModel] = useState('');
   const [aiSaving, setAiSaving] = useState(false);
   const [scheduleSaveMode, setScheduleSaveMode] = useState<'merge' | 'overwrite'>('merge');
   const [saveTeachersChecked, setSaveTeachersChecked] = useState(true);
@@ -941,13 +942,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
       const apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY).trim();
       const model = selectedSchool.geminiModel?.trim() || DEFAULT_GEMINI_MODEL;
+      setAiActiveModel(model);
       const parsed = await parseMasterScheduleWithAi(
         file.uri,
         apiKey,
         file.mimeType || (file.name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
         model,
         selectedSchool.id,
-        (msg) => setAiStageText(msg)
+        (msg) => setAiStageText(msg),
+        (m) => setAiActiveModel(m)
       );
       setParsedSchedule(parsed);
     } catch (error: any) {
@@ -4323,6 +4326,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 {/* Spinner & Ana Başlık */}
                 <ActivityIndicator size="large" color="#4F46E5" style={{ marginVertical: 10 }} />
                 <Text style={styles.aiLoadingText}>Gemini AI Çarşaf Programı İnceliyor</Text>
+                {!!aiActiveModel && (
+                  <View style={[styles.aiTimerBadge, { marginTop: 4, marginBottom: 6 }]}>
+                    <Ionicons name="hardware-chip-outline" size={15} color="#4F46E5" />
+                    <Text style={styles.aiTimerBadgeText}>Kullanılan Model: {aiActiveModel}</Text>
+                  </View>
+                )}
 
                 {/* Anlık Aşama Kartı */}
                 <View style={styles.aiStageCard}>

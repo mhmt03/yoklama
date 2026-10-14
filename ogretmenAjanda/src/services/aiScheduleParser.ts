@@ -199,8 +199,10 @@ export async function parseMasterScheduleWithAi(
   mimeType = 'image/jpeg',
   preferredModel = 'gemini-2.5-flash',
   schoolId?: string,
-  onProgress?: (stageText: string) => void
+  onProgress?: (stageText: string) => void,
+  onModelChange?: (modelName: string) => void
 ): Promise<ParsedScheduleResult> {
+  onModelChange?.(preferredModel);
   onProgress?.('Belge hazırlanıyor ve ön tarama yapılıyor...');
   const cleanApiKey = apiKey.trim();
   const genAI = new GoogleGenerativeAI(cleanApiKey);
@@ -307,6 +309,7 @@ Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON 
 
   for (const currentModel of modelsToTry) {
     try {
+      onModelChange?.(currentModel);
       onProgress?.(`Gemini AI (${currentModel}) ile çok sayfalı çarşaf program taranıyor...`);
       const model = genAI.getGenerativeModel({
         model: currentModel,
