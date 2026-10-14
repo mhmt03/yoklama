@@ -96,12 +96,15 @@ export async function parseMasterScheduleWithAi(
   apiKey: string,
   mimeType = 'image/jpeg',
   preferredModel = 'gemini-2.5-flash',
-  schoolId?: string
+  schoolId?: string,
+  onProgress?: (stageText: string) => void
 ): Promise<ParsedScheduleResult> {
+  onProgress?.('Belge hazırlanıyor ve sıkıştırılıyor...');
   const cleanApiKey = apiKey.trim();
   const genAI = new GoogleGenerativeAI(cleanApiKey);
 
   const resolvedMime = detectMimeType(fileUri, mimeType);
+  onProgress?.('Belge yapay zeka için taranabilir formata dönüştürülüyor...');
   const base64Data = await readUriAsBase64(fileUri);
 
   const prompt = `
@@ -145,8 +148,10 @@ Notlar:
 
   for (const currentModel of modelsToTry) {
     try {
+      onProgress?.(`Gemini AI (${currentModel}) ile görsel analiz yapılıyor...`);
       const model = genAI.getGenerativeModel({ model: currentModel });
       const result = await model.generateContent([prompt, imagePart]);
+      onProgress?.('Ders programı tablosu çözümleniyor ve veriler inceleniyor...');
       const textResponse = result.response.text().trim();
 
       // JSON temizleme (olası markdown backticklerini temizle)
@@ -155,6 +160,7 @@ Notlar:
         cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
       }
 
+      onProgress?.('Öğretmen, sınıf ve ders saatleri doğrulanıyor...');
       const parsedData: ParsedScheduleResult = JSON.parse(cleanJson);
 
       // Total okul kotasına bildir
@@ -163,6 +169,7 @@ Notlar:
         await recordGeminiApiUsage(currentModel, result.response.usageMetadata, schoolId);
       } catch {}
 
+      onProgress?.('Ayrıştırma başarıyla tamamlandı!');
       return parsedData;
     } catch (err: any) {
       if (!primaryError) {

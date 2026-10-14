@@ -150,6 +150,37 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiParsing, setAiParsing] = useState(false);
   const [parsedSchedule, setParsedSchedule] = useState<ParsedScheduleResult | null>(null);
+  const [aiStageText, setAiStageText] = useState('Belge hazırlanıyor...');
+  const [aiElapsedSeconds, setAiElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    let interval: any;
+    if (aiParsing) {
+      setAiElapsedSeconds(0);
+      interval = setInterval(() => {
+        setAiElapsedSeconds((prev) => {
+          const next = prev + 1;
+          if (next === 4) {
+            setAiStageText('🔍 Belge çözünürlüğü optimize edildi, Gemini modeline aktarılıyor...');
+          } else if (next === 10) {
+            setAiStageText('🧠 Yapay zeka tüm günleri, öğretmenleri ve derslikleri tarıyor...');
+          } else if (next === 22) {
+            setAiStageText('📊 Sınıf ve şube bazlı haftalık ders saatleri eşleştiriliyor...');
+          } else if (next === 35) {
+            setAiStageText('✨ Çarşaf program tablosu veri omurgasına dönüştürülüyor...');
+          } else if (next === 50) {
+            setAiStageText('⏳ Yoğun program analizi tamamlanmak üzere, son kontroller yapılıyor...');
+          }
+          return next;
+        });
+      }, 1000);
+    } else {
+      setAiElapsedSeconds(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [aiParsing]);
 
   // 6. Excel Öğrenci Yükleme State
   const [excelModalVisible, setExcelModalVisible] = useState(false);
@@ -736,6 +767,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       setAiModalVisible(true);
       setAiParsing(true);
       setParsedSchedule(null);
+      setAiElapsedSeconds(0);
+      setAiStageText('Belge hazırlanıyor...');
 
       const apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY).trim();
       const model = selectedSchool.geminiModel?.trim() || DEFAULT_GEMINI_MODEL;
@@ -744,7 +777,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         apiKey,
         file.mimeType || (file.name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
         model,
-        selectedSchool.id
+        selectedSchool.id,
+        (msg) => setAiStageText(msg)
       );
       setParsedSchedule(parsed);
     } catch (error: any) {
@@ -3317,9 +3351,61 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
             {aiParsing ? (
               <View style={styles.aiLoadingContainer}>
-                <ActivityIndicator size="large" color="#6366F1" />
-                <Text style={styles.aiLoadingText}>Gemini AI çarşaf programı inceliyor...</Text>
-                <Text style={styles.aiLoadingSub}>Öğretmenler, sınıflar ve ders saatleri ayrıştırılıyor.</Text>
+                {/* Süre Rozeti */}
+                <View style={styles.aiTimerBadge}>
+                  <Ionicons name="timer-outline" size={15} color="#4F46E5" />
+                  <Text style={styles.aiTimerBadgeText}>İşlem Sürüyor: {aiElapsedSeconds} sn</Text>
+                </View>
+
+                {/* Spinner & Ana Başlık */}
+                <ActivityIndicator size="large" color="#4F46E5" style={{ marginVertical: 10 }} />
+                <Text style={styles.aiLoadingText}>Gemini AI Çarşaf Programı İnceliyor</Text>
+
+                {/* Anlık Aşama Kartı */}
+                <View style={styles.aiStageCard}>
+                  <View style={styles.aiStageDot} />
+                  <Text style={styles.aiStageText}>{aiStageText}</Text>
+                </View>
+
+                {/* Adım Listesi (Progress Steps) */}
+                <View style={styles.aiStepsContainer}>
+                  <View style={styles.aiStepRow}>
+                    <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
+                    <Text style={styles.aiStepDoneText}>1. Belge hazırlandı ve sisteme aktarıldı</Text>
+                  </View>
+                  <View style={styles.aiStepRow}>
+                    <Ionicons
+                      name={aiElapsedSeconds >= 8 ? 'checkmark-circle' : 'time-outline'}
+                      size={16}
+                      color={aiElapsedSeconds >= 8 ? '#16A34A' : '#4F46E5'}
+                    />
+                    <Text style={aiElapsedSeconds >= 8 ? styles.aiStepDoneText : styles.aiStepActiveText}>
+                      2. Gemini Vision ile hücre ve metin taraması
+                    </Text>
+                  </View>
+                  <View style={styles.aiStepRow}>
+                    <Ionicons
+                      name={aiElapsedSeconds >= 22 ? 'checkmark-circle' : 'time-outline'}
+                      size={16}
+                      color={aiElapsedSeconds >= 22 ? '#16A34A' : '#94A3B8'}
+                    />
+                    <Text style={aiElapsedSeconds >= 22 ? styles.aiStepDoneText : styles.aiStepPendingText}>
+                      3. Öğretmen, sınıf ve ders saatleri eşleştirmesi
+                    </Text>
+                  </View>
+                  <View style={styles.aiStepRow}>
+                    <Ionicons name="time-outline" size={16} color="#94A3B8" />
+                    <Text style={styles.aiStepPendingText}>4. Haftalık ders programı omurgasının oluşturulması</Text>
+                  </View>
+                </View>
+
+                {/* Bilgilendirme Kutusu */}
+                <View style={styles.aiProgressInfoBox}>
+                  <Ionicons name="information-circle-outline" size={18} color="#166534" />
+                  <Text style={styles.aiProgressInfoBoxText}>
+                    Çarşaf programlar yüzlerce hücre, onlarca öğretmen ve ders saati içeren büyük tablolardır. Yapay zekanın tüm hücreleri hatasız eşleştirmesi <Text style={{ fontWeight: '800' }}>20-50 saniye</Text> sürebilir. Bu işlem tamamen normaldir.
+                  </Text>
+                </View>
               </View>
             ) : parsedSchedule ? (
               <View style={styles.parsedPreview}>
@@ -4749,9 +4835,98 @@ const styles = StyleSheet.create({
   credValCode: { fontSize: 12, fontWeight: '700', color: '#4F46E5' },
   credVal: { fontSize: 12, fontWeight: '800', color: Colors.text },
   credValPass: { fontSize: 12, fontWeight: '800', color: '#D97706' },
-  aiLoadingContainer: { alignItems: 'center', paddingVertical: 28 },
-  aiLoadingText: { fontSize: 14, fontWeight: '700', color: Colors.text, marginTop: 14 },
+  aiLoadingContainer: { alignItems: 'center', paddingVertical: 14 },
+  aiLoadingText: { fontSize: 15, fontWeight: '800', color: '#1E293B', marginTop: 6, marginBottom: 8 },
   aiLoadingSub: { fontSize: 11, color: Colors.textMuted, marginTop: 3 },
+  aiTimerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    marginBottom: 6,
+  },
+  aiTimerBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  aiStageCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    width: '100%',
+  },
+  aiStageDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#4F46E5',
+  },
+  aiStageText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    lineHeight: 16,
+  },
+  aiStepsContainer: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    gap: 8,
+    marginBottom: 12,
+  },
+  aiStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  aiStepDoneText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#16A34A',
+  },
+  aiStepActiveText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  aiStepPendingText: {
+    fontSize: 11,
+    color: '#94A3B8',
+  },
+  aiProgressInfoBox: {
+    flexDirection: 'row',
+    backgroundColor: '#F0FDF4',
+    borderRadius: 10,
+    padding: 10,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    alignItems: 'flex-start',
+    width: '100%',
+  },
+  aiProgressInfoBoxText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#166534',
+    lineHeight: 16,
+  },
   parsedPreview: { paddingVertical: 10 },
   previewSuccessTitle: { fontSize: 15, fontWeight: '800', color: '#059669', textAlign: 'center', marginBottom: 12 },
   previewGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
