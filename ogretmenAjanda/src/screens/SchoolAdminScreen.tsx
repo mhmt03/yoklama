@@ -146,6 +146,13 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [editingStudent, setEditingStudent] = useState<any>(null);
   const [updatingStudent, setUpdatingStudent] = useState(false);
 
+  // Öğrenci & Veli Giriş ve Şifre Yönetimi Modalı
+  const [credentialsModalVisible, setCredentialsModalVisible] = useState(false);
+  const [selectedStudentForCreds, setSelectedStudentForCreds] = useState<any>(null);
+  const [customResetPassInput, setCustomResetPassInput] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [showCredPassword, setShowCredPassword] = useState(false);
+
   // 5. AI Çarşaf Program Analizi Modal ve Staging Durumu
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiParsing, setAiParsing] = useState(false);
@@ -690,6 +697,125 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         },
       ]
     );
+  };
+
+  // --- ÖĞRENCİ & VELİ GİRİŞ VE ŞİFRE YÖNETİMİ ---
+
+  const handleOpenCredentialsModal = (student: any) => {
+    setSelectedStudentForCreds(student);
+    setCustomResetPassInput('');
+    setShowCredPassword(false);
+    setCredentialsModalVisible(true);
+  };
+
+  const handleResetStudentPassword = async (customPass?: string) => {
+    if (!selectedStudentForCreds || !selectedSchool) return;
+
+    const studentName = selectedStudentForCreds.fullName;
+    const defaultPass = `aaaa_${selectedStudentForCreds.studentNumber}`;
+    const targetPass = customPass?.trim() || defaultPass;
+
+    Alert.alert(
+      'Şifreyi Sıfırla',
+      `"${studentName}" öğrencisinin ve velisinin giriş şifresi:\n\n👉 "${targetPass}"\n\nolarak güncellenecektir. Onaylıyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sıfırla',
+          onPress: async () => {
+            setResettingPassword(true);
+            try {
+              const res = await apiRequest<{ success: boolean; message: string; password: string }>(
+                `schools/${selectedSchool.id}/students/${selectedStudentForCreds.id}/reset-password`,
+                'POST',
+                { newPassword: customPass?.trim() || undefined }
+              );
+
+              if (res.success) {
+                Alert.alert(
+                  '✅ Şifre Sıfırlandı',
+                  `"${studentName}" için yeni giriş şifresi başarıyla kaydedildi:\n\n🔑 Şifre: ${res.data?.password || targetPass}\n\nBu şifre ile hem öğrenci hem veli portala giriş yapabilir.`
+                );
+                setCustomResetPassInput('');
+              } else {
+                Alert.alert('Hata', res.error || 'Şifre sıfırlanamadı.');
+              }
+            } catch (err: any) {
+              Alert.alert('Hata', err.message || 'İşlem başarısız.');
+            } finally {
+              setResettingPassword(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const getCredentialsMessage = (student: any) => {
+    const sName = student.fullName;
+    const sGrade = `${student.grade}-${student.section}`;
+    const sNo = student.studentNumber;
+    const schoolCode = selectedSchool?.code || '';
+    const schoolName = selectedSchool?.name || 'Okulumuz';
+    const parentName = student.parentName || 'Sayın Velimiz';
+    const defPass = `aaaa_${sNo}`;
+
+    return `Sayın ${parentName},\n\n${schoolName} bünyesinde kayıtlı öğrencimiz ${sName} (${sGrade} - No: ${sNo}) için Öğrenci & Veli Portalı erişim bilgileriniz aşağıdadır:\n\n🏫 Okul Kodu: ${schoolCode}\n👤 Kullanıcı Adı: ${sNo} (veya kayıtlı veli cep telefonu)\n🔑 Giriş Şifresi: ${defPass}\n\nPortal üzerinden ödevleri, ders programını ve öğretmen değerlendirmelerini anlık olarak takip edebilirsiniz.`;
+  };
+
+  const handleShareViaWhatsApp = async (student: any) => {
+    if (!student.parentPhone) {
+      Alert.alert(
+        'Veli Telefonu Eksik',
+        'Bu öğrencinin veli cep telefonu kayıtlı değil. Düzenle butonundan veli telefonunu ekleyebilirsiniz.'
+      );
+      return;
+    }
+
+    let cleanPhone = student.parentPhone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '9' + cleanPhone;
+    } else if (cleanPhone.length === 10) {
+      cleanPhone = '90' + cleanPhone;
+    }
+
+    const message = getCredentialsMessage(student);
+    const url = `whatsapp://send?phone=${cleanPhone}&text=${encodeURIComponent(message)}`;
+
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        await Linking.openURL(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`);
+      }
+    } catch {
+      await Linking.openURL(`https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`);
+    }
+  };
+
+  const handleShareViaSms = async (student: any) => {
+    if (!student.parentPhone) {
+      Alert.alert('Bilgi', 'Bu öğrencinin veli cep telefonu kayıtlı değil.');
+      return;
+    }
+
+    const cleanPhone = student.parentPhone.replace(/[^0-9+]/g, '');
+    const message = getCredentialsMessage(student);
+    const separator = Platform.OS === 'ios' ? '&' : '?';
+    const url = `sms:${cleanPhone}${separator}body=${encodeURIComponent(message)}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch (e: any) {
+      Alert.alert('Hata', 'SMS uygulaması açılamadı: ' + e.message);
+    }
+  };
+
+  const handleCopyCredentialsMessage = async (student: any) => {
+    const message = getCredentialsMessage(student);
+    await Clipboard.setStringAsync(message);
+    Alert.alert('📋 Kopyalandı', 'Öğrenci ve veli portal giriş bilgilendirme metni panoya kopyalandı.');
   };
 
   const handlePickAndUploadPhoto = async (student: any) => {
@@ -2184,17 +2310,50 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 👨‍👩‍👧 Veli: {student.parentName} {student.parentPhone ? `(${student.parentPhone})` : ''}
                               </Text>
                             )}
+
+                            {/* Giriş Bilgileri Önizleme */}
+                            <View style={styles.cardCredPreviewBox}>
+                              <View style={styles.cardCredItem}>
+                                <Ionicons name="key" size={11} color="#4F46E5" />
+                                <Text style={styles.cardCredLabel}>Şifre:</Text>
+                                <Text style={styles.cardCredValue}>aaaa_{student.studentNumber}</Text>
+                              </View>
+                              <View style={styles.cardCredDivider} />
+                              <View style={styles.cardCredItem}>
+                                <Ionicons name="school" size={11} color="#059669" />
+                                <Text style={styles.cardCredLabel}>Okul:</Text>
+                                <Text style={styles.cardCredValue}>{selectedSchool?.code || '-'}</Text>
+                              </View>
+                            </View>
                           </View>
                         </View>
 
                         {/* Aksiyon Butonları */}
                         <View style={styles.studentActionsRow}>
                           <TouchableOpacity
+                            style={[styles.cardActionBtn, { borderColor: '#818CF8', backgroundColor: '#EEF2FF' }]}
+                            onPress={() => handleOpenCredentialsModal(student)}
+                          >
+                            <Ionicons name="key" size={13} color="#4F46E5" />
+                            <Text style={[styles.cardActionBtnText, { color: '#4F46E5', fontWeight: '700' }]}>Giriş & Şifre</Text>
+                          </TouchableOpacity>
+
+                          {student.parentPhone && (
+                            <TouchableOpacity
+                              style={[styles.cardActionBtn, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
+                              onPress={() => handleShareViaWhatsApp(student)}
+                            >
+                              <Ionicons name="logo-whatsapp" size={13} color="#16A34A" />
+                              <Text style={[styles.cardActionBtnText, { color: '#16A34A', fontWeight: '600' }]}>Veli WhatsApp</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          <TouchableOpacity
                             style={styles.cardActionBtn}
                             onPress={() => handlePickAndUploadPhoto(student)}
                           >
-                            <Ionicons name="camera-outline" size={14} color="#4F46E5" />
-                            <Text style={styles.cardActionBtnText}>Fotoğraf Ekle</Text>
+                            <Ionicons name="camera-outline" size={13} color="#4F46E5" />
+                            <Text style={styles.cardActionBtnText}>Fotoğraf</Text>
                           </TouchableOpacity>
 
                           <TouchableOpacity
@@ -2204,25 +2363,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               setEditStudentModalVisible(true);
                             }}
                           >
-                            <Ionicons name="pencil" size={14} color="#4F46E5" />
+                            <Ionicons name="pencil" size={13} color="#4F46E5" />
                             <Text style={styles.cardActionBtnText}>Düzenle</Text>
                           </TouchableOpacity>
-
-                          {student.parentPhone && (
-                            <TouchableOpacity
-                              style={[styles.cardActionBtn, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
-                              onPress={() => Linking.openURL(`tel:${student.parentPhone}`)}
-                            >
-                              <Ionicons name="call-outline" size={14} color="#16A34A" />
-                              <Text style={[styles.cardActionBtnText, { color: '#16A34A' }]}>Veli Ara</Text>
-                            </TouchableOpacity>
-                          )}
 
                           <TouchableOpacity
                             style={[styles.cardActionBtn, { borderColor: '#FECACA', backgroundColor: '#FEE2E2' }]}
                             onPress={() => handleDeleteStudent(student.id, student.fullName)}
                           >
-                            <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                            <Ionicons name="trash-outline" size={13} color="#DC2626" />
                             <Text style={[styles.cardActionBtnText, { color: '#DC2626' }]}>Sil</Text>
                           </TouchableOpacity>
                         </View>
@@ -3284,6 +3433,245 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
+      {/* 4.2 Öğrenci & Veli Giriş ve Şifre Yönetimi Modalı */}
+      <Modal visible={credentialsModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
+            {/* Modal Başlığı */}
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF2FF', justifyContent: 'center', alignItems: 'center' }}>
+                  <Ionicons name="key" size={20} color="#4F46E5" />
+                </View>
+                <View>
+                  <Text style={styles.modalTitle}>Giriş & Şifre Bilgileri</Text>
+                  <Text style={{ fontSize: 12, color: Colors.textMuted }}>
+                    Öğrenci & Veli Portalı Erişim Kartı
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setCredentialsModalVisible(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+              {selectedStudentForCreds && (
+                <>
+                  {/* Öğrenci Bilgi Özeti Çipi */}
+                  <View style={styles.credStudentCardBanner}>
+                    <View style={styles.credAvatarWrap}>
+                      <Text style={styles.credAvatarText}>
+                        {selectedStudentForCreds.fullName?.slice(0, 2).toUpperCase() || 'ÖG'}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.credStudentName}>{selectedStudentForCreds.fullName}</Text>
+                      <Text style={styles.credStudentSub}>
+                        {selectedStudentForCreds.grade}-{selectedStudentForCreds.section} Şubesi • Okul No: {selectedStudentForCreds.studentNumber}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                        🏫 {selectedSchool?.name || 'Okul'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* KART 1: ÖĞRENCİ VE VELİ SİSTEM GİRİŞ BİLGİLERİ */}
+                  <View style={styles.credSectionBox}>
+                    <View style={styles.credSectionHeaderRow}>
+                      <Ionicons name="school-outline" size={16} color="#4F46E5" />
+                      <Text style={styles.credSectionTitle}>Portal Giriş Bilgileri</Text>
+                    </View>
+
+                    {/* Okul Kodu */}
+                    <View style={styles.credDetailRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.credFieldLabel}>Okul Kodu</Text>
+                        <Text style={styles.credFieldValueBold}>{selectedSchool?.code || '-'}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.credCopyBtn}
+                        onPress={() => {
+                          Clipboard.setStringAsync(selectedSchool?.code || '');
+                          Alert.alert('Kopyalandı', 'Okul kodu panoya kopyalandı.');
+                        }}
+                      >
+                        <Ionicons name="copy-outline" size={14} color="#4F46E5" />
+                        <Text style={styles.credCopyBtnText}>Kopyala</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Kullanıcı Adı */}
+                    <View style={styles.credDetailRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.credFieldLabel}>Kullanıcı Adı (Öğrenci No)</Text>
+                        <Text style={styles.credFieldValueBold}>{selectedStudentForCreds.studentNumber}</Text>
+                        <Text style={styles.credFieldHint}>* Veli ayrıca kayıtlı cep telefonu ile de giriş yapabilir.</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.credCopyBtn}
+                        onPress={() => {
+                          Clipboard.setStringAsync(selectedStudentForCreds.studentNumber);
+                          Alert.alert('Kopyalandı', 'Kullanıcı adı panoya kopyalandı.');
+                        }}
+                      >
+                        <Ionicons name="copy-outline" size={14} color="#4F46E5" />
+                        <Text style={styles.credCopyBtnText}>Kopyala</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Giriş Şifresi */}
+                    <View style={styles.credDetailRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.credFieldLabel}>Varsayılan / Giriş Şifresi</Text>
+                        <Text style={[styles.credFieldValueBold, { color: '#4F46E5' }]}>
+                          {showCredPassword ? `aaaa_${selectedStudentForCreds.studentNumber}` : '••••••••••••'}
+                        </Text>
+                        <Text style={styles.credFieldHint}>* Varsayılan format: aaaa_öğrencino</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <TouchableOpacity
+                          style={styles.credIconBtn}
+                          onPress={() => setShowCredPassword(!showCredPassword)}
+                        >
+                          <Ionicons name={showCredPassword ? "eye-off-outline" : "eye-outline"} size={16} color="#64748B" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.credCopyBtn}
+                          onPress={() => {
+                            Clipboard.setStringAsync(`aaaa_${selectedStudentForCreds.studentNumber}`);
+                            Alert.alert('Kopyalandı', 'Giriş şifresi panoya kopyalandı.');
+                          }}
+                        >
+                          <Ionicons name="copy-outline" size={14} color="#4F46E5" />
+                          <Text style={styles.credCopyBtnText}>Kopyala</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* KART 2: VELİ BİLGİLERİ VE TEK TIKLA PAYLAŞIM */}
+                  <View style={[styles.credSectionBox, { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }]}>
+                    <View style={styles.credSectionHeaderRow}>
+                      <Ionicons name="people-outline" size={16} color="#16A34A" />
+                      <Text style={[styles.credSectionTitle, { color: '#166534' }]}>Veli İletişimi & Bilgi Gönderimi</Text>
+                    </View>
+
+                    <View style={{ marginBottom: 10 }}>
+                      <Text style={styles.credParentInfoText}>
+                        👤 <Text style={{ fontWeight: '700' }}>Veli Adı:</Text> {selectedStudentForCreds.parentName || 'Tanımlanmamış'}
+                      </Text>
+                      <Text style={styles.credParentInfoText}>
+                        📱 <Text style={{ fontWeight: '700' }}>Veli Telefonu:</Text> {selectedStudentForCreds.parentPhone || 'Tanımlanmamış'}
+                      </Text>
+                    </View>
+
+                    {/* Paylaşım Butonları */}
+                    <View style={{ gap: 8 }}>
+                      <TouchableOpacity
+                        style={[styles.credShareBtn, { backgroundColor: '#16A34A' }]}
+                        onPress={() => handleShareViaWhatsApp(selectedStudentForCreds)}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons name="logo-whatsapp" size={18} color="#fff" />
+                        <Text style={styles.credShareBtnText}>WhatsApp ile Veliye Gönder</Text>
+                      </TouchableOpacity>
+
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity
+                          style={[styles.credShareBtn, { flex: 1, backgroundColor: '#2563EB' }]}
+                          onPress={() => handleShareViaSms(selectedStudentForCreds)}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
+                          <Text style={styles.credShareBtnText}>SMS ile Gönder</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.credShareBtn, { flex: 1, backgroundColor: '#475569' }]}
+                          onPress={() => handleCopyCredentialsMessage(selectedStudentForCreds)}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons name="copy-outline" size={16} color="#fff" />
+                          <Text style={styles.credShareBtnText}>Tümünü Kopyala</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* KART 3: ŞİFRE SIFIRLAMA */}
+                  <View style={[styles.credSectionBox, { borderColor: '#FED7AA', backgroundColor: '#FFFBEB' }]}>
+                    <View style={styles.credSectionHeaderRow}>
+                      <Ionicons name="refresh-circle-outline" size={18} color="#D97706" />
+                      <Text style={[styles.credSectionTitle, { color: '#B45309' }]}>Şifre Sıfırlama (Öğrenci & Veli)</Text>
+                    </View>
+                    <Text style={styles.credResetHelpText}>
+                      Öğrenci veya veli şifresini unuttuysa ya da erişim sorunu yaşıyorsa tek tıkla varsayılan şifreye döndürebilir veya yeni bir şifre belirleyebilirsiniz.
+                    </Text>
+
+                    {/* Hızlı Varsayılana Sıfırla Butonu */}
+                    <TouchableOpacity
+                      style={styles.credResetDefaultBtn}
+                      onPress={() => handleResetStudentPassword()}
+                      disabled={resettingPassword}
+                      activeOpacity={0.85}
+                    >
+                      {resettingPassword ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="refresh" size={16} color="#fff" />
+                          <Text style={styles.credResetDefaultBtnText}>
+                            Varsayılan Şifreye Döndür (aaaa_{selectedStudentForCreds.studentNumber})
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    {/* Ya da Özel Şifre Belirleme */}
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#92400E', marginBottom: 4 }}>
+                        Veya Özel Yeni Şifre Belirle:
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TextInput
+                          style={[styles.modalInput, { flex: 1, marginBottom: 0, backgroundColor: '#fff', fontSize: 13 }]}
+                          placeholder="Yeni özel şifre (örn: 123456)"
+                          value={customResetPassInput}
+                          onChangeText={setCustomResetPassInput}
+                          placeholderTextColor={Colors.textMuted}
+                        />
+                        <TouchableOpacity
+                          style={[styles.credCustomPassSaveBtn, (!customResetPassInput.trim() || resettingPassword) && { opacity: 0.5 }]}
+                          onPress={() => {
+                            if (!customResetPassInput.trim()) {
+                              Alert.alert('Uyarı', 'Lütfen yeni şifreyi giriniz.');
+                              return;
+                            }
+                            handleResetStudentPassword(customResetPassInput.trim());
+                          }}
+                          disabled={!customResetPassInput.trim() || resettingPassword}
+                        >
+                          <Ionicons name="checkmark" size={16} color="#fff" />
+                          <Text style={styles.credCustomPassSaveBtnText}>Uygula</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.createSubmitButton, { backgroundColor: '#64748B', marginTop: 10 }]}
+              onPress={() => setCredentialsModalVisible(false)}
+            >
+              <Text style={styles.createSubmitText}>Kapat</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Okul Adı Düzenleme Modalı */}
       <Modal visible={editModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -3886,11 +4274,44 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           {student.studentPhone && (
                             <Text style={styles.contactText}>📱 Öğrenci Tel: {student.studentPhone}</Text>
                           )}
+
+                          {/* Giriş Bilgileri Önizleme */}
+                          <View style={styles.cardCredPreviewBox}>
+                            <View style={styles.cardCredItem}>
+                              <Ionicons name="key" size={11} color="#4F46E5" />
+                              <Text style={styles.cardCredLabel}>Şifre:</Text>
+                              <Text style={styles.cardCredValue}>aaaa_{student.studentNumber}</Text>
+                            </View>
+                            <View style={styles.cardCredDivider} />
+                            <View style={styles.cardCredItem}>
+                              <Ionicons name="school" size={11} color="#059669" />
+                              <Text style={styles.cardCredLabel}>Okul:</Text>
+                              <Text style={styles.cardCredValue}>{selectedSchool?.code || '-'}</Text>
+                            </View>
+                          </View>
                         </View>
                       </View>
 
                       {/* Aksiyon Butonları */}
                       <View style={styles.studentActionsRow}>
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { borderColor: '#818CF8', backgroundColor: '#EEF2FF' }]}
+                          onPress={() => handleOpenCredentialsModal(student)}
+                        >
+                          <Ionicons name="key" size={13} color="#4F46E5" />
+                          <Text style={[styles.cardActionBtnText, { color: '#4F46E5', fontWeight: '700' }]}>Giriş & Şifre</Text>
+                        </TouchableOpacity>
+
+                        {student.parentPhone && (
+                          <TouchableOpacity
+                            style={[styles.cardActionBtn, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
+                            onPress={() => handleShareViaWhatsApp(student)}
+                          >
+                            <Ionicons name="logo-whatsapp" size={13} color="#16A34A" />
+                            <Text style={[styles.cardActionBtnText, { color: '#16A34A', fontWeight: '600' }]}>WhatsApp</Text>
+                          </TouchableOpacity>
+                        )}
+
                         <TouchableOpacity
                           style={styles.cardActionBtn}
                           onPress={() => handlePickAndUploadPhoto(student)}
@@ -3909,16 +4330,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           <Ionicons name="pencil" size={13} color="#4F46E5" />
                           <Text style={styles.cardActionBtnText}>Düzenle</Text>
                         </TouchableOpacity>
-
-                        {student.parentPhone && (
-                          <TouchableOpacity
-                            style={[styles.cardActionBtn, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
-                            onPress={() => Linking.openURL(`tel:${student.parentPhone}`)}
-                          >
-                            <Ionicons name="call-outline" size={13} color="#16A34A" />
-                            <Text style={[styles.cardActionBtnText, { color: '#16A34A' }]}>Veli Ara</Text>
-                          </TouchableOpacity>
-                        )}
 
                         <TouchableOpacity
                           style={[styles.cardActionBtn, { borderColor: '#FECACA', backgroundColor: '#FEE2E2' }]}
@@ -5979,5 +6390,191 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#475569',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  cardCredPreviewBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignSelf: 'flex-start',
+  },
+  cardCredItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  cardCredLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  cardCredValue: {
+    fontSize: 11,
+    color: '#1E293B',
+    fontWeight: '700',
+  },
+  cardCredDivider: {
+    width: 1,
+    height: 12,
+    backgroundColor: '#CBD5E1',
+    marginHorizontal: 8,
+  },
+  credStudentCardBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  credAvatarWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#4F46E5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  credAvatarText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFF',
+  },
+  credStudentName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  credStudentSub: {
+    fontSize: 12,
+    color: '#475569',
+    marginTop: 1,
+    fontWeight: '600',
+  },
+  credSectionBox: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  credSectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  credSectionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  credDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  credFieldLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  credFieldValueBold: {
+    fontSize: 14,
+    color: '#0F172A',
+    fontWeight: '800',
+    marginTop: 1,
+  },
+  credFieldHint: {
+    fontSize: 10,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  credCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  credCopyBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  credIconBtn: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  credParentInfoText: {
+    fontSize: 12,
+    color: '#1E293B',
+    marginBottom: 4,
+  },
+  credShareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  credShareBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  credResetHelpText: {
+    fontSize: 11,
+    color: '#78350F',
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  credResetDefaultBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#D97706',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  credResetDefaultBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFF',
+  },
+  credCustomPassSaveBtn: {
+    backgroundColor: '#059669',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  credCustomPassSaveBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFF',
   },
 });

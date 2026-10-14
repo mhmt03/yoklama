@@ -538,6 +538,70 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(new { message = $"Şifre başarıyla güncellendi: {newPass}", password = newPass });
         }
 
+        // Öğrenci & Veli Şifre Sıfırlama
+        [HttpPost("{schoolId}/students/{studentId}/reset-password")]
+        public async Task<IActionResult> ResetStudentPassword(Guid schoolId, Guid studentId, [FromBody] ResetPasswordRequest? req)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (school.AdminUserId != CurrentUserId && CurrentUserRole != UserRoles.SuperAdmin)
+            {
+                return Forbid();
+            }
+
+            var student = await _context.Students.FirstOrDefaultAsync(s => s.Id == studentId && s.SchoolId == schoolId);
+            if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
+
+            var defaultPassword = $"aaaa_{student.StudentNumber.Trim()}";
+            var newPass = !string.IsNullOrWhiteSpace(req?.NewPassword) ? req.NewPassword.Trim() : defaultPassword;
+
+            var studentUser = await _context.Users
+                .FirstOrDefaultAsync(u => u.SchoolId == schoolId && u.Username == student.StudentNumber.Trim());
+
+            if (studentUser == null)
+            {
+                studentUser = new User
+                {
+                    Id = student.Id,
+                    Username = student.StudentNumber.Trim(),
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPass),
+                    FullName = student.FullName,
+                    Role = UserRoles.Student,
+                    SchoolId = school.Id,
+                    RelationId = student.RelationId ?? school.RelationId,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                };
+                await _context.Users.AddAsync(studentUser);
+            }
+            else
+            {
+                studentUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPass);
+                studentUser.IsActive = true;
+            }
+
+            await _context.SaveChangesAsync();
+
+            await LogActionAsync(
+                schoolId,
+                "STUDENT_PASSWORD_RESET",
+                "Student",
+                student.Id.ToString(),
+                $"Öğrenci/Veli şifresi sıfırlandı: {student.FullName} (No: {student.StudentNumber})",
+                $"{{\"studentNumber\": \"{student.StudentNumber}\", \"isDefault\": {((newPass == defaultPassword) ? "true" : "false")}}}"
+            );
+
+            return Ok(new
+            {
+                success = true,
+                message = $"Öğrenci/Veli şifresi başarıyla güncellendi: {newPass}",
+                password = newPass,
+                studentNumber = student.StudentNumber,
+                defaultPassword = defaultPassword
+            });
+        }
+
         // --- SINIF VE ŞUBE YÖNETİMİ ---
 
         [HttpGet("{schoolId}/classes")]

@@ -146,12 +146,17 @@ namespace OgretmenAjanda.Api.Controllers
                 return NotFound(new { message = "Geçersiz okul kodu." });
             }
 
+            var cleanInput = request.StudentNumber.Trim();
+            var cleanPhone = cleanInput.Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "");
+
             var student = await _context.Students
-                .FirstOrDefaultAsync(s => s.SchoolId == school.Id && s.StudentNumber == request.StudentNumber.Trim());
+                .FirstOrDefaultAsync(s => s.SchoolId == school.Id && 
+                    (s.StudentNumber == cleanInput || 
+                     (!string.IsNullOrEmpty(s.ParentPhone) && s.ParentPhone.Replace(" ", "").Replace("-", "").Replace("(", "").Replace(")", "") == cleanPhone)));
 
             if (student == null)
             {
-                return NotFound(new { message = "Bu okulda belirtilen öğrenci numarası bulunamadı." });
+                return NotFound(new { message = "Bu okulda belirtilen öğrenci numarası veya veli telefon numarası bulunamadı." });
             }
 
             // Lisans Kontrolü: Öğrenci İlişki ID -> Müşteri ID -> Admin Lisansı
