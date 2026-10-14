@@ -152,6 +152,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [parsedSchedule, setParsedSchedule] = useState<ParsedScheduleResult | null>(null);
   const [aiStageText, setAiStageText] = useState('Belge hazırlanıyor...');
   const [aiElapsedSeconds, setAiElapsedSeconds] = useState(0);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [scheduleSaveMode, setScheduleSaveMode] = useState<'merge' | 'overwrite'>('merge');
+  const [saveTeachersChecked, setSaveTeachersChecked] = useState(true);
+  const [saveClassesChecked, setSaveClassesChecked] = useState(true);
+  const [saveLessonsChecked, setSaveLessonsChecked] = useState(true);
+  const [saveScheduleChecked, setSaveScheduleChecked] = useState(true);
+  const [showTeachersList, setShowTeachersList] = useState(false);
+  const [showClassesList, setShowClassesList] = useState(false);
+  const [showLessonsList, setShowLessonsList] = useState(false);
 
   useEffect(() => {
     let interval: any;
@@ -789,45 +798,57 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
-  const handleConfirmAndSaveSchedule = async () => {
+  const executeSaveSchedule = async () => {
     if (!parsedSchedule || !selectedSchool) return;
 
-    Alert.alert(
-      'Çarşaf Program Yükleme Modu',
-      'Mevcut ders programı kayıtları nasıl işlensin?',
-      [
-        { text: 'Vazgeç', style: 'cancel' },
-        {
-          text: '🔄 Değişiklikleri Güncelle',
-          onPress: async () => {
-            await executeSaveSchedule(false);
+    if (!saveTeachersChecked && !saveClassesChecked && !saveLessonsChecked && !saveScheduleChecked) {
+      Alert.alert('Seçim Yapılmadı ⚠️', 'Lütfen sisteme aktarılacak en az bir veri türü (öğretmen, sınıf, ders veya program) seçiniz.');
+      return;
+    }
+
+    if (scheduleSaveMode === 'overwrite') {
+      Alert.alert(
+        '⚠️ Dikkat: Mevcut Program Silinecek',
+        'Okulun mevcut haftalık ders programı kayıtları tamamen silinecektir ve yerine bu çarşaf program sıfırdan yazılacaktır.\n\nEmin misiniz?',
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: 'Evet, Sıfırla ve Yaz',
+            style: 'destructive',
+            onPress: () => performSaveSchedule(),
           },
-        },
-        {
-          text: '⚠️ Sıfırdan Yaz (Eskileri Sil)',
-          style: 'destructive',
-          onPress: async () => {
-            await executeSaveSchedule(true);
-          },
-        },
-      ]
-    );
+        ]
+      );
+    } else {
+      await performSaveSchedule();
+    }
   };
 
-  const executeSaveSchedule = async (overwriteAll: boolean) => {
+  const performSaveSchedule = async () => {
     if (!parsedSchedule || !selectedSchool) return;
 
-    setAiParsing(true);
-    const result = await saveMasterScheduleToServer(selectedSchool.id, parsedSchedule, overwriteAll);
-    setAiParsing(false);
+    setAiSaving(true);
+    try {
+      const result = await saveMasterScheduleToServer(selectedSchool.id, parsedSchedule, {
+        overwriteAll: scheduleSaveMode === 'overwrite',
+        syncTeachers: saveTeachersChecked,
+        syncClasses: saveClassesChecked,
+        syncLessons: saveLessonsChecked,
+        syncSchedules: saveScheduleChecked,
+      });
 
-    if (result.success) {
-      Alert.alert('Başarılı 🎉', result.message);
-      setAiModalVisible(false);
-      setParsedSchedule(null);
-      loadAllSchoolData(selectedSchool.id);
-    } else {
-      Alert.alert('Hata', result.message);
+      if (result.success) {
+        Alert.alert('Başarılı 🎉', result.message);
+        setAiModalVisible(false);
+        setParsedSchedule(null);
+        loadAllSchoolData(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', result.message);
+      }
+    } catch (err: any) {
+      Alert.alert('Hata', err?.message || 'Kayıt işlemi başarısız oldu.');
+    } finally {
+      setAiSaving(false);
     }
   };
 
@@ -3408,8 +3429,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </View>
               </View>
             ) : parsedSchedule ? (
-              <View style={styles.parsedPreview}>
-                <Text style={styles.previewSuccessTitle}>🎉 Ayrıştırma Başarılı!</Text>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+                <Text style={styles.previewSuccessTitle}>🎉 Çarşaf Program Ayrıştırıldı!</Text>
+
+                {/* Özet Grid Kartları */}
                 <View style={styles.previewGrid}>
                   <View style={styles.previewItem}>
                     <Text style={styles.previewVal}>{parsedSchedule.teachers.length}</Text>
@@ -3420,20 +3443,249 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     <Text style={styles.previewLbl}>Sınıf / Şube</Text>
                   </View>
                   <View style={styles.previewItem}>
+                    <Text style={styles.previewVal}>{parsedSchedule.lessons.length}</Text>
+                    <Text style={styles.previewLbl}>Ders</Text>
+                  </View>
+                  <View style={styles.previewItem}>
                     <Text style={styles.previewVal}>{parsedSchedule.scheduleItems.length}</Text>
                     <Text style={styles.previewLbl}>Ders Saati</Text>
                   </View>
                 </View>
 
-                <Text style={styles.previewNote}>
-                  Onayladığınızda tüm okul veritabanına tek seferde atomik olarak kaydedilecek.
-                </Text>
+                {/* 1. İşlem / Kayıt Modu Seçimi */}
+                <View style={styles.scheduleOptionSection}>
+                  <Text style={styles.scheduleOptionSectionTitle}>1. KAYIT MODU SEÇİN:</Text>
 
-                <TouchableOpacity style={styles.confirmSaveButton} onPress={handleConfirmAndSaveSchedule}>
-                  <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                  <Text style={styles.confirmSaveText}>Onayla & Sisteme Kaydet</Text>
-                </TouchableOpacity>
-              </View>
+                  {/* Mod A: Merge / Update */}
+                  <TouchableOpacity
+                    style={[
+                      styles.scheduleModeCard,
+                      scheduleSaveMode === 'merge' && styles.scheduleModeCardActiveMerge,
+                    ]}
+                    onPress={() => setScheduleSaveMode('merge')}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name={scheduleSaveMode === 'merge' ? 'radio-button-on' : 'radio-button-off'}
+                      size={20}
+                      color={scheduleSaveMode === 'merge' ? '#059669' : '#94A3B8'}
+                    />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.scheduleModeTitle, scheduleSaveMode === 'merge' && { color: '#059669' }]}>
+                        🔄 Mevcutları Koru & Güncelle (Önerilen)
+                      </Text>
+                      <Text style={styles.scheduleModeDesc}>
+                        Var olan öğretmen, sınıf ve ders programı silinmez. Sadece yeni veya değişen veriler eklenir/güncellenir.
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* Mod B: Overwrite */}
+                  <TouchableOpacity
+                    style={[
+                      styles.scheduleModeCard,
+                      scheduleSaveMode === 'overwrite' && styles.scheduleModeCardActiveOverwrite,
+                    ]}
+                    onPress={() => setScheduleSaveMode('overwrite')}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name={scheduleSaveMode === 'overwrite' ? 'radio-button-on' : 'radio-button-off'}
+                      size={20}
+                      color={scheduleSaveMode === 'overwrite' ? '#DC2626' : '#94A3B8'}
+                    />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.scheduleModeTitle, scheduleSaveMode === 'overwrite' && { color: '#DC2626' }]}>
+                        ⚠️ Sıfırdan Temiz Kurulum (Mevcut Programı Sil)
+                      </Text>
+                      <Text style={styles.scheduleModeDesc}>
+                        Okuldaki tüm mevcut ders programı kayıtları silinir ve bu çarşaf program sıfırdan yazılır.
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+
+                {/* 2. Sisteme Yazılacak Veriler (Checkboxes) */}
+                <View style={styles.scheduleOptionSection}>
+                  <Text style={styles.scheduleOptionSectionTitle}>2. SİSTEME YAZILACAK VERİLERİ SEÇİN:</Text>
+
+                  {/* Öğretmenler */}
+                  <View style={styles.scheduleCheckboxContainer}>
+                    <View style={styles.scheduleCheckboxRow}>
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                        onPress={() => setSaveTeachersChecked(!saveTeachersChecked)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name={saveTeachersChecked ? 'checkbox' : 'square-outline'}
+                          size={22}
+                          color={saveTeachersChecked ? '#4F46E5' : '#94A3B8'}
+                        />
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                          <Text style={styles.scheduleCheckboxTitle}>
+                            👨‍🏫 Öğretmen Kadrosu ({parsedSchedule.teachers.length})
+                          </Text>
+                          <Text style={styles.scheduleCheckboxSub}>
+                            Bulunan öğretmenleri okul kadrosuna ekler / eşleştirir.
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.scheduleToggleBtn}
+                        onPress={() => setShowTeachersList(!showTeachersList)}
+                      >
+                        <Ionicons name={showTeachersList ? 'chevron-up' : 'chevron-down'} size={18} color="#64748B" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {showTeachersList && (
+                      <View style={styles.chipsContainer}>
+                        {parsedSchedule.teachers.map((t, idx) => (
+                          <View key={idx} style={styles.itemChip}>
+                            <Text style={styles.itemChipText}>{t}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Sınıflar & Şubeler */}
+                  <View style={styles.scheduleCheckboxContainer}>
+                    <View style={styles.scheduleCheckboxRow}>
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                        onPress={() => setSaveClassesChecked(!saveClassesChecked)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name={saveClassesChecked ? 'checkbox' : 'square-outline'}
+                          size={22}
+                          color={saveClassesChecked ? '#4F46E5' : '#94A3B8'}
+                        />
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                          <Text style={styles.scheduleCheckboxTitle}>
+                            🏫 Sınıflar & Şubeler ({parsedSchedule.classes.length})
+                          </Text>
+                          <Text style={styles.scheduleCheckboxSub}>
+                            Belirlenen şubeleri okulun sınıf listesine kaydeder.
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.scheduleToggleBtn}
+                        onPress={() => setShowClassesList(!showClassesList)}
+                      >
+                        <Ionicons name={showClassesList ? 'chevron-up' : 'chevron-down'} size={18} color="#64748B" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {showClassesList && (
+                      <View style={styles.chipsContainer}>
+                        {parsedSchedule.classes.map((c, idx) => (
+                          <View key={idx} style={[styles.itemChip, { backgroundColor: '#EDE9FE', borderColor: '#DDD6FE' }]}>
+                            <Text style={[styles.itemChipText, { color: '#6D28D9' }]}>{c}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Ders Havuzu */}
+                  <View style={styles.scheduleCheckboxContainer}>
+                    <View style={styles.scheduleCheckboxRow}>
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                        onPress={() => setSaveLessonsChecked(!saveLessonsChecked)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name={saveLessonsChecked ? 'checkbox' : 'square-outline'}
+                          size={22}
+                          color={saveLessonsChecked ? '#4F46E5' : '#94A3B8'}
+                        />
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                          <Text style={styles.scheduleCheckboxTitle}>
+                            📚 Ders Havuzu ({parsedSchedule.lessons.length})
+                          </Text>
+                          <Text style={styles.scheduleCheckboxSub}>
+                            Bulunan dersleri okulun dersler havuzuna ekler.
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.scheduleToggleBtn}
+                        onPress={() => setShowLessonsList(!showLessonsList)}
+                      >
+                        <Ionicons name={showLessonsList ? 'chevron-up' : 'chevron-down'} size={18} color="#64748B" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {showLessonsList && (
+                      <View style={styles.chipsContainer}>
+                        {parsedSchedule.lessons.map((l, idx) => (
+                          <View key={idx} style={[styles.itemChip, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}>
+                            <Text style={[styles.itemChipText, { color: '#047857' }]}>{l}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Haftalık Ders Programı */}
+                  <View style={styles.scheduleCheckboxContainer}>
+                    <View style={styles.scheduleCheckboxRow}>
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+                        onPress={() => setSaveScheduleChecked(!saveScheduleChecked)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons
+                          name={saveScheduleChecked ? 'checkbox' : 'square-outline'}
+                          size={22}
+                          color={saveScheduleChecked ? '#4F46E5' : '#94A3B8'}
+                        />
+                        <View style={{ flex: 1, marginLeft: 8 }}>
+                          <Text style={styles.scheduleCheckboxTitle}>
+                            📅 Haftalık Ders Programı ({parsedSchedule.scheduleItems.length} Ders Saati)
+                          </Text>
+                          <Text style={styles.scheduleCheckboxSub}>
+                            Haftalık gün ve saat bazında tüm ders eşleştirmelerini yazar.
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Aksiyon Butonları */}
+                <View style={styles.scheduleActionButtonsRow}>
+                  <TouchableOpacity
+                    style={styles.cancelUploadButton}
+                    onPress={() => {
+                      setParsedSchedule(null);
+                      setAiModalVisible(false);
+                    }}
+                  >
+                    <Text style={styles.cancelUploadText}>Vazgeç</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.confirmSaveButton, { flex: 2 }]}
+                    onPress={executeSaveSchedule}
+                    disabled={aiSaving}
+                  >
+                    {aiSaving ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="cloud-upload" size={18} color="#fff" />
+                        <Text style={styles.confirmSaveText}>Seçilenleri Kaydet</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
             ) : null}
           </View>
         </View>
@@ -4952,6 +5204,117 @@ const styles = StyleSheet.create({
     height: 44,
   },
   confirmSaveText: { color: '#fff', fontSize: 14, fontWeight: '700', marginLeft: 6 },
+  scheduleOptionSection: {
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  scheduleOptionSectionTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#475569',
+    marginBottom: 8,
+    letterSpacing: 0.5,
+  },
+  scheduleModeCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 10,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    marginBottom: 8,
+  },
+  scheduleModeCardActiveMerge: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#10B981',
+  },
+  scheduleModeCardActiveOverwrite: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#EF4444',
+  },
+  scheduleModeTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 2,
+  },
+  scheduleModeDesc: {
+    fontSize: 10,
+    color: '#64748B',
+    lineHeight: 14,
+  },
+  scheduleCheckboxContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 10,
+    marginBottom: 8,
+  },
+  scheduleCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  scheduleCheckboxTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  scheduleCheckboxSub: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  scheduleToggleBtn: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#EEF2FF',
+  },
+  chipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  itemChip: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  itemChipText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  scheduleActionButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  cancelUploadButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cancelUploadText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
 
   // AI & API Yapılandırma Stilleri
   codeCardAiBtn: {

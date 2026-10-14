@@ -307,54 +307,120 @@ namespace OgretmenAjanda.Api.Controllers
             var school = await _context.Schools.FindAsync(request.SchoolId);
             if (school == null) return NotFound();
 
-            if (request.OverwriteAll)
+            // 1. Sınıfları ve Şubeleri Eşle / Ekle
+            int addedClassesCount = 0;
+            if (request.SyncClasses && request.Classes != null && request.Classes.Count > 0)
             {
-                var existingItems = _context.ScheduleItems.Where(s => s.SchoolId == request.SchoolId);
-                _context.ScheduleItems.RemoveRange(existingItems);
-
-                foreach (var item in request.Schedules)
-                {
-                    _context.ScheduleItems.Add(new ScheduleItem
-                    {
-                        Id = item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
-                        SchoolId = request.SchoolId,
-                        TeacherName = item.TeacherName,
-                        DayOfWeek = item.DayOfWeek,
-                        LessonHour = item.LessonHour,
-                        Grade = item.Grade,
-                        Section = item.Section,
-                        LessonName = item.LessonName,
-                        Classroom = item.Classroom
-                    });
-                }
-            }
-            else
-            {
-                // Mevcut verileri koruyarak yalnızca değişiklikleri yansıt (Merge / Update)
-                var existingList = await _context.ScheduleItems
-                    .Where(s => s.SchoolId == request.SchoolId)
+                var existingClasses = await _context.SchoolClasses
+                    .Where(c => c.SchoolId == request.SchoolId)
                     .ToListAsync();
 
-                foreach (var item in request.Schedules)
+                foreach (var classStr in request.Classes)
                 {
-                    var existing = existingList.FirstOrDefault(s =>
-                        s.DayOfWeek == item.DayOfWeek &&
-                        s.LessonHour == item.LessonHour &&
-                        (
-                            (!string.IsNullOrEmpty(s.TeacherName) && !string.IsNullOrEmpty(item.TeacherName) && string.Equals(s.TeacherName.Trim(), item.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase)) ||
-                            (!string.IsNullOrEmpty(s.Grade) && !string.IsNullOrEmpty(item.Grade) && s.Grade == item.Grade && s.Section == item.Section)
-                        )
-                    );
+                    if (string.IsNullOrWhiteSpace(classStr)) continue;
+                    var parts = classStr.Trim().Split(new[] { '-', '/', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    string grade = parts.Length > 0 ? parts[0] : classStr.Trim();
+                    string section = parts.Length > 1 ? parts[1].ToUpper() : "A";
 
-                    if (existing != null)
+                    if (!existingClasses.Any(c => c.Grade == grade && c.Section == section))
                     {
-                        existing.TeacherName = item.TeacherName;
-                        existing.Grade = item.Grade;
-                        existing.Section = item.Section;
-                        existing.LessonName = item.LessonName;
-                        if (!string.IsNullOrEmpty(item.Classroom)) existing.Classroom = item.Classroom;
+                        var newClass = new SchoolClass
+                        {
+                            Id = Guid.NewGuid(),
+                            SchoolId = request.SchoolId,
+                            Grade = grade,
+                            Section = section,
+                            AcademicYear = $"{DateTime.UtcNow.Year}-{DateTime.UtcNow.Year + 1}",
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _context.SchoolClasses.Add(newClass);
+                        existingClasses.Add(newClass);
+                        addedClassesCount++;
                     }
-                    else
+                }
+            }
+
+            // 2. Dersleri Ders Havuzuna Eşle / Ekle
+            int addedLessonsCount = 0;
+            if (request.SyncLessons && request.Lessons != null && request.Lessons.Count > 0)
+            {
+                var existingLessons = await _context.SchoolLessons
+                    .Where(l => l.SchoolId == request.SchoolId)
+                    .ToListAsync();
+
+                foreach (var lessonName in request.Lessons)
+                {
+                    var cleanLesson = lessonName?.Trim();
+                    if (string.IsNullOrWhiteSpace(cleanLesson)) continue;
+
+                    if (!existingLessons.Any(l => string.Equals(l.Name.Trim(), cleanLesson, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var newLesson = new SchoolLesson
+                        {
+                            Id = Guid.NewGuid(),
+                            SchoolId = request.SchoolId,
+                            Name = cleanLesson,
+                            ShortCode = cleanLesson.Length > 3 ? cleanLesson.Substring(0, 3).ToUpper() : cleanLesson.ToUpper(),
+                            Grade = "Tüm Kademeler",
+                            WeeklyHours = 2,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _context.SchoolLessons.Add(newLesson);
+                        existingLessons.Add(newLesson);
+                        addedLessonsCount++;
+                    }
+                }
+            }
+
+            // 3. Öğretmenleri Ekle / Kadroya Tanımla
+            int addedTeachersCount = 0;
+            if (request.SyncTeachers && request.Teachers != null && request.Teachers.Count > 0)
+            {
+                var existingTeachers = await _context.Users
+                    .Where(u => u.SchoolId == request.SchoolId && u.Role == UserRoles.Teacher)
+                    .ToListAsync();
+
+                foreach (var teacherName in request.Teachers)
+                {
+                    var cleanTeacher = teacherName?.Trim();
+                    if (string.IsNullOrWhiteSpace(cleanTeacher)) continue;
+
+                    if (!existingTeachers.Any(t => string.Equals(t.FullName.Trim(), cleanTeacher, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var safeUsername = cleanTeacher.ToLower()
+                            .Replace("ç", "c").Replace("ğ", "g").Replace("ı", "i")
+                            .Replace("ö", "o").Replace("ş", "s").Replace("ü", "u")
+                            .Replace(" ", ".");
+                        var username = $"{safeUsername}.{Random.Shared.Next(100, 999)}";
+
+                        var newTeacher = new User
+                        {
+                            Id = Guid.NewGuid(),
+                            SchoolId = request.SchoolId,
+                            FullName = cleanTeacher,
+                            Username = username,
+                            PasswordHash = BCrypt.Net.BCrypt.HashPassword("1234"),
+                            Role = UserRoles.Teacher,
+                            IsActive = true,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _context.Users.Add(newTeacher);
+                        existingTeachers.Add(newTeacher);
+                        addedTeachersCount++;
+                    }
+                }
+            }
+
+            // 4. Haftalık Ders Programını Eşle / Kaydet
+            int savedScheduleCount = 0;
+            if (request.SyncSchedules && request.Schedules != null && request.Schedules.Count > 0)
+            {
+                if (request.OverwriteAll)
+                {
+                    var existingItems = _context.ScheduleItems.Where(s => s.SchoolId == request.SchoolId);
+                    _context.ScheduleItems.RemoveRange(existingItems);
+
+                    foreach (var item in request.Schedules)
                     {
                         _context.ScheduleItems.Add(new ScheduleItem
                         {
@@ -368,9 +434,57 @@ namespace OgretmenAjanda.Api.Controllers
                             LessonName = item.LessonName,
                             Classroom = item.Classroom
                         });
+                        savedScheduleCount++;
+                    }
+                }
+                else
+                {
+                    // Mevcut verileri koruyarak yalnızca değişiklikleri yansıt (Merge / Update)
+                    var existingList = await _context.ScheduleItems
+                        .Where(s => s.SchoolId == request.SchoolId)
+                        .ToListAsync();
+
+                    foreach (var item in request.Schedules)
+                    {
+                        var existing = existingList.FirstOrDefault(s =>
+                            s.DayOfWeek == item.DayOfWeek &&
+                            s.LessonHour == item.LessonHour &&
+                            (
+                                (!string.IsNullOrEmpty(s.TeacherName) && !string.IsNullOrEmpty(item.TeacherName) && string.Equals(s.TeacherName.Trim(), item.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase)) ||
+                                (!string.IsNullOrEmpty(s.Grade) && !string.IsNullOrEmpty(item.Grade) && s.Grade == item.Grade && s.Section == item.Section)
+                            )
+                        );
+
+                        if (existing != null)
+                        {
+                            existing.TeacherName = item.TeacherName;
+                            existing.Grade = item.Grade;
+                            existing.Section = item.Section;
+                            existing.LessonName = item.LessonName;
+                            if (!string.IsNullOrEmpty(item.Classroom)) existing.Classroom = item.Classroom;
+                        }
+                        else
+                        {
+                            _context.ScheduleItems.Add(new ScheduleItem
+                            {
+                                Id = item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
+                                SchoolId = request.SchoolId,
+                                TeacherName = item.TeacherName,
+                                DayOfWeek = item.DayOfWeek,
+                                LessonHour = item.LessonHour,
+                                Grade = item.Grade,
+                                Section = item.Section,
+                                LessonName = item.LessonName,
+                                Classroom = item.Classroom
+                            });
+                        }
+                        savedScheduleCount++;
                     }
                 }
             }
+
+            var modeText = request.OverwriteAll ? "Sıfırdan Temiz Kurulum (Mevcut Program Silindi)" : "Mevcutları Koru & Güncelle";
+            var detailText = $"{modeText}. Kaydedilen: {addedTeachersCount} yeni öğretmen, {addedClassesCount} yeni şube, {addedLessonsCount} yeni ders, {savedScheduleCount} ders saati.";
 
             _context.AuditLogs.Add(new AuditLog
             {
@@ -379,13 +493,21 @@ namespace OgretmenAjanda.Api.Controllers
                 UserRole = CurrentUserRole,
                 ActionType = "BATCH_SCHEDULE_SYNCED",
                 EntityName = "ScheduleItem",
-                DetailsJson = $"{request.Schedules.Count} ders programı kaydı yüklendi. (Mod: {(request.OverwriteAll ? "Sıfırdan Yaz" : "Güncelle")})",
+                DetailsJson = detailText,
                 Timestamp = DateTime.UtcNow
             });
 
             await _context.SaveChangesAsync();
-            await LogActionAsync(request.SchoolId, "BATCH_SCHEDULE_SYNCED", "ScheduleItem", null, $"{request.Schedules.Count} ders programı kaydı yüklendi. (Mod: {(request.OverwriteAll ? "Sıfırdan Yaz" : "Güncelle")})");
-            return Ok(new { message = request.OverwriteAll ? "Ders programı sıfırlanıp yeniden yazıldı." : "Ders programı başarıyla güncellendi." });
+            await LogActionAsync(request.SchoolId, "BATCH_SCHEDULE_SYNCED", "ScheduleItem", null, detailText);
+            
+            return Ok(new
+            {
+                message = detailText,
+                addedTeachersCount,
+                addedClassesCount,
+                addedLessonsCount,
+                savedScheduleCount,
+            });
         }
 
         // 4. Ders Programını Çek

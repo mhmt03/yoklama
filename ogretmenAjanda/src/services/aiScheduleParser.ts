@@ -191,14 +191,32 @@ Notlar:
   throw new Error(`Çarşaf ders programı analiz edilemedi: ${errMsg}`);
 }
 
+export interface MasterScheduleSaveOptions {
+  overwriteAll: boolean;
+  syncTeachers?: boolean;
+  syncClasses?: boolean;
+  syncLessons?: boolean;
+  syncSchedules?: boolean;
+}
+
 /**
- * Ayrıştırılan çarşaf programı sunucuya atomik olarak gönderir
+ * Ayrıştırılan çarşaf programı sunucuya atomik ve seçmeli olarak gönderir
  */
 export async function saveMasterScheduleToServer(
   schoolId: string,
   parsed: ParsedScheduleResult,
-  overwriteAll: boolean = false
-): Promise<{ success: boolean; message: string }> {
+  options: MasterScheduleSaveOptions | boolean = false
+): Promise<{ success: boolean; message: string; data?: any }> {
+  const opts: MasterScheduleSaveOptions = typeof options === 'boolean'
+    ? { overwriteAll: options, syncTeachers: true, syncClasses: true, syncLessons: true, syncSchedules: true }
+    : {
+        overwriteAll: options.overwriteAll,
+        syncTeachers: options.syncTeachers ?? true,
+        syncClasses: options.syncClasses ?? true,
+        syncLessons: options.syncLessons ?? true,
+        syncSchedules: options.syncSchedules ?? true,
+      };
+
   const syncItems = parsed.scheduleItems.map((item) => ({
     teacherName: item.teacherName,
     dayOfWeek: item.dayOfWeek,
@@ -209,18 +227,26 @@ export async function saveMasterScheduleToServer(
     classroom: item.classroom,
   }));
 
-  const res = await apiRequest('sync/schedules/batch', 'POST', {
+  const res = await apiRequest<any>('sync/schedules/batch', 'POST', {
     schoolId,
-    overwriteAll,
+    overwriteAll: opts.overwriteAll,
+    syncTeachers: opts.syncTeachers,
+    syncClasses: opts.syncClasses,
+    syncLessons: opts.syncLessons,
+    syncSchedules: opts.syncSchedules,
+    teachers: parsed.teachers,
+    classes: parsed.classes,
+    lessons: parsed.lessons,
     schedules: syncItems,
   });
 
   if (res.success) {
     return {
       success: true,
-      message: overwriteAll
-        ? `Tüm okul ders programı sıfırlanıp ${parsed.teachers.length} öğretmen ve ${parsed.classes.length} sınıf yeniden kaydedildi.`
-        : `Ders programı başarıyla güncellendi (${parsed.teachers.length} öğretmen, ${parsed.classes.length} sınıf).`,
+      message: res.data?.message || (opts.overwriteAll
+        ? `Tüm okul ders programı sıfırlanıp yeniden kaydedildi.`
+        : `Ders programı başarıyla güncellendi.`),
+      data: res.data,
     };
   }
 

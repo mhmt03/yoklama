@@ -38,6 +38,13 @@ namespace OgretmenAjanda.Api.DTOs
     {
         public Guid SchoolId { get; set; }
         public bool OverwriteAll { get; set; } = false;
+        public bool SyncTeachers { get; set; } = true;
+        public bool SyncClasses { get; set; } = true;
+        public bool SyncLessons { get; set; } = true;
+        public bool SyncSchedules { get; set; } = true;
+        public List<string> Teachers { get; set; } = new();
+        public List<string> Classes { get; set; } = new();
+        public List<string> Lessons { get; set; } = new();
         public List<ScheduleSyncItem> Schedules { get; set; } = new();
     }
 
