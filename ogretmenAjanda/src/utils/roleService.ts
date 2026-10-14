@@ -1,6 +1,6 @@
 import { getDB } from '../database/db';
 
-export type UserRole = 'admin' | 'teacher' | 'student' | 'staff';
+export type UserRole = 'superadmin' | 'admin' | 'teacher' | 'student' | 'staff';
 
 export interface StudentProfileData {
   studentId: number;
@@ -23,7 +23,7 @@ export const getActiveUserRole = async (): Promise<UserRole | null> => {
     const row = await db.getFirstAsync<{ value: string }>(
       "SELECT value FROM app_settings WHERE key = 'active_user_role'"
     );
-    if (row && (row.value === 'admin' || row.value === 'teacher' || row.value === 'student' || row.value === 'staff')) {
+    if (row && (row.value === 'superadmin' || row.value === 'admin' || row.value === 'teacher' || row.value === 'student' || row.value === 'staff')) {
       return row.value as UserRole;
     }
     return null;
@@ -32,6 +32,7 @@ export const getActiveUserRole = async (): Promise<UserRole | null> => {
     return null;
   }
 };
+
 
 /**
  * Aktif öğretmenin adını kaydeder (Sınıf/ders atamalarında filtreleme ve tanıma için).

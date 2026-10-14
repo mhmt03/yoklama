@@ -18,6 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Colors } from '../theme/colors';
 import { apiRequest } from '../services/apiClient';
 import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult } from '../services/aiScheduleParser';
+import { getActiveSchool, updateSchool } from '../database/operations/schoolOperations';
 
 export function SchoolAdminScreen({ navigation }: any) {
   const [schools, setSchools] = useState<any[]>([]);
@@ -25,6 +26,12 @@ export function SchoolAdminScreen({ navigation }: any) {
   const [teachers, setTeachers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Okul Adı Düzenleme Modal State
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editSchoolName, setEditSchoolName] = useState('');
+  const [editSchoolPhone, setEditSchoolPhone] = useState('');
+  const [updatingSchool, setUpdatingSchool] = useState(false);
 
   // AI Çarşaf Program Analizi Modal ve Staging Durumu
   const [aiModalVisible, setAiModalVisible] = useState(false);
@@ -36,6 +43,7 @@ export function SchoolAdminScreen({ navigation }: any) {
   const [newSchoolName, setNewSchoolName] = useState('');
   const [newSchoolPhone, setNewSchoolPhone] = useState('');
   const [newSchoolApiKey, setNewSchoolApiKey] = useState('');
+
 
   const loadSchools = async () => {
     try {
@@ -91,6 +99,35 @@ export function SchoolAdminScreen({ navigation }: any) {
       loadSchools();
     } else {
       Alert.alert('Hata', res.error || 'Okul oluşturulamadı (En fazla 3 okul açabilirsiniz).');
+    }
+  };
+
+  const handleUpdateSchool = async () => {
+    if (!editSchoolName.trim() || !selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen okul adı girin.');
+      return;
+    }
+    setUpdatingSchool(true);
+    try {
+      // 1. Sunucuyu güncelle
+      await apiRequest(`schools/${selectedSchool.id}`, 'PUT', {
+        name: editSchoolName.trim(),
+        phone: editSchoolPhone.trim(),
+      });
+
+      // 2. Yerel veritabanındaki okulu da güncelle
+      const active = await getActiveSchool();
+      if (active) {
+        await updateSchool(active.id, editSchoolName.trim(), active.color, selectedSchool.code);
+      }
+
+      Alert.alert('Başarılı', 'Okul adı başarıyla güncellendi.');
+      setEditModalVisible(false);
+      loadSchools();
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setUpdatingSchool(false);
     }
   };
 
@@ -159,9 +196,22 @@ export function SchoolAdminScreen({ navigation }: any) {
           <Text style={styles.headerTitle}>Okul Yönetim Paneli</Text>
           <Text style={styles.headerSubtitle}>{selectedSchool?.name || 'Okul Seçiniz'}</Text>
         </View>
+        <TouchableOpacity
+          onPress={() => {
+            if (selectedSchool) {
+              setEditSchoolName(selectedSchool.name || '');
+              setEditSchoolPhone(selectedSchool.phone || '');
+              setEditModalVisible(true);
+            }
+          }}
+          style={styles.editSchoolBtn}
+        >
+          <Ionicons name="pencil" size={16} color="#4F46E5" />
+          <Text style={styles.editSchoolBtnText}>Okulu Düzenle</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={styles.addSchoolButton}>
           <Ionicons name="add" size={20} color="#fff" />
-          <Text style={styles.addSchoolText}>Yeni Okul</Text>
+          <Text style={styles.addSchoolText}>Yeni</Text>
         </TouchableOpacity>
       </View>
 
@@ -173,7 +223,7 @@ export function SchoolAdminScreen({ navigation }: any) {
         {selectedSchool && (
           <View style={styles.codeCard}>
             <View style={styles.codeCardTop}>
-              <View>
+              <View style={{ flex: 1 }}>
                 <Text style={styles.codeCardLabel}>ÖĞRETMEN BAĞLANTI KODU</Text>
                 <Text style={styles.codeCardValue}>{selectedSchool.code}</Text>
               </View>
@@ -190,6 +240,7 @@ export function SchoolAdminScreen({ navigation }: any) {
             </Text>
           </View>
         )}
+
 
         {/* AI ile Otomatik Okul İnşası Butonu */}
         <TouchableOpacity style={styles.aiBanner} onPress={handlePickAndAnalyzeSchedule}>
@@ -326,6 +377,52 @@ export function SchoolAdminScreen({ navigation }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* Okul Bilgilerini Düzenleme Modalı */}
+      <Modal visible={editModalVisible} animationType="slide" transparent>
+
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Okul Bilgilerini Düzenle</Text>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.text, marginBottom: 6 }}>Okul Adı</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Okul Adı"
+              placeholderTextColor={Colors.textMuted}
+              value={editSchoolName}
+              onChangeText={setEditSchoolName}
+            />
+
+            <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.text, marginBottom: 6 }}>Telefon (Opsiyonel)</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Telefon Numarası"
+              placeholderTextColor={Colors.textMuted}
+              value={editSchoolPhone}
+              onChangeText={setEditSchoolPhone}
+              keyboardType="phone-pad"
+            />
+
+            <TouchableOpacity
+              style={styles.createSubmitButton}
+              onPress={handleUpdateSchool}
+              disabled={updatingSchool}
+            >
+              {updatingSchool ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.createSubmitText}>Değişiklikleri Kaydet</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -345,6 +442,18 @@ const styles = StyleSheet.create({
   headerTitleContainer: { flex: 1, marginLeft: 12 },
   headerTitle: { fontSize: 17, fontWeight: '700', color: Colors.text },
   headerSubtitle: { fontSize: 12, color: Colors.textMuted },
+  editSchoolBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginRight: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  editSchoolBtnText: { color: '#4F46E5', fontSize: 11, fontWeight: '700', marginLeft: 4 },
   addSchoolButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -353,6 +462,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
+
   addSchoolText: { color: '#fff', fontSize: 12, fontWeight: '700', marginLeft: 4 },
   scrollContent: { padding: 16, paddingBottom: 40 },
   codeCard: {

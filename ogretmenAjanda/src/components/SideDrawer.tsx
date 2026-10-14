@@ -150,20 +150,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                   <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={() => navigateToScreen('SuperAdmin')}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.menuIconWrap, { backgroundColor: '#FEF3C7' }]}>
-                    <Ionicons name="key" size={18} color="#D97706" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.menuItemTitle}>Süper Admin (Lisanslar)</Text>
-                    <Text style={styles.menuItemSub}>1 yıllık lisans süreleri ve okul kayıtları</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
+
 
 
                 <TouchableOpacity

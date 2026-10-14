@@ -198,7 +198,29 @@ function AppContent() {
     );
   }
 
-  // 2. Veli / Öğrenci rolü -> Süper sade öğrenci paneli
+  // 2. Süper Admin rolü -> Doğrudan Lisans ve Sistem Yönetim Paneli
+  if (currentRole === 'superadmin') {
+    return (
+      <SuperAdminScreen
+        navigation={{
+          goBack: () => setCurrentRole(null),
+        }}
+      />
+    );
+  }
+
+  // 3. Okul Admini / İdareci rolü -> Doğrudan Okul Yönetim Paneli (AI Çarşaf, Öğretmenler, Okul Kodu)
+  if (currentRole === 'admin') {
+    return (
+      <SchoolAdminScreen
+        navigation={{
+          goBack: () => setCurrentRole(null),
+        }}
+      />
+    );
+  }
+
+  // 4. Veli / Öğrenci rolü -> Süper sade öğrenci paneli
   if (currentRole === 'student') {
     return (
       <StudentDashboardScreen
@@ -209,7 +231,8 @@ function AppContent() {
     );
   }
 
-  // 3. Öğretmen veya Admin rolü -> Tam ajanda ve yan çekmece menü
+  // 5. Öğretmen rolü -> Tam ajanda ve yan çekmece menü
+
   return (
     <>
       <NavigationContainer ref={navigationRef}>

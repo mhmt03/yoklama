@@ -87,22 +87,19 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       if (res.success && res.data) {
         await saveAuthToken(res.data.token, res.data);
         setSuperAdminModalVisible(false);
-        await setActiveUserRole('admin');
-        onRoleSelected('admin');
-        if (navigation) {
-          navigation.navigate('SuperAdmin');
-        }
+        await setActiveUserRole('superadmin');
+        onRoleSelected('superadmin');
       } else {
         // Çevrimdışı / İlk test modu: şifre mehmet / 123456 ise doğrudan izin ver
         if (superAdminUsername.trim() === 'mehmet' && superAdminPassword.trim() === '123456') {
           setSuperAdminModalVisible(false);
-          await setActiveUserRole('admin');
-          onRoleSelected('admin');
-          if (navigation) navigation.navigate('SuperAdmin');
+          await setActiveUserRole('superadmin');
+          onRoleSelected('superadmin');
         } else {
           Alert.alert('Giriş Başarısız', res.error || 'Kullanıcı adı veya şifre hatalı.');
         }
       }
+
     } catch (e: any) {
       Alert.alert('Hata', e.message);
     } finally {

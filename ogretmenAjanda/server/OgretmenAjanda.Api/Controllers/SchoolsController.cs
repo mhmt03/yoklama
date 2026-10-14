@@ -153,6 +153,33 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(new { message = "Öğretmen bilgileri güncellendi." });
         }
 
+        // Okul Adı ve Bilgilerini Güncelleme
+        [HttpPut("{schoolId}")]
+        public async Task<IActionResult> UpdateSchoolDetails(Guid schoolId, [FromBody] UpdateSchoolRequest request)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            school.Name = request.Name.Trim();
+            if (request.Phone != null) school.Phone = request.Phone;
+            if (request.Address != null) school.Address = request.Address;
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                SchoolId = school.Id,
+                UserId = CurrentUserId,
+                UserRole = CurrentUserRole,
+                ActionType = "SCHOOL_UPDATED",
+                EntityName = "School",
+                EntityId = school.Id.ToString(),
+                DetailsJson = $"Okul adı güncellendi: {school.Name}",
+                Timestamp = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+            return Ok(school);
+        }
+
         // Okul Ortak Gemini API Key Güncelleme
         [HttpPut("{schoolId}/gemini-key")]
         public async Task<IActionResult> UpdateGeminiApiKey(Guid schoolId, [FromBody] UpdateKeyRequest request)
@@ -166,6 +193,14 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(new { message = "Okul ortak AI API anahtarı güncellendi." });
         }
     }
+
+    public class UpdateSchoolRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? Address { get; set; }
+    }
+
 
     public class UpdateTeacherStatusRequest
     {
