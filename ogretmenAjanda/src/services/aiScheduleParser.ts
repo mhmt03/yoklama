@@ -189,6 +189,56 @@ export function extractPdfBookmarksFromBase64(base64Data: string): string[] {
   }
 }
 
+const LOG = '[Çarşaf AI]';
+
+/**
+ * Gemini yanıtındaki JSON'u toleranslı ayrıştırır: markdown temizler, sondaki virgülleri atar,
+ * yanıt token sınırında yarım kesilmişse son tamamlanmış öğeye kadar kesip parantezleri kapatır.
+ */
+export function parseJsonLenient(raw: string): { data: any; repaired: boolean } {
+  let text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const first = text.indexOf('{');
+  if (first < 0) throw new Error('Yanıtta JSON bulunamadı.');
+  text = text.slice(first);
+  try {
+    return { data: JSON.parse(text), repaired: false };
+  } catch {}
+
+  const noTrailing = text.replace(/,\s*([}\]])/g, '$1');
+  try {
+    return { data: JSON.parse(noTrailing), repaired: true };
+  } catch {}
+
+  // Kesilmiş JSON onarımı
+  const stack: string[] = [];
+  let inStr = false;
+  let esc = false;
+  let lastSafe = -1;
+  let safeStack: string[] = [];
+  for (let i = 0; i < noTrailing.length; i++) {
+    const ch = noTrailing[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === '{') stack.push('}');
+    else if (ch === '[') stack.push(']');
+    else if (ch === '}' || ch === ']') {
+      stack.pop();
+      if (stack.length >= 1) {
+        lastSafe = i + 1;
+        safeStack = [...stack];
+      }
+    }
+  }
+  if (lastSafe < 0) throw new Error('JSON onarılamadı (yanıt çok kısa kesilmiş).');
+  const fixed = noTrailing.slice(0, lastSafe).replace(/,\s*$/, '') + safeStack.reverse().join('');
+  return { data: JSON.parse(fixed), repaired: true };
+}
+
 /**
  * Gemini AI ile çarşaf ders programı PDF veya görselini analiz ederek
  * okulun tüm öğretmen, sınıf, ders ve program omurgasını çıkarır.
@@ -302,36 +352,59 @@ Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON 
     },
   };
 
-  const candidateList = [preferredModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-3.8-flash'];
-  const modelsToTry = Array.from(new Set(candidateList.filter(Boolean)));
+  // Hesabın gerçekten erişebildiği modelleri öğren (404 alınan modelleri boşuna denememek için)
+  let liveModels: string[] = [];
+  try {
+    const { fetchAvailableGeminiModels } = await import('../utils/geminiScheduleService');
+    liveModels = await fetchAvailableGeminiModels(cleanApiKey);
+  } catch (e) {
+    console.warn(LOG, 'Canlı model listesi alınamadı:', e);
+  }
+  console.log(LOG, 'Canlı modeller:', liveModels.join(', ') || '(alınamadı)');
+
+  const staticList = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-3.8-flash'];
+  const liveFlash = liveModels
+    .filter((m) => m.includes('flash') && !m.includes('lite') && !m.includes('image') && !m.includes('tts') && !m.includes('live'))
+    .sort()
+    .reverse();
+  let candidateList = [preferredModel, ...staticList, ...liveFlash];
+  if (liveModels.length > 0) {
+    candidateList = candidateList.filter((m) => m === preferredModel || liveModels.includes(m));
+  }
+  const modelsToTry = Array.from(new Set(candidateList.filter(Boolean))).slice(0, 6);
+  console.log(LOG, 'Denenecek modeller (sırayla):', modelsToTry.join(' → '), '| MIME:', resolvedMime, '| base64 boyutu:', base64Data.length);
   let lastError: any = null;
   let primaryError: any = null;
   const failures: string[] = [];
 
   for (const currentModel of modelsToTry) {
     try {
+      console.log(LOG, `Model deneniyor: ${currentModel}`);
       onModelChange?.(currentModel);
       onProgress?.(`Gemini AI (${currentModel}) ile çok sayfalı çarşaf program taranıyor...`);
       const model = genAI.getGenerativeModel({
         model: currentModel,
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 8192,
+          maxOutputTokens: 65536,
           responseMimeType: 'application/json',
         },
       });
+      const t0 = Date.now();
       const result = await model.generateContent([prompt, imagePart]);
       onProgress?.('Hücreler, öğretmenler ve ders tabloları çözümleniyor...');
       const textResponse = result.response.text().trim();
-
-      // JSON temizleme
-      let cleanJson = textResponse.replace(/^```json/i, '').replace(/```$/i, '').trim();
-      if (cleanJson.startsWith('```')) {
-        cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-      }
+      console.log(LOG, `${currentModel} yanıt verdi: ${((Date.now() - t0) / 1000).toFixed(1)} sn, ${textResponse.length} karakter, finishReason=${result.response.candidates?.[0]?.finishReason}, usage=${JSON.stringify(result.response.usageMetadata)}`);
+      console.log(LOG, 'Yanıt başı:', textResponse.slice(0, 300));
+      console.log(LOG, 'Yanıt sonu:', textResponse.slice(-300));
 
       onProgress?.('Öğretmen, sınıf ve ders omurgası doğrulanıyor...');
-      const parsedData: ParsedScheduleResult = JSON.parse(cleanJson);
+      const { data: parsedData, repaired } = parseJsonLenient(textResponse) as { data: ParsedScheduleResult; repaired: boolean };
+      parsedData.teachers = parsedData.teachers || [];
+      parsedData.classes = parsedData.classes || [];
+      parsedData.lessons = parsedData.lessons || [];
+      parsedData.scheduleItems = parsedData.scheduleItems || [];
+      console.log(LOG, `JSON ayrıştırıldı${repaired ? ' (kesik yanıt onarıldı)' : ''}: ${parsedData.teachers.length} öğretmen, ${parsedData.classes.length} şube, ${parsedData.lessons.length} ders, ${parsedData.scheduleItems.length} program satırı`);
 
       // --- VERİ GÜVENLİĞİ VE BİRLEŞTİRME (POST-PROCESSING) ---
 
@@ -393,6 +466,7 @@ Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON 
         primaryError = err;
       }
       lastError = err;
+      console.warn(LOG, `${currentModel} başarısız:`, err?.message || err);
       const short = String(err?.message || 'Bilinmeyen hata').replace(/\s+/g, ' ').slice(0, 160);
       failures.push(`• ${currentModel}: ${short}`);
     }
