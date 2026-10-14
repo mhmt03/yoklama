@@ -13,12 +13,43 @@ namespace OgretmenAjanda.Api.Data
             // Tabloları oluştur (varsa korur)
             await context.Database.EnsureCreatedAsync();
 
-            // SQLite için yeni sütunları güvenle ekle
+            // SQLite için yeni sütunları ve tabloları güvenle ekle
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"CustomerId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"CustomerId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""SchoolClasses"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""Grade"" TEXT NOT NULL,
+                        ""Section"" TEXT NOT NULL,
+                        ""AcademicYear"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""SchoolLessons"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""Name"" TEXT NOT NULL,
+                        ""ShortCode"" TEXT,
+                        ""Grade"" TEXT,
+                        ""WeeklyHours"" INTEGER NOT NULL DEFAULT 2,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
 
             // 1. Süper Admin: mehmetsuper / 1234 (veya mehmet / 123456)
             var superAdmin = await context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == "mehmetsuper");
@@ -141,6 +172,87 @@ namespace OgretmenAjanda.Api.Data
             {
                 if (string.IsNullOrEmpty(teacher.RelationId)) teacher.RelationId = "ILK-10001";
                 teacher.SchoolId = testSchool.Id;
+            }
+
+            // 5. Varsayılan Sınıf & Şubeler (9-A, 9-B, 10-A, 11-A, 12-A)
+            var hasClasses = await context.SchoolClasses.AnyAsync(c => c.SchoolId == testSchool.Id);
+            if (!hasClasses)
+            {
+                var defaultClasses = new[]
+                {
+                    new SchoolClass { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Grade = "9", Section = "A", AcademicYear = "2026-2027" },
+                    new SchoolClass { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Grade = "9", Section = "B", AcademicYear = "2026-2027" },
+                    new SchoolClass { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Grade = "10", Section = "A", AcademicYear = "2026-2027" },
+                    new SchoolClass { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Grade = "11", Section = "A", AcademicYear = "2026-2027" },
+                    new SchoolClass { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Grade = "12", Section = "A", AcademicYear = "2026-2027" },
+                };
+                await context.SchoolClasses.AddRangeAsync(defaultClasses);
+            }
+
+            // 6. Varsayılan Dersler
+            var hasLessons = await context.SchoolLessons.AnyAsync(l => l.SchoolId == testSchool.Id);
+            if (!hasLessons)
+            {
+                var defaultLessons = new[]
+                {
+                    new SchoolLesson { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Name = "Fizik", ShortCode = "FZK", Grade = "Tüm Kademeler", WeeklyHours = 2 },
+                    new SchoolLesson { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Name = "Kimya", ShortCode = "KMY", Grade = "Tüm Kademeler", WeeklyHours = 2 },
+                    new SchoolLesson { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Name = "Biyoloji", ShortCode = "BYL", Grade = "Tüm Kademeler", WeeklyHours = 2 },
+                    new SchoolLesson { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Name = "Matematik", ShortCode = "MAT", Grade = "Tüm Kademeler", WeeklyHours = 6 },
+                    new SchoolLesson { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Name = "Türk Dili ve Edebiyatı", ShortCode = "EDB", Grade = "Tüm Kademeler", WeeklyHours = 5 },
+                    new SchoolLesson { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Name = "Tarih", ShortCode = "TRH", Grade = "Tüm Kademeler", WeeklyHours = 2 },
+                    new SchoolLesson { Id = Guid.NewGuid(), SchoolId = testSchool.Id, Name = "İngilizce", ShortCode = "İNG", Grade = "Tüm Kademeler", WeeklyHours = 4 }
+                };
+                await context.SchoolLessons.AddRangeAsync(defaultLessons);
+            }
+
+            // 7. Örnek Öğrenciler
+            var hasStudents = await context.Students.AnyAsync(s => s.SchoolId == testSchool.Id);
+            if (!hasStudents)
+            {
+                var defaultStudents = new[]
+                {
+                    new Student
+                    {
+                        Id = Guid.NewGuid(),
+                        SchoolId = testSchool.Id,
+                        RelationId = "ILK-10001",
+                        StudentNumber = "101",
+                        FullName = "Ali Yılmaz",
+                        Grade = "9",
+                        Section = "A",
+                        ParentName = "Kemal Yılmaz",
+                        ParentPhone = "05551112233",
+                        StudentPhone = "05552223344"
+                    },
+                    new Student
+                    {
+                        Id = Guid.NewGuid(),
+                        SchoolId = testSchool.Id,
+                        RelationId = "ILK-10001",
+                        StudentNumber = "102",
+                        FullName = "Ayşe Demir",
+                        Grade = "9",
+                        Section = "A",
+                        ParentName = "Fatma Demir",
+                        ParentPhone = "05553334455",
+                        StudentPhone = "05554445566"
+                    },
+                    new Student
+                    {
+                        Id = Guid.NewGuid(),
+                        SchoolId = testSchool.Id,
+                        RelationId = "ILK-10001",
+                        StudentNumber = "201",
+                        FullName = "Can Yıldız",
+                        Grade = "10",
+                        Section = "A",
+                        ParentName = "Mustafa Yıldız",
+                        ParentPhone = "05555556677",
+                        StudentPhone = "05556667788"
+                    }
+                };
+                await context.Students.AddRangeAsync(defaultStudents);
             }
 
             await context.SaveChangesAsync();

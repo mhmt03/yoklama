@@ -10,42 +10,55 @@ import {
   TextInput,
   RefreshControl,
   Modal,
+  Image,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Colors } from '../theme/colors';
-import { apiRequest } from '../services/apiClient';
+import { apiRequest, DEFAULT_API_URL } from '../services/apiClient';
 import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult } from '../services/aiScheduleParser';
 import { getActiveSchool, updateSchool } from '../database/operations/schoolOperations';
 import { setActiveUserRole } from '../utils/roleService';
+import { pickSinglePhotoFromSource } from '../utils/photoService';
+
+type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule';
 
 export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
+  // Okul ve Genel State
   const [schools, setSchools] = useState<any[]>([]);
   const [selectedSchool, setSelectedSchool] = useState<any>(null);
-  const [teachers, setTeachers] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<AdminTab>('teachers');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Okul Adı Düzenleme Modal State
+  // Veri Listeleri
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
+  const [lessons, setLessons] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+
+  // Öğrenci Filtre ve Arama
+  const [studentSearch, setStudentSearch] = useState('');
+  const [selectedClassFilter, setSelectedClassFilter] = useState('all');
+  const [photoUploadingId, setPhotoUploadingId] = useState<string | null>(null);
+
+  // Okul Düzenleme Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editSchoolName, setEditSchoolName] = useState('');
   const [editSchoolPhone, setEditSchoolPhone] = useState('');
   const [updatingSchool, setUpdatingSchool] = useState(false);
 
-  // AI Çarşaf Program Analizi Modal ve Staging Durumu
-  const [aiModalVisible, setAiModalVisible] = useState(false);
-  const [aiParsing, setAiParsing] = useState(false);
-  const [parsedSchedule, setParsedSchedule] = useState<ParsedScheduleResult | null>(null);
-
-  // Okul Ekleme Modal
+  // Okul Ekleme Modal State
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newSchoolName, setNewSchoolName] = useState('');
   const [newSchoolPhone, setNewSchoolPhone] = useState('');
   const [newSchoolApiKey, setNewSchoolApiKey] = useState('');
 
-  // Manuel Öğretmen Ekleme Modalı & Sonuç
+  // 1. Öğretmen Ekleme / Düzenleme Modalları
   const [addTeacherModalVisible, setAddTeacherModalVisible] = useState(false);
   const [teacherFullName, setTeacherFullName] = useState('');
   const [teacherBranch, setTeacherBranch] = useState('');
@@ -53,6 +66,159 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [teacherEmail, setTeacherEmail] = useState('');
   const [addingTeacher, setAddingTeacher] = useState(false);
   const [createdTeacherResult, setCreatedTeacherResult] = useState<any>(null);
+
+  const [editTeacherModalVisible, setEditTeacherModalVisible] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState<any>(null);
+
+  // 2. Sınıf & Şube Ekleme Modalı
+  const [addClassModalVisible, setAddClassModalVisible] = useState(false);
+  const [newClassGrade, setNewClassGrade] = useState('9');
+  const [newClassSection, setNewClassSection] = useState('A');
+  const [addingClass, setAddingClass] = useState(false);
+
+  // 3. Ders Ekleme Modalı
+  const [addLessonModalVisible, setAddLessonModalVisible] = useState(false);
+  const [newLessonName, setNewLessonName] = useState('');
+  const [newLessonShortCode, setNewLessonShortCode] = useState('');
+  const [newLessonGrade, setNewLessonGrade] = useState('Tüm Kademeler');
+  const [newLessonHours, setNewLessonHours] = useState('2');
+  const [addingLesson, setAddingLesson] = useState(false);
+
+  // 4. Öğrenci Ekleme & Düzenleme Modalları
+  const [addStudentModalVisible, setAddStudentModalVisible] = useState(false);
+  const [newStudentNo, setNewStudentNo] = useState('');
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentGrade, setNewStudentGrade] = useState('9');
+  const [newStudentSection, setNewStudentSection] = useState('A');
+  const [newStudentParentName, setNewStudentParentName] = useState('');
+  const [newStudentParentPhone, setNewStudentParentPhone] = useState('');
+  const [newStudentPhone, setNewStudentPhone] = useState('');
+  const [addingStudent, setAddingStudent] = useState(false);
+
+  const [editStudentModalVisible, setEditStudentModalVisible] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<any>(null);
+  const [updatingStudent, setUpdatingStudent] = useState(false);
+
+  // 5. AI Çarşaf Program Analizi Modal ve Staging Durumu
+  const [aiModalVisible, setAiModalVisible] = useState(false);
+  const [aiParsing, setAiParsing] = useState(false);
+  const [parsedSchedule, setParsedSchedule] = useState<ParsedScheduleResult | null>(null);
+
+  // Sunucu Görsel Kök Adresi (Fotoğraflar için)
+  const serverBaseUrl = DEFAULT_API_URL.replace(/\/api\/?$/, '');
+
+  // --- VERİ YÜKLEME FONKSİYONLARI ---
+
+  const loadSchools = async () => {
+    try {
+      const res = await apiRequest<any[]>('schools/my-schools');
+      if (res.success && res.data) {
+        setSchools(res.data);
+        if (res.data.length > 0) {
+          const current = selectedSchool ? res.data.find(s => s.id === selectedSchool.id) || res.data[0] : res.data[0];
+          setSelectedSchool(current);
+          await loadAllSchoolData(current.id);
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const loadAllSchoolData = async (schoolId: string) => {
+    await Promise.all([
+      loadTeachers(schoolId),
+      loadClasses(schoolId),
+      loadLessons(schoolId),
+      loadStudents(schoolId),
+    ]);
+  };
+
+  const loadTeachers = async (schoolId: string) => {
+    const res = await apiRequest<any[]>(`schools/${schoolId}/teachers`);
+    if (res.success && res.data) setTeachers(res.data);
+  };
+
+  const loadClasses = async (schoolId: string) => {
+    const res = await apiRequest<any[]>(`schools/${schoolId}/classes`);
+    if (res.success && res.data) setClasses(res.data);
+  };
+
+  const loadLessons = async (schoolId: string) => {
+    const res = await apiRequest<any[]>(`schools/${schoolId}/lessons`);
+    if (res.success && res.data) setLessons(res.data);
+  };
+
+  const loadStudents = async (schoolId: string) => {
+    const res = await apiRequest<any[]>(`sync/students?schoolId=${schoolId}`);
+    if (res.success && res.data) setStudents(res.data);
+  };
+
+  useEffect(() => {
+    loadSchools();
+  }, []);
+
+  // --- OKUL YÖNETİMİ ---
+
+  const handleCopyCode = async (code: string) => {
+    await Clipboard.setStringAsync(code);
+    Alert.alert('Kopyalandı', `Okul Kodu (${code}) panoya kopyalandı. Öğretmenleriniz bu kodla sisteme bağlanabilir.`);
+  };
+
+  const handleCreateSchool = async () => {
+    if (!newSchoolName.trim()) {
+      Alert.alert('Uyarı', 'Lütfen okul adı girin.');
+      return;
+    }
+    const res = await apiRequest('schools', 'POST', {
+      name: newSchoolName.trim(),
+      phone: newSchoolPhone.trim(),
+      geminiApiKey: newSchoolApiKey.trim(),
+    });
+
+    if (res.success && res.data) {
+      Alert.alert('Başarılı', `Okul oluşturuldu. Okul Kodu: ${res.data.code}`);
+      setCreateModalVisible(false);
+      setNewSchoolName('');
+      setNewSchoolPhone('');
+      setNewSchoolApiKey('');
+      loadSchools();
+    } else {
+      Alert.alert('Hata', res.error || 'Okul oluşturulamadı.');
+    }
+  };
+
+  const handleUpdateSchool = async () => {
+    if (!editSchoolName.trim() || !selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen okul adı girin.');
+      return;
+    }
+    setUpdatingSchool(true);
+    try {
+      await apiRequest(`schools/${selectedSchool.id}`, 'PUT', {
+        name: editSchoolName.trim(),
+        phone: editSchoolPhone.trim(),
+      });
+
+      const active = await getActiveSchool();
+      if (active) {
+        await updateSchool(active.id, editSchoolName.trim(), active.color, selectedSchool.code);
+      }
+
+      Alert.alert('Başarılı', 'Okul adı güncellendi.');
+      setEditModalVisible(false);
+      loadSchools();
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setUpdatingSchool(false);
+    }
+  };
+
+  // --- 1. ÖĞRETMEN İŞLEMLERİ ---
 
   const handleCreateTeacher = async () => {
     if (!teacherFullName.trim() || !selectedSchool) {
@@ -87,101 +253,362 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
-  const handleCopyTeacherCredentials = async () => {
-    if (!createdTeacherResult) return;
-    const text = `🎓 Öğretmen Ajanda Giriş Bilgileriniz:\n\nOkul Kodu: ${createdTeacherResult.schoolCode || selectedSchool?.code}\nKullanıcı Adı: ${createdTeacherResult.username}\nŞifre: ${createdTeacherResult.password || '1234'}\n\nUygulamayı açıp "Öğretmen" bölümünden bu bilgilerle giriş yapabilirsiniz.`;
-    await Clipboard.setStringAsync(text);
-    Alert.alert('Kopyalandı 📋', 'Giriş bilgileri panoya kopyalandı. WhatsApp veya SMS ile öğretmeninize iletebilirsiniz.');
-  };
-
-
-  const loadSchools = async () => {
-    try {
-      const res = await apiRequest<any[]>('schools/my-schools');
-      if (res.success && res.data) {
-        setSchools(res.data);
-        if (res.data.length > 0 && !selectedSchool) {
-          setSelectedSchool(res.data[0]);
-          loadTeachers(res.data[0].id);
-        }
-      }
-    } catch (e: any) {
-      Alert.alert('Hata', e.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  const loadTeachers = async (schoolId: string) => {
-    const res = await apiRequest<any[]>(`schools/${schoolId}/teachers`);
-    if (res.success && res.data) {
-      setTeachers(res.data);
-    }
-  };
-
-  useEffect(() => {
-    loadSchools();
-  }, []);
-
-  const handleCopyCode = async (code: string) => {
-    await Clipboard.setStringAsync(code);
-    Alert.alert('Kopyalandı', `Okul Kodu (${code}) panoya kopyalandı. Öğretmenleriniz bu kodla sisteme bağlanabilir.`);
-  };
-
-  const handleCreateSchool = async () => {
-    if (!newSchoolName.trim()) {
-      Alert.alert('Uyarı', 'Lütfen okul adı girin.');
+  const handleUpdateTeacher = async () => {
+    if (!editingTeacher || !editingTeacher.fullName.trim()) {
+      Alert.alert('Uyarı', 'Öğretmen adı boş bırakılamaz.');
       return;
     }
-    const res = await apiRequest('schools', 'POST', {
-      name: newSchoolName.trim(),
-      phone: newSchoolPhone.trim(),
-      geminiApiKey: newSchoolApiKey.trim(),
-    });
 
-    if (res.success && res.data) {
-      Alert.alert('Başarılı', `Okul oluşturuldu. Okul Kodu: ${res.data.code}`);
-      setCreateModalVisible(false);
-      setNewSchoolName('');
-      setNewSchoolPhone('');
-      setNewSchoolApiKey('');
-      loadSchools();
-    } else {
-      Alert.alert('Hata', res.error || 'Okul oluşturulamadı (En fazla 3 okul açabilirsiniz).');
-    }
-  };
-
-  const handleUpdateSchool = async () => {
-    if (!editSchoolName.trim() || !selectedSchool) {
-      Alert.alert('Uyarı', 'Lütfen okul adı girin.');
-      return;
-    }
-    setUpdatingSchool(true);
     try {
-      // 1. Sunucuyu güncelle
-      await apiRequest(`schools/${selectedSchool.id}`, 'PUT', {
-        name: editSchoolName.trim(),
-        phone: editSchoolPhone.trim(),
+      const res = await apiRequest(`schools/teachers/${editingTeacher.id}/details`, 'PUT', {
+        fullName: editingTeacher.fullName.trim(),
+        branch: editingTeacher.branch || undefined,
+        phone: editingTeacher.phone || undefined,
+        email: editingTeacher.email || undefined,
       });
 
-      // 2. Yerel veritabanındaki okulu da güncelle
-      const active = await getActiveSchool();
-      if (active) {
-        await updateSchool(active.id, editSchoolName.trim(), active.color, selectedSchool.code);
+      if (res.success) {
+        Alert.alert('Başarılı', 'Öğretmen bilgileri güncellendi.');
+        setEditTeacherModalVisible(false);
+        setEditingTeacher(null);
+        if (selectedSchool) loadTeachers(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', res.error || 'Güncellenemedi.');
       }
-
-      Alert.alert('Başarılı', 'Okul adı başarıyla güncellendi.');
-      setEditModalVisible(false);
-      loadSchools();
     } catch (e: any) {
       Alert.alert('Hata', e.message);
-    } finally {
-      setUpdatingSchool(false);
     }
   };
 
-  // İki Aşamalı AI Çarşaf Program Analizi (Client-Side Staging)
+  const handleDeleteTeacher = (teacherId: string, teacherName: string) => {
+    Alert.alert(
+      'Öğretmeni Sil',
+      `"${teacherName}" isimli öğretmeni okul kadrosundan silmek istediğinize emin misiniz? Bu işlem doğrudan sunucudan siler.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sil',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await apiRequest(`schools/teachers/${teacherId}`, 'DELETE');
+            if (res.success) {
+              Alert.alert('Silindi', 'Öğretmen okul kadrosundan silindi.');
+              if (selectedSchool) loadTeachers(selectedSchool.id);
+            } else {
+              Alert.alert('Hata', res.error || 'Silinemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleResetTeacherPassword = (teacherId: string, teacherName: string) => {
+    Alert.alert(
+      'Şifreyi Sıfırla',
+      `"${teacherName}" öğretmeninin şifresini "1234" olarak sıfırlamak istiyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Şifreyi 1234 Yap',
+          onPress: async () => {
+            const res = await apiRequest(`schools/teachers/${teacherId}/reset-password`, 'POST', { newPassword: '1234' });
+            if (res.success) {
+              Alert.alert('Başarılı 🔑', `Şifre 1234 olarak güncellendi.`);
+            } else {
+              Alert.alert('Hata', res.error || 'Şifre güncellenemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCopyTeacherCredentials = async () => {
+    if (!createdTeacherResult) return;
+    const text = `🎓 Öğretmen Ajanda Giriş Bilgileriniz:\n\nOkul Kodu: ${createdTeacherResult.schoolCode || selectedSchool?.code}\nKullanıcı Adı: ${createdTeacherResult.username}\nŞifre: ${createdTeacherResult.password || '1234'}\n\nUygulamayı açıp "Öğretmen" bölümünden bu bilgilerle sisteme bağlanabilirsiniz.`;
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Kopyalandı 📋', 'Giriş bilgileri panoya kopyalandı. WhatsApp ile iletebilirsiniz.');
+  };
+
+  // --- 2. SINIF & ŞUBE İŞLEMLERİ ---
+
+  const handleCreateClass = async () => {
+    if (!newClassGrade.trim() || !newClassSection.trim() || !selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen kademe ve şube adını girin.');
+      return;
+    }
+
+    setAddingClass(true);
+    try {
+      const res = await apiRequest(`schools/${selectedSchool.id}/classes`, 'POST', {
+        grade: newClassGrade.trim(),
+        section: newClassSection.trim(),
+        academicYear: '2026-2027',
+      });
+
+      if (res.success) {
+        Alert.alert('Başarılı', `${newClassGrade}-${newClassSection} sınıfı doğrudan sunucuya eklendi.`);
+        setAddClassModalVisible(false);
+        setNewClassSection('');
+        loadClasses(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', res.error || 'Sınıf eklenemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setAddingClass(false);
+    }
+  };
+
+  const handleDeleteClass = (classId: string, className: string) => {
+    Alert.alert(
+      'Sınıfı Sil',
+      `"${className}" sınıfını sunucudan silmek istediğinize emin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await apiRequest(`schools/classes/${classId}`, 'DELETE');
+            if (res.success) {
+              Alert.alert('Silindi', 'Sınıf silindi.');
+              if (selectedSchool) loadClasses(selectedSchool.id);
+            } else {
+              Alert.alert('Hata', res.error || 'Silinemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // --- 3. DERS İŞLEMLERİ ---
+
+  const handleCreateLesson = async () => {
+    if (!newLessonName.trim() || !selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen ders adını girin.');
+      return;
+    }
+
+    setAddingLesson(true);
+    try {
+      const res = await apiRequest(`schools/${selectedSchool.id}/lessons`, 'POST', {
+        name: newLessonName.trim(),
+        shortCode: newLessonShortCode.trim() || undefined,
+        grade: newLessonGrade.trim() || 'Tüm Kademeler',
+        weeklyHours: parseInt(newLessonHours) || 2,
+      });
+
+      if (res.success) {
+        Alert.alert('Başarılı', `${newLessonName} dersi doğrudan sunucuya eklendi.`);
+        setAddLessonModalVisible(false);
+        setNewLessonName('');
+        setNewLessonShortCode('');
+        loadLessons(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', res.error || 'Ders eklenemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setAddingLesson(false);
+    }
+  };
+
+  const handleDeleteLesson = (lessonId: string, lessonName: string) => {
+    Alert.alert(
+      'Dersi Sil',
+      `"${lessonName}" dersini okul müfredatından silmek istediğinize emin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await apiRequest(`schools/lessons/${lessonId}`, 'DELETE');
+            if (res.success) {
+              Alert.alert('Silindi', 'Ders silindi.');
+              if (selectedSchool) loadLessons(selectedSchool.id);
+            } else {
+              Alert.alert('Hata', res.error || 'Silinemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // --- 4. ÖĞRENCİ İŞLEMLERİ (SERVER CRUD & FOTOĞRAF) ---
+
+  const handleCreateStudent = async () => {
+    if (!newStudentNo.trim() || !newStudentName.trim() || !selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen öğrenci numarası ve adını giriniz.');
+      return;
+    }
+
+    setAddingStudent(true);
+    try {
+      const res = await apiRequest('sync/students/single', 'POST', {
+        schoolId: selectedSchool.id,
+        studentNumber: newStudentNo.trim(),
+        fullName: newStudentName.trim(),
+        grade: newStudentGrade.trim(),
+        section: newStudentSection.trim().toUpperCase(),
+        parentName: newStudentParentName.trim() || undefined,
+        parentPhone: newStudentParentPhone.trim() || undefined,
+        studentPhone: newStudentPhone.trim() || undefined,
+      });
+
+      if (res.success) {
+        Alert.alert('Başarılı', `${newStudentName} doğrudan sunucuya eklendi.`);
+        setAddStudentModalVisible(false);
+        setNewStudentNo('');
+        setNewStudentName('');
+        setNewStudentParentName('');
+        setNewStudentParentPhone('');
+        setNewStudentPhone('');
+        loadStudents(selectedSchool.id);
+        loadClasses(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', res.error || 'Öğrenci eklenemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setAddingStudent(false);
+    }
+  };
+
+  const handleUpdateStudent = async () => {
+    if (!editingStudent || !editingStudent.studentNumber.trim() || !editingStudent.fullName.trim()) {
+      Alert.alert('Uyarı', 'Öğrenci no ve adı boş bırakılamaz.');
+      return;
+    }
+
+    setUpdatingStudent(true);
+    try {
+      const res = await apiRequest(`sync/students/${editingStudent.id}`, 'PUT', {
+        studentNumber: editingStudent.studentNumber.trim(),
+        fullName: editingStudent.fullName.trim(),
+        grade: editingStudent.grade.trim(),
+        section: editingStudent.section.trim().toUpperCase(),
+        parentName: editingStudent.parentName || undefined,
+        parentPhone: editingStudent.parentPhone || undefined,
+        studentPhone: editingStudent.studentPhone || undefined,
+        photoPath: editingStudent.photoPath || undefined,
+      });
+
+      if (res.success) {
+        Alert.alert('Başarılı', 'Öğrenci bilgileri doğrudan sunucuda güncellendi.');
+        setEditStudentModalVisible(false);
+        setEditingStudent(null);
+        if (selectedSchool) {
+          loadStudents(selectedSchool.id);
+          loadClasses(selectedSchool.id);
+        }
+      } else {
+        Alert.alert('Hata', res.error || 'Güncellenemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setUpdatingStudent(false);
+    }
+  };
+
+  const handleDeleteStudent = (studentId: string, studentName: string) => {
+    Alert.alert(
+      'Öğrenciyi Sil',
+      `"${studentName}" isimli öğrenciyi sunucudan tamamen silmek istediğinize emin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sil',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await apiRequest(`sync/students/${studentId}`, 'DELETE');
+            if (res.success) {
+              Alert.alert('Silindi', 'Öğrenci sunucudan silindi.');
+              if (selectedSchool) {
+                loadStudents(selectedSchool.id);
+                loadClasses(selectedSchool.id);
+              }
+            } else {
+              Alert.alert('Hata', res.error || 'Silinemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handlePickAndUploadPhoto = async (student: any) => {
+    Alert.alert(
+      'Öğrenci Fotoğrafı',
+      `${student.fullName} için fotoğraf kaynağını seçin:`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: '📷 Kamera ile Çek',
+          onPress: () => processPhotoUpload(student, 'camera'),
+        },
+        {
+          text: '🖼️ Galeriden Seç',
+          onPress: () => processPhotoUpload(student, 'gallery'),
+        },
+      ]
+    );
+  };
+
+  const processPhotoUpload = async (student: any, source: 'camera' | 'gallery') => {
+    try {
+      const picked = await pickSinglePhotoFromSource(source);
+      if (!picked) return;
+
+      setPhotoUploadingId(student.id);
+
+      // İstemci tarafında optimize et (300x300, JPEG 70% kalite, base64)
+      const manip = await manipulateAsync(
+        picked.uri,
+        [{ resize: { width: 300, height: 300 } }],
+        { compress: 0.7, format: SaveFormat.JPEG, base64: true }
+      );
+
+      if (!manip.base64) {
+        Alert.alert('Hata', 'Görsel işlenemedi.');
+        return;
+      }
+
+      // Sunucuya base64 olarak gönder
+      const uploadRes = await apiRequest<any>('uploads/student-photo-base64', 'POST', {
+        schoolCode: selectedSchool.code,
+        studentNumber: student.studentNumber,
+        base64Data: manip.base64,
+      });
+
+      if (uploadRes.success && uploadRes.data?.photoPath) {
+        // Öğrencinin photoPath'ini sunucuda güncelle
+        await apiRequest(`sync/students/${student.id}/photo`, 'PUT', {
+          photoPath: uploadRes.data.photoPath,
+        });
+
+        Alert.alert('Başarılı 📸', 'Fotoğraf doğrudan sunucuya yüklendi ve öğrenciye atandı.');
+        if (selectedSchool) loadStudents(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', uploadRes.error || 'Fotoğraf sunucuya kaydedilemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message || 'Fotoğraf yüklenemedi.');
+    } finally {
+      setPhotoUploadingId(null);
+    }
+  };
+
+  // --- 5. AI ÇARŞAF PROGRAM İŞLEMLERİ ---
+
   const handlePickAndAnalyzeSchedule = async () => {
     if (!selectedSchool) {
       Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçin.');
@@ -203,21 +630,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       setAiParsing(true);
       setParsedSchedule(null);
 
-      // Okulun kendi Gemini API key'i varsa kullan, yoksa varsayılan
       const apiKey = selectedSchool.geminiApiKey || 'AIzaSyA_placeholder_gemini_key';
-
-      // 1. Aşama: Telefondaki bellekte ayrıştırma
       const parsed = await parseMasterScheduleWithAi(file.uri, apiKey, file.mimeType || 'image/jpeg');
       setParsedSchedule(parsed);
     } catch (error: any) {
-      Alert.alert('AI Ayrıştırma Hatası', error.message || 'Belge analiz edilemedi. Lütfen net bir fotoğraf yükleyin.');
+      Alert.alert('AI Ayrıştırma Hatası', error.message || 'Belge analiz edilemedi.');
       setAiModalVisible(false);
     } finally {
       setAiParsing(false);
     }
   };
 
-  // 2. Aşama: Doğrulanan veriyi atomik olarak sunucuya gönderme
   const handleConfirmAndSaveSchedule = async () => {
     if (!parsedSchedule || !selectedSchool) return;
 
@@ -229,12 +652,13 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       Alert.alert('Başarılı 🎉', result.message);
       setAiModalVisible(false);
       setParsedSchedule(null);
-      loadTeachers(selectedSchool.id);
+      loadAllSchoolData(selectedSchool.id);
     } else {
       Alert.alert('Hata', result.message);
     }
   };
 
+  // Rol Değiştirme
   const handleSwitchToTeacher = async () => {
     if (onRoleChange) {
       await onRoleChange('teacher');
@@ -255,17 +679,27 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  // Filtrelenmiş Öğrenci Listesi
+  const filteredStudents = students.filter(s => {
+    const matchesSearch =
+      s.fullName.toLowerCase().includes(studentSearch.toLowerCase()) ||
+      s.studentNumber.includes(studentSearch);
+
+    if (selectedClassFilter === 'all') return matchesSearch;
+    return matchesSearch && `${s.grade}-${s.section}` === selectedClassFilter;
+  });
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Üst Bar */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleGoBackOrLogout} style={styles.backButton}>
-          <Ionicons name="swap-horizontal" size={18} color="#4F46E5" />
+          <Ionicons name="swap-horizontal" size={16} color="#4F46E5" />
           <Text style={styles.backButtonText}>Rol Değiştir</Text>
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>Okul Yönetim Paneli</Text>
-          <Text style={styles.headerSubtitle}>{selectedSchool?.name || 'Okul Seçiniz'}</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>{selectedSchool?.name || 'Okul Seçiniz'}</Text>
         </View>
         <TouchableOpacity
           onPress={() => {
@@ -277,12 +711,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           }}
           style={styles.editSchoolBtn}
         >
-          <Ionicons name="pencil" size={16} color="#4F46E5" />
-          <Text style={styles.editSchoolBtnText}>Okulu Düzenle</Text>
+          <Ionicons name="pencil" size={15} color="#4F46E5" />
         </TouchableOpacity>
         <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={styles.addSchoolButton}>
-          <Ionicons name="add" size={20} color="#fff" />
-          <Text style={styles.addSchoolText}>Yeni</Text>
+          <Ionicons name="add" size={18} color="#fff" />
+          <Text style={styles.addSchoolText}>Yeni Okul</Text>
         </TouchableOpacity>
       </View>
 
@@ -291,7 +724,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         <View style={{ flex: 1 }}>
           <Text style={styles.roleSwitchTitle}>👨‍🏫 Derse mi Gireceksiniz?</Text>
           <Text style={styles.roleSwitchSub}>
-            Canlı ders kokpiti, yoklama ve ödevler için Öğretmen Moduna geçin
+            Canlı ders kokpiti ve yoklama için Öğretmen Moduna geçin
           </Text>
         </View>
         <TouchableOpacity
@@ -299,8 +732,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           onPress={handleSwitchToTeacher}
           activeOpacity={0.85}
         >
-          <Ionicons name="log-in-outline" size={16} color="#fff" />
-          <Text style={styles.roleSwitchBtnText}>Öğretmen Moduna Geç</Text>
+          <Ionicons name="log-in-outline" size={15} color="#fff" />
+          <Text style={styles.roleSwitchBtnText}>Öğretmen Modu</Text>
         </TouchableOpacity>
       </View>
 
@@ -323,7 +756,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     key={s.id}
                     onPress={() => {
                       setSelectedSchool(s);
-                      loadTeachers(s.id);
+                      loadAllSchoolData(s.id);
                     }}
                     style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
                     activeOpacity={0.8}
@@ -355,7 +788,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 style={styles.copyButton}
                 onPress={() => handleCopyCode(selectedSchool.code)}
               >
-                <Ionicons name="copy-outline" size={18} color="#fff" />
+                <Ionicons name="copy-outline" size={16} color="#fff" />
                 <Text style={styles.copyButtonText}>Kodu Kopyala</Text>
               </TouchableOpacity>
             </View>
@@ -364,11 +797,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             <View style={styles.licenseInfoRow}>
               <View style={styles.licenseBadge}>
                 <Ionicons name="finger-print" size={13} color="#C7D2FE" />
-                <Text style={styles.licenseBadgeText}>Müşteri No: {selectedSchool.customerId || 'MST-10001'}</Text>
+                <Text style={styles.licenseBadgeText}>Müşteri: {selectedSchool.customerId || 'MST-10001'}</Text>
               </View>
               <View style={styles.licenseBadge}>
                 <Ionicons name="git-network-outline" size={13} color="#C7D2FE" />
-                <Text style={styles.licenseBadgeText}>İlişki ID: {selectedSchool.relationId || 'ILK-10001'}</Text>
+                <Text style={styles.licenseBadgeText}>İlişki: {selectedSchool.relationId || 'ILK-10001'}</Text>
               </View>
               <View style={[styles.licenseBadge, { backgroundColor: 'rgba(34, 197, 94, 0.25)', borderColor: '#86EFAC' }]}>
                 <Ionicons name="shield-checkmark" size={13} color="#86EFAC" />
@@ -381,64 +814,905 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             </View>
 
             <Text style={styles.codeCardHint}>
-              Öğretmenler bu okul koduyla bağlandığında İlişki ID'niz ({selectedSchool.relationId || 'ILK-10001'}) atanır ve lisans süreniz üzerinden yetkilendirilir.
+              Admin doğrudan sunucuya yazar. Eklenen tüm öğretmenler, sınıflar, dersler ve öğrenciler global veritabanına anında işlenir.
             </Text>
           </View>
         )}
 
-
-        {/* AI ile Otomatik Okul İnşası Butonu */}
-        <TouchableOpacity style={styles.aiBanner} onPress={handlePickAndAnalyzeSchedule}>
-          <View style={styles.aiBannerIcon}>
-            <Ionicons name="sparkles" size={28} color="#fff" />
-          </View>
-          <View style={styles.aiBannerTextContainer}>
-            <Text style={styles.aiBannerTitle}>AI ile Çarşaf Program Yükle</Text>
-            <Text style={styles.aiBannerDesc}>
-              Haftalık çarşaf programı yükleyin; öğretmenler, sınıflar ve dersler 30 saniyede otomatik kurulsun!
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color="#6366F1" />
-        </TouchableOpacity>
-
-        {/* Okula Bağlı Öğretmenler */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Bağlı Öğretmenler ({teachers.length})</Text>
+        {/* Sekme Seçim Çubuğu (Tabs) */}
+        <View style={styles.tabsContainer}>
           <TouchableOpacity
-            style={styles.addTeacherBtn}
-            onPress={() => setAddTeacherModalVisible(true)}
+            style={[styles.tabButton, activeTab === 'teachers' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('teachers')}
           >
-            <Ionicons name="person-add" size={15} color="#4F46E5" />
-            <Text style={styles.addTeacherBtnText}>+ Öğretmen Ekle</Text>
+            <Ionicons name="people" size={15} color={activeTab === 'teachers' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'teachers' && styles.tabButtonTextActive]}>
+              Öğretmenler ({teachers.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'classes' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('classes')}
+          >
+            <Ionicons name="school" size={15} color={activeTab === 'classes' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'classes' && styles.tabButtonTextActive]}>
+              Sınıflar ({classes.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'lessons' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('lessons')}
+          >
+            <Ionicons name="book" size={15} color={activeTab === 'lessons' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'lessons' && styles.tabButtonTextActive]}>
+              Dersler ({lessons.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'students' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('students')}
+          >
+            <Ionicons name="id-card" size={15} color={activeTab === 'students' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'students' && styles.tabButtonTextActive]}>
+              Öğrenciler ({students.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'schedule' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('schedule')}
+          >
+            <Ionicons name="sparkles" size={15} color={activeTab === 'schedule' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'schedule' && styles.tabButtonTextActive]}>
+              AI Çarşaf
+            </Text>
           </TouchableOpacity>
         </View>
 
         {loading ? (
-          <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 20 }} />
-        ) : teachers.length === 0 ? (
-          <View style={styles.emptyTeachers}>
-            <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
-            <Text style={styles.emptyText}>Henüz okul kodunuzu kullanarak bağlanan öğretmen bulunmuyor.</Text>
-          </View>
+          <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 32 }} />
         ) : (
-          teachers.map((teacher) => (
-            <View key={teacher.id} style={styles.teacherCard}>
-              <View style={styles.teacherAvatar}>
-                <Text style={styles.avatarText}>{teacher.fullName.slice(0, 2).toUpperCase()}</Text>
+          <>
+            {/* 1. ÖĞRETMENLER SEKMESİ */}
+            {activeTab === 'teachers' && (
+              <View>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Bağlı Öğretmen Kadrosu ({teachers.length})</Text>
+                  <TouchableOpacity
+                    style={styles.primaryAddBtn}
+                    onPress={() => setAddTeacherModalVisible(true)}
+                  >
+                    <Ionicons name="person-add" size={15} color="#fff" />
+                    <Text style={styles.primaryAddBtnText}>+ Öğretmen Ekle</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {teachers.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
+                    <Text style={styles.emptyText}>Henüz sisteme eklenmiş bir öğretmen bulunmuyor.</Text>
+                  </View>
+                ) : (
+                  teachers.map((teacher) => (
+                    <View key={teacher.id} style={styles.cardItem}>
+                      <View style={styles.cardHeaderRow}>
+                        <View style={styles.teacherAvatar}>
+                          <Text style={styles.avatarText}>{teacher.fullName?.slice(0, 2).toUpperCase()}</Text>
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 12 }}>
+                          <Text style={styles.cardTitle}>{teacher.fullName}</Text>
+                          <Text style={styles.cardSub}>
+                            @{teacher.username} • {teacher.role}
+                          </Text>
+                          {teacher.phone && (
+                            <Text style={styles.contactText}>📞 {teacher.phone}</Text>
+                          )}
+                        </View>
+                        <View style={[styles.statusBadge, teacher.isActive ? styles.statusActive : styles.statusPassive]}>
+                          <Text style={styles.statusText}>{teacher.isActive ? 'Aktif' : 'Pasif'}</Text>
+                        </View>
+                      </View>
+
+                      {/* Öğretmen Aksiyon Butonları */}
+                      <View style={styles.cardActionsRow}>
+                        <TouchableOpacity
+                          style={styles.cardActionBtn}
+                          onPress={() => {
+                            setEditingTeacher({ ...teacher });
+                            setEditTeacherModalVisible(true);
+                          }}
+                        >
+                          <Ionicons name="pencil" size={14} color="#4F46E5" />
+                          <Text style={styles.cardActionBtnText}>Düzenle</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { borderColor: '#FDE68A', backgroundColor: '#FEF3C7' }]}
+                          onPress={() => handleResetTeacherPassword(teacher.id, teacher.fullName)}
+                        >
+                          <Ionicons name="key-outline" size={14} color="#D97706" />
+                          <Text style={[styles.cardActionBtnText, { color: '#D97706' }]}>Şifre Sıfırla (1234)</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { borderColor: '#FECACA', backgroundColor: '#FEE2E2' }]}
+                          onPress={() => handleDeleteTeacher(teacher.id, teacher.fullName)}
+                        >
+                          <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                          <Text style={[styles.cardActionBtnText, { color: '#DC2626' }]}>Sil</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))
+                )}
               </View>
-              <View style={styles.teacherInfo}>
-                <Text style={styles.teacherName}>{teacher.fullName}</Text>
-                <Text style={styles.teacherSub}>{teacher.email || teacher.username} • {teacher.role}</Text>
+            )}
+
+            {/* 2. SINIFLAR VE ŞUBELER SEKMESİ */}
+            {activeTab === 'classes' && (
+              <View>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Sınıflar & Şubeler ({classes.length})</Text>
+                  <TouchableOpacity
+                    style={styles.primaryAddBtn}
+                    onPress={() => setAddClassModalVisible(true)}
+                  >
+                    <Ionicons name="add-circle" size={16} color="#fff" />
+                    <Text style={styles.primaryAddBtnText}>+ Sınıf Ekle</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {classes.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="school-outline" size={48} color={Colors.textMuted} />
+                    <Text style={styles.emptyText}>Henüz tanımlanmış bir sınıf veya şube yok.</Text>
+                  </View>
+                ) : (
+                  <View style={styles.gridContainer}>
+                    {classes.map((cls) => (
+                      <View key={cls.id} style={styles.classCard}>
+                        <View style={styles.classBadge}>
+                          <Text style={styles.classBadgeText}>{cls.className || `${cls.grade}-${cls.section}`}</Text>
+                        </View>
+                        <Text style={styles.classStudentCount}>
+                          👥 {cls.studentCount || 0} Öğrenci
+                        </Text>
+                        <Text style={styles.classYearText}>Dönem: {cls.academicYear || '2026-2027'}</Text>
+
+                        <TouchableOpacity
+                          style={styles.deleteMiniBtn}
+                          onPress={() => handleDeleteClass(cls.id, cls.className || `${cls.grade}-${cls.section}`)}
+                        >
+                          <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                          <Text style={styles.deleteMiniText}>Sınıfı Sil</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
-              <View style={[styles.teacherStatusBadge, teacher.isActive ? styles.statusActive : styles.statusPassive]}>
-                <Text style={styles.statusText}>{teacher.isActive ? 'Aktif' : 'Onay Bekliyor'}</Text>
+            )}
+
+            {/* 3. DERSLER SEKMESİ */}
+            {activeTab === 'lessons' && (
+              <View>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Okul Müfredat Dersleri ({lessons.length})</Text>
+                  <TouchableOpacity
+                    style={styles.primaryAddBtn}
+                    onPress={() => setAddLessonModalVisible(true)}
+                  >
+                    <Ionicons name="book" size={15} color="#fff" />
+                    <Text style={styles.primaryAddBtnText}>+ Ders Ekle</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {lessons.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="book-outline" size={48} color={Colors.textMuted} />
+                    <Text style={styles.emptyText}>Henüz okulunuza kayıtlı ders bulunmuyor.</Text>
+                  </View>
+                ) : (
+                  lessons.map((lesson) => (
+                    <View key={lesson.id} style={styles.lessonCard}>
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={styles.lessonName}>{lesson.name}</Text>
+                          {lesson.shortCode && (
+                            <View style={styles.shortCodeTag}>
+                              <Text style={styles.shortCodeText}>{lesson.shortCode}</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.lessonSub}>
+                          Kademe: {lesson.grade || 'Tüm Kademeler'} • {lesson.weeklyHours || 2} Saat / Hafta
+                        </Text>
+                      </View>
+
+                      <TouchableOpacity
+                        style={styles.deleteMiniBtn}
+                        onPress={() => handleDeleteLesson(lesson.id, lesson.name)}
+                      >
+                        <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
               </View>
-            </View>
-          ))
+            )}
+
+            {/* 4. ÖĞRENCİLER SEKMESİ (SERVER CRUD & FOTOĞRAF) */}
+            {activeTab === 'students' && (
+              <View>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Kayıtlı Öğrenciler ({filteredStudents.length}/{students.length})</Text>
+                  <TouchableOpacity
+                    style={styles.primaryAddBtn}
+                    onPress={() => setAddStudentModalVisible(true)}
+                  >
+                    <Ionicons name="person-add" size={15} color="#fff" />
+                    <Text style={styles.primaryAddBtnText}>+ Öğrenci Ekle</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Sınıf Filtre Çipleri */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.classFilterScroll}>
+                  <TouchableOpacity
+                    style={[styles.filterChip, selectedClassFilter === 'all' && styles.filterChipSelected]}
+                    onPress={() => setSelectedClassFilter('all')}
+                  >
+                    <Text style={[styles.filterChipText, selectedClassFilter === 'all' && styles.filterChipTextSelected]}>
+                      Tüm Sınıflar ({students.length})
+                    </Text>
+                  </TouchableOpacity>
+                  {classes.map(c => {
+                    const tag = c.className || `${c.grade}-${c.section}`;
+                    const isSel = selectedClassFilter === tag;
+                    return (
+                      <TouchableOpacity
+                        key={c.id}
+                        style={[styles.filterChip, isSel && styles.filterChipSelected]}
+                        onPress={() => setSelectedClassFilter(tag)}
+                      >
+                        <Text style={[styles.filterChipText, isSel && styles.filterChipTextSelected]}>
+                          {tag}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                {/* Öğrenci Arama Çubuğu */}
+                <View style={styles.searchBox}>
+                  <Ionicons name="search" size={18} color={Colors.textMuted} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Öğrenci adı veya numarası ile ara..."
+                    value={studentSearch}
+                    onChangeText={setStudentSearch}
+                    placeholderTextColor={Colors.textMuted}
+                  />
+                  {studentSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setStudentSearch('')}>
+                      <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {filteredStudents.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="id-card-outline" size={48} color={Colors.textMuted} />
+                    <Text style={styles.emptyText}>Bu filtreye uygun öğrenci bulunamadı.</Text>
+                  </View>
+                ) : (
+                  filteredStudents.map((student) => {
+                    const photoUrl = student.photoPath ? `${serverBaseUrl}${student.photoPath}` : null;
+                    const isUploading = photoUploadingId === student.id;
+
+                    return (
+                      <View key={student.id} style={styles.studentCard}>
+                        <View style={styles.studentCardTop}>
+                          {/* Fotoğraf / Avatar */}
+                          <TouchableOpacity
+                            style={styles.studentPhotoContainer}
+                            onPress={() => handlePickAndUploadPhoto(student)}
+                            activeOpacity={0.8}
+                          >
+                            {isUploading ? (
+                              <ActivityIndicator size="small" color="#4F46E5" />
+                            ) : photoUrl ? (
+                              <Image source={{ uri: photoUrl }} style={styles.studentPhoto} />
+                            ) : (
+                              <View style={styles.studentPhotoPlaceholder}>
+                                <Text style={styles.studentInitials}>{student.fullName.slice(0, 2).toUpperCase()}</Text>
+                              </View>
+                            )}
+                            <View style={styles.cameraBadge}>
+                              <Ionicons name="camera" size={12} color="#fff" />
+                            </View>
+                          </TouchableOpacity>
+
+                          {/* Bilgiler */}
+                          <View style={{ flex: 1, marginLeft: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <Text style={styles.studentName}>{student.fullName}</Text>
+                              <View style={styles.studentClassTag}>
+                                <Text style={styles.studentClassTagText}>{student.grade}-{student.section}</Text>
+                              </View>
+                            </View>
+
+                            <Text style={styles.studentNoText}>Okul No: {student.studentNumber}</Text>
+
+                            {student.parentName && (
+                              <Text style={styles.parentText}>
+                                👨‍👩‍👧 Veli: {student.parentName} {student.parentPhone ? `(${student.parentPhone})` : ''}
+                              </Text>
+                            )}
+                          </View>
+                        </View>
+
+                        {/* Aksiyon Butonları */}
+                        <View style={styles.studentActionsRow}>
+                          <TouchableOpacity
+                            style={styles.cardActionBtn}
+                            onPress={() => handlePickAndUploadPhoto(student)}
+                          >
+                            <Ionicons name="camera-outline" size={14} color="#4F46E5" />
+                            <Text style={styles.cardActionBtnText}>Fotoğraf Ekle</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={styles.cardActionBtn}
+                            onPress={() => {
+                              setEditingStudent({ ...student });
+                              setEditStudentModalVisible(true);
+                            }}
+                          >
+                            <Ionicons name="pencil" size={14} color="#4F46E5" />
+                            <Text style={styles.cardActionBtnText}>Düzenle</Text>
+                          </TouchableOpacity>
+
+                          {student.parentPhone && (
+                            <TouchableOpacity
+                              style={[styles.cardActionBtn, { borderColor: '#86EFAC', backgroundColor: '#F0FDF4' }]}
+                              onPress={() => Linking.openURL(`tel:${student.parentPhone}`)}
+                            >
+                              <Ionicons name="call-outline" size={14} color="#16A34A" />
+                              <Text style={[styles.cardActionBtnText, { color: '#16A34A' }]}>Veli Ara</Text>
+                            </TouchableOpacity>
+                          )}
+
+                          <TouchableOpacity
+                            style={[styles.cardActionBtn, { borderColor: '#FECACA', backgroundColor: '#FEE2E2' }]}
+                            onPress={() => handleDeleteStudent(student.id, student.fullName)}
+                          >
+                            <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                            <Text style={[styles.cardActionBtnText, { color: '#DC2626' }]}>Sil</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            )}
+
+            {/* 5. AI ÇARŞAF PROGRAM SEKMESİ */}
+            {activeTab === 'schedule' && (
+              <View>
+                <TouchableOpacity style={styles.aiBanner} onPress={handlePickAndAnalyzeSchedule}>
+                  <View style={styles.aiBannerIcon}>
+                    <Ionicons name="sparkles" size={28} color="#fff" />
+                  </View>
+                  <View style={styles.aiBannerTextContainer}>
+                    <Text style={styles.aiBannerTitle}>AI ile Çarşaf Program Yükle</Text>
+                    <Text style={styles.aiBannerDesc}>
+                      Haftalık çarşaf programı yükleyin; öğretmenler, sınıflar ve dersler 30 saniyede otomatik kurulsun!
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#6366F1" />
+                </TouchableOpacity>
+
+                <View style={styles.aiInfoBox}>
+                  <Ionicons name="information-circle-outline" size={20} color="#4F46E5" />
+                  <Text style={styles.aiInfoText}>
+                    Çarşaf program yüklendiğinde okul kadrosu, sınıflar ve haftalık ders çizelgesi doğrudan sunucuya işlenir. Öğretmenler kendi telefonlarında ders kokpitini açtığında haftalık programları hazır gelir.
+                  </Text>
+                </View>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
 
-      {/* AI Çarşaf Program Onay Modalı (Client Staging) */}
+      {/* --- MODALLAR --- */}
+
+      {/* 1. Öğretmen Ekle Modal */}
+      <Modal visible={addTeacherModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>👨‍🏫 Yeni Öğretmen Tanımla</Text>
+              <TouchableOpacity onPress={() => setAddTeacherModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Adı Soyadı (Örn: Ahmet Kaya)"
+              value={teacherFullName}
+              onChangeText={setTeacherFullName}
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Branş (Örn: Fizik, Matematik)"
+              value={teacherBranch}
+              onChangeText={setTeacherBranch}
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Telefon Numarası (Opsiyonel)"
+              value={teacherPhone}
+              onChangeText={setTeacherPhone}
+              keyboardType="phone-pad"
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="E-posta Adresi (Opsiyonel)"
+              value={teacherEmail}
+              onChangeText={setTeacherEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              placeholderTextColor={Colors.textMuted}
+            />
+
+            <TouchableOpacity
+              style={styles.createSubmitButton}
+              onPress={handleCreateTeacher}
+              disabled={addingTeacher}
+            >
+              {addingTeacher ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.createSubmitText}>Öğretmeni Kaydet & Şifre Üret</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 1.1 Öğretmen Düzenle Modal */}
+      <Modal visible={editTeacherModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>✏️ Öğretmen Bilgilerini Düzenle</Text>
+              <TouchableOpacity onPress={() => setEditTeacherModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Adı Soyadı"
+              value={editingTeacher?.fullName || ''}
+              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, fullName: t })}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Telefon Numarası"
+              value={editingTeacher?.phone || ''}
+              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, phone: t })}
+              keyboardType="phone-pad"
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="E-posta"
+              value={editingTeacher?.email || ''}
+              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, email: t })}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity style={styles.createSubmitButton} onPress={handleUpdateTeacher}>
+              <Text style={styles.createSubmitText}>Değişiklikleri Kaydet</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 1.2 Öğretmen Oluşturuldu Sonuç Modalı */}
+      <Modal visible={!!createdTeacherResult} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { alignItems: 'center' }]}>
+            <View style={styles.successIconCircle}>
+              <Ionicons name="checkmark-circle" size={36} color="#059669" />
+            </View>
+
+            <Text style={styles.successTitle}>Öğretmen Hesabı Hazır! 🎉</Text>
+            <Text style={styles.successSub}>
+              {createdTeacherResult?.fullName} için sisteme giriş bilgileri otomatik üretildi.
+            </Text>
+
+            <View style={styles.credentialsBox}>
+              <View style={styles.credRow}>
+                <Text style={styles.credLabel}>Okul Kodu:</Text>
+                <Text style={styles.credValCode}>{createdTeacherResult?.schoolCode || selectedSchool?.code}</Text>
+              </View>
+              <View style={styles.credRow}>
+                <Text style={styles.credLabel}>Kullanıcı Adı:</Text>
+                <Text style={styles.credVal}>{createdTeacherResult?.username}</Text>
+              </View>
+              <View style={styles.credRow}>
+                <Text style={styles.credLabel}>Geçici Şifre:</Text>
+                <Text style={styles.credValPass}>{createdTeacherResult?.password || '1234'}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.createSubmitButton, { backgroundColor: '#059669', width: '100%', flexDirection: 'row', gap: 8, justifyContent: 'center' }]}
+              onPress={handleCopyTeacherCredentials}
+            >
+              <Ionicons name="copy-outline" size={18} color="#fff" />
+              <Text style={styles.createSubmitText}>Giriş Bilgilerini Kopyala (WhatsApp)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ marginTop: 12, paddingVertical: 8 }}
+              onPress={() => setCreatedTeacherResult(null)}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textMuted }}>Kapat</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 2. Sınıf / Şube Ekle Modal */}
+      <Modal visible={addClassModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🏫 Yeni Sınıf / Şube Ekle</Text>
+              <TouchableOpacity onPress={() => setAddClassModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.inputLabel}>Kademe (Sınıf Düzeyi)</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: 9, 10, 11, 12 veya 1, 2, 3..."
+              value={newClassGrade}
+              onChangeText={setNewClassGrade}
+              placeholderTextColor={Colors.textMuted}
+            />
+
+            <Text style={styles.inputLabel}>Şube Adı</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: A, B, C, Fen, Say..."
+              value={newClassSection}
+              onChangeText={setNewClassSection}
+              autoCapitalize="characters"
+              placeholderTextColor={Colors.textMuted}
+            />
+
+            <TouchableOpacity
+              style={styles.createSubmitButton}
+              onPress={handleCreateClass}
+              disabled={addingClass}
+            >
+              {addingClass ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.createSubmitText}>Sınıfı Sunucuya Ekle</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 3. Ders Ekle Modal */}
+      <Modal visible={addLessonModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📚 Yeni Ders Tanımla</Text>
+              <TouchableOpacity onPress={() => setAddLessonModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Ders Adı (Örn: Biyoloji, Geometri)"
+              value={newLessonName}
+              onChangeText={setNewLessonName}
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Kısa Kod (Örn: BYL, GEO)"
+              value={newLessonShortCode}
+              onChangeText={setNewLessonShortCode}
+              autoCapitalize="characters"
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Kademe (Örn: Tüm Kademeler veya 9)"
+              value={newLessonGrade}
+              onChangeText={setNewLessonGrade}
+              placeholderTextColor={Colors.textMuted}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Haftalık Saat (Örn: 2)"
+              value={newLessonHours}
+              onChangeText={setNewLessonHours}
+              keyboardType="numeric"
+              placeholderTextColor={Colors.textMuted}
+            />
+
+            <TouchableOpacity
+              style={styles.createSubmitButton}
+              onPress={handleCreateLesson}
+              disabled={addingLesson}
+            >
+              {addingLesson ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.createSubmitText}>Dersi Sunucuya Kaydet</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 4. Öğrenci Ekle Modal */}
+      <Modal visible={addStudentModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🎓 Yeni Öğrenci Ekle</Text>
+              <TouchableOpacity onPress={() => setAddStudentModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Öğrenci Numarası (Örn: 105)"
+                value={newStudentNo}
+                onChangeText={setNewStudentNo}
+                keyboardType="numeric"
+                placeholderTextColor={Colors.textMuted}
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Öğrenci Adı Soyadı (Örn: Zeynep Kaya)"
+                value={newStudentName}
+                onChangeText={setNewStudentName}
+                placeholderTextColor={Colors.textMuted}
+              />
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput
+                  style={[styles.modalInput, { flex: 1 }]}
+                  placeholder="Kademe (Örn: 9)"
+                  value={newStudentGrade}
+                  onChangeText={setNewStudentGrade}
+                  placeholderTextColor={Colors.textMuted}
+                />
+                <TextInput
+                  style={[styles.modalInput, { flex: 1 }]}
+                  placeholder="Şube (Örn: A)"
+                  value={newStudentSection}
+                  onChangeText={setNewStudentSection}
+                  autoCapitalize="characters"
+                  placeholderTextColor={Colors.textMuted}
+                />
+              </View>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Veli Adı Soyadı (Örn: Mehmet Kaya)"
+                value={newStudentParentName}
+                onChangeText={setNewStudentParentName}
+                placeholderTextColor={Colors.textMuted}
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Veli Telefonu (Örn: 0555 123 4567)"
+                value={newStudentParentPhone}
+                onChangeText={setNewStudentParentPhone}
+                keyboardType="phone-pad"
+                placeholderTextColor={Colors.textMuted}
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Öğrenci Telefonu (Opsiyonel)"
+                value={newStudentPhone}
+                onChangeText={setNewStudentPhone}
+                keyboardType="phone-pad"
+                placeholderTextColor={Colors.textMuted}
+              />
+
+              <TouchableOpacity
+                style={styles.createSubmitButton}
+                onPress={handleCreateStudent}
+                disabled={addingStudent}
+              >
+                {addingStudent ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.createSubmitText}>Öğrenciyi Doğrudan Sunucuya Kaydet</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 4.1 Öğrenci Düzenle Modal */}
+      <Modal visible={editStudentModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>✏️ Öğrenci Bilgilerini Düzenle</Text>
+              <TouchableOpacity onPress={() => setEditStudentModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Öğrenci No"
+                value={editingStudent?.studentNumber || ''}
+                onChangeText={(t) => setEditingStudent({ ...editingStudent, studentNumber: t })}
+                keyboardType="numeric"
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Adı Soyadı"
+                value={editingStudent?.fullName || ''}
+                onChangeText={(t) => setEditingStudent({ ...editingStudent, fullName: t })}
+              />
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput
+                  style={[styles.modalInput, { flex: 1 }]}
+                  placeholder="Kademe"
+                  value={editingStudent?.grade || ''}
+                  onChangeText={(t) => setEditingStudent({ ...editingStudent, grade: t })}
+                />
+                <TextInput
+                  style={[styles.modalInput, { flex: 1 }]}
+                  placeholder="Şube"
+                  value={editingStudent?.section || ''}
+                  onChangeText={(t) => setEditingStudent({ ...editingStudent, section: t })}
+                  autoCapitalize="characters"
+                />
+              </View>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Veli Adı"
+                value={editingStudent?.parentName || ''}
+                onChangeText={(t) => setEditingStudent({ ...editingStudent, parentName: t })}
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Veli Telefonu"
+                value={editingStudent?.parentPhone || ''}
+                onChangeText={(t) => setEditingStudent({ ...editingStudent, parentPhone: t })}
+                keyboardType="phone-pad"
+              />
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Öğrenci Telefonu"
+                value={editingStudent?.studentPhone || ''}
+                onChangeText={(t) => setEditingStudent({ ...editingStudent, studentPhone: t })}
+                keyboardType="phone-pad"
+              />
+
+              <TouchableOpacity
+                style={styles.createSubmitButton}
+                onPress={handleUpdateStudent}
+                disabled={updatingStudent}
+              >
+                {updatingStudent ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.createSubmitText}>Sunucuda Güncelle</Text>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Okul Adı Düzenleme Modalı */}
+      <Modal visible={editModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🏫 Okul Bilgilerini Güncelle</Text>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Okul Adı"
+              value={editSchoolName}
+              onChangeText={setEditSchoolName}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Okul Telefonu"
+              value={editSchoolPhone}
+              onChangeText={setEditSchoolPhone}
+              keyboardType="phone-pad"
+            />
+
+            <TouchableOpacity style={styles.createSubmitButton} onPress={handleUpdateSchool} disabled={updatingSchool}>
+              {updatingSchool ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.createSubmitText}>Güncelle</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Okul Ekleme Modalı */}
+      <Modal visible={createModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>➕ Yeni Okul Oluştur</Text>
+              <TouchableOpacity onPress={() => setCreateModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Okul Adı"
+              value={newSchoolName}
+              onChangeText={setNewSchoolName}
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Okul Telefonu (İsteğe bağlı)"
+              value={newSchoolPhone}
+              onChangeText={setNewSchoolPhone}
+              keyboardType="phone-pad"
+            />
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Gemini API Anahtarı (İsteğe bağlı)"
+              value={newSchoolApiKey}
+              onChangeText={setNewSchoolApiKey}
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity style={styles.createSubmitButton} onPress={handleCreateSchool}>
+              <Text style={styles.createSubmitText}>Okulu Oluştur</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* AI Çarşaf Program Onay Modalı */}
       <Modal visible={aiModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -474,7 +1748,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </View>
 
                 <Text style={styles.previewNote}>
-                  Veriler önce telefonunuzda doğrulandı. Onayladığınızda tüm okul veritabanına tek seferde kaydedilecek.
+                  Onayladığınızda tüm okul veritabanına tek seferde atomik olarak kaydedilecek.
                 </Text>
 
                 <TouchableOpacity style={styles.confirmSaveButton} onPress={handleConfirmAndSaveSchedule}>
@@ -483,212 +1757,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </TouchableOpacity>
               </View>
             ) : null}
-          </View>
-        </View>
-      </Modal>
-
-      {/* Yeni Okul Oluşturma Modalı */}
-      <Modal visible={createModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Yeni Okul Tanımla</Text>
-              <TouchableOpacity onPress={() => setCreateModalVisible(false)}>
-                <Ionicons name="close" size={24} color={Colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Okul Adı (Örn: Atatürk Anadolu Lisesi)"
-              placeholderTextColor={Colors.textMuted}
-              value={newSchoolName}
-              onChangeText={setNewSchoolName}
-            />
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Telefon Numarası (Opsiyonel)"
-              placeholderTextColor={Colors.textMuted}
-              value={newSchoolPhone}
-              onChangeText={setNewSchoolPhone}
-              keyboardType="phone-pad"
-            />
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Okul Ortak Gemini API Anahtarı (Opsiyonel)"
-              placeholderTextColor={Colors.textMuted}
-              value={newSchoolApiKey}
-              onChangeText={setNewSchoolApiKey}
-            />
-
-            <TouchableOpacity style={styles.createSubmitButton} onPress={handleCreateSchool}>
-              <Text style={styles.createSubmitText}>Okulu Oluştur</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Okul Bilgilerini Düzenleme Modalı */}
-      <Modal visible={editModalVisible} animationType="slide" transparent>
-
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Okul Bilgilerini Düzenle</Text>
-              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                <Ionicons name="close" size={24} color={Colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.text, marginBottom: 6 }}>Okul Adı</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Okul Adı"
-              placeholderTextColor={Colors.textMuted}
-              value={editSchoolName}
-              onChangeText={setEditSchoolName}
-            />
-
-            <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.text, marginBottom: 6 }}>Telefon (Opsiyonel)</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Telefon Numarası"
-              placeholderTextColor={Colors.textMuted}
-              value={editSchoolPhone}
-              onChangeText={setEditSchoolPhone}
-              keyboardType="phone-pad"
-            />
-
-            <TouchableOpacity
-              style={styles.createSubmitButton}
-              onPress={handleUpdateSchool}
-              disabled={updatingSchool}
-            >
-              {updatingSchool ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.createSubmitText}>Değişiklikleri Kaydet</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Yeni Öğretmen Tanımlama Modalı */}
-      <Modal visible={addTeacherModalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>👨‍🏫 Yeni Öğretmen Ekle</Text>
-              <TouchableOpacity onPress={() => setAddTeacherModalVisible(false)}>
-                <Ionicons name="close" size={24} color={Colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={{ fontSize: 12, color: Colors.textMuted, marginBottom: 12 }}>
-              Eklenen öğretmen için otomatik kullanıcı adı ve varsayılan 1234 şifresi üretilecektir.
-            </Text>
-
-            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>Ad Soyad *</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Örn: Mehmet Yılmaz"
-              placeholderTextColor={Colors.textMuted}
-              value={teacherFullName}
-              onChangeText={setTeacherFullName}
-            />
-
-            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>Branş</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Örn: Fizik, Matematik, Kimya..."
-              placeholderTextColor={Colors.textMuted}
-              value={teacherBranch}
-              onChangeText={setTeacherBranch}
-            />
-
-            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>Telefon (Opsiyonel)</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="05xx xxx xx xx"
-              placeholderTextColor={Colors.textMuted}
-              value={teacherPhone}
-              onChangeText={setTeacherPhone}
-              keyboardType="phone-pad"
-            />
-
-            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>E-posta (Opsiyonel)</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="ogretmen@okul.meb.k12.tr"
-              placeholderTextColor={Colors.textMuted}
-              value={teacherEmail}
-              onChangeText={setTeacherEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-
-            <TouchableOpacity
-              style={[styles.createSubmitButton, { backgroundColor: '#4F46E5', marginTop: 10 }]}
-              onPress={handleCreateTeacher}
-              disabled={addingTeacher}
-            >
-              {addingTeacher ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.createSubmitText}>Öğretmeni Kaydet & Şifre Üret</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Öğretmen Oluşturuldu Sonuç Modalı */}
-      <Modal visible={!!createdTeacherResult} animationType="fade" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { alignItems: 'center' }]}>
-            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
-              <Ionicons name="checkmark-circle" size={36} color="#059669" />
-            </View>
-
-            <Text style={{ fontSize: 18, fontWeight: '800', color: Colors.text, marginBottom: 6 }}>
-              Öğretmen Hesabı Hazır! 🎉
-            </Text>
-            <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: 'center', marginBottom: 16 }}>
-              {createdTeacherResult?.fullName} için sisteme giriş bilgileri otomatik üretildi.
-            </Text>
-
-            <View style={{ width: '100%', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8F0', gap: 8, marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 12, color: Colors.textMuted }}>Okul Kodu:</Text>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#4F46E5' }}>{createdTeacherResult?.schoolCode || selectedSchool?.code}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 12, color: Colors.textMuted }}>Kullanıcı Adı:</Text>
-                <Text style={{ fontSize: 13, fontWeight: '800', color: Colors.text }}>{createdTeacherResult?.username}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ fontSize: 12, color: Colors.textMuted }}>Geçici Şifre:</Text>
-                <Text style={{ fontSize: 13, fontWeight: '800', color: '#D97706' }}>{createdTeacherResult?.password || '1234'}</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.createSubmitButton, { backgroundColor: '#059669', width: '100%', flexDirection: 'row', gap: 8, justifyContent: 'center' }]}
-              onPress={handleCopyTeacherCredentials}
-            >
-              <Ionicons name="copy-outline" size={18} color="#fff" />
-              <Text style={styles.createSubmitText}>Giriş Bilgilerini Kopyala (WhatsApp)</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={{ marginTop: 12, paddingVertical: 8 }}
-              onPress={() => setCreatedTeacherResult(null)}
-            >
-              <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textMuted }}>Kapat</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -702,7 +1770,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
@@ -724,55 +1792,16 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   headerTitleContainer: { flex: 1, marginLeft: 10 },
-  headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
+  headerTitle: { fontSize: 15, fontWeight: '800', color: Colors.text },
   headerSubtitle: { fontSize: 11, color: Colors.textMuted },
-  roleSwitchBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#312E81',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  roleSwitchTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  roleSwitchSub: {
-    fontSize: 11,
-    color: '#C7D2FE',
-    marginTop: 2,
-  },
-  roleSwitchBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#4F46E5',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#818CF8',
-  },
-  roleSwitchBtnText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-    marginLeft: 5,
-  },
   editSchoolBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    padding: 7,
     borderRadius: 8,
+    backgroundColor: '#EEF2FF',
     marginRight: 6,
     borderWidth: 1,
     borderColor: '#C7D2FE',
   },
-  editSchoolBtnText: { color: '#4F46E5', fontSize: 11, fontWeight: '700', marginLeft: 4 },
   addSchoolButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -781,155 +1810,48 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 8,
   },
-
-  addSchoolText: { color: '#fff', fontSize: 12, fontWeight: '700', marginLeft: 4 },
-  scrollContent: { padding: 16, paddingBottom: 40 },
-  codeCard: {
-    backgroundColor: '#4F46E5',
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 16,
-  },
-  codeCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  codeCardLabel: { fontSize: 11, color: '#C7D2FE', fontWeight: '700', letterSpacing: 0.5 },
-  codeCardValue: { fontSize: 24, fontWeight: '900', color: '#fff', marginTop: 4 },
-  copyButton: {
+  addSchoolText: { color: '#fff', fontSize: 11, fontWeight: '700', marginLeft: 4 },
+  roleSwitchBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
+    backgroundColor: '#312E81',
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 8,
+    justifyContent: 'space-between',
+    gap: 10,
   },
-  copyButtonText: { color: '#fff', fontSize: 12, fontWeight: '700', marginLeft: 6 },
-  codeCardHint: { fontSize: 12, color: '#E0E7FF', marginTop: 10, lineHeight: 16 },
-  aiBanner: {
+  roleSwitchTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  roleSwitchSub: {
+    fontSize: 10,
+    color: '#C7D2FE',
+    marginTop: 1,
+  },
+  roleSwitchBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-    marginBottom: 20,
-  },
-  aiBannerIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#6366F1',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  aiBannerTextContainer: { flex: 1, marginRight: 8 },
-  aiBannerTitle: { fontSize: 15, fontWeight: '700', color: '#312E81' },
-  aiBannerDesc: { fontSize: 12, color: '#4338CA', marginTop: 2, lineHeight: 16 },
-  sectionHeader: { marginBottom: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
-  emptyTeachers: { alignItems: 'center', paddingVertical: 32 },
-  emptyText: { fontSize: 13, color: Colors.textMuted, marginTop: 8, textAlign: 'center', paddingHorizontal: 32 },
-  teacherCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  teacherAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#EEF2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  avatarText: { fontSize: 14, fontWeight: '700', color: '#4F46E5' },
-  teacherInfo: { flex: 1 },
-  teacherName: { fontSize: 14, fontWeight: '700', color: Colors.text },
-  teacherSub: { fontSize: 12, color: Colors.textMuted, marginTop: 2 },
-  teacherStatusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  statusActive: { backgroundColor: '#ECFDF5' },
-  statusPassive: { backgroundColor: '#FEF3C7' },
-  statusText: { fontSize: 11, fontWeight: '700', color: '#059669' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 16 },
-  modalContent: { backgroundColor: '#fff', borderRadius: 16, padding: 20 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: Colors.text },
-  modalInput: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    height: 48,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginBottom: 12,
-    fontSize: 14,
-    color: Colors.text,
-  },
-  createSubmitButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 10,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  createSubmitText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  aiLoadingContainer: { alignItems: 'center', paddingVertical: 32 },
-  aiLoadingText: { fontSize: 15, fontWeight: '700', color: Colors.text, marginTop: 16 },
-  aiLoadingSub: { fontSize: 12, color: Colors.textMuted, marginTop: 4 },
-  parsedPreview: { paddingVertical: 12 },
-  previewSuccessTitle: { fontSize: 16, fontWeight: '800', color: '#059669', textAlign: 'center', marginBottom: 16 },
-  previewGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  previewItem: {
-    flex: 1,
-    backgroundColor: '#F8FAFC',
-    padding: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    marginHorizontal: 4,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  previewVal: { fontSize: 20, fontWeight: '800', color: '#4F46E5' },
-  previewLbl: { fontSize: 11, color: Colors.textMuted, marginTop: 2 },
-  previewNote: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', lineHeight: 16, marginBottom: 16 },
-  confirmSaveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#059669',
-    borderRadius: 10,
-    height: 48,
-  },
-  confirmSaveText: { color: '#fff', fontSize: 15, fontWeight: '700', marginLeft: 8 },
-  addTeacherBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EEF2FF',
+    backgroundColor: '#4F46E5',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#C7D2FE',
-    gap: 4,
+    borderColor: '#818CF8',
   },
-  addTeacherBtnText: {
-    fontSize: 12,
+  roleSwitchBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
     fontWeight: '700',
-    color: '#4F46E5',
+    marginLeft: 4,
   },
-  // Çoklu Okul Seçici Stilleri
+  scrollContent: { padding: 14, paddingBottom: 40 },
   schoolSelectorContainer: {
     backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 12,
-    marginBottom: 14,
+    padding: 10,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
@@ -937,10 +1859,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   schoolSelectorLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
     color: '#4F46E5',
     letterSpacing: 0.5,
@@ -954,19 +1876,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F1F5F9',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    gap: 8,
+    gap: 6,
   },
   schoolChipSelected: {
     backgroundColor: '#4F46E5',
     borderColor: '#4338CA',
   },
   schoolChipText: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: Colors.text,
   },
@@ -975,43 +1897,564 @@ const styles = StyleSheet.create({
   },
   schoolCodeTag: {
     backgroundColor: '#E2E8F0',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
   },
   schoolCodeTagSelected: {
     backgroundColor: 'rgba(255, 255, 255, 0.25)',
   },
   schoolCodeTagText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
     color: '#64748B',
   },
   schoolCodeTagTextSelected: {
     color: '#fff',
   },
-  // Lisans ve Müşteri Rozetleri
+  codeCard: {
+    backgroundColor: '#4F46E5',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+  },
+  codeCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  codeCardLabel: { fontSize: 10, color: '#C7D2FE', fontWeight: '700', letterSpacing: 0.5 },
+  codeCardValue: { fontSize: 22, fontWeight: '900', color: '#fff', marginTop: 2 },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  copyButtonText: { color: '#fff', fontSize: 11, fontWeight: '700', marginLeft: 4 },
   licenseInfoRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginTop: 10,
-    marginBottom: 10,
+    marginTop: 8,
+    marginBottom: 8,
   },
   licenseBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.25)',
-    gap: 5,
+    gap: 4,
   },
   licenseBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     color: '#fff',
     fontWeight: '600',
   },
+  codeCardHint: {
+    fontSize: 10,
+    color: '#E0E7FF',
+    lineHeight: 14,
+    marginTop: 4,
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  tabButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+    borderRadius: 8,
+    gap: 4,
+  },
+  tabButtonActive: {
+    backgroundColor: '#EEF2FF',
+  },
+  tabButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  tabButtonTextActive: {
+    color: '#4F46E5',
+    fontWeight: '800',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  primaryAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 4,
+  },
+  primaryAddBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  emptyText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    marginTop: 8,
+  },
+  cardItem: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  teacherAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  avatarText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  cardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  cardSub: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  contactText: {
+    fontSize: 11,
+    color: '#4F46E5',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  statusActive: { backgroundColor: '#DCFCE7' },
+  statusPassive: { backgroundColor: '#FEE2E2' },
+  statusText: { fontSize: 10, fontWeight: '700', color: '#166534' },
+  cardActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  cardActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 4,
+  },
+  cardActionBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  classCard: {
+    width: '48%',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+  },
+  classBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    marginBottom: 6,
+  },
+  classBadgeText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#4F46E5',
+  },
+  classStudentCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  classYearText: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    marginBottom: 8,
+  },
+  deleteMiniBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#FEE2E2',
+    gap: 3,
+  },
+  deleteMiniText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  lessonCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  lessonName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  shortCodeTag: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  shortCodeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#475569',
+  },
+  lessonSub: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  classFilterScroll: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 10,
+  },
+  filterChip: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  filterChipSelected: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4338CA',
+  },
+  filterChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  filterChipTextSelected: {
+    color: '#fff',
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    height: 38,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 12,
+    color: Colors.text,
+  },
+  studentCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  studentCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  studentPhotoContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  studentPhoto: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  studentPhotoPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  studentInitials: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  cameraBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#4F46E5',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  studentName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  studentClassTag: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  studentClassTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  studentNoText: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  parentText: {
+    fontSize: 11,
+    color: '#475569',
+    marginTop: 2,
+  },
+  studentActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  aiBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  aiBannerIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#6366F1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  aiBannerTextContainer: { flex: 1 },
+  aiBannerTitle: { fontSize: 14, fontWeight: '800', color: Colors.text },
+  aiBannerDesc: { fontSize: 11, color: Colors.textSecondary, marginTop: 2, lineHeight: 15 },
+  aiInfoBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 10,
+    padding: 12,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  aiInfoText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#3730A3',
+    lineHeight: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 18,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 18,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  modalTitle: { fontSize: 16, fontWeight: '800', color: Colors.text },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+    marginBottom: 4,
+  },
+  modalInput: {
+    height: 44,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    fontSize: 13,
+    color: Colors.text,
+    marginBottom: 10,
+  },
+  createSubmitButton: {
+    backgroundColor: Colors.primary,
+    borderRadius: 10,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  createSubmitText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  successIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  successTitle: { fontSize: 16, fontWeight: '800', color: Colors.text, marginBottom: 4 },
+  successSub: { fontSize: 12, color: Colors.textSecondary, textAlign: 'center', marginBottom: 14 },
+  credentialsBox: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
+    marginBottom: 14,
+  },
+  credRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  credLabel: { fontSize: 11, color: Colors.textMuted },
+  credValCode: { fontSize: 12, fontWeight: '700', color: '#4F46E5' },
+  credVal: { fontSize: 12, fontWeight: '800', color: Colors.text },
+  credValPass: { fontSize: 12, fontWeight: '800', color: '#D97706' },
+  aiLoadingContainer: { alignItems: 'center', paddingVertical: 28 },
+  aiLoadingText: { fontSize: 14, fontWeight: '700', color: Colors.text, marginTop: 14 },
+  aiLoadingSub: { fontSize: 11, color: Colors.textMuted, marginTop: 3 },
+  parsedPreview: { paddingVertical: 10 },
+  previewSuccessTitle: { fontSize: 15, fontWeight: '800', color: '#059669', textAlign: 'center', marginBottom: 12 },
+  previewGrid: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  previewItem: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginHorizontal: 3,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  previewVal: { fontSize: 18, fontWeight: '800', color: '#4F46E5' },
+  previewLbl: { fontSize: 10, color: Colors.textMuted, marginTop: 2 },
+  previewNote: { fontSize: 11, color: Colors.textSecondary, textAlign: 'center', lineHeight: 15, marginBottom: 14 },
+  confirmSaveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#059669',
+    borderRadius: 10,
+    height: 44,
+  },
+  confirmSaveText: { color: '#fff', fontSize: 14, fontWeight: '700', marginLeft: 6 },
 });

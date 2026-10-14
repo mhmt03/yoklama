@@ -322,4 +322,44 @@ namespace OgretmenAjanda.Api.Models
         [MaxLength(60)]
         public string? IpAddress { get; set; }
     }
+
+    public class SchoolClass
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(30)]
+        public string Grade { get; set; } = string.Empty; // 9, 10, 11, 12, 1, 2...
+
+        [Required, MaxLength(30)]
+        public string Section { get; set; } = string.Empty; // A, B, C, Fen, Say...
+
+        [MaxLength(50)]
+        public string? AcademicYear { get; set; } // 2026-2027
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    public class SchoolLesson
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string Name { get; set; } = string.Empty; // Fizik, Kimya, Biyoloji, Matematik...
+
+        [MaxLength(30)]
+        public string? ShortCode { get; set; } // FZK, MAT, KMY...
+
+        [MaxLength(30)]
+        public string? Grade { get; set; } // 9, 10 veya Tüm Kademeler
+
+        public int WeeklyHours { get; set; } = 2;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
 }

@@ -19,6 +19,8 @@ namespace OgretmenAjanda.Api.Data
         public DbSet<YearlyPlanItem> YearlyPlanItems => Set<YearlyPlanItem>();
         public DbSet<AppMessage> AppMessages => Set<AppMessage>();
         public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+        public DbSet<SchoolClass> SchoolClasses => Set<SchoolClass>();
+        public DbSet<SchoolLesson> SchoolLessons => Set<SchoolLesson>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

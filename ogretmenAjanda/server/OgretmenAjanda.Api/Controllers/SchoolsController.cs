@@ -275,9 +275,209 @@ namespace OgretmenAjanda.Api.Controllers
 
             school.GeminiApiKey = request.ApiKey;
             await _context.SaveChangesAsync();
-
             return Ok(new { message = "Okul ortak AI API anahtarı güncellendi." });
         }
+
+        // Öğretmen Silme (Admin yetkisi)
+        [HttpDelete("teachers/{teacherId}")]
+        public async Task<IActionResult> DeleteTeacher(Guid teacherId)
+        {
+            var teacher = await _context.Users.FindAsync(teacherId);
+            if (teacher == null) return NotFound(new { message = "Öğretmen bulunamadı." });
+
+            _context.Users.Remove(teacher);
+            _context.AuditLogs.Add(new AuditLog
+            {
+                SchoolId = teacher.SchoolId,
+                UserId = CurrentUserId,
+                UserRole = CurrentUserRole,
+                ActionType = "TEACHER_DELETED",
+                EntityName = "User",
+                EntityId = teacher.Id.ToString(),
+                DetailsJson = $"{teacher.FullName} ({teacher.Username}) silindi.",
+                Timestamp = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Öğretmen başarıyla silindi." });
+        }
+
+        // Öğretmen Bilgilerini Güncelleme
+        [HttpPut("teachers/{teacherId}/details")]
+        public async Task<IActionResult> UpdateTeacherDetails(Guid teacherId, [FromBody] CreateTeacherRequest request)
+        {
+            var teacher = await _context.Users.FindAsync(teacherId);
+            if (teacher == null) return NotFound(new { message = "Öğretmen bulunamadı." });
+
+            teacher.FullName = request.FullName.Trim() + (!string.IsNullOrEmpty(request.Branch) ? $" ({request.Branch.Trim()})" : "");
+            if (request.Phone != null) teacher.Phone = request.Phone;
+            if (request.Email != null) teacher.Email = request.Email;
+
+            await _context.SaveChangesAsync();
+            return Ok(teacher);
+        }
+
+        // Öğretmen Şifre Sıfırlama
+        [HttpPost("teachers/{teacherId}/reset-password")]
+        public async Task<IActionResult> ResetTeacherPassword(Guid teacherId, [FromBody] ResetPasswordRequest? req)
+        {
+            var teacher = await _context.Users.FindAsync(teacherId);
+            if (teacher == null) return NotFound(new { message = "Öğretmen bulunamadı." });
+
+            var newPass = !string.IsNullOrEmpty(req?.NewPassword) ? req.NewPassword : "1234";
+            teacher.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPass);
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"Şifre başarıyla güncellendi: {newPass}", password = newPass });
+        }
+
+        // --- SINIF VE ŞUBE YÖNETİMİ ---
+
+        [HttpGet("{schoolId}/classes")]
+        public async Task<IActionResult> GetClasses(Guid schoolId)
+        {
+            var classes = await _context.SchoolClasses
+                .Where(c => c.SchoolId == schoolId)
+                .OrderBy(c => c.Grade)
+                .ThenBy(c => c.Section)
+                .Select(c => new
+                {
+                    c.Id,
+                    c.SchoolId,
+                    c.Grade,
+                    c.Section,
+                    ClassName = $"{c.Grade}-{c.Section}",
+                    c.AcademicYear,
+                    c.CreatedAt,
+                    StudentCount = _context.Students.Count(s => s.SchoolId == schoolId && s.Grade == c.Grade && s.Section == c.Section)
+                })
+                .ToListAsync();
+
+            return Ok(classes);
+        }
+
+        [HttpPost("{schoolId}/classes")]
+        public async Task<IActionResult> CreateClass(Guid schoolId, [FromBody] CreateClassRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Grade) || string.IsNullOrWhiteSpace(request.Section))
+            {
+                return BadRequest(new { message = "Kademe (Grade) ve Şube (Section) zorunludur." });
+            }
+
+            var grade = request.Grade.Trim();
+            var section = request.Section.Trim().ToUpper();
+
+            var exists = await _context.SchoolClasses.AnyAsync(c => c.SchoolId == schoolId && c.Grade == grade && c.Section == section);
+            if (exists)
+            {
+                return BadRequest(new { message = $"{grade}-{section} sınıfı zaten mevcut." });
+            }
+
+            var newClass = new SchoolClass
+            {
+                Id = Guid.NewGuid(),
+                SchoolId = schoolId,
+                Grade = grade,
+                Section = section,
+                AcademicYear = request.AcademicYear ?? "2026-2027",
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.SchoolClasses.AddAsync(newClass);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                newClass.Id,
+                newClass.SchoolId,
+                newClass.Grade,
+                newClass.Section,
+                ClassName = $"{newClass.Grade}-{newClass.Section}",
+                newClass.AcademicYear,
+                newClass.CreatedAt,
+                StudentCount = 0
+            });
+        }
+
+        [HttpDelete("classes/{classId}")]
+        public async Task<IActionResult> DeleteClass(Guid classId)
+        {
+            var item = await _context.SchoolClasses.FindAsync(classId);
+            if (item == null) return NotFound(new { message = "Sınıf bulunamadı." });
+
+            _context.SchoolClasses.Remove(item);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Sınıf silindi." });
+        }
+
+        // --- DERS YÖNETİMİ ---
+
+        [HttpGet("{schoolId}/lessons")]
+        public async Task<IActionResult> GetLessons(Guid schoolId)
+        {
+            var lessons = await _context.SchoolLessons
+                .Where(l => l.SchoolId == schoolId)
+                .OrderBy(l => l.Name)
+                .ToListAsync();
+
+            return Ok(lessons);
+        }
+
+        [HttpPost("{schoolId}/lessons")]
+        public async Task<IActionResult> CreateLesson(Guid schoolId, [FromBody] CreateLessonRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Name))
+            {
+                return BadRequest(new { message = "Ders adı zorunludur." });
+            }
+
+            var newLesson = new SchoolLesson
+            {
+                Id = Guid.NewGuid(),
+                SchoolId = schoolId,
+                Name = request.Name.Trim(),
+                ShortCode = request.ShortCode?.Trim().ToUpper(),
+                Grade = request.Grade?.Trim() ?? "Tüm Kademeler",
+                WeeklyHours = request.WeeklyHours > 0 ? request.WeeklyHours : 2,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.SchoolLessons.AddAsync(newLesson);
+            await _context.SaveChangesAsync();
+
+            return Ok(newLesson);
+        }
+
+        [HttpDelete("lessons/{lessonId}")]
+        public async Task<IActionResult> DeleteLesson(Guid lessonId)
+        {
+            var item = await _context.SchoolLessons.FindAsync(lessonId);
+            if (item == null) return NotFound(new { message = "Ders bulunamadı." });
+
+            _context.SchoolLessons.Remove(item);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Ders silindi." });
+        }
+    }
+
+    public class CreateClassRequest
+    {
+        public string Grade { get; set; } = string.Empty;
+        public string Section { get; set; } = string.Empty;
+        public string? AcademicYear { get; set; }
+    }
+
+    public class CreateLessonRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? ShortCode { get; set; }
+        public string? Grade { get; set; }
+        public int WeeklyHours { get; set; } = 2;
+    }
+
+    public class ResetPasswordRequest
+    {
+        public string? NewPassword { get; set; }
     }
 
     public class UpdateSchoolRequest

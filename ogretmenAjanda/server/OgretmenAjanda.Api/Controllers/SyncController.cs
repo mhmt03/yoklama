@@ -90,6 +90,115 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(new { message = $"{request.Students.Count} öğrenci başarıyla sunucuya kaydedildi." });
         }
 
+        // 1.1 Tek Öğrenci Ekle (Admin Doğrudan Server'a Ekler)
+        [HttpPost("students/single")]
+        public async Task<IActionResult> CreateSingleStudent([FromBody] CreateSingleStudentRequest request)
+        {
+            var school = await _context.Schools.FindAsync(request.SchoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            var studentNumber = request.StudentNumber.Trim();
+            var exists = await _context.Students.AnyAsync(s => s.SchoolId == request.SchoolId && s.StudentNumber == studentNumber);
+            if (exists)
+            {
+                return BadRequest(new { message = $"{studentNumber} numaralı öğrenci bu okulda zaten mevcut." });
+            }
+
+            var student = new Student
+            {
+                Id = Guid.NewGuid(),
+                SchoolId = request.SchoolId,
+                RelationId = school.RelationId,
+                StudentNumber = studentNumber,
+                FullName = request.FullName.Trim(),
+                Grade = request.Grade.Trim(),
+                Section = request.Section.Trim().ToUpper(),
+                ParentName = request.ParentName?.Trim(),
+                ParentPhone = request.ParentPhone?.Trim(),
+                StudentPhone = request.StudentPhone?.Trim(),
+                PhotoPath = request.PhotoPath,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await _context.Students.AddAsync(student);
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                SchoolId = request.SchoolId,
+                UserId = CurrentUserId,
+                UserRole = CurrentUserRole,
+                ActionType = "STUDENT_CREATED",
+                EntityName = "Student",
+                EntityId = student.Id.ToString(),
+                DetailsJson = $"{student.FullName} ({student.StudentNumber} - {student.Grade}/{student.Section}) eklendi.",
+                Timestamp = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+            return Ok(student);
+        }
+
+        // 1.2 Öğrenci Düzenle (Admin Doğrudan Server'da Düzenler)
+        [HttpPut("students/{studentId}")]
+        public async Task<IActionResult> UpdateStudent(Guid studentId, [FromBody] UpdateStudentRequest request)
+        {
+            var student = await _context.Students.FindAsync(studentId);
+            if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
+
+            student.FullName = request.FullName.Trim();
+            student.StudentNumber = request.StudentNumber.Trim();
+            student.Grade = request.Grade.Trim();
+            student.Section = request.Section.Trim().ToUpper();
+            if (request.ParentName != null) student.ParentName = request.ParentName.Trim();
+            if (request.ParentPhone != null) student.ParentPhone = request.ParentPhone.Trim();
+            if (request.StudentPhone != null) student.StudentPhone = request.StudentPhone.Trim();
+            if (request.PhotoPath != null) student.PhotoPath = request.PhotoPath;
+            student.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            return Ok(student);
+        }
+
+        // 1.3 Öğrenci Sil (Admin Doğrudan Server'dan Siler)
+        [HttpDelete("students/{studentId}")]
+        public async Task<IActionResult> DeleteStudent(Guid studentId)
+        {
+            var student = await _context.Students.FindAsync(studentId);
+            if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
+
+            _context.Students.Remove(student);
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                SchoolId = student.SchoolId,
+                UserId = CurrentUserId,
+                UserRole = CurrentUserRole,
+                ActionType = "STUDENT_DELETED",
+                EntityName = "Student",
+                EntityId = student.Id.ToString(),
+                DetailsJson = $"{student.FullName} ({student.StudentNumber}) silindi.",
+                Timestamp = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Öğrenci silindi." });
+        }
+
+        // 1.4 Öğrenci Fotoğrafı Güncelle
+        [HttpPut("students/{studentId}/photo")]
+        public async Task<IActionResult> UpdateStudentPhoto(Guid studentId, [FromBody] UpdatePhotoRequest request)
+        {
+            var student = await _context.Students.FindAsync(studentId);
+            if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
+
+            student.PhotoPath = request.PhotoPath;
+            student.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Öğrenci fotoğrafı güncellendi.", photoPath = student.PhotoPath });
+        }
+
         // 2. Okulun Öğrencilerini Çek (Öğretmen cihazına hazır çekme)
         [AllowAnonymous]
         [HttpGet("students")]
@@ -463,5 +572,35 @@ namespace OgretmenAjanda.Api.Controllers
                 evaluations
             });
         }
+    }
+
+    public class CreateSingleStudentRequest
+    {
+        public Guid SchoolId { get; set; }
+        public string StudentNumber { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string Grade { get; set; } = string.Empty;
+        public string Section { get; set; } = string.Empty;
+        public string? ParentName { get; set; }
+        public string? ParentPhone { get; set; }
+        public string? StudentPhone { get; set; }
+        public string? PhotoPath { get; set; }
+    }
+
+    public class UpdateStudentRequest
+    {
+        public string StudentNumber { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string Grade { get; set; } = string.Empty;
+        public string Section { get; set; } = string.Empty;
+        public string? ParentName { get; set; }
+        public string? ParentPhone { get; set; }
+        public string? StudentPhone { get; set; }
+        public string? PhotoPath { get; set; }
+    }
+
+    public class UpdatePhotoRequest
+    {
+        public string PhotoPath { get; set; } = string.Empty;
     }
 }
