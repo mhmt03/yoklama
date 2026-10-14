@@ -137,21 +137,34 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
 
                 <TouchableOpacity
                   style={styles.menuItem}
-                  onPress={() => {
-                    onClose();
-                    setAdminModalVisible(true);
-                  }}
+                  onPress={() => navigateToScreen('SchoolAdmin')}
                   activeOpacity={0.7}
                 >
-                  <View style={[styles.menuIconWrap, { backgroundColor: '#FEF3C7' }]}>
-                    <Ionicons name="shield-checkmark" size={18} color="#D97706" />
+                  <View style={[styles.menuIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                    <Ionicons name="sparkles" size={18} color="#6366F1" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.menuItemTitle}>Okul Yönetici Paneli</Text>
-                    <Text style={styles.menuItemSub}>Okul kodu, PIN ve okul ayarları</Text>
+                    <Text style={styles.menuItemTitle}>Okul Yönetimi (AI Çarşaf)</Text>
+                    <Text style={styles.menuItemSub}>Okul kodu, AI ders programı yükleme</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
                 </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => navigateToScreen('SuperAdmin')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.menuIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                    <Ionicons name="key" size={18} color="#D97706" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.menuItemTitle}>Süper Admin (Lisanslar)</Text>
+                    <Text style={styles.menuItemSub}>1 yıllık lisans süreleri ve okul kayıtları</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                </TouchableOpacity>
+
 
                 <TouchableOpacity
                   style={styles.menuItem}
@@ -229,7 +242,39 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
                 </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => navigateToScreen('ClassCockpit')}
+                  activeOpacity={0.7}
+                >
+
+                  <View style={[styles.menuIconWrap, { backgroundColor: '#DCFCE7' }]}>
+                    <Ionicons name="game-controller" size={18} color="#16A34A" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.menuItemTitle}>Canlı Ders Kokpiti</Text>
+                    <Text style={styles.menuItemSub}>Defter konusu, yoklama ve hızlı ödev</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => navigateToScreen('Messages')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.menuIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                    <Ionicons name="chatbubbles" size={18} color="#DC2626" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.menuItemTitle}>Kurum İçi Mesajlar</Text>
+                    <Text style={styles.menuItemSub}>Öğretmenler & İdare duyuru panosu</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                </TouchableOpacity>
               </View>
+
 
               {/* SECTION: GENEL ARAÇLAR */}
               <View style={styles.menuSection}>

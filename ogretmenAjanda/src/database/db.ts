@@ -480,6 +480,28 @@ const runSchema = async (db: SQLite.SQLiteDatabase): Promise<void> => {
     // Table already exists
   }
 
+  // Migrate: Hibrit Senkronizasyon (UUID & Sync Status)
+  const syncMigrations = [
+    { table: 'students', col: 'server_id', type: 'TEXT' },
+    { table: 'students', col: 'sync_status', type: "TEXT DEFAULT 'SYNCED'" },
+    { table: 'assignments', col: 'server_id', type: 'TEXT' },
+    { table: 'assignments', col: 'sync_status', type: "TEXT DEFAULT 'DRAFT'" },
+    { table: 'student_notes', col: 'server_id', type: 'TEXT' },
+    { table: 'student_notes', col: 'sync_status', type: "TEXT DEFAULT 'DRAFT'" },
+    { table: 'student_notes', col: 'is_shared_with_parent', type: 'INTEGER DEFAULT 0' },
+    { table: 'classes', col: 'server_id', type: 'TEXT' },
+    { table: 'classes', col: 'sync_status', type: "TEXT DEFAULT 'SYNCED'" },
+  ];
+
+  for (const m of syncMigrations) {
+    try {
+      await db.runAsync(`ALTER TABLE ${m.table} ADD COLUMN ${m.col} ${m.type};`);
+    } catch {
+      // Kolon zaten mevcut
+    }
+  }
+
+
   // Backfill unique code for schools if missing
   try {
     const schoolsWithoutCode = await db.getAllAsync<{ id: number; name: string }>(

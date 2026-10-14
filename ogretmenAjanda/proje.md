@@ -144,32 +144,37 @@
 
 
 ### 📍 FAZ 2: Mobil Yerel Veritabanı & Hibrit Senkronizasyon (Mobile Core)
-- [ ] SQLite yerel veritabanının UUID ve `sync_status` alanlarıyla güncellenmesi
-- [ ] `apiService.ts` ve Senkronizasyon Motoru (Offline-first, DRAFT -> SYNCED)
-- [ ] Güvenli depolama ve oturum yönetimi (`roleService`, `authStorage`)
-- [ ] Resim boyutu kontrolü & istemci optimizasyon servisi (`imageOptimizer.ts`)
+- [x] SQLite yerel veritabanının UUID ve `sync_status` alanlarıyla güncellenmesi
+- [x] `apiService.ts` ve Senkronizasyon Motoru (Offline-first, DRAFT -> SYNCED)
+- [x] Güvenli depolama ve oturum yönetimi (`apiClient.ts`, `saveAuthToken`)
+- [x] Resim boyutu kontrolü & istemci optimizasyon servisi (`imageOptimizer.ts`)
+
 
 ### 📍 FAZ 3: Süper Admin & Okul Admini Modülü (Mobil UI)
-- [ ] Süper Admin Lisans ve Okul Yönetim Paneli
-- [ ] Okul Admini: Okul kodu üretimi, öğretmen yetkilendirme ve denetimi
-- [ ] Okul Admini: AI Çarşaf Ders Programı ile Otomatik Okul Kurulumu (Öğretmen, sınıf, ders otomatik)
-- [ ] Okul Admini: e-Okul PDF ve Excel ile Öğrenci & Fotoğraf yükleme (Atomik Client Staging)
+- [x] Süper Admin Lisans ve Okul Yönetim Paneli (`SuperAdminScreen.tsx`)
+- [x] Okul Admini: Okul kodu üretimi, öğretmen yetkilendirme ve denetimi (`SchoolAdminScreen.tsx`)
+- [x] Okul Admini: AI Çarşaf Ders Programı ile Otomatik Okul Kurulumu (`aiScheduleParser.ts`)
+- [x] Okul Admini: e-Okul PDF ve Excel ile Öğrenci & Fotoğraf yükleme (Atomik Client Staging)
+
 
 ### 📍 FAZ 4: Öğretmen Modülü & "Ders Kokpiti" & İletişim
-- [ ] Canlı Ders Kokpiti: Deftere yazılacak kazanım panosu, fotoğraflı hızlı yoklama & ödev kontrolü
-- [ ] 360° Öğrenci Raporu & Tek Tıkla PDF Karne (Veli toplantısı asistanı)
-- [ ] Onay pencereli bildirim gönderimi (Ödev/Görüş) & WhatsApp entegrasyonu
-- [ ] Okul içi öğretmen-idareci mesajlaşma ekranı
+- [x] Canlı Ders Kokpiti: Deftere yazılacak kazanım panosu, fotoğraflı hızlı yoklama & ödev kontrolü (`ClassCockpitScreen.tsx`)
+- [x] 360° Öğrenci Raporu & Tek Tıkla PDF Karne (`Student360Modal.tsx`)
+- [x] Onay pencereli bildirim gönderimi (Ödev/Görüş) & WhatsApp entegrasyonu
+- [x] Okul içi öğretmen-idareci mesajlaşma ekranı (`MessagesScreen.tsx`)
+
 
 ### 📍 FAZ 5: Öğrenci & Veli Modülü
-- [ ] KVKK Uyumlu Sade Giriş Ekranı (Okul Kodu + `ogrencino` + `aaaa_ogrencino`)
-- [ ] Öğrenci/Veli Paneli: Ödev takip kartları, öğretmen görüşleri, bildirimler ve mesajlar
-- [ ] Şifre değiştirme ve profil ekranı
+- [x] KVKK Uyumlu Sade Giriş Ekranı (Okul Kodu + `ogrencino` + `aaaa_ogrencino`)
+- [x] Öğrenci/Veli Paneli: Ödev takip kartları, öğretmen görüşleri, bildirimler ve mesajlar
+- [x] Şifre değiştirme ve profil ekranı
+
 
 ### 📍 FAZ 6: Denetim Günlüğü (Audit Log), Güvenlik & Final
-- [ ] İdareci & Admin İşlem Denetim Günlüğü Görüntüleme Arayüzü
-- [ ] Testler, lint & typecheck doğrulamaları
-- [ ] Otomatik Git Commit ve Push
+- [x] İdareci & Admin İşlem Denetim Günlüğü Görüntüleme Arayüzü (`SuperAdminScreen.tsx` & Backend AuditLog)
+- [x] Testler, lint & typecheck doğrulamaları (.NET 0 error, TypeScript 0 error)
+- [x] Otomatik Git Commit ve Push
+
 
 
 

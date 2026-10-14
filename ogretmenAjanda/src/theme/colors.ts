@@ -33,10 +33,12 @@ export const Colors = {
   divider: '#CBD5E1',
 
   // Text
+  text: '#0F172A',
   textPrimary: '#0F172A', // Slate-900
   textSecondary: '#475569', // Slate-600
   textMuted: '#94A3B8', // Slate-400
   textInverse: '#FFFFFF',
+
 
   // Accent highlights
   purple: '#8B5CF6',

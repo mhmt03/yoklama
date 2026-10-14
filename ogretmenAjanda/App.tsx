@@ -31,10 +31,17 @@ import { OperationsScreen } from './src/screens/OperationsScreen';
 import { AgendaScreen } from './src/screens/AgendaScreen';
 import { RoleSelectScreen } from './src/screens/RoleSelectScreen';
 import { StudentDashboardScreen } from './src/screens/StudentDashboardScreen';
+import { SuperAdminScreen } from './src/screens/SuperAdminScreen';
+import { SchoolAdminScreen } from './src/screens/SchoolAdminScreen';
+import { ClassCockpitScreen } from './src/screens/ClassCockpitScreen';
+import { MessagesScreen } from './src/screens/MessagesScreen';
+
+
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 const navigationRef = createNavigationContainerRef<any>();
+
 
 function MainTabs() {
   const { themeColor, bgTint } = useSchoolTheme();
@@ -221,8 +228,14 @@ function AppContent() {
           <Stack.Screen name="YearlyPlan" component={YearlyPlanScreen} />
           <Stack.Screen name="Operations" component={OperationsScreen} />
           <Stack.Screen name="Agenda" component={AgendaScreen} />
+          <Stack.Screen name="SuperAdmin" component={SuperAdminScreen} />
+          <Stack.Screen name="SchoolAdmin" component={SchoolAdminScreen} />
+          <Stack.Screen name="ClassCockpit" component={ClassCockpitScreen} />
+          <Stack.Screen name="Messages" component={MessagesScreen} />
         </Stack.Navigator>
       </NavigationContainer>
+
+
 
       <SideDrawer
         visible={isDrawerOpen}

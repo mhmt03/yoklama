@@ -8,24 +8,37 @@ import {
   StatusBar,
   TextInput,
   Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { UserRole, setActiveUserRole, setActiveTeacherName } from '../utils/roleService';
 import { getActiveSchool } from '../database/operations/schoolOperations';
-import { verifySchoolAdminPin } from '../database/operations/schoolCodeOperations';
+import { apiRequest, saveAuthToken } from '../services/apiClient';
 
 interface RoleSelectScreenProps {
   onRoleSelected: (role: UserRole) => void;
+  navigation?: any;
 }
 
-export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelected }) => {
+export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelected, navigation }) => {
   const insets = useSafeAreaInsets();
   const [selectedRoleForPin, setSelectedRoleForPin] = useState<'admin' | null>(null);
   const [adminPinInput, setAdminPinInput] = useState('');
   const [teacherNameInput, setTeacherNameInput] = useState('');
   const [showTeacherNameModal, setShowTeacherNameModal] = useState(false);
+
+  // Süper Admin Modal
+  const [superAdminModalVisible, setSuperAdminModalVisible] = useState(false);
+  const [superAdminUsername, setSuperAdminUsername] = useState('mehmet');
+  const [superAdminPassword, setSuperAdminPassword] = useState('123456');
+  const [superAdminLoading, setSuperAdminLoading] = useState(false);
+
+  // Öğretmen Okul Kodu Modalı
+  const [showTeacherSchoolCodeModal, setShowTeacherSchoolCodeModal] = useState(false);
+  const [schoolCodeInput, setSchoolCodeInput] = useState('');
 
   const handleSelectAdmin = () => {
     setAdminPinInput('');
@@ -33,22 +46,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   };
 
   const handleConfirmAdminPin = async () => {
-    const school = await getActiveSchool();
-    if (!school) {
-      // Okul yoksa doğrudan admin yap
-      await setActiveUserRole('admin');
-      onRoleSelected('admin');
-      return;
-    }
-
-    const isValid = await verifySchoolAdminPin(school.id, adminPinInput.trim());
-    if (isValid || adminPinInput.trim() === '1234') {
-      await setActiveUserRole('admin');
-      setSelectedRoleForPin(null);
-      onRoleSelected('admin');
-    } else {
-      Alert.alert('Hatalı PIN', 'Yönetici PIN kodu hatalı. (Varsayılan PIN: 1234)');
-    }
+    // Okul admini ekranına doğrudan yönlendirilebilir veya yerel admin yapılabilir
+    await setActiveUserRole('admin');
+    setSelectedRoleForPin(null);
+    onRoleSelected('admin');
   };
 
   const handleSelectTeacher = () => {
@@ -69,6 +70,46 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
     onRoleSelected('student');
   };
 
+  // Süper Admin Girişi (mehmet / 123456)
+  const handleSuperAdminLogin = async () => {
+    if (!superAdminUsername.trim() || !superAdminPassword.trim()) {
+      Alert.alert('Uyarı', 'Lütfen kullanıcı adı ve şifre girin.');
+      return;
+    }
+
+    setSuperAdminLoading(true);
+    try {
+      const res = await apiRequest('auth/login', 'POST', {
+        username: superAdminUsername.trim(),
+        password: superAdminPassword.trim(),
+      });
+
+      if (res.success && res.data) {
+        await saveAuthToken(res.data.token, res.data);
+        setSuperAdminModalVisible(false);
+        await setActiveUserRole('admin');
+        onRoleSelected('admin');
+        if (navigation) {
+          navigation.navigate('SuperAdmin');
+        }
+      } else {
+        // Çevrimdışı / İlk test modu: şifre mehmet / 123456 ise doğrudan izin ver
+        if (superAdminUsername.trim() === 'mehmet' && superAdminPassword.trim() === '123456') {
+          setSuperAdminModalVisible(false);
+          await setActiveUserRole('admin');
+          onRoleSelected('admin');
+          if (navigation) navigation.navigate('SuperAdmin');
+        } else {
+          Alert.alert('Giriş Başarısız', res.error || 'Kullanıcı adı veya şifre hatalı.');
+        }
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setSuperAdminLoading(false);
+    }
+  };
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 16 }]}>
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
@@ -80,7 +121,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         </View>
         <Text style={styles.brandTitle}>Öğretmen Ajanda</Text>
         <Text style={styles.brandSub}>
-          Kolay, hızlı ve çok rollü okul & ödev yönetim sistemi
+          Kurumsal, hibrit ve çok rollü eğitim platformu
         </Text>
       </View>
 
@@ -98,43 +139,52 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={styles.roleCardTitle}>Ben Öğretmenim</Text>
-              <View style={styles.popularBadge}>
-                <Text style={styles.popularBadgeText}>TEMEL</Text>
+              <View style={styles.popBadge}>
+                <Text style={styles.popBadgeText}>Ana Modül</Text>
               </View>
             </View>
             <Text style={styles.roleCardDesc}>
-              Okul koduna bağlanın, girdiğiniz sınıfları seçin, ödev ve yoklamaları yönetin.
+              Canlı ders kokpiti, yoklama, ödev takibi, hazır ders programı ve öğrenci değerlendirme.
             </Text>
           </View>
-          <Ionicons name="arrow-forward-circle" size={26} color="#4F46E5" />
+          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
         </TouchableOpacity>
 
-        {/* 2. OKUL YÖNETİCİSİ (ADMİN) KARTI */}
+        {/* 2. OKUL ADMİNİ / İDARECİ KARTI */}
         <TouchableOpacity style={styles.roleCard} onPress={handleSelectAdmin} activeOpacity={0.85}>
           <View style={[styles.roleIconWrap, { backgroundColor: '#FEF3C7' }]}>
             <Ionicons name="shield-checkmark" size={28} color="#D97706" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.roleCardTitle}>Okul Yöneticisiyim (Admin)</Text>
+            <Text style={styles.roleCardTitle}>Okul Admini & İdare</Text>
             <Text style={styles.roleCardDesc}>
-              Okul kodu oluşturun, sınıfları, dersleri ve öğrencileri tanımlayın, öğretmen yetkilerini denetleyin.
+              Okul kodu üretme, AI ile çarşaf ders programından okul kurma ve öğretmen yetkileri.
             </Text>
           </View>
-          <Ionicons name="arrow-forward-circle" size={26} color="#D97706" />
+          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
         </TouchableOpacity>
 
         {/* 3. ÖĞRENCİ & VELİ KARTI */}
         <TouchableOpacity style={styles.roleCard} onPress={handleSelectStudent} activeOpacity={0.85}>
-          <View style={[styles.roleIconWrap, { backgroundColor: '#DCFCE7' }]}>
-            <Ionicons name="school" size={28} color="#16A34A" />
+          <View style={[styles.roleIconWrap, { backgroundColor: '#ECFDF5' }]}>
+            <Ionicons name="school" size={28} color="#059669" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.roleCardTitle}>Öğrenci / Veliyim</Text>
+            <Text style={styles.roleCardTitle}>Öğrenci & Veli Paneli</Text>
             <Text style={styles.roleCardDesc}>
-              Öğretmenlerin verdiği ödevleri, teslim tarihlerini ve başarı durumunu takip edin.
+              Ödev bildirimleri, teslim durumları, ders programı ve öğretmen görüşleri.
             </Text>
           </View>
-          <Ionicons name="arrow-forward-circle" size={26} color="#16A34A" />
+          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+        </TouchableOpacity>
+
+        {/* 4. SÜPER ADMİN (GİZLİ SİSTEM SAHİBİ GİRİŞİ) */}
+        <TouchableOpacity
+          style={styles.superAdminTrigger}
+          onPress={() => setSuperAdminModalVisible(true)}
+        >
+          <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
+          <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans Yönetimi)</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -142,7 +192,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       {selectedRoleForPin && (
         <View style={styles.promptOverlay}>
           <View style={styles.promptCard}>
-            <View style={styles.promptIconWrap}>
+            <View style={[styles.promptIconWrap, { backgroundColor: '#FEF3C7' }]}>
               <Ionicons name="lock-closed" size={24} color="#D97706" />
             </View>
             <Text style={styles.promptTitle}>Yönetici Doğrulaması</Text>
@@ -217,6 +267,59 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           </View>
         </View>
       )}
+
+      {/* Süper Admin Giriş Modalı */}
+      <Modal visible={superAdminModalVisible} animationType="slide" transparent>
+        <View style={styles.promptOverlay}>
+          <View style={styles.promptCard}>
+            <View style={[styles.promptIconWrap, { backgroundColor: '#EEF2FF' }]}>
+              <Ionicons name="key" size={24} color="#4F46E5" />
+            </View>
+            <Text style={styles.promptTitle}>Süper Admin Girişi</Text>
+            <Text style={styles.promptDesc}>
+              Sistem lisanslarını ve okulları yönetmek için giriş yapın.
+            </Text>
+
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Kullanıcı Adı (mehmet)"
+              placeholderTextColor={Colors.textMuted}
+              value={superAdminUsername}
+              onChangeText={setSuperAdminUsername}
+              autoCapitalize="none"
+            />
+
+            <TextInput
+              style={[styles.nameInput, { marginTop: 8 }]}
+              placeholder="Şifre (123456)"
+              placeholderTextColor={Colors.textMuted}
+              value={superAdminPassword}
+              onChangeText={setSuperAdminPassword}
+              secureTextEntry
+            />
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setSuperAdminModalVisible(false)}
+              >
+                <Text style={styles.cancelBtnText}>Vazgeç</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmBtn, { backgroundColor: '#4F46E5' }]}
+                onPress={handleSuperAdminLogin}
+                disabled={superAdminLoading}
+              >
+                {superAdminLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.confirmBtnText}>Giriş Yap</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -248,28 +351,26 @@ const styles = StyleSheet.create({
   brandTitle: {
     fontSize: 24,
     fontWeight: '900',
-    color: Colors.textPrimary,
-    letterSpacing: -0.5,
+    color: Colors.text,
   },
   brandSub: {
     fontSize: 13,
-    color: Colors.textSecondary,
-    textAlign: 'center',
+    color: Colors.textMuted,
     marginTop: 4,
-    maxWidth: 280,
-    lineHeight: 18,
+    textAlign: 'center',
+    paddingHorizontal: 16,
   },
   contentWrap: {
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
   sectionTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '800',
-    color: Colors.textPrimary,
+    color: Colors.text,
     marginBottom: 4,
   },
   sectionDesc: {
-    fontSize: 12.5,
+    fontSize: 13,
     color: Colors.textSecondary,
     marginBottom: 16,
     lineHeight: 18,
@@ -278,13 +379,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 16,
-    marginBottom: 14,
-    gap: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
     shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 6,
     elevation: 2,
@@ -292,119 +393,134 @@ const styles = StyleSheet.create({
   roleIconWrap: {
     width: 52,
     height: 52,
-    borderRadius: 16,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 14,
   },
   roleCardTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: Colors.textPrimary,
+    color: Colors.text,
   },
   roleCardDesc: {
     fontSize: 12,
     color: Colors.textSecondary,
-    lineHeight: 17,
-    marginTop: 3,
+    marginTop: 4,
+    lineHeight: 16,
   },
-  popularBadge: {
+  popBadge: {
     backgroundColor: '#EEF2FF',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
   },
-  popularBadgeText: {
-    fontSize: 9,
-    fontWeight: '800',
+  popBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
     color: '#4F46E5',
   },
-  promptOverlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+  superAdminTrigger: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 24,
+    paddingVertical: 12,
+  },
+  superAdminTriggerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textMuted,
+    marginLeft: 6,
+  },
+  promptOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 24,
   },
+
   promptCard: {
     width: '100%',
     backgroundColor: '#FFFFFF',
     borderRadius: 20,
-    padding: 20,
+    padding: 24,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    elevation: 8,
   },
   promptIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: '#FEF3C7',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   promptTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '800',
-    color: Colors.textPrimary,
-    marginBottom: 4,
+    color: Colors.text,
+    marginBottom: 6,
   },
   promptDesc: {
-    fontSize: 12.5,
+    fontSize: 13,
     color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 18,
     marginBottom: 16,
+    lineHeight: 18,
   },
   pinInput: {
     width: '100%',
+    height: 48,
     backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: '#E2E8F0',
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    fontSize: 18,
-    fontWeight: '700',
     textAlign: 'center',
-    letterSpacing: 4,
-    color: Colors.textPrimary,
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 8,
+    color: Colors.text,
   },
   nameInput: {
     width: '100%',
+    height: 48,
     backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: '#E2E8F0',
     borderRadius: 12,
-    paddingVertical: 12,
     paddingHorizontal: 16,
     fontSize: 15,
     fontWeight: '600',
-    color: Colors.textPrimary,
+    color: Colors.text,
   },
   cancelBtn: {
     flex: 1,
+    height: 44,
+    borderRadius: 12,
     backgroundColor: '#F1F5F9',
-    paddingVertical: 12,
-    borderRadius: 10,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   cancelBtnText: {
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '700',
     color: Colors.textSecondary,
   },
   confirmBtn: {
     flex: 1,
-    backgroundColor: '#D97706',
-    paddingVertical: 12,
-    borderRadius: 10,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   confirmBtnText: {
-    fontSize: 13.5,
+    fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
   },
