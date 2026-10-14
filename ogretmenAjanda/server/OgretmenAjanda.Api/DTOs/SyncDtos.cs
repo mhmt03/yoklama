@@ -37,6 +37,7 @@ namespace OgretmenAjanda.Api.DTOs
     public class BatchScheduleSyncRequest
     {
         public Guid SchoolId { get; set; }
+        public bool OverwriteAll { get; set; } = false;
         public List<ScheduleSyncItem> Schedules { get; set; } = new();
     }
 

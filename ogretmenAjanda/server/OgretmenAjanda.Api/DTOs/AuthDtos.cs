@@ -34,6 +34,13 @@ namespace OgretmenAjanda.Api.DTOs
         public string NewPassword { get; set; } = string.Empty;
     }
 
+    public class UpdateCredentialsRequest
+    {
+        public string? NewUsername { get; set; }
+        public string? OldPassword { get; set; }
+        public string? NewPassword { get; set; }
+    }
+
     public class LoginResponse
     {
         public string Token { get; set; } = string.Empty;

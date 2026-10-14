@@ -316,5 +316,54 @@ namespace OgretmenAjanda.Api.Controllers
 
             return Ok(new { message = "Şifreniz başarıyla güncellendi." });
         }
+
+        [Authorize]
+        [HttpPost("update-credentials")]
+        public async Task<IActionResult> UpdateCredentials([FromBody] UpdateCredentialsRequest request)
+        {
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
+
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null) return NotFound(new { message = "Kullanıcı bulunamadı." });
+
+            // Kullanıcı adı güncelleme
+            if (!string.IsNullOrWhiteSpace(request.NewUsername))
+            {
+                var newUsername = request.NewUsername.Trim();
+                if (!string.Equals(user.Username, newUsername, StringComparison.OrdinalIgnoreCase))
+                {
+                    var exists = await _context.Users.AnyAsync(u => u.Id != userId && u.Username.ToLower() == newUsername.ToLower());
+                    if (exists)
+                    {
+                        return BadRequest(new { message = $"'{newUsername}' kullanıcı adı zaten başka bir kullanıcı tarafından kullanılıyor." });
+                    }
+                    user.Username = newUsername;
+                }
+            }
+
+            // Şifre güncelleme
+            if (!string.IsNullOrEmpty(request.NewPassword))
+            {
+                if (string.IsNullOrEmpty(request.OldPassword))
+                {
+                    return BadRequest(new { message = "Şifrenizi değiştirmek için mevcut şifrenizi girmelisiniz." });
+                }
+
+                if (!BCrypt.Net.BCrypt.Verify(request.OldPassword, user.PasswordHash))
+                {
+                    return BadRequest(new { message = "Mevcut şifreniz hatalı." });
+                }
+
+                user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new
+            {
+                message = "Bilgileriniz başarıyla güncellendi.",
+                username = user.Username
+            });
+        }
     }
 }

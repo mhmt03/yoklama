@@ -1,10 +1,15 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using OgretmenAjanda.Api.Data;
+using OgretmenAjanda.Api.Models;
 
 namespace OgretmenAjanda.Api.Controllers
 {
@@ -14,10 +19,12 @@ namespace OgretmenAjanda.Api.Controllers
     public class UploadsController : ControllerBase
     {
         private readonly IWebHostEnvironment _env;
+        private readonly AppDbContext _context;
 
-        public UploadsController(IWebHostEnvironment env)
+        public UploadsController(IWebHostEnvironment env, AppDbContext context)
         {
             _env = env;
+            _context = context;
         }
 
         [HttpPost("student-photo")]
@@ -110,11 +117,100 @@ namespace OgretmenAjanda.Api.Controllers
                 return BadRequest(new { message = "Görsel yüklenemedi: " + ex.Message });
             }
         }
+
+        [HttpPost("batch-student-photos")]
+        public async Task<IActionResult> BatchUploadStudentPhotos([FromBody] BatchStudentPhotoUploadRequest request)
+        {
+            if (request.Photos == null || !request.Photos.Any())
+            {
+                return BadRequest(new { message = "Yüklenecek fotoğraf listesi boş." });
+            }
+
+            var webRoot = _env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            var cleanSchoolCode = string.Join("_", (request.SchoolCode ?? "OKL").Split(Path.GetInvalidFileNameChars())).ToUpper();
+            var targetDir = Path.Combine(webRoot, "uploads", "schools", cleanSchoolCode, "students");
+
+            if (!Directory.Exists(targetDir))
+            {
+                Directory.CreateDirectory(targetDir);
+            }
+
+            int successCount = 0;
+            int failedCount = 0;
+
+            foreach (var item in request.Photos)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(item.StudentNumber) || string.IsNullOrWhiteSpace(item.Base64Data))
+                    {
+                        failedCount++;
+                        continue;
+                    }
+
+                    var cleanBase64 = item.Base64Data;
+                    var ext = ".jpg";
+                    if (cleanBase64.Contains(","))
+                    {
+                        var prefix = cleanBase64.Substring(0, cleanBase64.IndexOf(","));
+                        if (prefix.Contains("png")) ext = ".png";
+                        else if (prefix.Contains("webp")) ext = ".webp";
+                        cleanBase64 = cleanBase64.Substring(cleanBase64.IndexOf(",") + 1);
+                    }
+
+                    var bytes = Convert.FromBase64String(cleanBase64);
+                    var fileName = $"{item.StudentNumber.Trim()}_{Guid.NewGuid().ToString("N").Substring(0, 6)}{ext}";
+                    var fullPath = Path.Combine(targetDir, fileName);
+
+                    await System.IO.File.WriteAllBytesAsync(fullPath, bytes);
+
+                    var relativePath = $"/uploads/schools/{cleanSchoolCode}/students/{fileName}";
+
+                    // Öğrenci kaydını güncelle
+                    var student = await _context.Students
+                        .FirstOrDefaultAsync(s => s.SchoolId == request.SchoolId && s.StudentNumber == item.StudentNumber.Trim());
+
+                    if (student != null)
+                    {
+                        student.PhotoPath = relativePath;
+                        student.UpdatedAt = DateTime.UtcNow;
+                    }
+
+                    successCount++;
+                }
+                catch
+                {
+                    failedCount++;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"{successCount} öğrencinin fotoğrafı başarıyla yüklendi.",
+                successCount,
+                failedCount
+            });
+        }
     }
 
     public class Base64PhotoUploadRequest
     {
         public string SchoolCode { get; set; } = string.Empty;
+        public string StudentNumber { get; set; } = string.Empty;
+        public string Base64Data { get; set; } = string.Empty;
+    }
+
+    public class BatchStudentPhotoUploadRequest
+    {
+        public Guid SchoolId { get; set; }
+        public string SchoolCode { get; set; } = string.Empty;
+        public List<StudentPhotoItem> Photos { get; set; } = new();
+    }
+
+    public class StudentPhotoItem
+    {
         public string StudentNumber { get; set; } = string.Empty;
         public string Base64Data { get; set; } = string.Empty;
     }

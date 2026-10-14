@@ -280,24 +280,69 @@ namespace OgretmenAjanda.Api.Controllers
             var school = await _context.Schools.FindAsync(request.SchoolId);
             if (school == null) return NotFound();
 
-            // Eski programları temizleyip yenilerini ekleyebilir veya güncelleyebiliriz
-            var existingItems = _context.ScheduleItems.Where(s => s.SchoolId == request.SchoolId);
-            _context.ScheduleItems.RemoveRange(existingItems);
-
-            foreach (var item in request.Schedules)
+            if (request.OverwriteAll)
             {
-                _context.ScheduleItems.Add(new ScheduleItem
+                var existingItems = _context.ScheduleItems.Where(s => s.SchoolId == request.SchoolId);
+                _context.ScheduleItems.RemoveRange(existingItems);
+
+                foreach (var item in request.Schedules)
                 {
-                    Id = item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
-                    SchoolId = request.SchoolId,
-                    TeacherName = item.TeacherName,
-                    DayOfWeek = item.DayOfWeek,
-                    LessonHour = item.LessonHour,
-                    Grade = item.Grade,
-                    Section = item.Section,
-                    LessonName = item.LessonName,
-                    Classroom = item.Classroom
-                });
+                    _context.ScheduleItems.Add(new ScheduleItem
+                    {
+                        Id = item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
+                        SchoolId = request.SchoolId,
+                        TeacherName = item.TeacherName,
+                        DayOfWeek = item.DayOfWeek,
+                        LessonHour = item.LessonHour,
+                        Grade = item.Grade,
+                        Section = item.Section,
+                        LessonName = item.LessonName,
+                        Classroom = item.Classroom
+                    });
+                }
+            }
+            else
+            {
+                // Mevcut verileri koruyarak yalnızca değişiklikleri yansıt (Merge / Update)
+                var existingList = await _context.ScheduleItems
+                    .Where(s => s.SchoolId == request.SchoolId)
+                    .ToListAsync();
+
+                foreach (var item in request.Schedules)
+                {
+                    var existing = existingList.FirstOrDefault(s =>
+                        s.DayOfWeek == item.DayOfWeek &&
+                        s.LessonHour == item.LessonHour &&
+                        (
+                            (!string.IsNullOrEmpty(s.TeacherName) && !string.IsNullOrEmpty(item.TeacherName) && string.Equals(s.TeacherName.Trim(), item.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase)) ||
+                            (!string.IsNullOrEmpty(s.Grade) && !string.IsNullOrEmpty(item.Grade) && s.Grade == item.Grade && s.Section == item.Section)
+                        )
+                    );
+
+                    if (existing != null)
+                    {
+                        existing.TeacherName = item.TeacherName;
+                        existing.Grade = item.Grade;
+                        existing.Section = item.Section;
+                        existing.LessonName = item.LessonName;
+                        if (!string.IsNullOrEmpty(item.Classroom)) existing.Classroom = item.Classroom;
+                    }
+                    else
+                    {
+                        _context.ScheduleItems.Add(new ScheduleItem
+                        {
+                            Id = item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
+                            SchoolId = request.SchoolId,
+                            TeacherName = item.TeacherName,
+                            DayOfWeek = item.DayOfWeek,
+                            LessonHour = item.LessonHour,
+                            Grade = item.Grade,
+                            Section = item.Section,
+                            LessonName = item.LessonName,
+                            Classroom = item.Classroom
+                        });
+                    }
+                }
             }
 
             _context.AuditLogs.Add(new AuditLog
@@ -307,12 +352,12 @@ namespace OgretmenAjanda.Api.Controllers
                 UserRole = CurrentUserRole,
                 ActionType = "BATCH_SCHEDULE_SYNCED",
                 EntityName = "ScheduleItem",
-                DetailsJson = $"{request.Schedules.Count} ders programı kaydı yüklendi.",
+                DetailsJson = $"{request.Schedules.Count} ders programı kaydı yüklendi. (Mod: {(request.OverwriteAll ? "Sıfırdan Yaz" : "Güncelle")})",
                 Timestamp = DateTime.UtcNow
             });
 
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Ders programı başarıyla kaydedildi." });
+            return Ok(new { message = request.OverwriteAll ? "Ders programı sıfırlanıp yeniden yazıldı." : "Ders programı başarıyla güncellendi." });
         }
 
         // 4. Ders Programını Çek

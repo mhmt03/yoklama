@@ -394,6 +394,7 @@ namespace OgretmenAjanda.Api.Controllers
             teacher.FullName = request.FullName.Trim() + (!string.IsNullOrEmpty(request.Branch) ? $" ({request.Branch.Trim()})" : "");
             if (request.Phone != null) teacher.Phone = request.Phone;
             if (request.Email != null) teacher.Email = request.Email;
+            if (request.AssignedClassesJson != null) teacher.AssignedClassesJson = request.AssignedClassesJson;
 
             await _context.SaveChangesAsync();
             return Ok(teacher);
@@ -540,6 +541,76 @@ namespace OgretmenAjanda.Api.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { message = "Ders silindi." });
         }
+
+        // Ders Güncelleme
+        [HttpPut("lessons/{lessonId}")]
+        public async Task<IActionResult> UpdateLesson(Guid lessonId, [FromBody] CreateLessonRequest request)
+        {
+            var item = await _context.SchoolLessons.FindAsync(lessonId);
+            if (item == null) return NotFound(new { message = "Ders bulunamadı." });
+
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                item.Name = request.Name.Trim();
+            }
+            if (request.ShortCode != null)
+            {
+                item.ShortCode = request.ShortCode.Trim().ToUpper();
+            }
+            if (request.Grade != null)
+            {
+                item.Grade = request.Grade.Trim();
+            }
+            if (request.WeeklyHours > 0)
+            {
+                item.WeeklyHours = request.WeeklyHours;
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(item);
+        }
+
+        // Toplu İşlemler: Tüm Okul Derslerini Sil
+        [HttpDelete("{schoolId}/lessons/all")]
+        public async Task<IActionResult> DeleteAllLessons(Guid schoolId)
+        {
+            var items = await _context.SchoolLessons.Where(l => l.SchoolId == schoolId).ToListAsync();
+            _context.SchoolLessons.RemoveRange(items);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"{items.Count} adet ders başarıyla silindi." });
+        }
+
+        // Toplu İşlemler: Tüm Şubeleri Sil
+        [HttpDelete("{schoolId}/classes/all")]
+        public async Task<IActionResult> DeleteAllClasses(Guid schoolId)
+        {
+            var items = await _context.SchoolClasses.Where(c => c.SchoolId == schoolId).ToListAsync();
+            _context.SchoolClasses.RemoveRange(items);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"{items.Count} adet sınıf/şube başarıyla silindi." });
+        }
+
+        // Toplu İşlemler: Tüm Öğretmenleri Sil
+        [HttpDelete("{schoolId}/teachers/all")]
+        public async Task<IActionResult> DeleteAllTeachers(Guid schoolId)
+        {
+            var teachers = await _context.Users
+                .Where(u => u.SchoolId == schoolId && (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff))
+                .ToListAsync();
+            _context.Users.RemoveRange(teachers);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"{teachers.Count} adet öğretmen başarıyla silindi." });
+        }
+
+        // Toplu İşlemler: Tüm Öğrencileri Sil
+        [HttpDelete("{schoolId}/students/all")]
+        public async Task<IActionResult> DeleteAllStudents(Guid schoolId)
+        {
+            var students = await _context.Students.Where(s => s.SchoolId == schoolId).ToListAsync();
+            _context.Students.RemoveRange(students);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"{students.Count} adet öğrenci kaydı başarıyla silindi." });
+        }
     }
 
     public class CreateClassRequest
@@ -589,5 +660,6 @@ namespace OgretmenAjanda.Api.Controllers
         public string? Branch { get; set; }
         public string? Phone { get; set; }
         public string? Email { get; set; }
+        public string? AssignedClassesJson { get; set; }
     }
 }

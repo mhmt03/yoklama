@@ -232,3 +232,62 @@ export async function saveParsedStudentsToServer(
     };
   }
 }
+
+/**
+ * Boş öğrenci listesi Excel şablonu oluşturup cihazda paylaşılmasını / indirilmesini sağlar.
+ */
+export async function generateStudentTemplateExcel(): Promise<boolean> {
+  const { saveAndShareWorkbook } = await import('../utils/excelService');
+  const workbook = XLSX.utils.book_new();
+
+  const header = [
+    'Öğrenci No *',
+    'Adı *',
+    'Soyadı *',
+    'Sınıf Düzeyi (örn: 9, 10, 11) *',
+    'Şube (örn: A, B, C) *',
+    'Cinsiyet (Erkek/Kız)',
+    'Veli Adı',
+    'Veli Telefonu',
+    'Öğrenci Telefonu',
+  ];
+
+  const sampleRows = [
+    header,
+    ['101', 'Ahmet', 'Yılmaz', '9', 'A', 'Erkek', 'Mehmet Yılmaz', '05321112233', '05554443322'],
+    ['102', 'Ayşe', 'Demir', '9', 'A', 'Kız', 'Fatma Demir', '05332223344', '05553332211'],
+    ['201', 'Burak', 'Kaya', '10', 'B', 'Erkek', 'Ali Kaya', '05423334455', ''],
+  ];
+
+  const worksheet = XLSX.utils.aoa_to_sheet(sampleRows);
+  worksheet['!cols'] = [
+    { wch: 14 },
+    { wch: 20 },
+    { wch: 20 },
+    { wch: 26 },
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 22 },
+    { wch: 18 },
+    { wch: 18 },
+  ];
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Öğrenci Listesi');
+
+  // Açıklama sayfası
+  const infoRows = [
+    ['ÖĞRENCİ LİSTESİ TOPLU YÜKLEME KILAVUZU'],
+    [],
+    ['1.', 'Yıldızlı (*) alanların doldurulması zorunludur.'],
+    ['2.', 'Öğrenci numaraları benzersiz olmalıdır.'],
+    ['3.', 'Sınıf Düzeyi rakam (örn: 9, 10, 11, 12, 1, 2 vb.) olmalıdır.'],
+    ['4.', 'Şube harf (örn: A, B, C, D vb.) olmalıdır.'],
+    ['5.', 'Listeyi doldurduktan sonra Yönetim Paneli -> Öğrenciler -> "Excel Yükle" butonu ile sisteme aktarabilirsiniz.'],
+    ['6.', 'e-Okuldan aldığınız resmi sınıf/okul listesi Excel dosyalarını doğrudan da yükleyebilirsiniz; sistem formatı otomatik algılar.'],
+  ];
+  const infoSheet = XLSX.utils.aoa_to_sheet(infoRows);
+  infoSheet['!cols'] = [{ wch: 10 }, { wch: 80 }];
+  XLSX.utils.book_append_sheet(workbook, infoSheet, 'Kılavuz');
+
+  return await saveAndShareWorkbook(workbook, 'Okul_Ogrenci_Yukleme_Sablonu.xlsx');
+}

@@ -85,7 +85,8 @@ Notlar:
  */
 export async function saveMasterScheduleToServer(
   schoolId: string,
-  parsed: ParsedScheduleResult
+  parsed: ParsedScheduleResult,
+  overwriteAll: boolean = false
 ): Promise<{ success: boolean; message: string }> {
   const syncItems = parsed.scheduleItems.map((item) => ({
     teacherName: item.teacherName,
@@ -99,13 +100,16 @@ export async function saveMasterScheduleToServer(
 
   const res = await apiRequest('sync/schedules/batch', 'POST', {
     schoolId,
+    overwriteAll,
     schedules: syncItems,
   });
 
   if (res.success) {
     return {
       success: true,
-      message: `Tüm okul ders programı, ${parsed.teachers.length} öğretmen ve ${parsed.classes.length} sınıf başarıyla kaydedildi.`,
+      message: overwriteAll
+        ? `Tüm okul ders programı sıfırlanıp ${parsed.teachers.length} öğretmen ve ${parsed.classes.length} sınıf yeniden kaydedildi.`
+        : `Ders programı başarıyla güncellendi (${parsed.teachers.length} öğretmen, ${parsed.classes.length} sınıf).`,
     };
   }
 
