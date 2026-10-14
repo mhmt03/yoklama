@@ -22,7 +22,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Colors } from '../theme/colors';
 import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession } from '../services/apiClient';
-import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult } from '../services/aiScheduleParser';
+import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult, readUriAsBase64 } from '../services/aiScheduleParser';
 import { parseStudentsFromExcel, saveParsedStudentsToServer, ParsedExcelStudent, generateStudentTemplateExcel } from '../services/excelStudentParser';
 import { analyzeUploadedDocument, convertRowsWithMapping, DocumentAnalysisResult, ColumnMappingSelection } from '../utils/columnMappingService';
 import { getActiveSchool, updateSchool } from '../database/operations/schoolOperations';
@@ -721,8 +721,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       setAiParsing(true);
       setParsedSchedule(null);
 
-      const apiKey = selectedSchool.geminiApiKey || 'AIzaSyA_placeholder_gemini_key';
-      const parsed = await parseMasterScheduleWithAi(file.uri, apiKey, file.mimeType || 'image/jpeg');
+      const apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY).trim();
+      const model = selectedSchool.geminiModel?.trim() || DEFAULT_GEMINI_MODEL;
+      const parsed = await parseMasterScheduleWithAi(
+        file.uri,
+        apiKey,
+        file.mimeType || (file.name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+        model,
+        selectedSchool.id
+      );
       setParsedSchedule(parsed);
     } catch (error: any) {
       Alert.alert('AI Ayrıştırma Hatası', error.message || 'Belge analiz edilemedi.');
@@ -1189,9 +1196,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         if (!match) continue;
         const studentNumber = match[0];
 
-        const base64 = await FileSystem.readAsStringAsync(file.uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
+        const base64 = await readUriAsBase64(file.uri);
 
         photos.push({
           studentNumber,

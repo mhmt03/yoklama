@@ -19,22 +19,90 @@ export interface ParsedScheduleResult {
 }
 
 /**
+ * Android Scoped Storage ve DocumentPicker önbelleğinde IOException vermeyen,
+ * fetch + blob + FileReader + copyAsync fallback'li güvenli base64 okuyucu.
+ */
+export async function readUriAsBase64(fileUri: string): Promise<string> {
+  // 1. fetch -> blob -> FileReader (Android DocumentPicker cache/content URI için en sağlam yöntem)
+  try {
+    const response = await fetch(fileUri);
+    const blob = await response.blob();
+    const b64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        try {
+          const res = reader.result as string;
+          const clean = res.includes(',') ? res.split(',')[1] : res;
+          resolve(clean);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    if (b64 && b64.length > 0) return b64;
+  } catch (fetchErr) {
+    console.warn('fetch blob base64 okuma başarısız, FileSystem deneniyor:', fetchErr);
+  }
+
+  // 2. FileSystem.readAsStringAsync doğrudan okuma
+  try {
+    const b64 = await FileSystem.readAsStringAsync(fileUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    if (b64 && b64.length > 0) return b64;
+  } catch (fsErr) {
+    console.warn('readAsStringAsync başarısız, copyAsync deneniyor:', fsErr);
+  }
+
+  // 3. Geçici dosya kopyalama ile okuma (Scoped storage aşımı)
+  try {
+    const ext = fileUri.toLowerCase().includes('.pdf') ? '.pdf' : '.tmp';
+    const tempPath = `${FileSystem.cacheDirectory}schedule_safe_${Date.now()}${ext}`;
+    await FileSystem.copyAsync({ from: fileUri, to: tempPath });
+    const b64 = await FileSystem.readAsStringAsync(tempPath, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    await FileSystem.deleteAsync(tempPath, { idempotent: true });
+    if (b64 && b64.length > 0) return b64;
+  } catch (copyErr) {
+    console.warn('copyAsync fallback başarısız:', copyErr);
+  }
+
+  throw new Error('Belge dosyası okunamadı. Lütfen dosyayı tekrar seçiniz veya bir görsel (PNG/JPG) olarak yüklemeyi deneyiniz.');
+}
+
+export function detectMimeType(uri: string, providedMime?: string): string {
+  const clean = uri.toLowerCase().split('?')[0];
+  if (clean.endsWith('.pdf') || providedMime?.toLowerCase().includes('pdf')) {
+    return 'application/pdf';
+  }
+  if (clean.endsWith('.png') || providedMime?.toLowerCase().includes('png')) {
+    return 'image/png';
+  }
+  if (clean.endsWith('.webp') || providedMime?.toLowerCase().includes('webp')) {
+    return 'image/webp';
+  }
+  return 'image/jpeg';
+}
+
+/**
  * Gemini AI ile çarşaf ders programı PDF veya görselini analiz ederek
  * okulun tüm öğretmen, sınıf, ders ve program omurgasını çıkarır.
  */
 export async function parseMasterScheduleWithAi(
   fileUri: string,
   apiKey: string,
-  mimeType = 'image/jpeg'
+  mimeType = 'image/jpeg',
+  preferredModel = 'gemini-2.5-flash',
+  schoolId?: string
 ): Promise<ParsedScheduleResult> {
-  const genAI = new GoogleGenerativeAI(apiKey);
-  // En güncel ve görsel anlama yeteneği yüksek model
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const cleanApiKey = apiKey.trim();
+  const genAI = new GoogleGenerativeAI(cleanApiKey);
 
-  // Dosyayı base64 oku
-  const base64Data = await FileSystem.readAsStringAsync(fileUri, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  const resolvedMime = detectMimeType(fileUri, mimeType);
+  const base64Data = await readUriAsBase64(fileUri);
 
   const prompt = `
 Bu haftalık okul çarşaf ders programı belgesini incele.
@@ -66,18 +134,40 @@ Notlar:
   const imagePart = {
     inlineData: {
       data: base64Data,
-      mimeType,
+      mimeType: resolvedMime,
     },
   };
 
-  const result = await model.generateContent([prompt, imagePart]);
-  const textResponse = result.response.text().trim();
+  const modelsToTry = Array.from(new Set([preferredModel, 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.5-flash']));
+  let lastError: any = null;
 
-  // JSON temizleme (olası markdown backticklerini temizle)
-  const cleanJson = textResponse.replace(/^```json/i, '').replace(/```$/i, '').trim();
-  const parsedData: ParsedScheduleResult = JSON.parse(cleanJson);
+  for (const currentModel of modelsToTry) {
+    try {
+      const model = genAI.getGenerativeModel({ model: currentModel });
+      const result = await model.generateContent([prompt, imagePart]);
+      const textResponse = result.response.text().trim();
 
-  return parsedData;
+      // JSON temizleme (olası markdown backticklerini temizle)
+      let cleanJson = textResponse.replace(/^```json/i, '').replace(/```$/i, '').trim();
+      if (cleanJson.startsWith('```')) {
+        cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      }
+
+      const parsedData: ParsedScheduleResult = JSON.parse(cleanJson);
+
+      // Total okul kotasına bildir
+      try {
+        const { recordGeminiApiUsage } = await import('../utils/geminiScheduleService');
+        await recordGeminiApiUsage(currentModel, result.response.usageMetadata, schoolId);
+      } catch {}
+
+      return parsedData;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error('Çarşaf ders programı analiz edilemedi.');
 }
 
 /**

@@ -3,6 +3,7 @@ import { getDB } from '../database/db';
 import type { ParsedYearlyPlanRow } from './excelService';
 import { apiRequest } from '../services/apiClient';
 import { getActiveSchool } from '../database/operations/schoolOperations';
+import { readUriAsBase64 } from '../services/aiScheduleParser';
 
 // Varsayılan API Anahtarı (Kullanıcı dilerse buraya doğrudan tanımlayabilir veya uygulama içinden girebilir)
 export const DEFAULT_GEMINI_API_KEY = 'AQ.Ab8RN6Jo0l8xWLJabe72du_7hkSGRYm9miUkzxV0-ISPbqFC';
@@ -530,7 +531,7 @@ export const normalizeClassName = (raw: string, separateGrade?: number | string)
 };
 
 /**
- * Görsel dosyasının base64 verisini okur ve mime tipini belirler.
+ * Görsel veya PDF dosyasının base64 verisini okur ve mime tipini belirler.
  */
 const prepareImageBase64 = async (
   uri: string
@@ -541,11 +542,11 @@ const prepareImageBase64 = async (
     mimeType = 'image/png';
   } else if (cleanUri.endsWith('.webp')) {
     mimeType = 'image/webp';
+  } else if (cleanUri.endsWith('.pdf')) {
+    mimeType = 'application/pdf';
   }
 
-  const base64 = await FileSystem.readAsStringAsync(uri, {
-    encoding: 'base64',
-  });
+  const base64 = await readUriAsBase64(uri);
 
   return { base64, mimeType };
 };
