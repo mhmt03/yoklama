@@ -253,7 +253,7 @@ export function MessagesScreen({ navigation }: any) {
       )}
 
       {/* Okul Koduna Bağlanma Modalı */}
-      <Modal visible={connectModalVisible} animationType="slide" transparent>
+      <Modal visible={connectModalVisible} animationType="fade" transparent onRequestClose={() => setConnectModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -451,13 +451,19 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 20,
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 40 : 54,
+    paddingHorizontal: 16,
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 18,
+    borderRadius: 20,
     padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
   },
   modalHeader: {
     flexDirection: 'row',

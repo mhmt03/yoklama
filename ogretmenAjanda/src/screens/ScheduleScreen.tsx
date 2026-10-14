@@ -10,6 +10,7 @@ import {
   Image,
   ActivityIndicator,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -806,7 +807,7 @@ export const ScheduleScreen: React.FC = () => {
       </ScrollView>
 
       {/* Edit Slot Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal visible={modalVisible} animationType="fade" transparent onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
@@ -939,7 +940,7 @@ export const ScheduleScreen: React.FC = () => {
       {/* Photo Import Action Modal (Camera / Gallery / Official) */}
       <Modal
         visible={photoMenuVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setPhotoMenuVisible(false)}
       >
@@ -1311,7 +1312,7 @@ export const ScheduleScreen: React.FC = () => {
       {/* Schedule Photo Crop & Optimize Modal */}
       <Modal
         visible={cropModalVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setCropModalVisible(false)}
       >
@@ -1788,7 +1789,7 @@ export const ScheduleScreen: React.FC = () => {
       {/* Gemini AI Analyzed Schedule Preview & Confirm Modal */}
       <Modal
         visible={aiPreviewModalVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setAiPreviewModalVisible(false)}
       >
@@ -2246,14 +2247,21 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContainer: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: 36,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+    maxHeight: '88%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2408,16 +2416,18 @@ const styles = StyleSheet.create({
   photoModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.55)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   photoModalSheet: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderRadius: 20,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 28,
+    paddingTop: 16,
+    paddingBottom: 20,
     ...Shadows.large,
+    maxHeight: '88%',
   },
   sheetHandle: {
     width: 40,
@@ -2694,16 +2704,17 @@ const styles = StyleSheet.create({
   cropModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.7)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   cropModalCard: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderRadius: 20,
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 24,
-    maxHeight: '92%',
+    paddingBottom: 20,
+    maxHeight: '88%',
     ...Shadows.large,
   },
   cropModalHeader: {
@@ -2989,14 +3000,20 @@ const styles = StyleSheet.create({
   aiPreviewOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   aiPreviewContainer: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '90%',
-    paddingBottom: 24,
+    borderRadius: 20,
+    maxHeight: '88%',
+    paddingBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
   },
   aiPreviewHeader: {
     flexDirection: 'row',

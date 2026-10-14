@@ -12,6 +12,7 @@ import {
   Modal,
   Image,
   Linking,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -2533,14 +2534,20 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 18,
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 18,
-    maxHeight: '90%',
+    maxHeight: '88%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
   },
   modalHeader: {
     flexDirection: 'row',

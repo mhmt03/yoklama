@@ -462,7 +462,7 @@ export const StudentNotesScreen: React.FC = () => {
       />
 
       {/* Student Opinion Modal */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal visible={modalVisible} animationType="fade" transparent onRequestClose={() => setModalVisible(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
@@ -623,7 +623,7 @@ export const StudentNotesScreen: React.FC = () => {
       </Modal>
 
       {/* QUICK NOTES MANAGEMENT MODAL */}
-      <Modal visible={manageModalVisible} animationType="slide" transparent>
+      <Modal visible={manageModalVisible} animationType="fade" transparent onRequestClose={() => setManageModalVisible(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.modalOverlay}
@@ -921,15 +921,21 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContainer: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: 36,
-    maxHeight: '90%',
+    paddingBottom: 24,
+    maxHeight: '88%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
   },
   modalHeader: {
     flexDirection: 'row',

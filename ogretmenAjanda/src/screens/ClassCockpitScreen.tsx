@@ -10,6 +10,7 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -349,7 +350,7 @@ export function ClassCockpitScreen({ route, navigation }: any) {
       </ScrollView>
 
       {/* ÖĞRENCİYE GÖRÜŞ EKLEME MODALI */}
-      <Modal visible={!!selectedStudentForNote} animationType="slide" transparent>
+      <Modal visible={!!selectedStudentForNote} animationType="fade" transparent onRequestClose={() => setSelectedStudentForNote(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -543,8 +544,23 @@ const styles = StyleSheet.create({
   btnHwMissing: { backgroundColor: '#D97706' },
   starBtn: { padding: 6, backgroundColor: '#FEF3C7', borderRadius: 8 },
   noteBtn: { padding: 6, backgroundColor: '#EEF2FF', borderRadius: 8 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 40 : 54,
+    paddingHorizontal: 16,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+  },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontSize: 17, fontWeight: '700', color: Colors.text },
   noteInput: {

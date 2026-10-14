@@ -791,7 +791,7 @@ export const AgendaScreen: React.FC = () => {
       {/* ADD / EDIT MODAL */}
       <Modal
         visible={modalVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setModalVisible(false)}
       >
@@ -1368,14 +1368,16 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalCard: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '90%',
+    borderRadius: 20,
+    maxHeight: '88%',
     paddingTop: 16,
+    paddingBottom: 20,
     ...Shadows.large,
   },
   modalHeader: {

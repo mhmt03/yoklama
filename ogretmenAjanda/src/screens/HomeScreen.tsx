@@ -2109,7 +2109,7 @@ export const HomeScreen: React.FC = () => {
       <Modal
         visible={topicModalVisible}
         transparent={true}
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setTopicModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
@@ -2358,7 +2358,7 @@ export const HomeScreen: React.FC = () => {
       <Modal
         visible={yearlyPlanModalVisible}
         transparent={true}
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setYearlyPlanModalVisible(false)}
       >
         <View style={styles.modalBackdrop}>
@@ -3724,16 +3724,17 @@ const styles = StyleSheet.create({
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 14,
   },
   modalContainer: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '90%',
+    borderRadius: 20,
+    maxHeight: '88%',
     paddingHorizontal: 16,
     paddingTop: 16,
-    paddingBottom: 24,
+    paddingBottom: 20,
     ...Shadows.large,
   },
   modalHeader: {

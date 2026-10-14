@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Colors } from '../theme/colors';
-
+import { TopSlideModal } from './TopSlideModal';
 
 interface Student360Data {
   id: number;
@@ -111,9 +111,8 @@ export const Student360Modal: React.FC<Student360ModalProps> = ({ visible, onClo
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
+    <TopSlideModal visible={visible} onClose={onClose} maxHeightPercent={0.88}>
+      <View style={styles.modalContent}>
           {/* Header */}
           <View style={styles.modalHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -197,19 +196,15 @@ export const Student360Modal: React.FC<Student360ModalProps> = ({ visible, onClo
             </View>
           </ScrollView>
         </View>
-      </View>
-    </Modal>
-  );
+      </TopSlideModal>
+    );
 };
 
 const styles = StyleSheet.create({
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '88%',
-    padding: 20,
+    borderRadius: 20,
+    padding: 4,
   },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   avatarWrap: { width: 50, height: 50, borderRadius: 25, overflow: 'hidden' },

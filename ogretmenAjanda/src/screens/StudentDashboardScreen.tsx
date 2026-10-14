@@ -12,6 +12,7 @@ import {
   Image,
   RefreshControl,
   Modal,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
@@ -384,7 +385,7 @@ export function StudentDashboardScreen({ onLogout }: StudentDashboardScreenProps
       </ScrollView>
 
       {/* Şifre Değiştirme Modalı */}
-      <Modal visible={changePasswordModal} animationType="slide" transparent>
+      <Modal visible={changePasswordModal} animationType="fade" transparent onRequestClose={() => setChangePasswordModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
@@ -557,8 +558,23 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   scoreText: { fontSize: 12, fontWeight: '800', color: '#D97706' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 40 : 54,
+    paddingHorizontal: 16,
+  },
+  modalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+  },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontSize: 17, fontWeight: '700', color: Colors.text },
   modalInput: {

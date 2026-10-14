@@ -2062,7 +2062,7 @@ export const ClassDetailScreen: React.FC = () => {
       {/* Floating Action Menu Modal */}
       <Modal
         visible={actionMenuVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setActionMenuVisible(false)}
       >
@@ -3006,7 +3006,7 @@ export const ClassDetailScreen: React.FC = () => {
       {/* Student Detail & Opinion Modal */}
       <Modal
         visible={detailModalVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setDetailModalVisible(false)}
       >
@@ -3856,15 +3856,16 @@ const styles = StyleSheet.create({
   actionModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.55)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   actionModalSheet: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderRadius: 20,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 36 : 24,
+    paddingTop: 16,
+    paddingBottom: 20,
     ...Shadows.large,
     maxHeight: '85%',
   },
@@ -4190,14 +4191,20 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContent: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: 36,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -4484,18 +4491,18 @@ const styles = StyleSheet.create({
   detailModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   detailModalContainer: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '92%',
-    minHeight: '75%',
+    borderRadius: 20,
+    maxHeight: '88%',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
     elevation: 10,
   },
   detailModalHeader: {

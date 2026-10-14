@@ -1658,7 +1658,8 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 40 : 54,
     alignItems: 'center',
     padding: 20,
   },

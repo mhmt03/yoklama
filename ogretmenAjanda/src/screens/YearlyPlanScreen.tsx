@@ -9,6 +9,7 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -998,7 +999,7 @@ export const YearlyPlanScreen: React.FC = () => {
       />
 
       {/* BULK EXCEL IMPORT MODAL */}
-      <Modal visible={bulkModalVisible} animationType="slide" transparent>
+      <Modal visible={bulkModalVisible} animationType="fade" transparent onRequestClose={() => setBulkModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContainer, { maxHeight: '92%' }]}>
             <View style={styles.modalHeader}>
@@ -1478,7 +1479,7 @@ export const YearlyPlanScreen: React.FC = () => {
       </Modal>
 
       {/* SINGLE ADD / EDIT PLAN MODAL */}
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal visible={modalVisible} animationType="fade" transparent onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
@@ -1983,14 +1984,21 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContainer: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: 36,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+    maxHeight: '88%',
   },
   modalHeader: {
     flexDirection: 'row',

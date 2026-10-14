@@ -8,6 +8,7 @@ import {
   Modal,
   Alert,
   FlatList,
+  Platform,
 } from 'react-native';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -1128,7 +1129,7 @@ export const ScheduleManageScreen: React.FC = () => {
       )}
 
       {/* Course Modal */}
-      <Modal visible={courseModal} animationType="slide" transparent>
+      <Modal visible={courseModal} animationType="fade" transparent onRequestClose={() => setCourseModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>
@@ -1161,7 +1162,7 @@ export const ScheduleManageScreen: React.FC = () => {
       </Modal>
 
       {/* Standard Slot Modal */}
-      <Modal visible={slotModal} animationType="slide" transparent>
+      <Modal visible={slotModal} animationType="fade" transparent onRequestClose={() => setSlotModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>
@@ -1212,7 +1213,7 @@ export const ScheduleManageScreen: React.FC = () => {
       </Modal>
 
       {/* Day-Specific Slot Edit Modal */}
-      <Modal visible={daySlotModal} animationType="slide" transparent>
+      <Modal visible={daySlotModal} animationType="fade" transparent onRequestClose={() => setDaySlotModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeaderRow}>
@@ -1260,7 +1261,7 @@ export const ScheduleManageScreen: React.FC = () => {
       </Modal>
 
       {/* Grade Level Modal */}
-      <Modal visible={gradeModal} animationType="slide" transparent>
+      <Modal visible={gradeModal} animationType="fade" transparent onRequestClose={() => setGradeModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeaderRow}>
@@ -1305,7 +1306,7 @@ export const ScheduleManageScreen: React.FC = () => {
       </Modal>
 
       {/* CLASS ADD / EDIT MODAL */}
-      <Modal visible={classModal} animationType="slide" transparent>
+      <Modal visible={classModal} animationType="fade" transparent onRequestClose={() => setClassModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeaderRow}>
@@ -1702,14 +1703,21 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContainer: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: 36,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+    maxHeight: '88%',
   },
   modalHeaderRow: {
     flexDirection: 'row',

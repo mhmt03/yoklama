@@ -1151,7 +1151,7 @@ export const ReportsScreen: React.FC = () => {
       {/* FILTER & EXPORT MODAL */}
       <Modal
         visible={filterModalVisible}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => setFilterModalVisible(false)}
       >
@@ -1795,13 +1795,14 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContainer: {
     backgroundColor: '#FFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '90%',
+    borderRadius: 20,
+    maxHeight: '88%',
     display: 'flex',
     flexDirection: 'column',
     ...Shadows.large,

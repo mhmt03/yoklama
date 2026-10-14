@@ -8,6 +8,7 @@ import {
   Modal,
   Alert,
   Image,
+  Platform,
 } from 'react-native';
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -427,7 +428,7 @@ export const AssignmentDetailScreen: React.FC = () => {
       />
 
       {/* Teacher Note on Student Homework Modal */}
-      <Modal visible={noteModalVisible} animationType="slide" transparent>
+      <Modal visible={noteModalVisible} animationType="fade" transparent onRequestClose={() => setNoteModalVisible(false)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -625,14 +626,21 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.5)',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'android' ? 36 : 52,
+    paddingHorizontal: 16,
   },
   modalContent: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderRadius: 20,
     padding: 20,
-    paddingBottom: 36,
+    paddingBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+    maxHeight: '88%',
   },
   modalHeader: {
     flexDirection: 'row',
