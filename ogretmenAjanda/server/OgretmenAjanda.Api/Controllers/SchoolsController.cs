@@ -360,6 +360,103 @@ namespace OgretmenAjanda.Api.Controllers
             });
         }
 
+        public class ReportAiUsageRequest
+        {
+            public int Tokens { get; set; } = 0;
+            public string? Model { get; set; }
+        }
+
+        // Okul Ortak TOTAL AI Kullanımı Bildir (Tüm öğretmenler ve admin havuzu)
+        [AllowAnonymous]
+        [HttpPost("{schoolId}/ai-usage")]
+        public async Task<IActionResult> ReportSchoolAiUsage(Guid schoolId, [FromBody] ReportAiUsageRequest request)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            var nowTime = DateTime.UtcNow.AddHours(3).ToString("HH:mm");
+
+            if (school.LastAiUsageDate != today)
+            {
+                school.LastAiUsageDate = today;
+                school.DailyAiRequests = 1;
+                school.DailyAiTokens = request.Tokens;
+            }
+            else
+            {
+                school.DailyAiRequests += 1;
+                school.DailyAiTokens += request.Tokens;
+            }
+
+            school.LastAiRequestTime = nowTime;
+            school.LastTokensUsed = request.Tokens;
+            if (!string.IsNullOrEmpty(request.Model))
+            {
+                school.GeminiModel = request.Model.Trim();
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new
+            {
+                requestsToday = school.DailyAiRequests,
+                tokensToday = school.DailyAiTokens,
+                lastRequestTime = school.LastAiRequestTime,
+                lastTokensUsed = school.LastTokensUsed
+            });
+        }
+
+        // Okul Ortak TOTAL AI Kullanım ve Kota İstatistiklerini Çek
+        [AllowAnonymous]
+        [HttpGet("{schoolId}/ai-usage")]
+        public async Task<IActionResult> GetSchoolAiUsage(Guid schoolId)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            var isToday = school.LastAiUsageDate == today;
+
+            var model = school.GeminiModel ?? "gemini-2.5-flash";
+            var isPro = model.ToLowerInvariant().Contains("pro");
+            var dailyLimit = isPro ? 50 : 1500;
+
+            var requestsToday = isToday ? school.DailyAiRequests : 0;
+            var tokensToday = isToday ? school.DailyAiTokens : 0;
+            var remainingRequests = Math.Max(0, dailyLimit - requestsToday);
+            var remainingPercent = Math.Max(0, Math.Min(100, (double)remainingRequests / dailyLimit * 100));
+
+            return Ok(new
+            {
+                date = today,
+                requestsToday,
+                tokensToday,
+                lastRequestTime = isToday ? (school.LastAiRequestTime ?? "-") : "-",
+                model,
+                dailyRequestLimit = dailyLimit,
+                remainingRequests,
+                remainingPercent = Math.Round(remainingPercent, 1),
+                lastTokensUsed = isToday ? school.LastTokensUsed : 0,
+                scope = "TOTAL_SCHOOL"
+            });
+        }
+
+        // Okul Ortak TOTAL AI Kullanım Sayacını Sıfırla (Admin)
+        [HttpPost("{schoolId}/reset-ai-usage")]
+        public async Task<IActionResult> ResetSchoolAiUsage(Guid schoolId)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            school.DailyAiRequests = 0;
+            school.DailyAiTokens = 0;
+            school.LastTokensUsed = 0;
+            school.LastAiRequestTime = "-";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Okul ortak TOTAL AI kullanım sayacı sıfırlandı." });
+        }
+
         // Öğretmen Silme (Admin yetkisi)
         [HttpDelete("teachers/{teacherId}")]
         public async Task<IActionResult> DeleteTeacher(Guid teacherId)

@@ -1,6 +1,8 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { getDB } from '../database/db';
 import type { ParsedYearlyPlanRow } from './excelService';
+import { apiRequest } from '../services/apiClient';
+import { getActiveSchool } from '../database/operations/schoolOperations';
 
 // Varsayılan API Anahtarı (Kullanıcı dilerse buraya doğrudan tanımlayabilir veya uygulama içinden girebilir)
 export const DEFAULT_GEMINI_API_KEY = 'AQ.Ab8RN6Jo0l8xWLJabe72du_7hkSGRYm9miUkzxV0-ISPbqFC';
@@ -40,6 +42,7 @@ export interface GeminiUsageStats {
   remainingRequests: number;
   remainingPercent: number; // 0..100
   lastTokensUsed: number;
+  scope?: 'TOTAL_SCHOOL' | 'DEVICE';
 }
 
 /**
@@ -77,12 +80,33 @@ export const setGeminiApiKey = async (apiKey: string): Promise<void> => {
 };
 
 /**
- * Günlük Gemini API istek ve harcanan token kullanımını kaydeder.
+ * Günlük Gemini API istek ve harcanan token kullanımını kaydeder (Yerel + Sunucu TOTAL Havuzu).
  */
 export const recordGeminiApiUsage = async (
   model: string,
-  usageMetadata?: { totalTokenCount?: number; promptTokenCount?: number; candidatesTokenCount?: number }
+  usageMetadata?: { totalTokenCount?: number; promptTokenCount?: number; candidatesTokenCount?: number },
+  schoolId?: string
 ): Promise<void> => {
+  const addedTokens = usageMetadata?.totalTokenCount || 0;
+
+  // 1. Sunucu Okul TOTAL Havuzuna Bildir (Tüm öğretmenler ve admin ortak sayacı)
+  try {
+    let targetSchoolId = schoolId;
+    if (!targetSchoolId) {
+      const active = await getActiveSchool();
+      targetSchoolId = active?.id ? String(active.id) : undefined;
+    }
+    if (targetSchoolId) {
+      await apiRequest(`schools/${targetSchoolId}/ai-usage`, 'POST', {
+        tokens: addedTokens,
+        model,
+      });
+    }
+  } catch (serverErr) {
+    // Sunucu çevrimdışıysa sessizce yerel DB'ye devam et
+  }
+
+  // 2. Cihazın Kendi SQLite app_settings Tablosuna Kaydet
   try {
     const db = await getDB();
     const today = new Date().toISOString().split('T')[0];
@@ -108,7 +132,6 @@ export const recordGeminiApiUsage = async (
     }
 
     reqCount += 1;
-    const addedTokens = usageMetadata?.totalTokenCount || 0;
     tokenCount += addedTokens;
 
     await db.runAsync(
@@ -141,15 +164,37 @@ export const recordGeminiApiUsage = async (
 };
 
 /**
- * Günlük ücretsiz kota ve token kalan durumunu hesaplar.
+ * Günlük ücretsiz kota ve token durumunu hesaplar.
+ * Okul ID mevcutsa sunucudaki TOTAL OKUL HAVUZUNU (tüm öğretmenler + admin),
+ * yoksa cihazın yerel kullanımını döndürür.
  */
-export const getGeminiUsageStats = async (): Promise<GeminiUsageStats> => {
+export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsageStats> => {
   const today = new Date().toISOString().split('T')[0];
   const model = await getGeminiModel();
   const isPro = model.toLowerCase().includes('pro');
-  // Google AI Studio Free Tier limitleri: Flash: 1,500 RPD, Pro: 50 RPD
   const dailyRequestLimit = isPro ? 50 : 1500;
 
+  // 1. Sunucudan TOTAL OKUL Kotasını Çekmeyi Dene
+  try {
+    let targetSchoolId = schoolId;
+    if (!targetSchoolId) {
+      const active = await getActiveSchool();
+      targetSchoolId = active?.id ? String(active.id) : undefined;
+    }
+    if (targetSchoolId) {
+      const serverRes = await apiRequest<GeminiUsageStats>(`schools/${targetSchoolId}/ai-usage`);
+      if (serverRes.success && serverRes.data) {
+        return {
+          ...serverRes.data,
+          scope: 'TOTAL_SCHOOL',
+        };
+      }
+    }
+  } catch {
+    // Sunucu yoksa veya hata oluşursa yerel sayaca devam
+  }
+
+  // 2. Çevrimdışı / Yerel SQLite Cihaz Sayacı
   try {
     const db = await getDB();
     const dateRow = await db.getFirstAsync<{ value: string }>(
@@ -168,6 +213,7 @@ export const getGeminiUsageStats = async (): Promise<GeminiUsageStats> => {
         remainingRequests: dailyRequestLimit,
         remainingPercent: 100,
         lastTokensUsed: 0,
+        scope: 'DEVICE',
       };
     }
 
@@ -199,6 +245,7 @@ export const getGeminiUsageStats = async (): Promise<GeminiUsageStats> => {
       remainingRequests,
       remainingPercent,
       lastTokensUsed,
+      scope: 'DEVICE',
     };
   } catch (err) {
     console.warn('Gemini kullanım verisi okunamadı:', err);
@@ -212,14 +259,25 @@ export const getGeminiUsageStats = async (): Promise<GeminiUsageStats> => {
       remainingRequests: dailyRequestLimit,
       remainingPercent: 100,
       lastTokensUsed: 0,
+      scope: 'DEVICE',
     };
   }
 };
 
 /**
- * Gemini kullanım sayacını sıfırlar.
+ * Gemini kullanım sayacını sıfırlar (Hem sunucuda okul havuzu hem yerelde).
  */
-export const resetGeminiUsageStats = async (): Promise<void> => {
+export const resetGeminiUsageStats = async (schoolId?: string): Promise<void> => {
+  try {
+    let targetSchoolId = schoolId;
+    if (!targetSchoolId) {
+      const active = await getActiveSchool();
+      targetSchoolId = active?.id ? String(active.id) : undefined;
+    }
+    if (targetSchoolId) {
+      await apiRequest(`schools/${targetSchoolId}/reset-ai-usage`, 'POST');
+    }
+  } catch {}
   const db = await getDB();
   await db.runAsync("DELETE FROM app_settings WHERE key LIKE 'gemini_usage_%'");
 };

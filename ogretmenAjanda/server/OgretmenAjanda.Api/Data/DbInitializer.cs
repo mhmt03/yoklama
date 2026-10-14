@@ -19,6 +19,11 @@ namespace OgretmenAjanda.Api.Data
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"CustomerId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"GeminiModel\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"DailyAiRequests\" INTEGER DEFAULT 0;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"DailyAiTokens\" INTEGER DEFAULT 0;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"LastAiUsageDate\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"LastAiRequestTime\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"LastTokensUsed\" INTEGER DEFAULT 0;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
 
             try

@@ -45,6 +45,13 @@ namespace OgretmenAjanda.Api.Models
         [MaxLength(100)]
         public string? GeminiModel { get; set; } // Okulun kurumsal seçili AI modeli (örn: gemini-2.5-flash)
 
+        // Okul Ortak TOTAL AI Kota Sayacı (Tüm öğretmenler ve admin havuzu)
+        public int DailyAiRequests { get; set; } = 0;
+        public int DailyAiTokens { get; set; } = 0;
+        public string? LastAiUsageDate { get; set; }
+        public string? LastAiRequestTime { get; set; }
+        public int LastTokensUsed { get; set; } = 0;
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LicenseExpiresAt { get; set; } // Okul lisansı son kullanma tarihi
         public bool IsActive { get; set; } = true;

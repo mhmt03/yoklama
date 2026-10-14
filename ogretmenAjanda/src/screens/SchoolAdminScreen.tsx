@@ -205,7 +205,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           else setSelectedGeminiModel(DEFAULT_GEMINI_MODEL);
           await loadAllSchoolData(current.id);
           try {
-            const usage = await getGeminiUsageStats();
+            const usage = await getGeminiUsageStats(current.id);
             setUsageStats(usage);
           } catch {}
         }
@@ -1309,7 +1309,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setSchools((prev) => prev.map(s => s.id === selectedSchool.id ? { ...s, geminiApiKey: key, geminiModel: model } : s));
 
         try {
-          const stats = await getGeminiUsageStats();
+          const stats = await getGeminiUsageStats(selectedSchool.id);
           setUsageStats(stats);
         } catch {}
 
@@ -1329,9 +1329,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const handleRefreshUsageStats = async () => {
     try {
-      const stats = await getGeminiUsageStats();
+      const stats = await getGeminiUsageStats(selectedSchool?.id);
       setUsageStats(stats);
-      Alert.alert('Güncellendi 🔄', 'Günlük kullanım ve kota istatistikleri yenilendi.');
+      Alert.alert('Güncellendi 🔄', 'Okul ortak TOTAL AI kullanım ve kota istatistikleri yenilendi.');
     } catch (e: any) {
       Alert.alert('Hata', e.message);
     }
@@ -1340,17 +1340,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const handleResetUsageStats = () => {
     Alert.alert(
       'Kullanım Sayacını Sıfırla',
-      'Bugünkü harcanan istek ve token sayaçlarını sıfırlamak istiyor musunuz?',
+      'Okul genelinde (tüm öğretmenler ve admin havuzunda) bugünkü harcanan istek ve token sayaçlarını sıfırlamak istiyor musunuz?',
       [
         { text: 'Vazgeç', style: 'cancel' },
         {
           text: 'Sıfırla',
           style: 'destructive',
           onPress: async () => {
-            await resetGeminiUsageStats();
-            const stats = await getGeminiUsageStats();
+            await resetGeminiUsageStats(selectedSchool?.id);
+            const stats = await getGeminiUsageStats(selectedSchool?.id);
             setUsageStats(stats);
-            Alert.alert('Bilgi', 'Kullanım sayacı başarıyla sıfırlandı.');
+            Alert.alert('Bilgi', 'Okul TOTAL kullanım sayacı başarıyla sıfırlandı.');
           },
         },
       ]
@@ -1429,7 +1429,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       else setSelectedGeminiModel(DEFAULT_GEMINI_MODEL);
                       loadAllSchoolData(s.id);
                       try {
-                        const usage = await getGeminiUsageStats();
+                        const usage = await getGeminiUsageStats(s.id);
                         setUsageStats(usage);
                       } catch {}
                     }}
@@ -2251,8 +2251,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <View style={styles.aiConfigCardHeader}>
                     <Ionicons name="speedometer-outline" size={18} color="#4F46E5" />
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.aiConfigCardTitle}>Günlük Ücretsiz Kota & Kullanım Durumu</Text>
-                      <Text style={styles.aiConfigCardSub}>Google AI Studio Free Tier İstatistikleri</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.aiConfigCardTitle}>Okul Ortak TOTAL Kota & Kullanım</Text>
+                        <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#166534' }}>TÜM OKUL HAVUZU</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.aiConfigCardSub}>
+                        {selectedSchool?.name || 'Okul'} geneli (Tüm öğretmenler ve yönetici havuzu)
+                      </Text>
                     </View>
                     <TouchableOpacity onPress={handleRefreshUsageStats} style={styles.refreshIconBtn}>
                       <Ionicons name="refresh" size={16} color="#4F46E5" />
@@ -2262,7 +2269,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   {/* Kalan Kota Gösterge Çubuğu */}
                   <View style={styles.quotaGaugeBox}>
                     <View style={styles.quotaGaugeTop}>
-                      <Text style={styles.quotaGaugeLabel}>Kalan Günlük İstek Hakkı:</Text>
+                      <Text style={styles.quotaGaugeLabel}>Kalan Günlük İstek Hakkı (Okul Toplamı):</Text>
                       <Text style={styles.quotaGaugeVal}>
                         {usageStats ? usageStats.remainingRequests : 1500} / {usageStats ? usageStats.dailyRequestLimit : 1500} İstek
                       </Text>
@@ -2284,7 +2291,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       />
                     </View>
                     <Text style={styles.gaugePercentText}>
-                      %{usageStats ? usageStats.remainingPercent : 100} Kota Mevcut
+                      %{usageStats ? usageStats.remainingPercent : 100} Kota Mevcut (1500 İstek/Gün)
                     </Text>
                   </View>
 
@@ -2292,7 +2299,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <View style={styles.quotaMiniGrid}>
                     <View style={styles.quotaMiniBox}>
                       <Text style={styles.quotaMiniBoxVal}>{usageStats ? usageStats.requestsToday : 0}</Text>
-                      <Text style={styles.quotaMiniBoxLabel}>Bugün Yapılan İstek</Text>
+                      <Text style={styles.quotaMiniBoxLabel}>Okul Toplam İstek</Text>
                     </View>
                     <View style={styles.quotaMiniBox}>
                       <Text style={styles.quotaMiniBoxVal}>{usageStats ? usageStats.tokensToday : 0}</Text>
