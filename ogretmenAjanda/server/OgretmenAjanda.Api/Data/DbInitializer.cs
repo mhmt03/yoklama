@@ -30,6 +30,8 @@ namespace OgretmenAjanda.Api.Data
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AuditLogs\" ADD COLUMN \"UserName\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AuditLogs\" ADD COLUMN \"UserFullName\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AuditLogs\" ADD COLUMN \"Description\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"Branch\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"PermissionsJson\" TEXT;"); } catch { }
 
             try
             {

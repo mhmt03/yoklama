@@ -221,7 +221,7 @@ function AppContent() {
   }
 
   // 3. Okul Admini / İdareci rolü -> Doğrudan Okul Yönetim Paneli (AI Çarşaf, Öğretmenler, Okul Kodu)
-  if (currentRole === 'admin') {
+  if (currentRole === 'admin' || currentRole === 'staff') {
     return (
       <SchoolAdminScreen
         navigation={{

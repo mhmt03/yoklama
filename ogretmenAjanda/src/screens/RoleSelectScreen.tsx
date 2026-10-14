@@ -66,8 +66,9 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       if (res.success && res.data) {
         await saveAuthToken(res.data.token, res.data);
         setShowAdminLoginModal(false);
-        await setActiveUserRole('admin');
-        onRoleSelected('admin');
+        const nextRole = res.data.role === 'STAFF' ? 'staff' : 'admin';
+        await setActiveUserRole(nextRole);
+        onRoleSelected(nextRole);
       } else {
         // Çevrimdışı / Yerel Test Modu Fallback (mehmetadmin / 1234)
         if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
@@ -119,7 +120,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           await saveAuthToken(res.data.token, res.data);
           const displayName = res.data.fullName || teacherUsername.trim();
           await setActiveTeacherName(displayName);
-          await setActiveUserRole('teacher');
+
+          const isStaffRole = res.data.role === 'STAFF';
+          const nextRole = isStaffRole ? 'staff' : 'teacher';
+          await setActiveUserRole(nextRole);
 
           // KURUMSAL OKULLARI YEREL VERİTABANINA SENKRONİZE ET VE AKTİF OKULU BELİRLE:
           const affSchools = res.data.affiliatedSchools && res.data.affiliatedSchools.length > 0
@@ -133,7 +137,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           }
 
           setShowTeacherLoginModal(false);
-          onRoleSelected('teacher');
+          onRoleSelected(nextRole);
         } else {
           // Çevrimdışı test fallback: mehmetogretmen / 1234
           if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {

@@ -98,6 +98,13 @@ namespace OgretmenAjanda.Api.Models
         // Öğretmenin sorumlu olduğu sınıflar/şubeler (JSON formatında saklanabilir)
         public string? AssignedClassesJson { get; set; }
 
+        [MaxLength(100)]
+        public string? Branch { get; set; }
+
+        // Öğretmenin yetki kısıtlamaları (JSON: canMessageStudents, canMessageTeachers, canMessageParents, canViewAllClasses, canUseAiAssistant, canExportReports, canManageAttendance, canEditStudents)
+        [MaxLength(2000)]
+        public string? PermissionsJson { get; set; }
+
         [MaxLength(300)]
         public string? PushToken { get; set; } // Expo Push Token (Kilitli ekran bildirimi için)
     }

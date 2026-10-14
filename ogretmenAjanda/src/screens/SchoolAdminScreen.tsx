@@ -44,7 +44,7 @@ import {
   GeminiUsageStats,
 } from '../utils/geminiScheduleService';
 
-type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'logs' | 'ai_settings';
+type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'logs' | 'messages' | 'ai_settings';
 
 export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Okul ve Genel State
@@ -54,11 +54,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Oturum Açan Kullanıcı & Rol Durumu
+  const [currentUserSession, setCurrentUserSession] = useState<any>(null);
+  const isStaff = currentUserSession?.role === 'STAFF';
+
   // Veri Listeleri
   const [teachers, setTeachers] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
   const [lessons, setLessons] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
+
+  // Okul İçi Mesajlaşma Denetim State
+  const [schoolMessages, setSchoolMessages] = useState<any[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [messageSearch, setMessageSearch] = useState('');
+  const [selectedMessageFilter, setSelectedMessageFilter] = useState<'all' | 'students' | 'teachers' | 'parents'>('all');
 
   // Sınıf Öğrencileri Detay Modalı State
   const [selectedClassForStudents, setSelectedClassForStudents] = useState<any>(null);
@@ -112,6 +122,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [teacherPhone, setTeacherPhone] = useState('');
   const [teacherEmail, setTeacherEmail] = useState('');
   const [addingTeacher, setAddingTeacher] = useState(false);
+  const [newTeacherRole, setNewTeacherRole] = useState<'TEACHER' | 'STAFF'>('TEACHER');
   const [createdTeacherResult, setCreatedTeacherResult] = useState<any>(null);
 
   const [editTeacherModalVisible, setEditTeacherModalVisible] = useState(false);
@@ -310,8 +321,27 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     if (res.success && res.data) setStudents(res.data);
   };
 
+  const loadSchoolMessages = async (targetSchoolId?: string) => {
+    const sId = targetSchoolId || selectedSchool?.id;
+    if (!sId) return;
+    setLoadingMessages(true);
+    try {
+      const res = await apiRequest<any[]>(`messages?schoolId=${sId}`);
+      if (res.success && res.data) {
+        setSchoolMessages(res.data);
+      }
+    } catch (e: any) {
+      console.log('Mesajlar yüklenirken hata:', e);
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
   useEffect(() => {
     loadSchools();
+    getActiveUserSession().then((session) => {
+      if (session) setCurrentUserSession(session);
+    });
   }, []);
 
   // --- OKUL YÖNETİMİ ---
@@ -386,6 +416,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         branch: teacherBranch.trim() || undefined,
         phone: teacherPhone.trim() || undefined,
         email: teacherEmail.trim() || undefined,
+        role: newTeacherRole,
       });
 
       if (res.success && res.data) {
@@ -395,6 +426,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setTeacherBranch('');
         setTeacherPhone('');
         setTeacherEmail('');
+        setNewTeacherRole('TEACHER');
         loadTeachers(selectedSchool.id);
       } else {
         Alert.alert('Hata', res.error || 'Öğretmen eklenemedi.');
@@ -419,10 +451,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         phone: editingTeacher.phone || undefined,
         email: editingTeacher.email || undefined,
         assignedClassesJson: editingTeacher.assignedClassesJson || undefined,
+        role: editingTeacher.role || 'TEACHER',
+        permissionsJson: JSON.stringify(editingTeacher.permissions || {}),
       });
 
       if (res.success) {
-        Alert.alert('Başarılı', 'Öğretmen bilgileri güncellendi.');
+        Alert.alert('Başarılı', 'Öğretmen bilgileri ve yetkileri güncellendi.');
         setEditTeacherModalVisible(false);
         setEditingTeacher(null);
         if (selectedSchool) loadTeachers(selectedSchool.id);
@@ -1698,7 +1732,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           <Text style={styles.logoutButtonText}>Çıkış</Text>
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Okul Yönetim Paneli</Text>
+          <Text style={styles.headerTitle}>
+            {isStaff ? '🛡️ Okul İdarecisi Paneli' : 'Okul Yönetim Paneli'}
+          </Text>
           <Text style={styles.headerSubtitle} numberOfLines={1}>{selectedSchool?.name || 'Okul Seçiniz'}</Text>
         </View>
         <TouchableOpacity
@@ -1720,18 +1756,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         >
           <Ionicons name="pencil" size={15} color="#4F46E5" />
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={styles.addSchoolButton}>
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={styles.addSchoolText}>Yeni Okul</Text>
-        </TouchableOpacity>
+        {!isStaff && (
+          <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={styles.addSchoolButton}>
+            <Ionicons name="add" size={18} color="#fff" />
+            <Text style={styles.addSchoolText}>Yeni Okul</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSchools(); }} />}
       >
-        {/* Çoklu Okul Değiştirici (Müşteri Birden Fazla Okul Yönetebilir) */}
-        {schools.length > 1 && (
+        {/* Çoklu Okul Değiştirici (Müşteri Birden Fazla Okul Yönetebilir - İdareci yalnızca kendi okulunu görür) */}
+        {schools.length > 1 && !isStaff && (
           <View style={styles.schoolSelectorContainer}>
             <View style={styles.schoolSelectorHeader}>
               <Ionicons name="business" size={14} color="#4F46E5" />
@@ -1902,6 +1940,19 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'messages' && styles.tabButtonActive]}
+            onPress={() => {
+              setActiveTab('messages');
+              loadSchoolMessages();
+            }}
+          >
+            <Ionicons name="chatbubbles" size={15} color={activeTab === 'messages' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'messages' && styles.tabButtonTextActive]}>
+              💬 Mesajlar {schoolMessages.length > 0 ? `(${schoolMessages.length})` : ''}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={[styles.tabButton, activeTab === 'ai_settings' && styles.tabButtonActive]}
             onPress={() => setActiveTab('ai_settings')}
           >
@@ -1954,9 +2005,16 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           <Text style={styles.avatarText}>{teacher.fullName?.slice(0, 2).toUpperCase()}</Text>
                         </View>
                         <View style={{ flex: 1, marginLeft: 12 }}>
-                          <Text style={styles.cardTitle}>{teacher.fullName}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                            <Text style={styles.cardTitle}>{teacher.fullName}</Text>
+                            <View style={[styles.roleBadge, teacher.role === 'STAFF' ? styles.roleStaffBadge : styles.roleTeacherBadge]}>
+                              <Text style={teacher.role === 'STAFF' ? styles.roleStaffBadgeText : styles.roleTeacherBadgeText}>
+                                {teacher.role === 'STAFF' ? '🛡️ İdareci' : '👨‍🏫 Öğretmen'}
+                              </Text>
+                            </View>
+                          </View>
                           <Text style={styles.cardSub}>
-                            @{teacher.username} • {teacher.role}
+                            @{teacher.username}
                           </Text>
                           {teacher.branch && (
                             <Text style={styles.teacherBranchText}>📚 Branş: {teacher.branch}</Text>
@@ -1967,6 +2025,43 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           {teacher.phone && (
                             <Text style={styles.contactText}>📞 {teacher.phone}</Text>
                           )}
+
+                          {/* Yetki Özeti Çipleri */}
+                          {(() => {
+                            let perms: any = null;
+                            if (teacher.permissionsJson) {
+                              try { perms = JSON.parse(teacher.permissionsJson); } catch (e) {}
+                            }
+                            return (
+                              <View style={styles.permissionChipsWrap}>
+                                <View style={[styles.permissionMiniChip, perms?.canMessageStudents === false && { backgroundColor: '#FEE2E2' }]}>
+                                  <Text style={[styles.permissionMiniChipText, perms?.canMessageStudents === false && { color: '#DC2626' }]}>
+                                    {perms?.canMessageStudents === false ? '🚫 Öğrenci Mesaj' : '💬 Öğrenci'}
+                                  </Text>
+                                </View>
+                                <View style={[styles.permissionMiniChip, perms?.canMessageParents === false && { backgroundColor: '#FEE2E2' }]}>
+                                  <Text style={[styles.permissionMiniChipText, perms?.canMessageParents === false && { color: '#DC2626' }]}>
+                                    {perms?.canMessageParents === false ? '🚫 Veli Mesaj' : '💬 Veli'}
+                                  </Text>
+                                </View>
+                                <View style={[styles.permissionMiniChip, perms?.canMessageTeachers === false && { backgroundColor: '#FEE2E2' }]}>
+                                  <Text style={[styles.permissionMiniChipText, perms?.canMessageTeachers === false && { color: '#DC2626' }]}>
+                                    {perms?.canMessageTeachers === false ? '🚫 Öğretmen Mesaj' : '💬 Öğretmen'}
+                                  </Text>
+                                </View>
+                                <View style={styles.permissionMiniChip}>
+                                  <Text style={styles.permissionMiniChipText}>
+                                    {perms?.canViewAllClasses === false ? '🔒 Kısıtlı Şube' : '🌐 Tüm Şubeler'}
+                                  </Text>
+                                </View>
+                                {perms?.canUseAiAssistant === false && (
+                                  <View style={[styles.permissionMiniChip, { backgroundColor: '#FEE2E2' }]}>
+                                    <Text style={[styles.permissionMiniChipText, { color: '#DC2626' }]}>🚫 AI Kapalı</Text>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })()}
                         </View>
                         <View style={[styles.statusBadge, teacher.isActive ? styles.statusActive : styles.statusPassive]}>
                           <Text style={styles.statusText}>{teacher.isActive ? 'Aktif' : 'Pasif'}</Text>
@@ -1986,7 +2081,26 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         <TouchableOpacity
                           style={styles.cardActionBtn}
                           onPress={() => {
-                            setEditingTeacher({ ...teacher });
+                            let perms = {
+                              canMessageStudents: true,
+                              canMessageTeachers: true,
+                              canMessageParents: true,
+                              canViewAllClasses: true,
+                              canUseAiAssistant: true,
+                              canExportReports: true,
+                              canManageAttendance: true,
+                              canEditStudents: false,
+                            };
+                            if (teacher.permissionsJson) {
+                              try {
+                                perms = { ...perms, ...JSON.parse(teacher.permissionsJson) };
+                              } catch (e) {}
+                            }
+                            setEditingTeacher({
+                              ...teacher,
+                              role: teacher.role || 'TEACHER',
+                              permissions: perms,
+                            });
                             setEditTeacherModalVisible(true);
                           }}
                         >
@@ -2684,20 +2798,163 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               </View>
             )}
 
-            {/* 7. AI & API AYARLARI SEKMESİ */}
+            {/* 7. OKUL İÇİ MESAJLAŞMA VE DENETİM SEKMESİ */}
+            {activeTab === 'messages' && (
+              <View>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={styles.sectionTitle}>💬 Okul İçi Mesajlaşmalar ({schoolMessages.length})</Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>Tüm öğretmen, öğrenci ve veli iletişimini buradan denetleyebilirsiniz.</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.primaryAddBtn, { backgroundColor: '#4F46E5' }]}
+                    onPress={() => loadSchoolMessages()}
+                  >
+                    <Ionicons name="refresh" size={14} color="#fff" />
+                    <Text style={styles.primaryAddBtnText}>Yenile</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Filtre ve Arama */}
+                <View style={styles.logSearchContainer}>
+                  <Ionicons name="search" size={16} color="#64748B" />
+                  <TextInput
+                    style={styles.logSearchInput}
+                    placeholder="Mesaj içeriği, gönderen veya alıcı ara..."
+                    value={messageSearch}
+                    onChangeText={setMessageSearch}
+                    placeholderTextColor="#94A3B8"
+                  />
+                  {messageSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setMessageSearch('')}>
+                      <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+                  <TouchableOpacity
+                    style={[styles.logFilterChip, selectedMessageFilter === 'all' && styles.logFilterChipActive]}
+                    onPress={() => setSelectedMessageFilter('all')}
+                  >
+                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'all' && styles.logFilterChipTextActive]}>
+                      Tümü ({schoolMessages.length})
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.logFilterChip, selectedMessageFilter === 'students' && styles.logFilterChipActive]}
+                    onPress={() => setSelectedMessageFilter('students')}
+                  >
+                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'students' && styles.logFilterChipTextActive]}>
+                      Öğrenciye
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.logFilterChip, selectedMessageFilter === 'teachers' && styles.logFilterChipActive]}
+                    onPress={() => setSelectedMessageFilter('teachers')}
+                  >
+                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'teachers' && styles.logFilterChipTextActive]}>
+                      Öğretmenlere
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.logFilterChip, selectedMessageFilter === 'parents' && styles.logFilterChipActive]}
+                    onPress={() => setSelectedMessageFilter('parents')}
+                  >
+                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'parents' && styles.logFilterChipTextActive]}>
+                      Velilere
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {loadingMessages ? (
+                  <ActivityIndicator size="small" color="#4F46E5" style={{ marginVertical: 20 }} />
+                ) : schoolMessages.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Ionicons name="chatbubble-ellipses-outline" size={48} color={Colors.textMuted} />
+                    <Text style={styles.emptyText}>Henüz kayıtlı bir okul mesajı bulunamadı.</Text>
+                  </View>
+                ) : (
+                  schoolMessages
+                    .filter((m) => {
+                      if (selectedMessageFilter === 'students') {
+                        const t = (m.targetRole || '').toUpperCase();
+                        return t.includes('STUDENT') || t === 'GRADE' || t === 'SECTION' || t === 'MY_STUDENTS';
+                      }
+                      if (selectedMessageFilter === 'teachers') {
+                        const t = (m.targetRole || '').toUpperCase();
+                        return t.includes('TEACHER');
+                      }
+                      if (selectedMessageFilter === 'parents') {
+                        const t = (m.targetRole || '').toUpperCase();
+                        return t.includes('PARENT');
+                      }
+                      return true;
+                    })
+                    .filter((m) => {
+                      if (!messageSearch.trim()) return true;
+                      const q = messageSearch.toLowerCase();
+                      return (
+                        (m.content || '').toLowerCase().includes(q) ||
+                        (m.senderName || '').toLowerCase().includes(q) ||
+                        (m.receiverName || '').toLowerCase().includes(q) ||
+                        (m.targetDescription || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((msg) => (
+                      <View key={msg.id} style={styles.cardItem}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons
+                              name={msg.senderRole === 'STAFF' ? 'shield-checkmark' : 'person-circle'}
+                              size={18}
+                              color={msg.senderRole === 'STAFF' ? '#7C3AED' : '#4F46E5'}
+                            />
+                            <Text style={{ fontWeight: '800', fontSize: 13, color: '#1E293B' }}>
+                              {msg.senderName || 'İsimsiz'}
+                            </Text>
+                            <View style={[styles.roleBadge, { paddingVertical: 1, paddingHorizontal: 6, marginTop: 0 }]}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#4F46E5' }}>
+                                {msg.senderRole === 'STAFF' ? 'İdareci' : msg.senderRole === 'TEACHER' ? 'Öğretmen' : msg.senderRole}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={{ fontSize: 11, color: '#94A3B8' }}>
+                            {msg.createdAt ? new Date(msg.createdAt).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                          </Text>
+                        </View>
+
+                        <View style={{ backgroundColor: '#F8FAFC', padding: 8, borderRadius: 6, marginBottom: 6 }}>
+                          <Text style={{ fontSize: 12, color: '#475569', fontWeight: '600' }}>
+                            🎯 Alıcı / Hedef: <Text style={{ color: '#0F172A', fontWeight: '700' }}>{msg.targetDescription || msg.receiverName || msg.targetRole || 'Genel'}</Text>
+                          </Text>
+                        </View>
+
+                        <Text style={{ fontSize: 13, color: '#334155', lineHeight: 18 }}>
+                          {msg.content}
+                        </Text>
+                      </View>
+                    ))
+                )}
+              </View>
+            )}
+
+            {/* 8. AI & API AYARLARI SEKMESİ */}
             {activeTab === 'ai_settings' && (
               <View>
                 {/* Bilgilendirme Banner */}
-                <View style={styles.aiConfigBanner}>
-                  <View style={styles.aiConfigBannerIcon}>
-                    <Ionicons name="hardware-chip" size={24} color="#4F46E5" />
+                <View style={[styles.aiConfigBanner, isStaff && { backgroundColor: '#F5F3FF', borderColor: '#DDD6FE' }]}>
+                  <View style={[styles.aiConfigBannerIcon, isStaff && { backgroundColor: '#EDE9FE' }]}>
+                    <Ionicons name={isStaff ? 'shield-checkmark' : 'hardware-chip'} size={24} color={isStaff ? '#7C3AED' : '#4F46E5'} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.aiConfigBannerTitle}>
-                      {selectedSchool?.name || 'Okul'} Kurumsal AI Yapılandırması
+                    <Text style={[styles.aiConfigBannerTitle, isStaff && { color: '#6D28D9' }]}>
+                      {isStaff ? '🛡️ Kurumsal AI Yapılandırması (Salt Okunur)' : `${selectedSchool?.name || 'Okul'} Kurumsal AI Yapılandırması`}
                     </Text>
-                    <Text style={styles.aiConfigBannerSub}>
-                      Burada belirlenen API anahtarı ve seçilen model sunucu veritabanına yazılır. Bu okula bağlı tüm öğretmenler AI işlemlerini (ders programı OCR, yıllık plan ve öğrenci listeleri) bu kurumsal anahtar ile otomatik yürütür.
+                    <Text style={[styles.aiConfigBannerSub, isStaff && { color: '#5B21B6' }]}>
+                      {isStaff
+                        ? 'İdareci rolündesiniz. Google Gemini API anahtarı ve model seçimi okul ana yöneticisi (Admin) tarafından yönetilir. Sunucuya anahtar güncellemesi gönderilemez. Okulun ortak lisansı ve kullanım kotası üzerinden işlemler otomatik yürütülür.'
+                        : 'Burada belirlenen API anahtarı ve seçilen model sunucu veritabanına yazılır. Bu okula bağlı tüm öğretmenler AI işlemlerini (ders programı OCR, yıllık plan ve öğrenci listeleri) bu kurumsal anahtar ile otomatik yürütür.'}
                     </Text>
                   </View>
                 </View>
@@ -2968,24 +3225,36 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </View>
                 </View>
 
-                {/* Sunucu DB Kaydet Butonu */}
-                <TouchableOpacity
-                  style={styles.saveAiSettingsBtn}
-                  onPress={handleSaveAiSettingsToServer}
-                  disabled={savingAiSettings}
-                  activeOpacity={0.85}
-                >
-                  {savingAiSettings ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                  ) : (
-                    <>
-                      <Ionicons name="cloud-upload" size={18} color="#fff" />
-                      <Text style={styles.saveAiSettingsBtnText}>
-                        💾 Sunucu Veritabanına Kaydet & Tüm Öğretmenlere Dağıt
+                {/* Sunucu DB Kaydet Butonu (İdarecide Salt Okunur) */}
+                {isStaff ? (
+                  <View style={[styles.aiConfigBanner, { backgroundColor: '#F5F3FF', borderColor: '#DDD6FE', marginTop: 14 }]}>
+                    <Ionicons name="information-circle" size={22} color="#7C3AED" />
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <Text style={[styles.aiConfigBannerTitle, { color: '#6D28D9' }]}>İdareci Yetki Bildirimi</Text>
+                      <Text style={[styles.aiConfigBannerSub, { color: '#5B21B6' }]}>
+                        Kurumsal Gemini API anahtarı ve model seçimi okul yöneticisi (Admin) tarafından yönetilir. Sunucuya anahtar değişikliği gönderme yetkiniz bulunmamaktadır.
                       </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.saveAiSettingsBtn}
+                    onPress={handleSaveAiSettingsToServer}
+                    disabled={savingAiSettings}
+                    activeOpacity={0.85}
+                  >
+                    {savingAiSettings ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Ionicons name="cloud-upload" size={18} color="#fff" />
+                        <Text style={styles.saveAiSettingsBtnText}>
+                          💾 Sunucu Veritabanına Kaydet & Tüm Öğretmenlere Dağıt
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </>
@@ -3002,6 +3271,29 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               <Text style={styles.modalTitle}>👨‍🏫 Yeni Öğretmen Tanımla</Text>
               <TouchableOpacity onPress={() => setAddTeacherModalVisible(false)}>
                 <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.inputLabel}>Kullanıcı Rolü</Text>
+            <View style={styles.segmentedRoleRow}>
+              <TouchableOpacity
+                style={[styles.segmentedRoleBtn, newTeacherRole === 'TEACHER' && styles.segmentedRoleBtnActiveTeacher]}
+                onPress={() => setNewTeacherRole('TEACHER')}
+              >
+                <Ionicons name="school" size={16} color={newTeacherRole === 'TEACHER' ? '#0284C7' : '#64748B'} />
+                <Text style={[styles.segmentedRoleText, newTeacherRole === 'TEACHER' && styles.segmentedRoleTextActiveTeacher]}>
+                  👨‍🏫 Öğretmen
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.segmentedRoleBtn, newTeacherRole === 'STAFF' && styles.segmentedRoleBtnActiveStaff]}
+                onPress={() => setNewTeacherRole('STAFF')}
+              >
+                <Ionicons name="shield-checkmark" size={16} color={newTeacherRole === 'STAFF' ? '#7C3AED' : '#64748B'} />
+                <Text style={[styles.segmentedRoleText, newTeacherRole === 'STAFF' && styles.segmentedRoleTextActiveStaff]}>
+                  🛡️ İdareci (Md. Yrd.)
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -3055,59 +3347,321 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       {/* 1.1 Öğretmen Düzenle Modal */}
       <Modal visible={editTeacherModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>✏️ Öğretmen Bilgilerini Düzenle</Text>
+              <View>
+                <Text style={styles.modalTitle}>✏️ Öğretmen Bilgilerini & Yetkilerini Düzenle</Text>
+                <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                  Rol ve erişim izinlerini okul kurallarına göre yapılandırın.
+                </Text>
+              </View>
               <TouchableOpacity onPress={() => setEditTeacherModalVisible(false)}>
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.inputLabel}>Adı Soyadı</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Adı Soyadı"
-              value={editingTeacher?.fullName || ''}
-              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, fullName: t })}
-            />
+            <ScrollView style={{ maxHeight: 500 }} showsVerticalScrollIndicator={false}>
+              {/* Rol Seçimi */}
+              <Text style={styles.inputLabel}>Kullanıcı Rolü & Panel Erişimi</Text>
+              <View style={styles.segmentedRoleRow}>
+                <TouchableOpacity
+                  style={[styles.segmentedRoleBtn, editingTeacher?.role !== 'STAFF' && styles.segmentedRoleBtnActiveTeacher]}
+                  onPress={() => setEditingTeacher({ ...editingTeacher, role: 'TEACHER' })}
+                >
+                  <Ionicons name="school" size={16} color={editingTeacher?.role !== 'STAFF' ? '#0284C7' : '#64748B'} />
+                  <Text style={[styles.segmentedRoleText, editingTeacher?.role !== 'STAFF' && styles.segmentedRoleTextActiveTeacher]}>
+                    👨‍🏫 Öğretmen
+                  </Text>
+                </TouchableOpacity>
 
-            <Text style={styles.inputLabel}>Branşı (Ders Alanı)</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Örn: Matematik, Fizik, Türkçe..."
-              value={editingTeacher?.branch || ''}
-              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, branch: t })}
-            />
+                <TouchableOpacity
+                  style={[styles.segmentedRoleBtn, editingTeacher?.role === 'STAFF' && styles.segmentedRoleBtnActiveStaff]}
+                  onPress={() => setEditingTeacher({ ...editingTeacher, role: 'STAFF' })}
+                >
+                  <Ionicons name="shield-checkmark" size={16} color={editingTeacher?.role === 'STAFF' ? '#7C3AED' : '#64748B'} />
+                  <Text style={[styles.segmentedRoleText, editingTeacher?.role === 'STAFF' && styles.segmentedRoleTextActiveStaff]}>
+                    🛡️ İdareci (Md. Yrd.)
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-            <Text style={styles.inputLabel}>Girdiği Şubeler / Sınıflar</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Örn: 9-A, 10-B, 11-C (Çarşaftan otomatik gelir)"
-              value={editingTeacher?.assignedClassesJson || ''}
-              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, assignedClassesJson: t })}
-            />
+              {editingTeacher?.role === 'STAFF' && (
+                <View style={styles.roleExplainBox}>
+                  <Text style={styles.roleExplainText}>
+                    🛡️ <Text style={{ fontWeight: '800' }}>İdareci Yetkisi:</Text> Bu öğretmen okul yönetim paneline erişebilir. Sınıfları, öğrencileri, işlem loglarını ve mesajlaşmaları denetleyebilir. Okul ekleyemez veya diğer okulları göremez. AI API anahtarını değiştiremez. Lisansı ana yöneticiye bağlı çalışır.
+                  </Text>
+                </View>
+              )}
 
-            <Text style={styles.inputLabel}>Telefon Numarası</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Telefon Numarası"
-              value={editingTeacher?.phone || ''}
-              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, phone: t })}
-              keyboardType="phone-pad"
-            />
+              <Text style={styles.inputLabel}>Adı Soyadı</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Adı Soyadı"
+                value={editingTeacher?.fullName || ''}
+                onChangeText={(t) => setEditingTeacher({ ...editingTeacher, fullName: t })}
+              />
 
-            <Text style={styles.inputLabel}>E-posta</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="E-posta"
-              value={editingTeacher?.email || ''}
-              onChangeText={(t) => setEditingTeacher({ ...editingTeacher, email: t })}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+              <Text style={styles.inputLabel}>Branşı (Ders Alanı)</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Örn: Matematik, Fizik, Türkçe..."
+                value={editingTeacher?.branch || ''}
+                onChangeText={(t) => setEditingTeacher({ ...editingTeacher, branch: t })}
+              />
+
+              <Text style={styles.inputLabel}>Telefon Numarası</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Telefon Numarası"
+                value={editingTeacher?.phone || ''}
+                onChangeText={(t) => setEditingTeacher({ ...editingTeacher, phone: t })}
+                keyboardType="phone-pad"
+              />
+
+              <Text style={styles.inputLabel}>E-posta</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="E-posta"
+                value={editingTeacher?.email || ''}
+                onChangeText={(t) => setEditingTeacher({ ...editingTeacher, email: t })}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+
+              {/* YETKİ VE KISITLAMA AYARLARI */}
+              <Text style={styles.permissionSectionTitle}>🔒 Yetki ve Özellik Kısıtlamaları</Text>
+
+              {/* Mesajlaşma İzinleri */}
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Öğrencilere Mesaj Gönderebilir</Text>
+                  <Text style={styles.permissionSublabel}>Öğrencilere duyuru ve bilgilendirme mesajı atabilir.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canMessageStudents !== false;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canMessageStudents: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canMessageStudents !== false ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canMessageStudents !== false ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Öğretmenlere Mesaj Gönderebilir</Text>
+                  <Text style={styles.permissionSublabel}>Diğer öğretmen arkadaşlarına mesaj yazabilir.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canMessageTeachers !== false;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canMessageTeachers: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canMessageTeachers !== false ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canMessageTeachers !== false ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Velilere Mesaj Gönderebilir</Text>
+                  <Text style={styles.permissionSublabel}>Öğrenci velilerine doğrudan mesaj iletebilir.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canMessageParents !== false;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canMessageParents: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canMessageParents !== false ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canMessageParents !== false ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {/* Şube ve Sınıf Görünürlüğü */}
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Tüm Okul Şubelerini Görebilir</Text>
+                  <Text style={styles.permissionSublabel}>Kapalı ise öğretmen yalnızca atandığı şubeleri görür.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canViewAllClasses !== false;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canViewAllClasses: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canViewAllClasses !== false ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canViewAllClasses !== false ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {/* Şube Seçimi Çipleri */}
+              {editingTeacher?.permissions?.canViewAllClasses === false && (
+                <View style={{ backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8, marginVertical: 6, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B', marginBottom: 4 }}>
+                    Erişebileceği Şubeleri Seçin:
+                  </Text>
+                  <View style={styles.classesChipsContainer}>
+                    {classes.map((cls) => {
+                      const clsName = `${cls.grade}-${cls.section}`;
+                      const currentList: string[] = (editingTeacher?.assignedClassesJson || '')
+                        .split(',')
+                        .map((s: string) => s.trim())
+                        .filter(Boolean);
+                      const isAssigned = currentList.includes(clsName);
+                      return (
+                        <TouchableOpacity
+                          key={cls.id || clsName}
+                          style={[styles.classSelectChip, isAssigned && styles.classSelectChipActive]}
+                          onPress={() => {
+                            let updated: string[];
+                            if (isAssigned) {
+                              updated = currentList.filter((s: string) => s !== clsName);
+                            } else {
+                              updated = [...currentList, clsName];
+                            }
+                            setEditingTeacher({
+                              ...editingTeacher,
+                              assignedClassesJson: updated.join(', '),
+                            });
+                          }}
+                        >
+                          <Text style={[styles.classSelectChipText, isAssigned && styles.classSelectChipTextActive]}>
+                            {isAssigned ? '✓ ' : '+ '}{clsName}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              <Text style={styles.inputLabel}>Girdiği Şubeler / Sınıflar (Metin)</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Örn: 9-A, 10-B, 11-C"
+                value={editingTeacher?.assignedClassesJson || ''}
+                onChangeText={(t) => setEditingTeacher({ ...editingTeacher, assignedClassesJson: t })}
+              />
+
+              {/* Ek Modül Kısıtlamaları */}
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Yapay Zeka (AI) ve OCR Kullanabilir</Text>
+                  <Text style={styles.permissionSublabel}>Okulun ortak Gemini kotasıyla AI asistanını çalıştırır.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canUseAiAssistant !== false;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canUseAiAssistant: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canUseAiAssistant !== false ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canUseAiAssistant !== false ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Rapor ve Excel / PDF İndirebilir</Text>
+                  <Text style={styles.permissionSublabel}>Yoklama, not ve öğrenci raporlarını dışa aktarabilir.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canExportReports !== false;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canExportReports: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canExportReports !== false ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canExportReports !== false ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Yoklama Değiştirme / Silme</Text>
+                  <Text style={styles.permissionSublabel}>Geçmiş yoklama kayıtlarını düzenleyebilir veya silebilir.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canManageAttendance !== false;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canManageAttendance: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canManageAttendance !== false ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canManageAttendance !== false ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.permissionRow}>
+                <View style={styles.permissionLabelWrap}>
+                  <Text style={styles.permissionLabel}>Öğrenci Profil & Fotoğraf Düzenleme</Text>
+                  <Text style={styles.permissionSublabel}>Öğrenci bilgilerini ve fotoğraflarını güncelleyebilir.</Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const current = editingTeacher?.permissions?.canEditStudents === true;
+                    setEditingTeacher({
+                      ...editingTeacher,
+                      permissions: { ...editingTeacher?.permissions, canEditStudents: !current },
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name={editingTeacher?.permissions?.canEditStudents === true ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={editingTeacher?.permissions?.canEditStudents === true ? '#4F46E5' : '#94A3B8'}
+                  />
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
 
             <TouchableOpacity
-              style={[styles.createSubmitButton, { backgroundColor: '#4F46E5', marginBottom: 8, flexDirection: 'row', gap: 6, justifyContent: 'center' }]}
+              style={[styles.createSubmitButton, { backgroundColor: '#4F46E5', marginTop: 10, marginBottom: 8, flexDirection: 'row', gap: 6, justifyContent: 'center' }]}
               onPress={() => {
                 setEditTeacherModalVisible(false);
                 handleOpenTeacherSchedule(editingTeacher);
@@ -6576,5 +7130,156 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#FFF',
+  },
+  roleBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  roleStaffBadge: {
+    backgroundColor: '#EDE9FE',
+    borderWidth: 1,
+    borderColor: '#C4B5FD',
+  },
+  roleTeacherBadge: {
+    backgroundColor: '#E0F2FE',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  roleStaffBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6D28D9',
+  },
+  roleTeacherBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0369A1',
+  },
+  permissionChipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 6,
+  },
+  permissionMiniChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: '#F1F5F9',
+  },
+  permissionMiniChipText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  segmentedRoleRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  segmentedRoleBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+  },
+  segmentedRoleBtnActiveTeacher: {
+    borderColor: '#0284C7',
+    backgroundColor: '#F0F9FF',
+  },
+  segmentedRoleBtnActiveStaff: {
+    borderColor: '#7C3AED',
+    backgroundColor: '#F5F3FF',
+  },
+  segmentedRoleText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  segmentedRoleTextActiveTeacher: {
+    color: '#0284C7',
+  },
+  segmentedRoleTextActiveStaff: {
+    color: '#7C3AED',
+  },
+  roleExplainBox: {
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 12,
+  },
+  roleExplainText: {
+    fontSize: 11,
+    color: '#475569',
+    lineHeight: 16,
+  },
+  permissionSectionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  permissionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  permissionLabelWrap: {
+    flex: 1,
+    marginRight: 10,
+  },
+  permissionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  permissionSublabel: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  classesChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  classSelectChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#F8FAFC',
+  },
+  classSelectChipActive: {
+    borderColor: '#4F46E5',
+    backgroundColor: '#EEF2FF',
+  },
+  classSelectChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  classSelectChipTextActive: {
+    color: '#4F46E5',
+    fontWeight: '700',
   },
 });

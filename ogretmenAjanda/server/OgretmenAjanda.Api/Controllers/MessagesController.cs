@@ -25,13 +25,26 @@ namespace OgretmenAjanda.Api.Controllers
         private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         private string CurrentUserRole => User.FindFirstValue(ClaimTypes.Role)!;
 
-        // Kullanıcının mesajlarını listele
+        // Kullanıcının veya okulun mesajlarını listele
         [HttpGet]
         public async Task<IActionResult> GetMyMessages([FromQuery] Guid schoolId)
         {
             var isStaffOrAdmin = CurrentUserRole.Equals("ADMIN", StringComparison.OrdinalIgnoreCase) ||
                                  CurrentUserRole.Equals("STAFF", StringComparison.OrdinalIgnoreCase) ||
-                                 CurrentUserRole.Equals("SCHOOL_ADMIN", StringComparison.OrdinalIgnoreCase);
+                                 CurrentUserRole.Equals("SCHOOL_ADMIN", StringComparison.OrdinalIgnoreCase) ||
+                                 CurrentUserRole.Equals("SUPERADMIN", StringComparison.OrdinalIgnoreCase);
+
+            if (isStaffOrAdmin)
+            {
+                // İdareci ve Admin okul genelindeki tüm mesajlaşmaları denetleyebilir
+                var allMessages = await _context.AppMessages
+                    .Where(m => m.SchoolId == schoolId)
+                    .OrderByDescending(m => m.CreatedAt)
+                    .Take(200)
+                    .ToListAsync();
+
+                return Ok(allMessages);
+            }
 
             var messages = await _context.AppMessages
                 .Where(m => m.SchoolId == schoolId &&
@@ -43,8 +56,7 @@ namespace OgretmenAjanda.Api.Controllers
                             m.TargetRole == "SECTION" ||
                             m.TargetRole == "SPECIFIC_STUDENT" ||
                             m.TargetRole == "SPECIFIC_TEACHER" ||
-                            m.TargetRole == CurrentUserRole ||
-                            (isStaffOrAdmin && m.TargetRole == "STAFF")))
+                            m.TargetRole == CurrentUserRole))
                 .OrderByDescending(m => m.CreatedAt)
                 .Take(100)
                 .ToListAsync();
@@ -58,6 +70,36 @@ namespace OgretmenAjanda.Api.Controllers
         {
             var sender = await _context.Users.FindAsync(CurrentUserId);
             if (sender == null) return Unauthorized();
+
+            // Öğretmen yetki kontrolü
+            if (sender.Role == UserRoles.Teacher && !string.IsNullOrEmpty(sender.PermissionsJson))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(sender.PermissionsJson);
+                    var root = doc.RootElement;
+                    var target = (request.TargetRole ?? "").ToUpper();
+
+                    if ((target.Contains("STUDENT") || target == "GRADE" || target == "SECTION" || target == "MY_STUDENTS") &&
+                        root.TryGetProperty("canMessageStudents", out var canStudent) && !canStudent.GetBoolean())
+                    {
+                        return BadRequest(new { message = "Öğrencilere mesaj gönderme yetkiniz okul yönetimi tarafından sınırlandırılmıştır." });
+                    }
+
+                    if ((target.Contains("TEACHER") || target == "ALL_TEACHERS") &&
+                        root.TryGetProperty("canMessageTeachers", out var canTeacher) && !canTeacher.GetBoolean())
+                    {
+                        return BadRequest(new { message = "Öğretmenlere mesaj gönderme yetkiniz okul yönetimi tarafından sınırlandırılmıştır." });
+                    }
+
+                    if (target.Contains("PARENT") &&
+                        root.TryGetProperty("canMessageParents", out var canParent) && !canParent.GetBoolean())
+                    {
+                        return BadRequest(new { message = "Velilere mesaj gönderme yetkiniz okul yönetimi tarafından sınırlandırılmıştır." });
+                    }
+                }
+                catch { }
+            }
 
             var message = new AppMessage
             {

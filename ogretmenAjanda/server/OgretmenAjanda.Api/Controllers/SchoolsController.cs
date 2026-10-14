@@ -53,12 +53,35 @@ namespace OgretmenAjanda.Api.Controllers
             catch {}
         }
 
-        // Adminin tanımladığı okulları listele
+        // Adminin veya İdarecinin okullarını listele
         [HttpGet("my-schools")]
         public async Task<IActionResult> GetMySchools()
         {
-            var schools = await _context.Schools
-                .Where(s => s.AdminUserId == CurrentUserId || CurrentUserRole == UserRoles.SuperAdmin)
+            IQueryable<School> query = _context.Schools;
+
+            if (CurrentUserRole == UserRoles.SuperAdmin)
+            {
+                // Süper admin tüm okulları görür
+            }
+            else if (CurrentUserRole == UserRoles.Staff)
+            {
+                // İdareci sadece kendi okulunu görür
+                var currentUser = await _context.Users.FindAsync(CurrentUserId);
+                if (currentUser?.SchoolId != null)
+                {
+                    query = query.Where(s => s.Id == currentUser.SchoolId.Value);
+                }
+                else
+                {
+                    query = query.Where(s => false);
+                }
+            }
+            else
+            {
+                query = query.Where(s => s.AdminUserId == CurrentUserId);
+            }
+
+            var schools = await query
                 .Select(s => new
                 {
                     s.Id,
@@ -201,6 +224,8 @@ namespace OgretmenAjanda.Api.Controllers
                     u.CustomerId,
                     u.IsActive,
                     u.AssignedClassesJson,
+                    u.Branch,
+                    u.PermissionsJson,
                     u.CreatedAt,
                     u.LastLoginAt
                 })
@@ -215,6 +240,15 @@ namespace OgretmenAjanda.Api.Controllers
         {
             var school = await _context.Schools.FindAsync(schoolId);
             if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (CurrentUserRole == UserRoles.Staff)
+            {
+                var currentUser = await _context.Users.FindAsync(CurrentUserId);
+                if (currentUser == null || currentUser.SchoolId != schoolId)
+                {
+                    return Forbid();
+                }
+            }
 
             var fullName = request.FullName.Trim();
             // Türkçe karakterleri temizleyip kullanıcı adı üret
@@ -240,31 +274,31 @@ namespace OgretmenAjanda.Api.Controllers
                 Id = Guid.NewGuid(),
                 Username = username,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
-                FullName = fullName + (!string.IsNullOrEmpty(request.Branch) ? $" ({request.Branch})" : ""),
-                Email = request.Email,
-                Phone = request.Phone,
-                Role = UserRoles.Teacher,
+                FullName = fullName,
+                Role = !string.IsNullOrEmpty(request.Role) ? request.Role : UserRoles.Teacher,
+                Branch = request.Branch?.Trim(),
+                PermissionsJson = request.PermissionsJson,
+                Email = request.Email?.Trim(),
+                Phone = request.Phone?.Trim(),
                 SchoolId = school.Id,
                 RelationId = school.RelationId,
                 CustomerId = school.CustomerId,
                 LicenseExpiresAt = school.LicenseExpiresAt,
+                AssignedClassesJson = request.AssignedClassesJson,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
 
             await _context.Users.AddAsync(teacher);
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = school.Id,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "TEACHER_CREATED",
-                EntityName = "User",
-                EntityId = teacher.Id.ToString(),
-                DetailsJson = $"{teacher.FullName} ({teacher.Username}) oluşturuldu.",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                school.Id,
+                "TEACHER_CREATED",
+                "User",
+                teacher.Id.ToString(),
+                $"{teacher.FullName} ({teacher.Username} - {teacher.Role}) kadroya eklendi.",
+                $"{{\"role\": \"{teacher.Role}\", \"branch\": \"{teacher.Branch}\", \"permissions\": {request.PermissionsJson ?? "null"}}}"
+            );
 
             await _context.SaveChangesAsync();
 
@@ -276,35 +310,48 @@ namespace OgretmenAjanda.Api.Controllers
                 teacher.FullName,
                 SchoolCode = school.Code,
                 teacher.Role,
+                teacher.Branch,
+                teacher.PermissionsJson,
                 teacher.IsActive
             });
         }
 
-        // Öğretmen Yetki / Durum Düzenleme (Admin yetkisi)
+        // Öğretmen Yetki / Durum / Rol Düzenleme (Admin veya İdareci yetkisi)
         [HttpPut("teachers/{teacherId}/status")]
         public async Task<IActionResult> UpdateTeacherStatus(Guid teacherId, [FromBody] UpdateTeacherStatusRequest request)
         {
             var teacher = await _context.Users.FindAsync(teacherId);
             if (teacher == null) return NotFound();
 
+            if (CurrentUserRole == UserRoles.Staff)
+            {
+                var currentUser = await _context.Users.FindAsync(CurrentUserId);
+                if (currentUser == null || currentUser.SchoolId != teacher.SchoolId)
+                {
+                    return Forbid();
+                }
+            }
+
             teacher.IsActive = request.IsActive;
             if (!string.IsNullOrEmpty(request.Role)) teacher.Role = request.Role;
             if (request.AssignedClassesJson != null) teacher.AssignedClassesJson = request.AssignedClassesJson;
+            if (request.PermissionsJson != null) teacher.PermissionsJson = request.PermissionsJson;
+            if (!string.IsNullOrEmpty(request.FullName)) teacher.FullName = request.FullName.Trim();
+            if (request.Branch != null) teacher.Branch = request.Branch.Trim();
+            if (request.Phone != null) teacher.Phone = request.Phone.Trim();
+            if (request.Email != null) teacher.Email = request.Email.Trim();
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = teacher.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "TEACHER_UPDATED",
-                EntityName = "User",
-                EntityId = teacher.Id.ToString(),
-                DetailsJson = $"{teacher.FullName} yetkileri güncellendi. Aktif: {teacher.IsActive}, Rol: {teacher.Role}",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                teacher.SchoolId,
+                "TEACHER_UPDATED",
+                "User",
+                teacher.Id.ToString(),
+                $"{teacher.FullName} yetkileri ve rolü güncellendi. Rol: {teacher.Role}, Aktif: {teacher.IsActive}",
+                $"{{\"role\": \"{teacher.Role}\", \"permissions\": {request.PermissionsJson ?? "null"}, \"assignedClasses\": \"{teacher.AssignedClassesJson}\"}}"
+            );
 
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Öğretmen bilgileri güncellendi." });
+            return Ok(new { message = "Öğretmen rol ve yetki bilgileri güncellendi.", teacher });
         }
 
         // Okul Adı ve Bilgilerini Güncelleme
@@ -338,6 +385,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPut("{schoolId}/gemini-key")]
         public async Task<IActionResult> UpdateGeminiApiKey(Guid schoolId, [FromBody] UpdateKeyRequest request)
         {
+            if (CurrentUserRole == UserRoles.Staff)
+            {
+                return StatusCode(403, new { message = "İdarecilerin okul AI API anahtarını değiştirme yetkisi bulunmamaktadır." });
+            }
+
             var school = await _context.Schools.FindAsync(schoolId);
             if (school == null) return NotFound();
 
@@ -515,10 +567,31 @@ namespace OgretmenAjanda.Api.Controllers
             var teacher = await _context.Users.FindAsync(teacherId);
             if (teacher == null) return NotFound(new { message = "Öğretmen bulunamadı." });
 
-            teacher.FullName = request.FullName.Trim() + (!string.IsNullOrEmpty(request.Branch) ? $" ({request.Branch.Trim()})" : "");
-            if (request.Phone != null) teacher.Phone = request.Phone;
-            if (request.Email != null) teacher.Email = request.Email;
+            if (CurrentUserRole == UserRoles.Staff)
+            {
+                var currentUser = await _context.Users.FindAsync(CurrentUserId);
+                if (currentUser == null || currentUser.SchoolId != teacher.SchoolId)
+                {
+                    return Forbid();
+                }
+            }
+
+            if (!string.IsNullOrEmpty(request.FullName)) teacher.FullName = request.FullName.Trim();
+            if (request.Branch != null) teacher.Branch = request.Branch.Trim();
+            if (!string.IsNullOrEmpty(request.Role)) teacher.Role = request.Role;
+            if (request.PermissionsJson != null) teacher.PermissionsJson = request.PermissionsJson;
+            if (request.Phone != null) teacher.Phone = request.Phone.Trim();
+            if (request.Email != null) teacher.Email = request.Email.Trim();
             if (request.AssignedClassesJson != null) teacher.AssignedClassesJson = request.AssignedClassesJson;
+
+            await LogActionAsync(
+                teacher.SchoolId,
+                "TEACHER_UPDATED",
+                "User",
+                teacher.Id.ToString(),
+                $"{teacher.FullName} bilgileri ve rolü güncellendi. Rol: {teacher.Role}",
+                $"{{\"role\": \"{teacher.Role}\", \"permissions\": {request.PermissionsJson ?? "null"}}}"
+            );
 
             await _context.SaveChangesAsync();
             return Ok(teacher);
@@ -903,6 +976,11 @@ namespace OgretmenAjanda.Api.Controllers
         public bool IsActive { get; set; } = true;
         public string? Role { get; set; }
         public string? AssignedClassesJson { get; set; }
+        public string? PermissionsJson { get; set; }
+        public string? Branch { get; set; }
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public string? FullName { get; set; }
     }
 
     public class UpdateKeyRequest
@@ -914,9 +992,11 @@ namespace OgretmenAjanda.Api.Controllers
     public class CreateTeacherRequest
     {
         public string FullName { get; set; } = string.Empty;
+        public string? Role { get; set; }
         public string? Branch { get; set; }
         public string? Phone { get; set; }
         public string? Email { get; set; }
         public string? AssignedClassesJson { get; set; }
+        public string? PermissionsJson { get; set; }
     }
 }
