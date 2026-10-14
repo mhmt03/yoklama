@@ -187,16 +187,16 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       interval = setInterval(() => {
         setAiElapsedSeconds((prev) => {
           const next = prev + 1;
-          if (next === 4) {
-            setAiStageText('🔍 Belge çözünürlüğü optimize edildi, Gemini modeline aktarılıyor...');
+          if (next === 3) {
+            setAiStageText('📑 1. Adım: PDF sayfa yer imleri (bookmark) ve sayfa başlıkları taranıyor...');
           } else if (next === 10) {
-            setAiStageText('🧠 Yapay zeka tüm günleri, öğretmenleri ve derslikleri tarıyor...');
-          } else if (next === 22) {
-            setAiStageText('📊 Sınıf ve şube bazlı haftalık ders saatleri eşleştiriliyor...');
-          } else if (next === 35) {
-            setAiStageText('✨ Çarşaf program tablosu veri omurgasına dönüştürülüyor...');
-          } else if (next === 50) {
-            setAiStageText('⏳ Yoğun program analizi tamamlanmak üzere, son kontroller yapılıyor...');
+            setAiStageText('👨‍🏫 2. Adım: Her sayfadaki "Adı Soyadı" ile öğretmen kadrosu doğrulanıyor...');
+          } else if (next === 20) {
+            setAiStageText('📚 3. Adım: "Ders Adı", "Ders" (kod) ve "Sınıflar" tablosundan tüm branşlar ve şubeler çıkarılıyor...');
+          } else if (next === 32) {
+            setAiStageText('⏰ 4. Adım: İlk öğretmenin programından okulun giriş-çıkış ve ders saatleri belirleniyor...');
+          } else if (next === 44) {
+            setAiStageText('🗓️ 5. Adım: Hücrelere bölünmüş haftalık ders tablolarından tüm program çözümleniyor...');
           }
           return next;
         });
@@ -4330,11 +4330,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <Text style={styles.aiStageText}>{aiStageText}</Text>
                 </View>
 
-                {/* Adım Listesi (Progress Steps) */}
+                {/* Adım Listesi (Progress Steps - 5 Aşamalı Çözümleme) */}
                 <View style={styles.aiStepsContainer}>
                   <View style={styles.aiStepRow}>
                     <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
-                    <Text style={styles.aiStepDoneText}>1. Belge hazırlandı ve sisteme aktarıldı</Text>
+                    <Text style={styles.aiStepDoneText}>1. PDF Sayfa Bookmarkları taranıyor & Öğretmen listesi çıkarılıyor</Text>
                   </View>
                   <View style={styles.aiStepRow}>
                     <Ionicons
@@ -4343,22 +4343,38 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       color={aiElapsedSeconds >= 8 ? '#16A34A' : '#4F46E5'}
                     />
                     <Text style={aiElapsedSeconds >= 8 ? styles.aiStepDoneText : styles.aiStepActiveText}>
-                      2. Gemini Vision ile hücre ve metin taraması
+                      2. Her sayfa başlığından ("Adı Soyadı") öğretmen kadrosu doğrulanıyor
                     </Text>
                   </View>
                   <View style={styles.aiStepRow}>
                     <Ionicons
-                      name={aiElapsedSeconds >= 22 ? 'checkmark-circle' : 'time-outline'}
+                      name={aiElapsedSeconds >= 18 ? 'checkmark-circle' : 'time-outline'}
                       size={16}
-                      color={aiElapsedSeconds >= 22 ? '#16A34A' : '#94A3B8'}
+                      color={aiElapsedSeconds >= 18 ? '#16A34A' : '#94A3B8'}
                     />
-                    <Text style={aiElapsedSeconds >= 22 ? styles.aiStepDoneText : styles.aiStepPendingText}>
-                      3. Öğretmen, sınıf ve ders saatleri eşleştirmesi
+                    <Text style={aiElapsedSeconds >= 18 ? styles.aiStepDoneText : styles.aiStepPendingText}>
+                      3. "Ders Adı", "Ders" (kod) ve "Sınıflar" tablosundan branş ve şubeler çıkarılıyor
                     </Text>
                   </View>
                   <View style={styles.aiStepRow}>
-                    <Ionicons name="time-outline" size={16} color="#94A3B8" />
-                    <Text style={styles.aiStepPendingText}>4. Haftalık ders programı omurgasının oluşturulması</Text>
+                    <Ionicons
+                      name={aiElapsedSeconds >= 30 ? 'checkmark-circle' : 'time-outline'}
+                      size={16}
+                      color={aiElapsedSeconds >= 30 ? '#16A34A' : '#94A3B8'}
+                    />
+                    <Text style={aiElapsedSeconds >= 30 ? styles.aiStepDoneText : styles.aiStepPendingText}>
+                      4. İlk öğretmenin programından okulun giriş-çıkış ve ders saatleri belirleniyor
+                    </Text>
+                  </View>
+                  <View style={styles.aiStepRow}>
+                    <Ionicons
+                      name={aiElapsedSeconds >= 42 ? 'checkmark-circle' : 'time-outline'}
+                      size={16}
+                      color={aiElapsedSeconds >= 42 ? '#16A34A' : '#94A3B8'}
+                    />
+                    <Text style={aiElapsedSeconds >= 42 ? styles.aiStepDoneText : styles.aiStepPendingText}>
+                      5. Hücrelere bölünmüş haftalık ders tablolarından tüm program omurgası çıkarılıyor
+                    </Text>
                   </View>
                 </View>
 
@@ -4366,7 +4382,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 <View style={styles.aiProgressInfoBox}>
                   <Ionicons name="information-circle-outline" size={18} color="#166534" />
                   <Text style={styles.aiProgressInfoBoxText}>
-                    Çarşaf programlar yüzlerce hücre, onlarca öğretmen ve ders saati içeren büyük tablolardır. Yapay zekanın tüm hücreleri hatasız eşleştirmesi <Text style={{ fontWeight: '800' }}>20-50 saniye</Text> sürebilir. Bu işlem tamamen normaldir.
+                    Çarşaf programlar sayfa sayfa onlarca öğretmen, derslik ve yüzlerce ders hücresi içeren büyük tablolardır. Yapay zekanın tüm sayfaları hatasız eşleştirmesi <Text style={{ fontWeight: '800' }}>20-50 saniye</Text> sürebilir. Bu işlem tamamen normaldir.
                   </Text>
                 </View>
               </View>
@@ -4393,6 +4409,27 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     <Text style={styles.previewLbl}>Ders Saati</Text>
                   </View>
                 </View>
+
+                {/* Okul Ders & Giriş-Çıkış Saatleri (Varsa) */}
+                {parsedSchedule.bellSchedule && parsedSchedule.bellSchedule.length > 0 && (
+                  <View style={[styles.scheduleOptionSection, { backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 14 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <Ionicons name="time" size={16} color="#4F46E5" />
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
+                        ⏰ TESPİT EDİLEN OKUL GİRİŞ - ÇIKIŞ SAATLERİ ({parsedSchedule.bellSchedule.length} Ders):
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {parsedSchedule.bellSchedule.map((b) => (
+                        <View key={b.period} style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>
+                            {b.period}. Ders: <Text style={{ fontWeight: '600', color: '#1E293B' }}>{b.time}</Text>
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
 
                 {/* 1. İşlem / Kayıt Modu Seçimi */}
                 <View style={styles.scheduleOptionSection}>
