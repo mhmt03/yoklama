@@ -18,6 +18,7 @@ namespace OgretmenAjanda.Api.Data
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"CustomerId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Schools\" ADD COLUMN \"GeminiModel\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"RelationId\" TEXT;"); } catch { }
 
             try

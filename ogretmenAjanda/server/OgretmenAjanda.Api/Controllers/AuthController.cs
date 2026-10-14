@@ -110,7 +110,9 @@ namespace OgretmenAjanda.Api.Controllers
                     Name = s.Name,
                     Code = s.Code,
                     Address = s.Address,
-                    Phone = s.Phone
+                    Phone = s.Phone,
+                    GeminiApiKey = s.GeminiApiKey,
+                    GeminiModel = s.GeminiModel
                 })
                 .ToListAsync();
 

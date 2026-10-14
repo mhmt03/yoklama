@@ -58,6 +58,8 @@ namespace OgretmenAjanda.Api.DTOs
         public string Code { get; set; } = string.Empty;
         public string? Address { get; set; }
         public string? Phone { get; set; }
+        public string? GeminiApiKey { get; set; }
+        public string? GeminiModel { get; set; }
     }
 
     public class CustomerResponse

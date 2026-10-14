@@ -16,7 +16,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { School } from '../types';
 import { UserRole, setActiveUserRole, logoutUserRole } from '../utils/roleService';
-import { SchoolAdminModal } from './SchoolAdminModal';
 import { TeacherSchoolModal } from './TeacherSchoolModal';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -42,7 +41,6 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   navigation,
 }) => {
   const insets = useSafeAreaInsets();
-  const [adminModalVisible, setAdminModalVisible] = useState(false);
   const [teacherModalVisible, setTeacherModalVisible] = useState(false);
 
   const handleCopyCode = async () => {
@@ -50,10 +48,6 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
       await Clipboard.setStringAsync(activeSchool.code);
       Alert.alert('Kopyalandı', `Okul Kodu (${activeSchool.code}) panoya kopyalandı.`);
     }
-  };
-
-  const handleSwitchToAdmin = () => {
-    setAdminModalVisible(true);
   };
 
   const handleSwitchToTeacher = async () => {
@@ -131,30 +125,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
             </View>
 
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {/* SECTION: YÖNETİCİ / ADMİN İŞLEMLERİ */}
-              {/* SECTION: İDARECİ / ADMİN GEÇİŞİ */}
-              <View style={styles.menuSection}>
-                <Text style={styles.sectionTitle}>👑 İDARECİ / OKUL ADMİNİ MİSİNİZ?</Text>
-                <TouchableOpacity
-                  style={styles.adminSwitchCard}
-                  onPress={async () => {
-                    onClose();
-                    await onRoleChanged('admin');
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.adminSwitchIconWrap}>
-                    <Ionicons name="shield-checkmark" size={20} color="#D97706" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.adminSwitchTitle}>Okul Admin Paneline Geç</Text>
-                    <Text style={styles.adminSwitchSub}>
-                      AI çarşaf ders programı, okul kodu, öğretmen onayları ve idari ayarlar
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color="#D97706" />
-                </TouchableOpacity>
-              </View>
+              {/* SECTION: ÖĞRETMEN MENÜSÜ */}
 
               {/* SECTION: ÖĞRETMEN İŞLEMLERİ */}
               <View style={styles.menuSection}>
@@ -310,14 +281,6 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
           </View>
         </View>
       </Modal>
-
-      {/* Admin Modalı */}
-      <SchoolAdminModal
-        visible={adminModalVisible}
-        onClose={() => setAdminModalVisible(false)}
-        activeSchool={activeSchool}
-        onSchoolUpdated={onSchoolUpdated}
-      />
 
       {/* Öğretmen Modalı */}
       <TeacherSchoolModal

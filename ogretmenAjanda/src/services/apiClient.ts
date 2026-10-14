@@ -17,6 +17,8 @@ export interface AffiliatedSchool {
   code: string;
   address?: string;
   phone?: string;
+  geminiApiKey?: string;
+  geminiModel?: string;
 }
 
 export interface UserSession {
@@ -30,6 +32,7 @@ export interface UserSession {
   customerId?: string;
   relationId?: string;
   geminiApiKey?: string;
+  geminiModel?: string;
   licenseExpiresAt?: string;
   affiliatedSchools?: AffiliatedSchool[];
 }

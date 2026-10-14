@@ -1,4 +1,5 @@
 import { getDB } from '../db';
+import { setGeminiApiKey, setGeminiModel } from '../../utils/geminiScheduleService';
 
 export interface School {
   id: number;
@@ -154,7 +155,7 @@ export const deleteSchool = async (id: number): Promise<void> => {
  * sunucudan gelen (aynı admine bağlı tüm) okulları yerel SQLite veritabanına senkronize eder.
  */
 export const syncAffiliatedSchools = async (
-  affiliatedSchools: Array<{ name: string; code: string }>,
+  affiliatedSchools: Array<{ name: string; code: string; geminiApiKey?: string; geminiModel?: string }>,
   primaryCode?: string
 ): Promise<School | null> => {
   if (!affiliatedSchools || affiliatedSchools.length === 0) return null;
@@ -190,6 +191,18 @@ export const syncAffiliatedSchools = async (
         cleanCode
       );
     }
+  }
+
+  // Okulun Gemini API Key ve Modelini SQLite'a kaydet (böylece tüm öğretmenler ortak anahtarı kullanır)
+  const targetItem = affiliatedSchools.find(
+    s => primaryCode && s.code?.trim().toUpperCase() === primaryCode.trim().toUpperCase()
+  ) || affiliatedSchools[0];
+
+  if (targetItem?.geminiApiKey) {
+    await setGeminiApiKey(targetItem.geminiApiKey);
+  }
+  if (targetItem?.geminiModel) {
+    await setGeminiModel(targetItem.geminiModel);
   }
 
   // Şimdi hedef okulu (primaryCode) aktif yap

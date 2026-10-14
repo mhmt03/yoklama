@@ -42,6 +42,9 @@ namespace OgretmenAjanda.Api.Models
         [MaxLength(200)]
         public string? GeminiApiKey { get; set; } // Okulun kurumsal ortak Gemini API Anahtarı
 
+        [MaxLength(100)]
+        public string? GeminiModel { get; set; } // Okulun kurumsal seçili AI modeli (örn: gemini-2.5-flash)
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LicenseExpiresAt { get; set; } // Okul lisansı son kullanma tarihi
         public bool IsActive { get; set; } = true;

@@ -17,6 +17,7 @@ import { Colors } from '../theme/colors';
 import { UserRole, setActiveUserRole, setActiveTeacherName } from '../utils/roleService';
 import { getActiveSchool, syncAffiliatedSchools } from '../database/operations/schoolOperations';
 import { apiRequest, saveAuthToken } from '../services/apiClient';
+import { DEFAULT_GEMINI_API_KEY, setGeminiApiKey, setGeminiModel } from '../utils/geminiScheduleService';
 
 interface RoleSelectScreenProps {
   onRoleSelected: (role: UserRole) => void;
@@ -123,10 +124,12 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           // KURUMSAL OKULLARI YEREL VERİTABANINA SENKRONİZE ET VE AKTİF OKULU BELİRLE:
           const affSchools = res.data.affiliatedSchools && res.data.affiliatedSchools.length > 0
             ? res.data.affiliatedSchools
-            : (res.data.schoolName ? [{ name: res.data.schoolName, code: schoolCodeClean }] : []);
+            : (res.data.schoolName ? [{ name: res.data.schoolName, code: schoolCodeClean, geminiApiKey: res.data.geminiApiKey }] : []);
           
           if (affSchools.length > 0) {
             await syncAffiliatedSchools(affSchools, schoolCodeClean);
+          } else if (res.data.geminiApiKey) {
+            await setGeminiApiKey(res.data.geminiApiKey);
           }
 
           setShowTeacherLoginModal(false);
@@ -135,10 +138,12 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           // Çevrimdışı test fallback: mehmetogretmen / 1234
           if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
             const defaultSchools = [
-              { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001' },
-              { name: 'Cumhuriyet Fen Lisesi', code: 'OKL-10002' },
+              { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: 'gemini-2.5-flash' },
+              { name: 'Cumhuriyet Fen Lisesi', code: 'OKL-10002', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: 'gemini-2.5-flash' },
             ];
             await syncAffiliatedSchools(defaultSchools, schoolCodeClean || 'OKL-10001');
+            await setGeminiApiKey(DEFAULT_GEMINI_API_KEY);
+            await setGeminiModel('gemini-2.5-flash');
             await saveAuthToken('offline_token', {
               userId: 'offline-teacher',
               username: 'mehmetogretmen',
@@ -146,7 +151,9 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               role: 'TEACHER',
               schoolCode: schoolCodeClean || 'OKL-10001',
               schoolName: schoolCodeClean === 'OKL-10002' ? 'Cumhuriyet Fen Lisesi' : 'Atatürk Anadolu Lisesi',
-              affiliatedSchools: defaultSchools.map(s => ({ id: s.code, name: s.name, code: s.code })),
+              geminiApiKey: DEFAULT_GEMINI_API_KEY,
+              geminiModel: 'gemini-2.5-flash',
+              affiliatedSchools: defaultSchools.map(s => ({ id: s.code, name: s.name, code: s.code, geminiApiKey: s.geminiApiKey, geminiModel: s.geminiModel })),
             });
             await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
             await setActiveUserRole('teacher');

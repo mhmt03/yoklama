@@ -40,6 +40,7 @@ namespace OgretmenAjanda.Api.Controllers
                     s.Address,
                     s.Phone,
                     s.GeminiApiKey,
+                    s.GeminiModel,
                     s.LicenseExpiresAt,
                     s.IsActive,
                     TeacherCount = _context.Users.Count(u => u.SchoolId == s.Id && u.Role == UserRoles.Teacher),
@@ -81,6 +82,8 @@ namespace OgretmenAjanda.Api.Controllers
                     s.Code,
                     s.Address,
                     s.Phone,
+                    s.GeminiApiKey,
+                    s.GeminiModel,
                     IsPrimary = s.Id == primarySchool.Id
                 })
                 .ToListAsync();
@@ -304,16 +307,35 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(school);
         }
 
-        // Okul Ortak Gemini API Key Güncelleme
+        // Okul Ortak Gemini API Key ve Model Güncelleme
         [HttpPut("{schoolId}/gemini-key")]
         public async Task<IActionResult> UpdateGeminiApiKey(Guid schoolId, [FromBody] UpdateKeyRequest request)
         {
             var school = await _context.Schools.FindAsync(schoolId);
             if (school == null) return NotFound();
 
-            school.GeminiApiKey = request.ApiKey;
+            school.GeminiApiKey = request.ApiKey?.Trim();
+            if (!string.IsNullOrEmpty(request.Model))
+            {
+                school.GeminiModel = request.Model.Trim();
+            }
             await _context.SaveChangesAsync();
-            return Ok(new { message = "Okul ortak AI API anahtarı güncellendi." });
+            return Ok(new { message = "Okul ortak AI API anahtarı ve model tercihi güncellendi.", apiKey = school.GeminiApiKey, model = school.GeminiModel });
+        }
+
+        // Okul Ortak Gemini Yapılandırmasını Çek
+        [AllowAnonymous]
+        [HttpGet("{schoolId}/ai-config")]
+        public async Task<IActionResult> GetSchoolAiConfig(Guid schoolId)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            return Ok(new
+            {
+                apiKey = school.GeminiApiKey,
+                model = school.GeminiModel
+            });
         }
 
         // Öğretmen Silme (Admin yetkisi)
@@ -536,6 +558,7 @@ namespace OgretmenAjanda.Api.Controllers
     public class UpdateKeyRequest
     {
         public string? ApiKey { get; set; }
+        public string? Model { get; set; }
     }
 
     public class CreateTeacherRequest
