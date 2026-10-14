@@ -43,7 +43,9 @@ import {
   getDefaultSchoolId,
   setDefaultSchoolId,
   setActiveSchool,
+  getActiveSchool,
 } from '../database/operations/schoolOperations';
+import { getActiveUserSession, apiRequest, UserSession } from '../services/apiClient';
 import { useSchoolTheme } from '../context/SchoolThemeContext';
 import {
   getGeminiApiKey,
@@ -106,6 +108,11 @@ export const OperationsScreen: React.FC = () => {
   const [schools, setSchools] = useState<School[]>([]);
   const [defaultSchoolId, setDefaultSchoolIdState] = useState<number | null>(null);
 
+  // Okul & Oturum bilgisi (Sadece okula bağlı giriş yapıldığında okuldan API çekme butonu görünür)
+  const [activeSchool, setActiveSchoolState] = useState<School | null>(null);
+  const [userSession, setUserSession] = useState<UserSession | null>(null);
+  const [fetchingSchoolAiKey, setFetchingSchoolAiKey] = useState(false);
+
   // Gemini AI Settings State
   const [geminiApiKey, setGeminiApiKeyState] = useState('');
   const [geminiKeyInput, setGeminiKeyInput] = useState('');
@@ -120,7 +127,7 @@ export const OperationsScreen: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [dbStats, notes, schoolList, defId, gemKey, curModel, usage] = await Promise.all([
+      const [dbStats, notes, schoolList, defId, gemKey, curModel, usage, actSchool, session] = await Promise.all([
         getDatabaseStats(),
         getQuickNotes(),
         getSchools(),
@@ -128,6 +135,8 @@ export const OperationsScreen: React.FC = () => {
         getGeminiApiKey(),
         getGeminiModel(),
         getGeminiUsageStats(),
+        getActiveSchool(),
+        getActiveUserSession(),
       ]);
       setStats(dbStats);
       setQuickNotes(notes);
@@ -137,8 +146,72 @@ export const OperationsScreen: React.FC = () => {
       setGeminiKeyInput(gemKey);
       setGeminiModelState(curModel || DEFAULT_GEMINI_MODEL);
       setUsageStats(usage);
+      setActiveSchoolState(actSchool);
+      setUserSession(session);
     } catch (e) {
       console.error('Error loading operations data:', e);
+    }
+  };
+
+  // Okuldan ortak API anahtarını çekme işlemi
+  const handleFetchSchoolAiKey = async () => {
+    const code = (activeSchool?.code || userSession?.schoolCode || '').trim();
+    const schoolName = activeSchool?.name || userSession?.schoolName || 'Okulunuz';
+
+    if (!code) {
+      Alert.alert('Bilgi', 'Bağlı olduğunuz bir okul kodu bulunamadı.');
+      return;
+    }
+
+    try {
+      setFetchingSchoolAiKey(true);
+      const res = await apiRequest<{
+        schoolId: string;
+        schoolName: string;
+        schoolCode: string;
+        apiKey: string;
+        model: string;
+      }>(`api/schools/ai-config-by-code/${encodeURIComponent(code)}`, 'GET');
+      setFetchingSchoolAiKey(false);
+
+      if (!res.success || !res.data) {
+        Alert.alert('Hata', res.error || 'Okul yapay zeka ayarları sunucudan alınamadı.');
+        return;
+      }
+
+      const { apiKey, model, schoolName: respSchoolName } = res.data;
+      if (!apiKey || apiKey.trim().length === 0) {
+        Alert.alert(
+          'API Anahtarı Tanımlanmamış ⚠️',
+          `"${respSchoolName || schoolName}" yöneticisi henüz sistemde bir Google Gemini API anahtarı tanımlamamış.\n\nLütfen okul idareniz veya yöneticiniz ile iletişime geçiniz.`
+        );
+        return;
+      }
+
+      const trimmedKey = apiKey.trim();
+      const modelToUse = (model || DEFAULT_GEMINI_MODEL).trim();
+
+      // SQLite ve State kaydı
+      await Promise.all([
+        setGeminiApiKey(trimmedKey),
+        setGeminiModel(modelToUse),
+      ]);
+
+      setGeminiApiKeyState(trimmedKey);
+      setGeminiKeyInput(trimmedKey);
+      setGeminiModelState(modelToUse);
+
+      // Kullanım istatistiği güncelle
+      const updatedUsage = await getGeminiUsageStats();
+      setUsageStats(updatedUsage);
+
+      Alert.alert(
+        'Okul API Anahtarı Alındı ✅',
+        `"${respSchoolName || schoolName}" okul yöneticinizin tanımladığı Google Gemini API anahtarı ve seçili yapay zeka modeli (${modelToUse}) başarıyla yüklendi ve kaydedildi.\n\nArtık ders programı tarama ve yıllık plan hazırlama işlemlerinizi okul kotası üzerinden kullanabilirsiniz.`
+      );
+    } catch (err: any) {
+      setFetchingSchoolAiKey(false);
+      Alert.alert('Hata', err?.message || 'Okuldan API anahtarı çekilirken bir sorun oluştu.');
     }
   };
 
@@ -589,6 +662,46 @@ export const OperationsScreen: React.FC = () => {
               </Text>
             </View>
           </View>
+
+          {/* SADECE OKULA BAĞLI GİRİŞ YAPILDIĞINDA: Okuldan API Anahtarı Alma Paneli */}
+          {Boolean((activeSchool?.code || userSession?.schoolCode || '').trim()) && (
+            <View style={styles.schoolAiSyncCard}>
+              <View style={styles.schoolAiSyncHeader}>
+                <View style={styles.schoolAiSyncBadge}>
+                  <Ionicons name="business" size={16} color="#0D9488" />
+                  <Text style={styles.schoolAiSyncBadgeText}>Kurumsal Okul Bağlantısı</Text>
+                </View>
+                <View style={styles.schoolAiCodePill}>
+                  <Text style={styles.schoolAiCodePillText}>
+                    Kod: {(activeSchool?.code || userSession?.schoolCode || '').trim().toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={styles.schoolAiSyncTitle}>
+                {activeSchool?.name || userSession?.schoolName || 'Okul'} Yönetim API Anahtarı
+              </Text>
+              <Text style={styles.schoolAiSyncDesc}>
+                Okul yöneticinizin (Admin) panelinde tanımladığı ortak Google Gemini API kodunu ve modelini tek tuşla telefonunuza çekebilirsiniz.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.schoolAiSyncBtn}
+                onPress={handleFetchSchoolAiKey}
+                disabled={fetchingSchoolAiKey}
+                activeOpacity={0.8}
+              >
+                {fetchingSchoolAiKey ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="cloud-download-outline" size={18} color="#FFF" />
+                    <Text style={styles.schoolAiSyncBtnText}>API Anahtarını Okuldan Al</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* API Key Input Row */}
           <View style={styles.aiInputWrap}>
@@ -2219,5 +2332,76 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: '600',
     color: Colors.textSecondary,
+  },
+  // Okul AI Senkronizasyon Kartı Stilleri
+  schoolAiSyncCard: {
+    backgroundColor: '#F0FDFA',
+    borderWidth: 1.5,
+    borderColor: '#99F6E4',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+  },
+  schoolAiSyncHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  schoolAiSyncBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#CCFBF1',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  schoolAiSyncBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0F766E',
+  },
+  schoolAiCodePill: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#99F6E4',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  schoolAiCodePillText: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    color: '#0D9488',
+    letterSpacing: 0.5,
+  },
+  schoolAiSyncTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#134E4A',
+    marginBottom: 4,
+  },
+  schoolAiSyncDesc: {
+    fontSize: 12,
+    color: '#115E59',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  schoolAiSyncBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#0D9488',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    ...Shadows.small,
+  },
+  schoolAiSyncBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

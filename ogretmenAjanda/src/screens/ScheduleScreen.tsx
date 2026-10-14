@@ -51,6 +51,7 @@ import { DaySlotInfo, ScheduleItem, CourseName, ClassItem } from '../types';
 import { pickSchedulePhoto, cropAndRotateSchedulePhoto } from '../utils/photoService';
 
 import { getActiveSchool, School } from '../database/operations/schoolOperations';
+import { apiRequest } from '../services/apiClient';
 
 import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
 import { useDrawer } from '../context/DrawerContext';
@@ -95,6 +96,7 @@ export const ScheduleScreen: React.FC = () => {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [selectedGeminiModel, setSelectedGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
   const [testingApiKey, setTestingApiKey] = useState(false);
+  const [fetchingSchoolKey, setFetchingSchoolKey] = useState(false);
   const [aiPreviewModalVisible, setAiPreviewModalVisible] = useState(false);
   const [analyzedLessons, setAnalyzedLessons] = useState<AnalyzedLessonItem[]>([]);
   const [applyingSchedule, setApplyingSchedule] = useState(false);
@@ -366,6 +368,59 @@ export const ScheduleScreen: React.FC = () => {
     } catch (err: any) {
       setApplyingSchedule(false);
       Alert.alert('Hata', 'Program kaydedilirken bir hata oluştu: ' + (err?.message || err));
+    }
+  };
+
+  const handleFetchSchoolAiKeyInSchedule = async () => {
+    const code = (activeSchool?.code || '').trim();
+    if (!code) {
+      Alert.alert('Bilgi', 'Bağlı olduğunuz bir okul kodu bulunamadı.');
+      return;
+    }
+
+    try {
+      setFetchingSchoolKey(true);
+      const res = await apiRequest<{
+        schoolId: string;
+        schoolName: string;
+        schoolCode: string;
+        apiKey: string;
+        model: string;
+      }>(`api/schools/ai-config-by-code/${encodeURIComponent(code)}`, 'GET');
+      setFetchingSchoolKey(false);
+
+      if (!res.success || !res.data) {
+        Alert.alert('Hata', res.error || 'Okul yapay zeka ayarları sunucudan alınamadı.');
+        return;
+      }
+
+      const { apiKey, model, schoolName } = res.data;
+      if (!apiKey || apiKey.trim().length === 0) {
+        Alert.alert(
+          'API Anahtarı Tanımlanmamış ⚠️',
+          `"${schoolName || activeSchool?.name || 'Okulunuz'}" yöneticisi henüz sistemde bir Google Gemini API anahtarı tanımlamamış.\n\nLütfen okul idareniz ile iletişime geçiniz.`
+        );
+        return;
+      }
+
+      const trimmedKey = apiKey.trim();
+      const modelToUse = (model || DEFAULT_GEMINI_MODEL).trim();
+
+      await Promise.all([
+        setGeminiApiKey(trimmedKey),
+        setGeminiModel(modelToUse),
+      ]);
+
+      setApiKeyInput(trimmedKey);
+      setSelectedGeminiModel(modelToUse);
+
+      Alert.alert(
+        'Okul API Anahtarı Alındı ✅',
+        `"${schoolName || activeSchool?.name}" okul yöneticinizin tanımladığı Google Gemini API anahtarı ve yapay zeka modeli (${modelToUse}) başarıyla cihaza aktarıldı ve kaydedildi.`
+      );
+    } catch (err: any) {
+      setFetchingSchoolKey(false);
+      Alert.alert('Hata', err?.message || 'Okuldan API anahtarı çekilirken bir sorun oluştu.');
     }
   };
 
@@ -1712,6 +1767,41 @@ export const ScheduleScreen: React.FC = () => {
                 </Text>
               </View>
             </View>
+
+            {/* Sadece Okula Bağlı Giriş Yapılmışsa: Okuldan API Anahtarını Çekme Butonu */}
+            {Boolean((activeSchool?.code || '').trim()) && (
+              <View style={styles.schoolApiKeyModalBox}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="business" size={16} color="#0D9488" />
+                    <Text style={styles.schoolApiKeyModalTitle}>
+                      {activeSchool?.name || 'Okul'} Yönetim API Anahtarı
+                    </Text>
+                  </View>
+                  <View style={styles.schoolApiKeyModalPill}>
+                    <Text style={styles.schoolApiKeyModalPillText}>{activeSchool?.code}</Text>
+                  </View>
+                </View>
+                <Text style={styles.schoolApiKeyModalSub}>
+                  Okul admininin sisteme yüklediği ortak Gemini API anahtarını doğrudan çekebilirsiniz.
+                </Text>
+                <TouchableOpacity
+                  style={styles.schoolApiKeyModalBtn}
+                  onPress={handleFetchSchoolAiKeyInSchedule}
+                  disabled={fetchingSchoolKey}
+                  activeOpacity={0.8}
+                >
+                  {fetchingSchoolKey ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="cloud-download-outline" size={16} color="#FFF" />
+                      <Text style={styles.schoolApiKeyModalBtnText}>API Anahtarını Okuldan Al</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
 
             <View style={{ marginVertical: 10 }}>
               <Text style={styles.inputLabel}>Gemini API Key (AIzaSy...):</Text>
@@ -3224,5 +3314,53 @@ const styles = StyleSheet.create({
   },
   hamburgerBtn: {
     padding: 4,
+  },
+  // Modal içi Okuldan API Çekme Stilleri
+  schoolApiKeyModalBox: {
+    backgroundColor: '#F0FDFA',
+    borderWidth: 1.5,
+    borderColor: '#99F6E4',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 10,
+  },
+  schoolApiKeyModalTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#134E4A',
+  },
+  schoolApiKeyModalPill: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#99F6E4',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  schoolApiKeyModalPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0D9488',
+  },
+  schoolApiKeyModalSub: {
+    fontSize: 11.5,
+    color: '#115E59',
+    lineHeight: 16,
+    marginBottom: 10,
+  },
+  schoolApiKeyModalBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#0D9488',
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+  },
+  schoolApiKeyModalBtnText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });

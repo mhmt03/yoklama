@@ -333,6 +333,28 @@ namespace OgretmenAjanda.Api.Controllers
 
             return Ok(new
             {
+                schoolId = school.Id,
+                schoolName = school.Name,
+                schoolCode = school.Code,
+                apiKey = school.GeminiApiKey,
+                model = school.GeminiModel
+            });
+        }
+
+        // Okul Koduna Göre Ortak Gemini Yapılandırmasını Çek (Öğretmen Cihazı İçin)
+        [AllowAnonymous]
+        [HttpGet("ai-config-by-code/{code}")]
+        public async Task<IActionResult> GetSchoolAiConfigByCode(string code)
+        {
+            var cleanCode = code.Trim().ToUpper();
+            var school = await _context.Schools.FirstOrDefaultAsync(s => s.Code.ToUpper() == cleanCode && s.IsActive);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            return Ok(new
+            {
+                schoolId = school.Id,
+                schoolName = school.Name,
+                schoolCode = school.Code,
                 apiKey = school.GeminiApiKey,
                 model = school.GeminiModel
             });
