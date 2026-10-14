@@ -1345,6 +1345,25 @@ export const HomeScreen: React.FC = () => {
 
             {/* 4. AKSİYON BUTONLARI */}
             <View style={styles.cardActionsRow}>
+              {/* Canlı Ders Kokpiti */}
+              <TouchableOpacity
+                style={[styles.cardActionBtn, { backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE' }]}
+                onPress={() => {
+                  if (effectiveHeroLesson?.class_id) {
+                    navigation.navigate('ClassCockpit', {
+                      classId: effectiveHeroLesson.class_id,
+                      className: effectiveHeroLesson.class_name,
+                      lessonName: effectiveHeroLesson.course_name || 'Ders',
+                    });
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="game-controller" size={15} color="#4F46E5" />
+                <Text style={[styles.cardActionText, { color: '#4F46E5' }]}>Canlı Kokpit</Text>
+              </TouchableOpacity>
+
+              {/* Öğrenci Listesi */}
               <TouchableOpacity
                 style={styles.cardActionBtn}
                 onPress={() => {
@@ -1355,11 +1374,13 @@ export const HomeScreen: React.FC = () => {
                     });
                   }
                 }}
+                activeOpacity={0.7}
               >
-                <Ionicons name="people-outline" size={16} color={Colors.primary} />
+                <Ionicons name="people-outline" size={15} color={Colors.primary} />
                 <Text style={styles.cardActionText}>Öğrenci Listesi</Text>
               </TouchableOpacity>
 
+              {/* Görüş Ekle */}
               <TouchableOpacity
                 style={[styles.cardActionBtn, { backgroundColor: Colors.warningLight }]}
                 onPress={() => {
@@ -1367,8 +1388,9 @@ export const HomeScreen: React.FC = () => {
                     initialClassId: effectiveHeroLesson?.class_id,
                   });
                 }}
+                activeOpacity={0.7}
               >
-                <Ionicons name="create-outline" size={16} color={Colors.warningDark} />
+                <Ionicons name="create-outline" size={15} color={Colors.warningDark} />
                 <Text style={[styles.cardActionText, { color: Colors.warningDark }]}>
                   Görüş Ekle
                 </Text>
@@ -3299,7 +3321,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   cardActionText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
     color: Colors.primary,
   },
