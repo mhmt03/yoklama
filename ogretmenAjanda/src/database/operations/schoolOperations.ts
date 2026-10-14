@@ -148,3 +148,62 @@ export const deleteSchool = async (id: number): Promise<void> => {
     }
   }
 };
+
+/**
+ * Kurumsal öğretmen veya admin girişi yapıldığında,
+ * sunucudan gelen (aynı admine bağlı tüm) okulları yerel SQLite veritabanına senkronize eder.
+ */
+export const syncAffiliatedSchools = async (
+  affiliatedSchools: Array<{ name: string; code: string }>,
+  primaryCode?: string
+): Promise<School | null> => {
+  if (!affiliatedSchools || affiliatedSchools.length === 0) return null;
+
+  const db = await getDB();
+  const currentSchools = await db.getAllAsync<School>('SELECT * FROM schools');
+
+  let activeSet = false;
+
+  for (let i = 0; i < affiliatedSchools.length; i++) {
+    const item = affiliatedSchools[i];
+    const cleanCode = item.code?.trim().toUpperCase();
+    const cleanName = item.name?.trim();
+    const isTarget = primaryCode && cleanCode === primaryCode.trim().toUpperCase();
+
+    const existing = currentSchools.find(
+      s => (s.code && s.code.trim().toUpperCase() === cleanCode) || s.name.trim().toLowerCase() === cleanName.toLowerCase()
+    );
+
+    if (existing) {
+      await db.runAsync(
+        'UPDATE schools SET name = ?, code = ? WHERE id = ?',
+        cleanName,
+        cleanCode,
+        existing.id
+      );
+    } else {
+      const color = SCHOOL_COLORS[i % SCHOOL_COLORS.length].color;
+      await db.runAsync(
+        'INSERT INTO schools (name, color, code, is_active) VALUES (?, ?, ?, 0)',
+        cleanName,
+        color,
+        cleanCode
+      );
+    }
+  }
+
+  // Şimdi hedef okulu (primaryCode) aktif yap
+  if (primaryCode) {
+    const targetSchool = await db.getFirstAsync<School>(
+      'SELECT * FROM schools WHERE UPPER(code) = ? LIMIT 1',
+      primaryCode.trim().toUpperCase()
+    );
+    if (targetSchool) {
+      await db.runAsync('UPDATE schools SET is_active = 0');
+      await db.runAsync('UPDATE schools SET is_active = 1 WHERE id = ?', targetSchool.id);
+      return { ...targetSchool, is_active: 1 };
+    }
+  }
+
+  return await getActiveSchool();
+};

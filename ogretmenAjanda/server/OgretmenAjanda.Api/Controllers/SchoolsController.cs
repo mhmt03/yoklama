@@ -50,6 +50,44 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(schools);
         }
 
+        // Okul koduna göre aynı adminin/kurumun yönettiği tüm okulları listele
+        [AllowAnonymous]
+        [HttpGet("affiliated-by-code/{code}")]
+        public async Task<IActionResult> GetAffiliatedByCode(string code)
+        {
+            var cleanCode = code.Trim().ToUpper();
+            var primarySchool = await _context.Schools
+                .FirstOrDefaultAsync(s => s.Code.ToUpper() == cleanCode && s.IsActive);
+
+            if (primarySchool == null)
+            {
+                return NotFound(new { message = "Okul kodu bulunamadı." });
+            }
+
+            var adminUserId = primarySchool.AdminUserId;
+            var customerId = primarySchool.CustomerId;
+            var relationId = primarySchool.RelationId;
+
+            var allSchools = await _context.Schools
+                .Where(s => s.IsActive && (
+                    s.AdminUserId == adminUserId ||
+                    (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
+                    (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId)
+                ))
+                .Select(s => new
+                {
+                    s.Id,
+                    s.Name,
+                    s.Code,
+                    s.Address,
+                    s.Phone,
+                    IsPrimary = s.Id == primarySchool.Id
+                })
+                .ToListAsync();
+
+            return Ok(allSchools);
+        }
+
         // Yeni Okul Ekle (En fazla 3 okul kuralı)
         [HttpPost]
         public async Task<IActionResult> CreateSchool([FromBody] CreateSchoolRequest request)

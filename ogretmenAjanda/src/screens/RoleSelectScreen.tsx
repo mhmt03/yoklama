@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { UserRole, setActiveUserRole, setActiveTeacherName } from '../utils/roleService';
-import { getActiveSchool } from '../database/operations/schoolOperations';
+import { getActiveSchool, syncAffiliatedSchools } from '../database/operations/schoolOperations';
 import { apiRequest, saveAuthToken } from '../services/apiClient';
 
 interface RoleSelectScreenProps {
@@ -119,11 +119,35 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           const displayName = res.data.fullName || teacherUsername.trim();
           await setActiveTeacherName(displayName);
           await setActiveUserRole('teacher');
+
+          // KURUMSAL OKULLARI YEREL VERİTABANINA SENKRONİZE ET VE AKTİF OKULU BELİRLE:
+          const affSchools = res.data.affiliatedSchools && res.data.affiliatedSchools.length > 0
+            ? res.data.affiliatedSchools
+            : (res.data.schoolName ? [{ name: res.data.schoolName, code: schoolCodeClean }] : []);
+          
+          if (affSchools.length > 0) {
+            await syncAffiliatedSchools(affSchools, schoolCodeClean);
+          }
+
           setShowTeacherLoginModal(false);
           onRoleSelected('teacher');
         } else {
           // Çevrimdışı test fallback: mehmetogretmen / 1234
           if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
+            const defaultSchools = [
+              { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001' },
+              { name: 'Cumhuriyet Fen Lisesi', code: 'OKL-10002' },
+            ];
+            await syncAffiliatedSchools(defaultSchools, schoolCodeClean || 'OKL-10001');
+            await saveAuthToken('offline_token', {
+              userId: 'offline-teacher',
+              username: 'mehmetogretmen',
+              fullName: 'Mehmet Öğretmen (Fizik)',
+              role: 'TEACHER',
+              schoolCode: schoolCodeClean || 'OKL-10001',
+              schoolName: schoolCodeClean === 'OKL-10002' ? 'Cumhuriyet Fen Lisesi' : 'Atatürk Anadolu Lisesi',
+              affiliatedSchools: defaultSchools.map(s => ({ id: s.code, name: s.name, code: s.code })),
+            });
             await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
             await setActiveUserRole('teacher');
             setShowTeacherLoginModal(false);

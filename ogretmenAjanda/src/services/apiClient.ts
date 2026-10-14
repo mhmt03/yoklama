@@ -11,6 +11,14 @@ const TOKEN_KEY = '@ogretmen_ajanda_jwt_token';
 const USER_KEY = '@ogretmen_ajanda_active_user';
 const API_URL_KEY = '@ogretmen_ajanda_api_url';
 
+export interface AffiliatedSchool {
+  id: string;
+  name: string;
+  code: string;
+  address?: string;
+  phone?: string;
+}
+
 export interface UserSession {
   userId: string;
   username: string;
@@ -23,6 +31,7 @@ export interface UserSession {
   relationId?: string;
   geminiApiKey?: string;
   licenseExpiresAt?: string;
+  affiliatedSchools?: AffiliatedSchool[];
 }
 
 export async function getBaseApiUrl(): Promise<string> {

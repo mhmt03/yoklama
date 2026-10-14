@@ -48,6 +48,16 @@ namespace OgretmenAjanda.Api.DTOs
         public string? RelationId { get; set; } // İlişki ID
         public string? GeminiApiKey { get; set; }
         public DateTime? LicenseExpiresAt { get; set; }
+        public List<SchoolDto> AffiliatedSchools { get; set; } = new();
+    }
+
+    public class SchoolDto
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Code { get; set; } = string.Empty;
+        public string? Address { get; set; }
+        public string? Phone { get; set; }
     }
 
     public class CustomerResponse

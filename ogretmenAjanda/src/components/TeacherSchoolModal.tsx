@@ -56,6 +56,9 @@ export const TeacherSchoolModal: React.FC<TeacherSchoolModalProps> = ({
 
   useEffect(() => {
     if (visible) {
+      if (activeSchool?.code) {
+        setActiveTab('selectClasses');
+      }
       loadInitialData();
     }
   }, [visible, activeSchool]);
@@ -193,36 +196,38 @@ export const TeacherSchoolModal: React.FC<TeacherSchoolModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* Tab Selector */}
-          <View style={styles.tabsRow}>
-            <TouchableOpacity
-              style={[styles.tabBtn, activeTab === 'join' && styles.tabBtnActive]}
-              onPress={() => setActiveTab('join')}
-            >
-              <Ionicons
-                name="key-outline"
-                size={15}
-                color={activeTab === 'join' ? Colors.primary : Colors.textSecondary}
-              />
-              <Text style={[styles.tabText, activeTab === 'join' && styles.tabTextActive]}>
-                Okul Koduna Bağlan
-              </Text>
-            </TouchableOpacity>
+          {/* Tab Selector - Okula zaten bağlıysa kod arama sekmesini gösterme */}
+          {!activeSchool?.code && (
+            <View style={styles.tabsRow}>
+              <TouchableOpacity
+                style={[styles.tabBtn, activeTab === 'join' && styles.tabBtnActive]}
+                onPress={() => setActiveTab('join')}
+              >
+                <Ionicons
+                  name="key-outline"
+                  size={15}
+                  color={activeTab === 'join' ? Colors.primary : Colors.textSecondary}
+                />
+                <Text style={[styles.tabText, activeTab === 'join' && styles.tabTextActive]}>
+                  Okul Koduna Bağlan
+                </Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.tabBtn, activeTab === 'selectClasses' && styles.tabBtnActive]}
-              onPress={() => setActiveTab('selectClasses')}
-            >
-              <Ionicons
-                name="checkbox-outline"
-                size={15}
-                color={activeTab === 'selectClasses' ? Colors.primary : Colors.textSecondary}
-              />
-              <Text style={[styles.tabText, activeTab === 'selectClasses' && styles.tabTextActive]}>
-                Girdiğim Sınıfları Seç
-              </Text>
-            </TouchableOpacity>
-          </View>
+              <TouchableOpacity
+                style={[styles.tabBtn, activeTab === 'selectClasses' && styles.tabBtnActive]}
+                onPress={() => setActiveTab('selectClasses')}
+              >
+                <Ionicons
+                  name="checkbox-outline"
+                  size={15}
+                  color={activeTab === 'selectClasses' ? Colors.primary : Colors.textSecondary}
+                />
+                <Text style={[styles.tabText, activeTab === 'selectClasses' && styles.tabTextActive]}>
+                  Girdiğim Sınıfları Seç
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* TAB 1: OKUL KODUNA BAĞLAN */}
           {activeTab === 'join' && (

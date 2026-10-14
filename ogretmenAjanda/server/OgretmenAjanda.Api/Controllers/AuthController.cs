@@ -92,6 +92,28 @@ namespace OgretmenAjanda.Api.Controllers
 
             var token = _tokenService.GenerateToken(user, school?.Code);
 
+            // Bağlı olduğu admin/kuruma ait tüm okulları bul (Admin birden fazla okul yönetiyorsa hepsi döner)
+            var adminUserId = school?.AdminUserId ?? (user.Role == UserRoles.SchoolAdmin ? user.Id : (Guid?)null);
+            var customerId = user.CustomerId ?? school?.CustomerId;
+            var relationId = user.RelationId ?? school?.RelationId;
+
+            var affiliatedSchools = await _context.Schools
+                .Where(s => s.IsActive && (
+                    (adminUserId.HasValue && s.AdminUserId == adminUserId.Value) ||
+                    (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
+                    (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId) ||
+                    (school != null && s.Id == school.Id)
+                ))
+                .Select(s => new SchoolDto
+                {
+                    Id = s.Id,
+                    Name = s.Name,
+                    Code = s.Code,
+                    Address = s.Address,
+                    Phone = s.Phone
+                })
+                .ToListAsync();
+
             return Ok(new LoginResponse
             {
                 Token = token,
@@ -105,7 +127,8 @@ namespace OgretmenAjanda.Api.Controllers
                 CustomerId = user.CustomerId ?? school?.CustomerId,
                 RelationId = user.RelationId ?? school?.RelationId,
                 GeminiApiKey = school?.GeminiApiKey,
-                LicenseExpiresAt = user.LicenseExpiresAt ?? school?.LicenseExpiresAt
+                LicenseExpiresAt = user.LicenseExpiresAt ?? school?.LicenseExpiresAt,
+                AffiliatedSchools = affiliatedSchools
             });
         }
 
