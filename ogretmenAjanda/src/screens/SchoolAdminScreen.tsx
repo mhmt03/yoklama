@@ -19,8 +19,9 @@ import { Colors } from '../theme/colors';
 import { apiRequest } from '../services/apiClient';
 import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult } from '../services/aiScheduleParser';
 import { getActiveSchool, updateSchool } from '../database/operations/schoolOperations';
+import { setActiveUserRole } from '../utils/roleService';
 
-export function SchoolAdminScreen({ navigation }: any) {
+export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [schools, setSchools] = useState<any[]>([]);
   const [selectedSchool, setSelectedSchool] = useState<any>(null);
   const [teachers, setTeachers] = useState<any[]>([]);
@@ -185,12 +186,33 @@ export function SchoolAdminScreen({ navigation }: any) {
     }
   };
 
+  const handleSwitchToTeacher = async () => {
+    if (onRoleChange) {
+      await onRoleChange('teacher');
+    } else if (navigation?.switchToTeacher) {
+      await navigation.switchToTeacher();
+    } else {
+      await setActiveUserRole('teacher');
+      if (navigation?.goBack) navigation.goBack();
+    }
+  };
+
+  const handleGoBackOrLogout = async () => {
+    if (onRoleChange) {
+      await onRoleChange(null);
+    } else if (navigation?.goBack) {
+      await setActiveUserRole(null);
+      navigation.goBack();
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Üst Bar */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={Colors.text} />
+        <TouchableOpacity onPress={handleGoBackOrLogout} style={styles.backButton}>
+          <Ionicons name="swap-horizontal" size={18} color="#4F46E5" />
+          <Text style={styles.backButtonText}>Rol Değiştir</Text>
         </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>Okul Yönetim Paneli</Text>
@@ -212,6 +234,24 @@ export function SchoolAdminScreen({ navigation }: any) {
         <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={styles.addSchoolButton}>
           <Ionicons name="add" size={20} color="#fff" />
           <Text style={styles.addSchoolText}>Yeni</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Hızlı Öğretmen Moduna Geçiş Çubuğu (Ders Kokpiti) */}
+      <View style={styles.roleSwitchBanner}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.roleSwitchTitle}>👨‍🏫 Derse mi Gireceksiniz?</Text>
+          <Text style={styles.roleSwitchSub}>
+            Canlı ders kokpiti, yoklama ve ödevler için Öğretmen Moduna geçin
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.roleSwitchBtn}
+          onPress={handleSwitchToTeacher}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="log-in-outline" size={16} color="#fff" />
+          <Text style={styles.roleSwitchBtnText}>Öğretmen Moduna Geç</Text>
         </TouchableOpacity>
       </View>
 
@@ -438,10 +478,60 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
   },
-  backButton: { padding: 4 },
-  headerTitleContainer: { flex: 1, marginLeft: 12 },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: Colors.text },
-  headerSubtitle: { fontSize: 12, color: Colors.textMuted },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  backButtonText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+    marginLeft: 4,
+  },
+  headerTitleContainer: { flex: 1, marginLeft: 10 },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: Colors.text },
+  headerSubtitle: { fontSize: 11, color: Colors.textMuted },
+  roleSwitchBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#312E81',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  roleSwitchTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  roleSwitchSub: {
+    fontSize: 11,
+    color: '#C7D2FE',
+    marginTop: 2,
+  },
+  roleSwitchBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#818CF8',
+  },
+  roleSwitchBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 5,
+  },
   editSchoolBtn: {
     flexDirection: 'row',
     alignItems: 'center',

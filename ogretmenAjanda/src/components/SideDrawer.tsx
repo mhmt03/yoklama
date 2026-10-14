@@ -132,61 +132,27 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
 
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
               {/* SECTION: YÖNETİCİ / ADMİN İŞLEMLERİ */}
+              {/* SECTION: İDARECİ / ADMİN GEÇİŞİ */}
               <View style={styles.menuSection}>
-                <Text style={styles.sectionTitle}>👑 OKUL YÖNETİCİSİ (ADMİN)</Text>
-
+                <Text style={styles.sectionTitle}>👑 İDARECİ / OKUL ADMİNİ MİSİNİZ?</Text>
                 <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={() => navigateToScreen('SchoolAdmin')}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.menuIconWrap, { backgroundColor: '#EEF2FF' }]}>
-                    <Ionicons name="sparkles" size={18} color="#6366F1" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.menuItemTitle}>Okul Yönetimi (AI Çarşaf)</Text>
-                    <Text style={styles.menuItemSub}>Okul kodu, AI ders programı yükleme</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
-
-
-
-
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={() => {
+                  style={styles.adminSwitchCard}
+                  onPress={async () => {
                     onClose();
-                    setAdminModalVisible(true);
+                    await onRoleChanged('admin');
                   }}
-                  activeOpacity={0.7}
+                  activeOpacity={0.85}
                 >
-                  <View style={[styles.menuIconWrap, { backgroundColor: '#DCFCE7' }]}>
-                    <Ionicons name="people" size={18} color="#16A34A" />
+                  <View style={styles.adminSwitchIconWrap}>
+                    <Ionicons name="shield-checkmark" size={20} color="#D97706" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.menuItemTitle}>Öğretmen Yetkileri & Atamaları</Text>
-                    <Text style={styles.menuItemSub}>Sınıf atama onayları & yetkisizleri kısıtlama</Text>
+                    <Text style={styles.adminSwitchTitle}>Okul Admin Paneline Geç</Text>
+                    <Text style={styles.adminSwitchSub}>
+                      AI çarşaf ders programı, okul kodu, öğretmen onayları ve idari ayarlar
+                    </Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={() => {
-                    onClose();
-                    setAdminModalVisible(true);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.menuIconWrap, { backgroundColor: '#E0E7FF' }]}>
-                    <Ionicons name="library" size={18} color="#4F46E5" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.menuItemTitle}>Okul Dersleri Tanımlama</Text>
-                    <Text style={styles.menuItemSub}>Okutulan branş dersleri listesi</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                  <Ionicons name="chevron-forward" size={16} color="#D97706" />
                 </TouchableOpacity>
               </View>
 
@@ -475,6 +441,36 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     marginBottom: 8,
     paddingLeft: 4,
+  },
+  adminSwitchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#FEF3C7',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    marginBottom: 4,
+  },
+  adminSwitchIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adminSwitchTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+  adminSwitchSub: {
+    fontSize: 10.5,
+    color: '#B45309',
+    marginTop: 2,
+    lineHeight: 14,
   },
   menuItem: {
     flexDirection: 'row',

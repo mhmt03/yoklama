@@ -128,6 +128,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           Seçiminiz cihazınızda hatırlanacak ve doğrudan ilgili panel açılacaktır.
         </Text>
 
+        {/* Rol Ayrımı Bilgilendirme Kutusu */}
+        <View style={styles.roleTipCard}>
+          <Ionicons name="information-circle" size={22} color="#4F46E5" />
+          <Text style={styles.roleTipText}>
+            <Text style={{ fontWeight: '700', color: '#1E1B4B' }}>Rol Ayrımı: </Text>
+            Bir kişi hem Fizik Öğretmeni hem de Okul Admini olabilir. Bu oturumda hangi işi yapacaksanız o rolü seçin. Paneller arasında dilediğiniz an tek tıkla geçiş yapabilirsiniz.
+          </Text>
+        </View>
+
         {/* 1. ÖĞRETMEN KARTI */}
         <TouchableOpacity style={styles.roleCard} onPress={handleSelectTeacher} activeOpacity={0.85}>
           <View style={[styles.roleIconWrap, { backgroundColor: '#EEF2FF' }]}>
@@ -135,13 +144,13 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           </View>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.roleCardTitle}>Ben Öğretmenim</Text>
+              <Text style={styles.roleCardTitle}>Öğretmen (Branş / Sınıf)</Text>
               <View style={styles.popBadge}>
-                <Text style={styles.popBadgeText}>Ana Modül</Text>
+                <Text style={styles.popBadgeText}>Ders Modülü</Text>
               </View>
             </View>
             <Text style={styles.roleCardDesc}>
-              Canlı ders kokpiti, yoklama, ödev takibi, hazır ders programı ve öğrenci değerlendirme.
+              Fizik vb. branş dersleriniz, canlı ders kokpiti, yoklama, ödev kontrolü ve öğrenci 360° veli görüşmesi.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
@@ -153,9 +162,14 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Ionicons name="shield-checkmark" size={28} color="#D97706" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.roleCardTitle}>Okul Admini & İdare</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.roleCardTitle}>Okul Admini (İdareci)</Text>
+              <View style={[styles.popBadge, { backgroundColor: '#FEF3C7' }]}>
+                <Text style={[styles.popBadgeText, { color: '#B45309' }]}>Yönetim</Text>
+              </View>
+            </View>
             <Text style={styles.roleCardDesc}>
-              Okul kodu üretme, AI ile çarşaf ders programından okul kurma ve öğretmen yetkileri.
+              Öğretmenlik dışı idari işlemler: Okul kodu yönetimi, AI ile çarşaf program analizi ve öğretmen onayları.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
@@ -369,8 +383,25 @@ const styles = StyleSheet.create({
   sectionDesc: {
     fontSize: 13,
     color: Colors.textSecondary,
-    marginBottom: 16,
+    marginBottom: 12,
     lineHeight: 18,
+  },
+  roleTipCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    gap: 10,
+  },
+  roleTipText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#3730A3',
+    lineHeight: 17,
   },
   roleCard: {
     flexDirection: 'row',

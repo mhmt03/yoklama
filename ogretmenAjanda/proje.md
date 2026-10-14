@@ -38,6 +38,15 @@
 
 ## 2. 👥 Rol, Yetki ve Giriş Mekanizmaları
 
+### 🔄 Rol Ayrımı ve Dinamik Rol/Şapka Seçimi
+- **Temel İlke: "Admin bir öğretmen değildir."**
+  - Bir eğitimci (örn: Mehmet Hoca) hem **Fizik Öğretmeni** hem de **Okul Admini (Müdür/İdareci)** olabilir.
+  - Ancak idarecilik görevi ile derse girip fizik anlatma, yoklama alma ve ödev kontrol etme görevleri birbirinden tamamen farklı iş akışlarıdır.
+  - Giriş ekranında kullanıcı o an hangi işi icra edecekse o şapkayı seçerek giriş yapar:
+    1. **Öğretmen Modu:** Canlı ders kokpiti, yoklama, defter konusu, ödevler, öğrenci 360° veli görüşmesi.
+    2. **Okul Admini Modu:** Okul kodu yönetimi, AI ile çarşaf haftalık program yükleme, öğretmen yetkilendirmeleri ve kurum ayarları.
+  - **Kesintisiz Geçiş:** Admin panelinin üstünde tek dokunuşla *"👨‍🏫 Öğretmen Moduna Geç (Derse Gir)"*, öğretmen çekmecesinin içinde ise *"👑 Okul Admin Paneline Geç"* bağlantısı yer alır. Tek tıkla roller arasında geçiş yapılabilir.
+
 ### 👑 1. Süper Admin (Sistem Sahibi / Lisans Yöneticisi)
 - **Başlangıç Girişi:** Kullanıcı Adı: `mehmet` | Şifre: `123456` (Sistem içinden değiştirilebilir).
 - **Yetkiler:**

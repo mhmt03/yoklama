@@ -13,7 +13,7 @@ import { Colors } from './src/theme/colors';
 import { SchoolThemeProvider, useSchoolTheme } from './src/context/SchoolThemeContext';
 import { DrawerProvider, useDrawer } from './src/context/DrawerContext';
 import { SideDrawer } from './src/components/SideDrawer';
-import { getActiveUserRole, UserRole } from './src/utils/roleService';
+import { getActiveUserRole, setActiveUserRole, UserRole } from './src/utils/roleService';
 
 // Screens
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -178,6 +178,14 @@ function AppContent() {
     loadRoleAndSchool();
   }, []);
 
+  const handleRoleChange = async (newRole: UserRole | null) => {
+    await setActiveUserRole(newRole);
+    setCurrentRole(newRole);
+    if (newRole) {
+      await loadRoleAndSchool();
+    }
+  };
+
   if (!roleLoaded) {
     return (
       <View style={styles.splashContainer}>
@@ -190,10 +198,7 @@ function AppContent() {
   if (!currentRole) {
     return (
       <RoleSelectScreen
-        onRoleSelected={(newRole) => {
-          setCurrentRole(newRole);
-          loadRoleAndSchool();
-        }}
+        onRoleSelected={handleRoleChange}
       />
     );
   }
@@ -203,7 +208,7 @@ function AppContent() {
     return (
       <SuperAdminScreen
         navigation={{
-          goBack: () => setCurrentRole(null),
+          goBack: () => handleRoleChange(null),
         }}
       />
     );
@@ -214,8 +219,10 @@ function AppContent() {
     return (
       <SchoolAdminScreen
         navigation={{
-          goBack: () => setCurrentRole(null),
+          goBack: () => handleRoleChange(null),
+          switchToTeacher: () => handleRoleChange('teacher'),
         }}
+        onRoleChange={handleRoleChange}
       />
     );
   }
@@ -224,9 +231,7 @@ function AppContent() {
   if (currentRole === 'student') {
     return (
       <StudentDashboardScreen
-        onLogout={() => {
-          setCurrentRole(null);
-        }}
+        onLogout={() => handleRoleChange(null)}
       />
     );
   }
@@ -265,12 +270,7 @@ function AppContent() {
         onClose={closeDrawer}
         activeSchool={activeSchool}
         currentRole={currentRole}
-        onRoleChanged={(newRole) => {
-          setCurrentRole(newRole);
-          if (newRole) {
-            loadRoleAndSchool();
-          }
-        }}
+        onRoleChanged={handleRoleChange}
         onSchoolUpdated={loadRoleAndSchool}
         navigation={navigationRef}
       />
