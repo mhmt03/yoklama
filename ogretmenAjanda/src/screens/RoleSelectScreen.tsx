@@ -25,44 +25,151 @@ interface RoleSelectScreenProps {
 
 export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelected, navigation }) => {
   const insets = useSafeAreaInsets();
-  const [selectedRoleForPin, setSelectedRoleForPin] = useState<'admin' | null>(null);
-  const [adminPinInput, setAdminPinInput] = useState('');
-  const [teacherNameInput, setTeacherNameInput] = useState('');
-  const [showTeacherNameModal, setShowTeacherNameModal] = useState(false);
+  // Okul Admini Modal & State
+  const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
+  const [adminUsername, setAdminUsername] = useState('mehmetadmin');
+  const [adminPassword, setAdminPassword] = useState('1234');
+  const [adminLoading, setAdminLoading] = useState(false);
+
+  // Öğretmen Giriş Modalı (Okul Kodu + Kullanıcı Adı + Şifre)
+  const [showTeacherLoginModal, setShowTeacherLoginModal] = useState(false);
+  const [teacherSchoolCode, setTeacherSchoolCode] = useState('OKL-10001');
+  const [teacherUsername, setTeacherUsername] = useState('mehmetogretmen');
+  const [teacherPassword, setTeacherPassword] = useState('1234');
+  const [teacherLoading, setTeacherLoading] = useState(false);
 
   // Süper Admin Modal
   const [superAdminModalVisible, setSuperAdminModalVisible] = useState(false);
-  const [superAdminUsername, setSuperAdminUsername] = useState('mehmet');
-  const [superAdminPassword, setSuperAdminPassword] = useState('123456');
+  const [superAdminUsername, setSuperAdminUsername] = useState('mehmetsuper');
+  const [superAdminPassword, setSuperAdminPassword] = useState('1234');
   const [superAdminLoading, setSuperAdminLoading] = useState(false);
 
-  // Öğretmen Okul Kodu Modalı
-  const [showTeacherSchoolCodeModal, setShowTeacherSchoolCodeModal] = useState(false);
-  const [schoolCodeInput, setSchoolCodeInput] = useState('');
-
+  // Okul Admini Giriş Butonu
   const handleSelectAdmin = () => {
-    setAdminPinInput('');
-    setSelectedRoleForPin('admin');
+    setShowAdminLoginModal(true);
   };
 
-  const handleConfirmAdminPin = async () => {
-    // Okul admini ekranına doğrudan yönlendirilebilir veya yerel admin yapılabilir
-    await setActiveUserRole('admin');
-    setSelectedRoleForPin(null);
-    onRoleSelected('admin');
+  const handleConfirmAdmin = async () => {
+    if (!adminUsername.trim() || !adminPassword.trim()) {
+      Alert.alert('Uyarı', 'Lütfen kullanıcı adı ve şifre girin.');
+      return;
+    }
+
+    setAdminLoading(true);
+    try {
+      const res = await apiRequest('auth/login', 'POST', {
+        username: adminUsername.trim(),
+        password: adminPassword.trim(),
+      });
+
+      if (res.success && res.data) {
+        await saveAuthToken(res.data.token, res.data);
+        setShowAdminLoginModal(false);
+        await setActiveUserRole('admin');
+        onRoleSelected('admin');
+      } else {
+        // Çevrimdışı / Yerel Test Modu Fallback (mehmetadmin / 1234)
+        if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
+          setShowAdminLoginModal(false);
+          await setActiveUserRole('admin');
+          onRoleSelected('admin');
+        } else {
+          Alert.alert('Giriş Başarısız', res.error || 'Kullanıcı adı veya şifre hatalı.');
+        }
+      }
+    } catch (e: any) {
+      if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
+        setShowAdminLoginModal(false);
+        await setActiveUserRole('admin');
+        onRoleSelected('admin');
+      } else {
+        Alert.alert('Hata', e.message);
+      }
+    } finally {
+      setAdminLoading(false);
+    }
   };
 
+  // Öğretmen Giriş Butonu
   const handleSelectTeacher = () => {
-    setTeacherNameInput('');
-    setShowTeacherNameModal(true);
+    setShowTeacherLoginModal(true);
   };
 
   const handleConfirmTeacher = async () => {
-    const finalName = teacherNameInput.trim() || 'Öğretmen';
-    await setActiveTeacherName(finalName);
-    await setActiveUserRole('teacher');
-    setShowTeacherNameModal(false);
-    onRoleSelected('teacher');
+    if (!teacherUsername.trim() || !teacherPassword.trim()) {
+      Alert.alert('Uyarı', 'Lütfen kullanıcı adı ve şifrenizi giriniz.');
+      return;
+    }
+
+    const schoolCodeClean = teacherSchoolCode.trim();
+    const isIndividual = schoolCodeClean === '';
+
+    setTeacherLoading(true);
+    try {
+      if (!isIndividual) {
+        // 1. Kurumsal Okul Girişi (Okul Kodu Mevcut)
+        const res = await apiRequest('auth/login', 'POST', {
+          username: teacherUsername.trim(),
+          password: teacherPassword.trim(),
+          schoolCode: schoolCodeClean,
+        });
+
+        if (res.success && res.data) {
+          await saveAuthToken(res.data.token, res.data);
+          const displayName = res.data.fullName || teacherUsername.trim();
+          await setActiveTeacherName(displayName);
+          await setActiveUserRole('teacher');
+          setShowTeacherLoginModal(false);
+          onRoleSelected('teacher');
+        } else {
+          // Çevrimdışı test fallback: mehmetogretmen / 1234
+          if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
+            await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
+            await setActiveUserRole('teacher');
+            setShowTeacherLoginModal(false);
+            onRoleSelected('teacher');
+          } else {
+            Alert.alert('Giriş Başarısız', res.error || 'Okul kodu, kullanıcı adı veya şifre hatalı.');
+          }
+        }
+      } else {
+        // 2. Bireysel Mod (Okul Kodu Boş)
+        // Kurum içi iletişim kapalıdır, plan ve programı öğretmen kendisi yönetir.
+        const displayName = teacherUsername.trim() === 'mehmetogretmen' 
+          ? 'Mehmet Öğretmen (Fizik)' 
+          : teacherUsername.trim();
+        
+        await saveAuthToken('individual_offline_token', {
+          userId: 'individual',
+          username: teacherUsername.trim(),
+          fullName: displayName,
+          role: 'TEACHER',
+          schoolId: undefined,
+          schoolCode: undefined,
+        });
+
+        await setActiveTeacherName(displayName);
+        await setActiveUserRole('teacher');
+        setShowTeacherLoginModal(false);
+
+        Alert.alert(
+          'Bireysel Mod Açıldı 📌',
+          'Okul kodu girmeden bireysel modda giriş yaptınız. Ders programınızı ve yıllık planlarınızı kendiniz oluşturabilirsiniz. Kurum içi iletişim özellikleri okul koduna bağlı öğretmenler içindir.',
+          [{ text: 'Anladım, Başla', onPress: () => onRoleSelected('teacher') }]
+        );
+      }
+    } catch (e: any) {
+      if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
+        await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
+        await setActiveUserRole('teacher');
+        setShowTeacherLoginModal(false);
+        onRoleSelected('teacher');
+      } else {
+        Alert.alert('Hata', e.message);
+      }
+    } finally {
+      setTeacherLoading(false);
+    }
   };
 
   const handleSelectStudent = async () => {
@@ -70,7 +177,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
     onRoleSelected('student');
   };
 
-  // Süper Admin Girişi (mehmet / 123456)
+  // Süper Admin Girişi (mehmetsuper / 1234)
   const handleSuperAdminLogin = async () => {
     if (!superAdminUsername.trim() || !superAdminPassword.trim()) {
       Alert.alert('Uyarı', 'Lütfen kullanıcı adı ve şifre girin.');
@@ -90,8 +197,11 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         await setActiveUserRole('superadmin');
         onRoleSelected('superadmin');
       } else {
-        // Çevrimdışı / İlk test modu: şifre mehmet / 123456 ise doğrudan izin ver
-        if (superAdminUsername.trim() === 'mehmet' && superAdminPassword.trim() === '123456') {
+        // Çevrimdışı / İlk test modu: mehmetsuper / 1234 veya mehmet / 123456
+        if (
+          (superAdminUsername.trim() === 'mehmetsuper' && superAdminPassword.trim() === '1234') ||
+          (superAdminUsername.trim() === 'mehmet' && superAdminPassword.trim() === '123456')
+        ) {
           setSuperAdminModalVisible(false);
           await setActiveUserRole('superadmin');
           onRoleSelected('superadmin');
@@ -99,9 +209,17 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           Alert.alert('Giriş Başarısız', res.error || 'Kullanıcı adı veya şifre hatalı.');
         }
       }
-
     } catch (e: any) {
-      Alert.alert('Hata', e.message);
+      if (
+        (superAdminUsername.trim() === 'mehmetsuper' && superAdminPassword.trim() === '1234') ||
+        (superAdminUsername.trim() === 'mehmet' && superAdminPassword.trim() === '123456')
+      ) {
+        setSuperAdminModalVisible(false);
+        await setActiveUserRole('superadmin');
+        onRoleSelected('superadmin');
+      } else {
+        Alert.alert('Hata', e.message);
+      }
     } finally {
       setSuperAdminLoading(false);
     }
@@ -199,88 +317,145 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         </TouchableOpacity>
       </ScrollView>
 
-      {/* Admin PIN Prompt Modal */}
-      {selectedRoleForPin && (
+      {/* Okul Admini Giriş Modalı */}
+      <Modal visible={showAdminLoginModal} animationType="fade" transparent>
         <View style={styles.promptOverlay}>
           <View style={styles.promptCard}>
             <View style={[styles.promptIconWrap, { backgroundColor: '#FEF3C7' }]}>
-              <Ionicons name="lock-closed" size={24} color="#D97706" />
+              <Ionicons name="shield-checkmark" size={24} color="#D97706" />
             </View>
-            <Text style={styles.promptTitle}>Yönetici Doğrulaması</Text>
+            <Text style={styles.promptTitle}>Okul Admini Girişi</Text>
             <Text style={styles.promptDesc}>
-              Okul yöneticisi paneline erişmek için PIN kodunuzu giriniz. (Varsayılan PIN: 1234)
+              Okul tanımlama, öğretmen ekleme ve çarşaf program yönetimi için giriş yapınız.
             </Text>
 
+            <View style={styles.trialInfoBox}>
+              <Ionicons name="information-circle" size={16} color="#D97706" />
+              <Text style={styles.trialInfoText}>Deneme Hesabı: mehmetadmin / 1234</Text>
+            </View>
+
+            <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
             <TextInput
-              style={styles.pinInput}
-              placeholder="PIN Kodu (1234)"
+              style={styles.nameInput}
+              placeholder="Kullanıcı Adı (mehmetadmin)"
               placeholderTextColor={Colors.textMuted}
-              value={adminPinInput}
-              onChangeText={setAdminPinInput}
-              keyboardType="numeric"
-              secureTextEntry
-              maxLength={8}
+              value={adminUsername}
+              onChangeText={setAdminUsername}
+              autoCapitalize="none"
             />
 
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <Text style={[styles.inputLabel, { marginTop: 10 }]}>Şifre</Text>
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Şifre (1234)"
+              placeholderTextColor={Colors.textMuted}
+              value={adminPassword}
+              onChangeText={setAdminPassword}
+              secureTextEntry
+            />
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
               <TouchableOpacity
                 style={styles.cancelBtn}
-                onPress={() => setSelectedRoleForPin(null)}
+                onPress={() => setShowAdminLoginModal(false)}
               >
                 <Text style={styles.cancelBtnText}>Vazgeç</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.confirmBtn}
-                onPress={handleConfirmAdminPin}
+                style={[styles.confirmBtn, { backgroundColor: '#D97706' }]}
+                onPress={handleConfirmAdmin}
+                disabled={adminLoading}
               >
-                <Text style={styles.confirmBtnText}>Giriş Yap</Text>
+                {adminLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.confirmBtnText}>Admin Girişi</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
-      )}
+      </Modal>
 
-      {/* Teacher Name Input Modal */}
-      {showTeacherNameModal && (
+      {/* Öğretmen Giriş Modalı (Okul Kodu + Kullanıcı Adı + Şifre) */}
+      <Modal visible={showTeacherLoginModal} animationType="fade" transparent>
         <View style={styles.promptOverlay}>
           <View style={styles.promptCard}>
             <View style={[styles.promptIconWrap, { backgroundColor: '#EEF2FF' }]}>
               <Ionicons name="person" size={24} color="#4F46E5" />
             </View>
-            <Text style={styles.promptTitle}>Öğretmen Adınız</Text>
+            <Text style={styles.promptTitle}>Öğretmen Girişi</Text>
             <Text style={styles.promptDesc}>
-              Sınıf ve ders atamalarınızda kullanılmak üzere adınızı ve soyadınızı giriniz.
+              Kurumsal veya bireysel olarak derslerinizi yönetin.
             </Text>
 
+            <View style={styles.trialInfoBoxBlue}>
+              <Ionicons name="information-circle" size={16} color="#4F46E5" />
+              <Text style={styles.trialInfoTextBlue}>
+                Deneme: mehmetogretmen / 1234 (Fizik Öğretmeni)
+              </Text>
+            </View>
+
+            <Text style={styles.inputLabel}>Okul Kodu (Kurumsal Giriş İçin)</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Örn: Mehmet Yılmaz"
+              placeholder="Örn: OKL-10001 (Bireysel için boş bırakın)"
               placeholderTextColor={Colors.textMuted}
-              value={teacherNameInput}
-              onChangeText={setTeacherNameInput}
-              autoFocus
+              value={teacherSchoolCode}
+              onChangeText={setTeacherSchoolCode}
+              autoCapitalize="characters"
+            />
+            <Text style={styles.fieldHint}>
+              💡 Bireysel kullanım için boş bırakabilirsiniz. Kurumsal kod girerseniz okulunuzun ders ve yıllık planları otomatik yüklenir.
+            </Text>
+
+            <Text style={[styles.inputLabel, { marginTop: 8 }]}>Kullanıcı Adı</Text>
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Kullanıcı Adı (mehmetogretmen)"
+              placeholderTextColor={Colors.textMuted}
+              value={teacherUsername}
+              onChangeText={setTeacherUsername}
+              autoCapitalize="none"
             />
 
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+            <Text style={[styles.inputLabel, { marginTop: 8 }]}>Şifre</Text>
+            <TextInput
+              style={styles.nameInput}
+              placeholder="Şifre (1234)"
+              placeholderTextColor={Colors.textMuted}
+              value={teacherPassword}
+              onChangeText={setTeacherPassword}
+              secureTextEntry
+            />
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
               <TouchableOpacity
                 style={styles.cancelBtn}
-                onPress={() => setShowTeacherNameModal(false)}
+                onPress={() => setShowTeacherLoginModal(false)}
               >
                 <Text style={styles.cancelBtnText}>Vazgeç</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.confirmBtn, { backgroundColor: '#4F46E5' }]}
                 onPress={handleConfirmTeacher}
+                disabled={teacherLoading}
               >
-                <Text style={styles.confirmBtnText}>Devam Et</Text>
+                {teacherLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.confirmBtnText}>
+                    {teacherSchoolCode.trim() ? 'Okula Giriş Yap' : 'Bireysel Giriş Yap'}
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
-      )}
+      </Modal>
 
       {/* Süper Admin Giriş Modalı */}
-      <Modal visible={superAdminModalVisible} animationType="slide" transparent>
+      <Modal visible={superAdminModalVisible} animationType="fade" transparent>
         <View style={styles.promptOverlay}>
           <View style={styles.promptCard}>
             <View style={[styles.promptIconWrap, { backgroundColor: '#EEF2FF' }]}>
@@ -288,28 +463,35 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             </View>
             <Text style={styles.promptTitle}>Süper Admin Girişi</Text>
             <Text style={styles.promptDesc}>
-              Sistem lisanslarını ve okulları yönetmek için giriş yapın.
+              Sistem lisanslarını ve tüm okulları yönetmek için giriş yapın.
             </Text>
 
+            <View style={styles.trialInfoBox}>
+              <Ionicons name="information-circle" size={16} color="#D97706" />
+              <Text style={styles.trialInfoText}>Deneme Hesabı: mehmetsuper / 1234</Text>
+            </View>
+
+            <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Kullanıcı Adı (mehmet)"
+              placeholder="Kullanıcı Adı (mehmetsuper)"
               placeholderTextColor={Colors.textMuted}
               value={superAdminUsername}
               onChangeText={setSuperAdminUsername}
               autoCapitalize="none"
             />
 
+            <Text style={[styles.inputLabel, { marginTop: 10 }]}>Şifre</Text>
             <TextInput
-              style={[styles.nameInput, { marginTop: 8 }]}
-              placeholder="Şifre (123456)"
+              style={styles.nameInput}
+              placeholder="Şifre (1234)"
               placeholderTextColor={Colors.textMuted}
               value={superAdminPassword}
               onChangeText={setSuperAdminPassword}
               secureTextEntry
             />
 
-            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
               <TouchableOpacity
                 style={styles.cancelBtn}
                 onPress={() => setSuperAdminModalVisible(false)}
@@ -551,5 +733,57 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  trialInfoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 12,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  trialInfoText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#B45309',
+  },
+  trialInfoBoxBlue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 12,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  trialInfoTextBlue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
+  inputLabel: {
+    alignSelf: 'flex-start',
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    marginBottom: 4,
+  },
+  fieldHint: {
+    alignSelf: 'flex-start',
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 4,
+    lineHeight: 15,
   },
 });

@@ -126,6 +126,75 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(teachers);
         }
 
+        // Okula Yeni Öğretmen Tanımla (Otomatik Kullanıcı Adı & Şifre)
+        [HttpPost("{schoolId}/teachers")]
+        public async Task<IActionResult> CreateSchoolTeacher(Guid schoolId, [FromBody] CreateTeacherRequest request)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            var fullName = request.FullName.Trim();
+            // Türkçe karakterleri temizleyip kullanıcı adı üret
+            var rawUsername = (fullName + (request.Branch ?? "")).ToLower()
+                .Replace(" ", "")
+                .Replace("ı", "i")
+                .Replace("ğ", "g")
+                .Replace("ü", "u")
+                .Replace("ş", "s")
+                .Replace("ö", "o")
+                .Replace("ç", "c");
+
+            var username = rawUsername;
+            var counter = 1;
+            while (await _context.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower()))
+            {
+                username = $"{rawUsername}{counter++}";
+            }
+
+            var password = "1234"; // Varsayılan otomatik şifre
+            var teacher = new User
+            {
+                Id = Guid.NewGuid(),
+                Username = username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
+                FullName = fullName + (!string.IsNullOrEmpty(request.Branch) ? $" ({request.Branch})" : ""),
+                Email = request.Email,
+                Phone = request.Phone,
+                Role = UserRoles.Teacher,
+                SchoolId = school.Id,
+                LicenseExpiresAt = school.LicenseExpiresAt,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.Users.AddAsync(teacher);
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                SchoolId = school.Id,
+                UserId = CurrentUserId,
+                UserRole = CurrentUserRole,
+                ActionType = "TEACHER_CREATED",
+                EntityName = "User",
+                EntityId = teacher.Id.ToString(),
+                DetailsJson = $"{teacher.FullName} ({teacher.Username}) oluşturuldu.",
+                Timestamp = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                teacher.Id,
+                teacher.Username,
+                Password = password,
+                teacher.FullName,
+                SchoolCode = school.Code,
+                teacher.Role,
+                teacher.IsActive
+            });
+        }
+
         // Öğretmen Yetki / Durum Düzenleme (Admin yetkisi)
         [HttpPut("teachers/{teacherId}/status")]
         public async Task<IActionResult> UpdateTeacherStatus(Guid teacherId, [FromBody] UpdateTeacherStatusRequest request)
@@ -212,5 +281,13 @@ namespace OgretmenAjanda.Api.Controllers
     public class UpdateKeyRequest
     {
         public string? ApiKey { get; set; }
+    }
+
+    public class CreateTeacherRequest
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string? Branch { get; set; }
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
     }
 }

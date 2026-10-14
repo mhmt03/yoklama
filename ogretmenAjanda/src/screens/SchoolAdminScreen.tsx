@@ -45,6 +45,55 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [newSchoolPhone, setNewSchoolPhone] = useState('');
   const [newSchoolApiKey, setNewSchoolApiKey] = useState('');
 
+  // Manuel Öğretmen Ekleme Modalı & Sonuç
+  const [addTeacherModalVisible, setAddTeacherModalVisible] = useState(false);
+  const [teacherFullName, setTeacherFullName] = useState('');
+  const [teacherBranch, setTeacherBranch] = useState('');
+  const [teacherPhone, setTeacherPhone] = useState('');
+  const [teacherEmail, setTeacherEmail] = useState('');
+  const [addingTeacher, setAddingTeacher] = useState(false);
+  const [createdTeacherResult, setCreatedTeacherResult] = useState<any>(null);
+
+  const handleCreateTeacher = async () => {
+    if (!teacherFullName.trim() || !selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen öğretmen adını ve soyadını giriniz.');
+      return;
+    }
+
+    setAddingTeacher(true);
+    try {
+      const res = await apiRequest(`schools/${selectedSchool.id}/teachers`, 'POST', {
+        fullName: teacherFullName.trim(),
+        branch: teacherBranch.trim() || undefined,
+        phone: teacherPhone.trim() || undefined,
+        email: teacherEmail.trim() || undefined,
+      });
+
+      if (res.success && res.data) {
+        setAddTeacherModalVisible(false);
+        setCreatedTeacherResult(res.data);
+        setTeacherFullName('');
+        setTeacherBranch('');
+        setTeacherPhone('');
+        setTeacherEmail('');
+        loadTeachers(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', res.error || 'Öğretmen eklenemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setAddingTeacher(false);
+    }
+  };
+
+  const handleCopyTeacherCredentials = async () => {
+    if (!createdTeacherResult) return;
+    const text = `🎓 Öğretmen Ajanda Giriş Bilgileriniz:\n\nOkul Kodu: ${createdTeacherResult.schoolCode || selectedSchool?.code}\nKullanıcı Adı: ${createdTeacherResult.username}\nŞifre: ${createdTeacherResult.password || '1234'}\n\nUygulamayı açıp "Öğretmen" bölümünden bu bilgilerle giriş yapabilirsiniz.`;
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Kopyalandı 📋', 'Giriş bilgileri panoya kopyalandı. WhatsApp veya SMS ile öğretmeninize iletebilirsiniz.');
+  };
+
 
   const loadSchools = async () => {
     try {
@@ -299,6 +348,13 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         {/* Okula Bağlı Öğretmenler */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Bağlı Öğretmenler ({teachers.length})</Text>
+          <TouchableOpacity
+            style={styles.addTeacherBtn}
+            onPress={() => setAddTeacherModalVisible(true)}
+          >
+            <Ionicons name="person-add" size={15} color="#4F46E5" />
+            <Text style={styles.addTeacherBtnText}>+ Öğretmen Ekle</Text>
+          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -459,6 +515,123 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               ) : (
                 <Text style={styles.createSubmitText}>Değişiklikleri Kaydet</Text>
               )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Yeni Öğretmen Tanımlama Modalı */}
+      <Modal visible={addTeacherModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>👨‍🏫 Yeni Öğretmen Ekle</Text>
+              <TouchableOpacity onPress={() => setAddTeacherModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 12, color: Colors.textMuted, marginBottom: 12 }}>
+              Eklenen öğretmen için otomatik kullanıcı adı ve varsayılan 1234 şifresi üretilecektir.
+            </Text>
+
+            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>Ad Soyad *</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: Mehmet Yılmaz"
+              placeholderTextColor={Colors.textMuted}
+              value={teacherFullName}
+              onChangeText={setTeacherFullName}
+            />
+
+            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>Branş</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: Fizik, Matematik, Kimya..."
+              placeholderTextColor={Colors.textMuted}
+              value={teacherBranch}
+              onChangeText={setTeacherBranch}
+            />
+
+            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>Telefon (Opsiyonel)</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="05xx xxx xx xx"
+              placeholderTextColor={Colors.textMuted}
+              value={teacherPhone}
+              onChangeText={setTeacherPhone}
+              keyboardType="phone-pad"
+            />
+
+            <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, marginBottom: 4 }}>E-posta (Opsiyonel)</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="ogretmen@okul.meb.k12.tr"
+              placeholderTextColor={Colors.textMuted}
+              value={teacherEmail}
+              onChangeText={setTeacherEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+
+            <TouchableOpacity
+              style={[styles.createSubmitButton, { backgroundColor: '#4F46E5', marginTop: 10 }]}
+              onPress={handleCreateTeacher}
+              disabled={addingTeacher}
+            >
+              {addingTeacher ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.createSubmitText}>Öğretmeni Kaydet & Şifre Üret</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Öğretmen Oluşturuldu Sonuç Modalı */}
+      <Modal visible={!!createdTeacherResult} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { alignItems: 'center' }]}>
+            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+              <Ionicons name="checkmark-circle" size={36} color="#059669" />
+            </View>
+
+            <Text style={{ fontSize: 18, fontWeight: '800', color: Colors.text, marginBottom: 6 }}>
+              Öğretmen Hesabı Hazır! 🎉
+            </Text>
+            <Text style={{ fontSize: 13, color: Colors.textSecondary, textAlign: 'center', marginBottom: 16 }}>
+              {createdTeacherResult?.fullName} için sisteme giriş bilgileri otomatik üretildi.
+            </Text>
+
+            <View style={{ width: '100%', backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8F0', gap: 8, marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 12, color: Colors.textMuted }}>Okul Kodu:</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#4F46E5' }}>{createdTeacherResult?.schoolCode || selectedSchool?.code}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 12, color: Colors.textMuted }}>Kullanıcı Adı:</Text>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: Colors.text }}>{createdTeacherResult?.username}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <Text style={{ fontSize: 12, color: Colors.textMuted }}>Geçici Şifre:</Text>
+                <Text style={{ fontSize: 13, fontWeight: '800', color: '#D97706' }}>{createdTeacherResult?.password || '1234'}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.createSubmitButton, { backgroundColor: '#059669', width: '100%', flexDirection: 'row', gap: 8, justifyContent: 'center' }]}
+              onPress={handleCopyTeacherCredentials}
+            >
+              <Ionicons name="copy-outline" size={18} color="#fff" />
+              <Text style={styles.createSubmitText}>Giriş Bilgilerini Kopyala (WhatsApp)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={{ marginTop: 12, paddingVertical: 8 }}
+              onPress={() => setCreatedTeacherResult(null)}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '600', color: Colors.textMuted }}>Kapat</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -679,4 +852,20 @@ const styles = StyleSheet.create({
     height: 48,
   },
   confirmSaveText: { color: '#fff', fontSize: 15, fontWeight: '700', marginLeft: 8 },
+  addTeacherBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    gap: 4,
+  },
+  addTeacherBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
 });

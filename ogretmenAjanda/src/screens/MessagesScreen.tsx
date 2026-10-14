@@ -11,11 +11,12 @@ import {
   RefreshControl,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
-import { apiRequest, getActiveUserSession } from '../services/apiClient';
+import { apiRequest, getActiveUserSession, saveAuthToken } from '../services/apiClient';
 
 interface MessageItem {
   id: string;
@@ -35,11 +36,20 @@ export function MessagesScreen({ navigation }: any) {
   const [sending, setSending] = useState(false);
   const [schoolId, setSchoolId] = useState<string | null>(null);
 
+  // Okula Bağlanma Modal State
+  const [connectModalVisible, setConnectModalVisible] = useState(false);
+  const [connectSchoolCode, setConnectSchoolCode] = useState('OKL-10001');
+  const [connectUsername, setConnectUsername] = useState('mehmetogretmen');
+  const [connectPassword, setConnectPassword] = useState('1234');
+  const [connectLoading, setConnectLoading] = useState(false);
+
   const loadMessages = async () => {
     try {
       const session = await getActiveUserSession();
       if (!session?.schoolId) {
+        setSchoolId(null);
         setLoading(false);
+        setRefreshing(false);
         return;
       }
       setSchoolId(session.schoolId);
@@ -53,6 +63,35 @@ export function MessagesScreen({ navigation }: any) {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleConnectSchool = async () => {
+    if (!connectSchoolCode.trim() || !connectUsername.trim() || !connectPassword.trim()) {
+      Alert.alert('Uyarı', 'Lütfen tüm alanları doldurunuz.');
+      return;
+    }
+
+    setConnectLoading(true);
+    try {
+      const res = await apiRequest('auth/login', 'POST', {
+        username: connectUsername.trim(),
+        password: connectPassword.trim(),
+        schoolCode: connectSchoolCode.trim(),
+      });
+
+      if (res.success && res.data && res.data.schoolId) {
+        await saveAuthToken(res.data.token, res.data);
+        setConnectModalVisible(false);
+        Alert.alert('Başarılı 🎉', `${res.data.schoolName || 'Okulunuza'} başarıyla bağlandınız.`);
+        loadMessages();
+      } else {
+        Alert.alert('Giriş Başarısız', res.error || 'Okul kodu veya bilgiler hatalı.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setConnectLoading(false);
     }
   };
 
@@ -95,94 +134,183 @@ export function MessagesScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadMessages(); }} />}
-        >
-          {loading ? (
-            <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 40 }} />
-          ) : messages.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={48} color={Colors.textMuted} />
-              <Text style={styles.emptyText}>Henüz paylaşılan duyuru veya mesaj bulunmuyor.</Text>
-            </View>
-          ) : (
-            messages.map((item) => (
-              <View key={item.id} style={styles.messageCard}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.senderWrap}>
-                    <Text style={styles.senderName}>{item.senderName}</Text>
-                    <View style={styles.roleBadge}>
-                      <Text style={styles.roleText}>{item.senderRole}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.timeText}>
-                    {new Date(item.createdAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}
-                  </Text>
-                </View>
-                <Text style={styles.messageContent}>{item.content}</Text>
-              </View>
-            ))
-          )}
-        </ScrollView>
+      {!schoolId ? (
+        <ScrollView contentContainerStyle={styles.individualContainer}>
+          <View style={styles.individualIconWrap}>
+            <Ionicons name="business-outline" size={48} color="#D97706" />
+          </View>
+          <Text style={styles.individualTitle}>Kurum İçi İletişim Kapalı</Text>
+          <Text style={styles.individualDesc}>
+            Şu anda uygulamayı <Text style={{ fontWeight: '800', color: Colors.text }}>Bireysel Modda</Text> kullanmaktasınız.
+            {"\n\n"}
+            Kurum içi duyurular, zümre mesajlaşması ve idare panosu yalnızca bir okul koduna (Örn: OKL-10001) bağlı öğretmenler için aktiftir.
+          </Text>
 
-        {/* Mesaj Yazma Alanı */}
-        <View style={styles.inputContainer}>
-          <View style={styles.targetRow}>
-            <Text style={styles.targetLabel}>Kime:</Text>
-            <TouchableOpacity
-              style={[styles.targetChip, targetRole === 'ALL' && styles.targetChipActive]}
-              onPress={() => setTargetRole('ALL')}
-            >
-              <Text style={[styles.targetChipText, targetRole === 'ALL' && styles.targetChipTextActive]}>
-                Tüm Okul
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.targetChip, targetRole === 'TEACHER' && styles.targetChipActive]}
-              onPress={() => setTargetRole('TEACHER')}
-            >
-              <Text style={[styles.targetChipText, targetRole === 'TEACHER' && styles.targetChipTextActive]}>
-                Öğretmenler
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.targetChip, targetRole === 'STAFF' && styles.targetChipActive]}
-              onPress={() => setTargetRole('STAFF')}
-            >
-              <Text style={[styles.targetChipText, targetRole === 'STAFF' && styles.targetChipTextActive]}>
-                İdare
-              </Text>
-            </TouchableOpacity>
+          <View style={styles.individualTipCard}>
+            <Ionicons name="information-circle" size={20} color="#4F46E5" />
+            <Text style={styles.individualTipText}>
+              Bireysel modda kendi derslerinizi, yoklama, öğrenci ve yıllık planlarınızı tamamen bağımsız yönetebilirsiniz.
+            </Text>
           </View>
 
-          <View style={styles.inputRow}>
+          <TouchableOpacity
+            style={styles.connectSchoolBtn}
+            onPress={() => setConnectModalVisible(true)}
+          >
+            <Ionicons name="school" size={18} color="#fff" />
+            <Text style={styles.connectSchoolBtnText}>Bir Okul Koduna Bağlan</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadMessages(); }} />}
+          >
+            {loading ? (
+              <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 40 }} />
+            ) : messages.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="chatbubbles-outline" size={48} color={Colors.textMuted} />
+                <Text style={styles.emptyText}>Henüz paylaşılan duyuru veya mesaj bulunmuyor.</Text>
+              </View>
+            ) : (
+              messages.map((item) => (
+                <View key={item.id} style={styles.messageCard}>
+                  <View style={styles.cardHeader}>
+                    <View style={styles.senderWrap}>
+                      <Text style={styles.senderName}>{item.senderName}</Text>
+                      <View style={styles.roleBadge}>
+                        <Text style={styles.roleText}>{item.senderRole}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.timeText}>
+                      {new Date(item.createdAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })}
+                    </Text>
+                  </View>
+                  <Text style={styles.messageContent}>{item.content}</Text>
+                </View>
+              ))
+            )}
+          </ScrollView>
+
+          {/* Mesaj Yazma Alanı */}
+          <View style={styles.inputContainer}>
+            <View style={styles.targetRow}>
+              <Text style={styles.targetLabel}>Kime:</Text>
+              <TouchableOpacity
+                style={[styles.targetChip, targetRole === 'ALL' && styles.targetChipActive]}
+                onPress={() => setTargetRole('ALL')}
+              >
+                <Text style={[styles.targetChipText, targetRole === 'ALL' && styles.targetChipTextActive]}>
+                  Tüm Okul
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.targetChip, targetRole === 'TEACHER' && styles.targetChipActive]}
+                onPress={() => setTargetRole('TEACHER')}
+              >
+                <Text style={[styles.targetChipText, targetRole === 'TEACHER' && styles.targetChipTextActive]}>
+                  Öğretmenler
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.targetChip, targetRole === 'STAFF' && styles.targetChipActive]}
+                onPress={() => setTargetRole('STAFF')}
+              >
+                <Text style={[styles.targetChipText, targetRole === 'STAFF' && styles.targetChipTextActive]}>
+                  İdare
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Duyuru veya mesajınızı yazın..."
+                placeholderTextColor={Colors.textMuted}
+                value={newContent}
+                onChangeText={setNewContent}
+                multiline
+              />
+              <TouchableOpacity
+                style={[styles.sendButton, !newContent.trim() && styles.sendButtonDisabled]}
+                onPress={handleSendMessage}
+                disabled={!newContent.trim() || sending}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="send" size={18} color="#fff" />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      )}
+
+      {/* Okul Koduna Bağlanma Modalı */}
+      <Modal visible={connectModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>🏫 Okul Koduna Bağlan</Text>
+              <TouchableOpacity onPress={() => setConnectModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, color: Colors.textSecondary, marginBottom: 14 }}>
+              Okul idarenizin verdiği kod ve kullanıcı bilgilerinizle kurumunuza bağlanın.
+            </Text>
+
+            <Text style={styles.inputLabel}>Okul Kodu</Text>
             <TextInput
-              style={styles.textInput}
-              placeholder="Duyuru veya mesajınızı yazın..."
+              style={styles.modalInput}
+              placeholder="Örn: OKL-10001"
               placeholderTextColor={Colors.textMuted}
-              value={newContent}
-              onChangeText={setNewContent}
-              multiline
+              value={connectSchoolCode}
+              onChangeText={setConnectSchoolCode}
+              autoCapitalize="characters"
             />
+
+            <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Örn: mehmetogretmen"
+              placeholderTextColor={Colors.textMuted}
+              value={connectUsername}
+              onChangeText={setConnectUsername}
+              autoCapitalize="none"
+            />
+
+            <Text style={styles.inputLabel}>Şifre</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Şifreniz"
+              placeholderTextColor={Colors.textMuted}
+              value={connectPassword}
+              onChangeText={setConnectPassword}
+              secureTextEntry
+            />
+
             <TouchableOpacity
-              style={[styles.sendButton, !newContent.trim() && styles.sendButtonDisabled]}
-              onPress={handleSendMessage}
-              disabled={!newContent.trim() || sending}
+              style={styles.connectSubmitBtn}
+              onPress={handleConnectSchool}
+              disabled={connectLoading}
             >
-              {sending ? (
+              {connectLoading ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Ionicons name="send" size={18} color="#fff" />
+                <Text style={styles.connectSubmitBtnText}>Bağlan & Senkronize Et</Text>
               )}
             </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -256,4 +384,120 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sendButtonDisabled: { backgroundColor: '#CBD5E1' },
+  individualContainer: {
+    padding: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexGrow: 1,
+  },
+  individualIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FEF3C7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  individualTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: Colors.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  individualDesc: {
+    fontSize: 14,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  individualTipCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    gap: 10,
+    marginBottom: 24,
+  },
+  individualTipText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#3730A3',
+    lineHeight: 18,
+  },
+  connectSchoolBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+    shadowColor: '#4F46E5',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  connectSchoolBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    marginBottom: 4,
+    marginTop: 8,
+  },
+  modalInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 46,
+    fontSize: 14,
+    color: Colors.text,
+  },
+  connectSubmitBtn: {
+    backgroundColor: '#4F46E5',
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+  connectSubmitBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
 });

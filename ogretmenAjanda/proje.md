@@ -48,16 +48,20 @@
   - **Kesintisiz Geçiş:** Admin panelinin üstünde tek dokunuşla *"👨‍🏫 Öğretmen Moduna Geç (Derse Gir)"*, öğretmen çekmecesinin içinde ise *"👑 Okul Admin Paneline Geç"* bağlantısı yer alır. Tek tıkla roller arasında geçiş yapılabilir.
 
 ### 👑 1. Süper Admin (Sistem Sahibi / Lisans Yöneticisi)
-- **Başlangıç Girişi:** Kullanıcı Adı: `mehmet` | Şifre: `123456` (Sistem içinden değiştirilebilir).
+- **Deneme Girişi:** Kullanıcı Adı: `mehmetsuper` | Şifre: `1234` (Ayrıca `mehmet` / `123456` desteklenir).
 - **Yetkiler:**
   - Tüm okulları, adminleri ve bağımsız öğretmenleri listeleme.
   - 1 yıllık lisans sürelerini takip etme, dondurma, süre uzatma (+1 yıl).
   - İleride Google Play / App Store IAP entegrasyonu için hazır lisans bayrakları (`is_licensed`, `expires_at`, `receipt_token`).
 
 ### 🏢 2. Okul Admini (Müdür / Kurucu)
-- En fazla 3 okul tanımlayabilme.
+- **Deneme Girişi:** Kullanıcı Adı: `mehmetadmin` | Şifre: `1234`
+- En fazla 3 okul tanımlayabilme (Varsayılan Deneme Okulu: `Atatürk Anadolu Lisesi`, Kod: `OKL-10001`).
 - Otomatik benzersiz **Okul Kodu** üretme.
 - Sınıf düzeyleri, şubeler, dersler ve kısa adları belirleme.
+- **Otomatik Öğretmen Tanımlama (Manuel veya Çarşaf Program ile):**
+  - Admin öğretmen tanımladığında sistem Türkçe karakter ve branşa göre otomatik kullanıcı adı (Örn: `ahmetkayafizik`) ve varsayılan `1234` şifresi üretir.
+  - Admin tek dokunuşla bu giriş bilgilerini WhatsApp üzerinden öğretmene gönderebilir.
 - Öğrencileri sisteme aktarma (Excel, AI veya manuel) + PDF'ten fotoğrafları ayıklama.
 - Okul ders programlarını ve yıllık planları AI ile yükleme.
 - Okula bağlanan öğretmenleri onaylama, yetkilendirme ve hatalı sınıf atamalarını düzeltme.
@@ -66,7 +70,17 @@
 - Okul içi duyuruları ve idari iletişim akışını yönetme.
 - Öğretmen-veli-öğrenci mesajlaşmalarını, bildirim trafiğini ve işlem loglarını denetleme/izleme yetkisi.
 
-### 👨‍🏫 4. Öğretmen (Okula Bağlı veya Bireysel)
+### 👨‍🏫 4. Öğretmen (Okula Bağlı veya Bireysel Mod)
+- **Deneme Girişi:** Kullanıcı Adı: `mehmetogretmen` | Şifre: `1234` (Branş: Fizik, Kurumsal Okul: `OKL-10001`).
+- **Giriş Şekilleri:**
+  1. **Kurumsal Giriş (Okul Kodu ile):**
+     - Okul Kodu (Örn: `OKL-10001`) + Kullanıcı Adı + Şifre ile giriş yapılır.
+     - İdarenin yüklediği yıllık planlar, ders programı ve sınıflar hazır gelir.
+     - Kurum içi mesajlaşma ve zümre iletişimi aktiftir.
+  2. **Bireysel Mod (Okul Kodu Boş):**
+     - Okul kodu boş bırakıldığında öğretmen **Bireysel Modda** başlar.
+     - Ders programını, sınıflarını ve yıllık planlarını tamamen kendi belirler ve yönetir.
+     - Kurum içi mesajlaşma kapalıdır (bilgilendirici kart gösterilir; istenirse sonradan okul koduna bağlanılabilir).
 - **Arayüz:** Mevcut `odevTakip` arayüzü ve akışında, hızlı ve pratik.
 - **Yerel Öncelikli Öğrenci Listesi (Local-First):**
   - Öğretmenin uygulamasındaki öğrenci listeleri tamamen cihazdaki yerel SQLite veritabanında tutulur.
