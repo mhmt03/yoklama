@@ -306,6 +306,7 @@ Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON 
   const modelsToTry = Array.from(new Set(candidateList.filter(Boolean)));
   let lastError: any = null;
   let primaryError: any = null;
+  const failures: string[] = [];
 
   for (const currentModel of modelsToTry) {
     try {
@@ -392,19 +393,22 @@ Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON 
         primaryError = err;
       }
       lastError = err;
+      const short = String(err?.message || 'Bilinmeyen hata').replace(/\s+/g, ' ').slice(0, 160);
+      failures.push(`• ${currentModel}: ${short}`);
     }
   }
 
   const errToReport = primaryError || lastError;
   const errMsg = errToReport?.message || 'Bilinmeyen hata';
+  const detail = failures.length ? `\n\nDenenen modeller:\n${failures.join('\n')}` : '';
   if (errMsg.includes('404') || errMsg.includes('not found')) {
     throw new Error(
-      `Seçilen "${preferredModel}" modeli Google Gemini API'sinde bulunamadı veya bu API anahtarında aktif değil.\n\n` +
-      `Lütfen Admin panelindeki "AI Ayarları" sekmesinden "gemini-2.5-flash" veya "gemini-2.0-flash" seçin veya "Canlı Modeller" butonuna basarak API anahtarınızın desteklediği güncel modelleri listeleyin.`
+      `Seçilen "${preferredModel}" modeli Google Gemini API'sinde bulunamadı veya bu API anahtarında aktif değil.${detail}\n\n` +
+      `Lütfen AI Ayarları sekmesinden desteklenen bir model seçip "Sunucuya Kaydet" butonuna basın veya "Canlı Modeller" ile anahtarınızın desteklediği modelleri listeleyin.`
     );
   }
 
-  throw new Error(`Çarşaf ders programı analiz edilemedi: ${errMsg}`);
+  throw new Error(`Çarşaf ders programı analiz edilemedi: ${errMsg}${detail}`);
 }
 
 export interface MasterScheduleSaveOptions {

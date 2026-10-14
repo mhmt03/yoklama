@@ -941,8 +941,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       setAiStageText('Belge hazırlanıyor...');
 
       const apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY).trim();
-      const model = selectedSchool.geminiModel?.trim() || DEFAULT_GEMINI_MODEL;
-      setAiActiveModel(model);
+      const model = (selectedGeminiModel || selectedSchool.geminiModel || DEFAULT_GEMINI_MODEL).trim();
       const parsed = await parseMasterScheduleWithAi(
         file.uri,
         apiKey,
