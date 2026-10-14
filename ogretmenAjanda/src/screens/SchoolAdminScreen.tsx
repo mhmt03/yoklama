@@ -21,6 +21,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Colors } from '../theme/colors';
 import { apiRequest, DEFAULT_API_URL } from '../services/apiClient';
 import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult } from '../services/aiScheduleParser';
+import { parseStudentsFromExcel, saveParsedStudentsToServer, ParsedExcelStudent } from '../services/excelStudentParser';
 import { getActiveSchool, updateSchool } from '../database/operations/schoolOperations';
 import { setActiveUserRole } from '../utils/roleService';
 import { pickSinglePhotoFromSource } from '../utils/photoService';
@@ -103,6 +104,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiParsing, setAiParsing] = useState(false);
   const [parsedSchedule, setParsedSchedule] = useState<ParsedScheduleResult | null>(null);
+
+  // 6. Excel Öğrenci Yükleme State
+  const [excelModalVisible, setExcelModalVisible] = useState(false);
+  const [excelParsing, setExcelParsing] = useState(false);
+  const [excelSaving, setExcelSaving] = useState(false);
+  const [parsedExcelStudents, setParsedExcelStudents] = useState<ParsedExcelStudent[]>([]);
+  const [detectedExcelClasses, setDetectedExcelClasses] = useState<string[]>([]);
+  const [excelSchoolName, setExcelSchoolName] = useState<string | undefined>(undefined);
 
   // Sunucu Görsel Kök Adresi (Fotoğraflar için)
   const serverBaseUrl = DEFAULT_API_URL.replace(/\/api\/?$/, '');
@@ -658,6 +667,93 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  // --- 6. EXCEL İLE ÖĞRENCİ YÜKLEME (STANDART TABLO & E-OKUL LİSTESİ) ---
+
+  const handlePickAndParseExcel = async () => {
+    if (!selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçin.');
+      return;
+    }
+
+    try {
+      const pickerResult = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
+        return;
+      }
+
+      const file = pickerResult.assets[0];
+      setExcelModalVisible(true);
+      setExcelParsing(true);
+      setParsedExcelStudents([]);
+      setDetectedExcelClasses([]);
+
+      const result = await parseStudentsFromExcel(file.uri);
+      setExcelParsing(false);
+
+      if (result.success && result.students.length > 0) {
+        setParsedExcelStudents(result.students);
+        setDetectedExcelClasses(result.detectedClasses);
+        setExcelSchoolName(result.schoolName);
+      } else {
+        Alert.alert('Excel Ayrıştırma Hatası', result.error || 'Excel dosyasında öğrenci verisi bulunamadı.');
+        setExcelModalVisible(false);
+      }
+    } catch (e: any) {
+      setExcelParsing(false);
+      Alert.alert('Hata', e.message || 'Excel dosyası okunamadı.');
+      setExcelModalVisible(false);
+    }
+  };
+
+  const handleConfirmAndSaveExcelStudents = async () => {
+    if (!selectedSchool || parsedExcelStudents.length === 0) return;
+
+    setExcelSaving(true);
+    try {
+      // 1. Excel'de tespit edilen sınıflardan sistemde olmayanları sunucuda otomatik oluştur
+      for (const clsTag of detectedExcelClasses) {
+        const parts = clsTag.split('-');
+        if (parts.length >= 2) {
+          const grade = parts[0];
+          const section = parts[1];
+          const exists = classes.some(c => c.grade === grade && c.section === section);
+          if (!exists) {
+            await apiRequest(`schools/${selectedSchool.id}/classes`, 'POST', {
+              grade,
+              section,
+              academicYear: '2026-2027',
+            });
+          }
+        }
+      }
+
+      // 2. Öğrencileri toplu sunucuya kaydet
+      const saveRes = await saveParsedStudentsToServer(selectedSchool.id, parsedExcelStudents);
+      if (saveRes.success) {
+        Alert.alert('Başarılı 🎉', saveRes.message);
+        setExcelModalVisible(false);
+        setParsedExcelStudents([]);
+        setDetectedExcelClasses([]);
+        loadStudents(selectedSchool.id);
+        loadClasses(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', saveRes.message);
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setExcelSaving(false);
+    }
+  };
+
   // Rol Değiştirme
   const handleSwitchToTeacher = async () => {
     if (onRoleChange) {
@@ -1049,13 +1145,25 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               <View>
                 <View style={styles.sectionHeader}>
                   <Text style={styles.sectionTitle}>Kayıtlı Öğrenciler ({filteredStudents.length}/{students.length})</Text>
-                  <TouchableOpacity
-                    style={styles.primaryAddBtn}
-                    onPress={() => setAddStudentModalVisible(true)}
-                  >
-                    <Ionicons name="person-add" size={15} color="#fff" />
-                    <Text style={styles.primaryAddBtnText}>+ Öğrenci Ekle</Text>
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#059669' }]}
+                      onPress={handlePickAndParseExcel}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="document-text" size={14} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>📊 Excel Yükle</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.primaryAddBtn}
+                      onPress={() => setAddStudentModalVisible(true)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="person-add" size={14} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>+ Öğrenci Ekle</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {/* Sınıf Filtre Çipleri */}
@@ -1754,6 +1862,70 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 <TouchableOpacity style={styles.confirmSaveButton} onPress={handleConfirmAndSaveSchedule}>
                   <Ionicons name="checkmark-circle" size={20} color="#fff" />
                   <Text style={styles.confirmSaveText}>Onayla & Sisteme Kaydet</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      {/* 6. Excel ile Öğrenci Yükleme Onay Modalı */}
+      <Modal visible={excelModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📊 Excel Öğrenci Aktarımı</Text>
+              <TouchableOpacity onPress={() => setExcelModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {excelParsing ? (
+              <View style={styles.aiLoadingContainer}>
+                <ActivityIndicator size="large" color="#059669" />
+                <Text style={styles.aiLoadingText}>Excel dosyası inceleniyor...</Text>
+                <Text style={styles.aiLoadingSub}>e-Okul sınıf listesi ve öğrenci kayıtları ayrıştırılıyor.</Text>
+              </View>
+            ) : parsedExcelStudents.length > 0 ? (
+              <View style={styles.parsedPreview}>
+                <Text style={styles.previewSuccessTitle}>🎉 Excel Ayrıştırma Başarılı!</Text>
+
+                {excelSchoolName && (
+                  <View style={{ backgroundColor: '#F0FDF4', padding: 8, borderRadius: 8, marginBottom: 10, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#166534', textAlign: 'center' }}>
+                      🏫 {excelSchoolName}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={styles.previewGrid}>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#059669' }]}>{parsedExcelStudents.length}</Text>
+                    <Text style={styles.previewLbl}>Öğrenci</Text>
+                  </View>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#059669' }]}>{detectedExcelClasses.length}</Text>
+                    <Text style={styles.previewLbl}>Sınıf / Şube</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.previewNote}>
+                  Tespit edilen {detectedExcelClasses.length} şube ve {parsedExcelStudents.length} öğrenci doğrudan okulunuzun sunucu veritabanına tek seferde aktarılacak.
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.confirmSaveButton, { backgroundColor: '#059669' }]}
+                  onPress={handleConfirmAndSaveExcelStudents}
+                  disabled={excelSaving}
+                >
+                  {excelSaving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="cloud-upload" size={18} color="#fff" />
+                      <Text style={styles.confirmSaveText}>Onayla & Sunucuya Aktar</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </View>
             ) : null}

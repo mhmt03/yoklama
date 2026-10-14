@@ -201,6 +201,7 @@
 - [x] Okul Admini: Okul kodu üretimi, öğretmen yetkilendirme ve denetimi (`SchoolAdminScreen.tsx`)
 - [x] Okul Admini: AI Çarşaf Ders Programı ile Otomatik Okul Kurulumu (`aiScheduleParser.ts`)
 - [x] Okul Admini: e-Okul PDF ve Excel ile Öğrenci & Fotoğraf yükleme (Atomik Client Staging)
+- [x] Okul Admini: Excel (.XLS / .XLSX) ile Tek Tıkla Toplu Öğrenci & Sınıf Yükleme (`excelStudentParser.ts` - 593 öğrenci ve 21 şube anında aktarım)
 
 
 ### 📍 FAZ 4: Öğretmen Modülü & "Ders Kokpiti" & İletişim
