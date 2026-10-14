@@ -91,14 +91,74 @@ namespace OgretmenAjanda.Api.Controllers
         }
 
         // 2. Okulun Öğrencilerini Çek (Öğretmen cihazına hazır çekme)
+        [AllowAnonymous]
         [HttpGet("students")]
-        public async Task<IActionResult> GetStudents([FromQuery] Guid schoolId)
+        public async Task<IActionResult> GetStudents(
+            [FromQuery] Guid? schoolId = null,
+            [FromQuery] string? schoolCode = null,
+            [FromQuery] string? className = null,
+            [FromQuery] string? grade = null,
+            [FromQuery] string? section = null)
         {
-            var students = await _context.Students
-                .Where(s => s.SchoolId == schoolId)
+            var query = _context.Students.AsQueryable();
+
+            if (schoolId.HasValue && schoolId.Value != Guid.Empty)
+            {
+                query = query.Where(s => s.SchoolId == schoolId.Value);
+            }
+            else if (!string.IsNullOrEmpty(schoolCode))
+            {
+                var school = await _context.Schools.FirstOrDefaultAsync(s => s.Code == schoolCode.Trim());
+                if (school == null)
+                {
+                    return NotFound(new { message = "Belirtilen okul koduna ait okul bulunamadı." });
+                }
+                query = query.Where(s => s.SchoolId == school.Id);
+            }
+
+            if (!string.IsNullOrEmpty(grade))
+            {
+                query = query.Where(s => s.Grade == grade.Trim());
+            }
+
+            if (!string.IsNullOrEmpty(section))
+            {
+                query = query.Where(s => s.Section == section.Trim());
+            }
+
+            if (!string.IsNullOrEmpty(className))
+            {
+                var cleanClass = className.Trim();
+                var parts = cleanClass.Split(new[] { '-', '/', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
+                {
+                    var g = parts[0];
+                    var sec = parts[1];
+                    query = query.Where(s => (s.Grade == g && s.Section == sec) || (s.Grade + "-" + s.Section == cleanClass));
+                }
+                else
+                {
+                    query = query.Where(s => s.Section == cleanClass || s.Grade == cleanClass || (s.Grade + "-" + s.Section == cleanClass));
+                }
+            }
+
+            var students = await query
                 .OrderBy(s => s.Grade)
                 .ThenBy(s => s.Section)
                 .ThenBy(s => s.StudentNumber)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.SchoolId,
+                    s.StudentNumber,
+                    s.FullName,
+                    s.Grade,
+                    s.Section,
+                    s.PhotoPath,
+                    s.ParentName,
+                    s.ParentPhone,
+                    s.StudentPhone
+                })
                 .ToListAsync();
 
             return Ok(students);

@@ -99,3 +99,40 @@ export const deleteClass = async (id: number): Promise<void> => {
   const db = await getDB();
   await db.runAsync('DELETE FROM classes WHERE id = ?', id);
 };
+
+/**
+ * Bir şubeyi ve bu şubeye ait TÜM verileri (öğrenciler, notlar, görüşler, quizler, ödevler, program) kalıcı olarak siler.
+ */
+export const deleteEntireClassWithAllData = async (classId: number): Promise<void> => {
+  const db = await getDB();
+  await db.withTransactionAsync(async () => {
+    // 1. Sınıf görüşlerini ve öğrenci görüş notlarını temizle
+    await db.runAsync('DELETE FROM student_notes WHERE class_id = ?', classId);
+    await db.runAsync('DELETE FROM class_notes WHERE class_id = ?', classId);
+
+    // 2. Not çizelgesi ve quiz puanlarını temizle
+    await db.runAsync('DELETE FROM student_grades WHERE class_id = ?', classId);
+    await db.runAsync(
+      'DELETE FROM quiz_scores WHERE quiz_id IN (SELECT id FROM quizzes WHERE class_id = ?)',
+      classId
+    );
+    await db.runAsync('DELETE FROM quizzes WHERE class_id = ?', classId);
+
+    // 3. Ödevleri ve öğrenci teslim durumlarını temizle
+    await db.runAsync(
+      'DELETE FROM assignment_students WHERE assignment_id IN (SELECT id FROM assignments WHERE class_id = ?)',
+      classId
+    );
+    await db.runAsync('DELETE FROM assignments WHERE class_id = ?', classId);
+
+    // 4. Ders programı atamasını sıfırla
+    await db.runAsync('UPDATE schedules SET class_id = NULL WHERE class_id = ?', classId);
+
+    // 5. Bu sınıftaki tüm öğrencileri sil
+    await db.runAsync('DELETE FROM students WHERE class_id = ?', classId);
+
+    // 6. Şubenin kendisini sil
+    await db.runAsync('DELETE FROM classes WHERE id = ?', classId);
+  });
+};
+

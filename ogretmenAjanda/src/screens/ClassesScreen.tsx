@@ -25,6 +25,7 @@ import {
   createClass,
   updateClass,
   deleteClass,
+  deleteEntireClassWithAllData,
 } from '../database/operations/classOperations';
 import {
   getAllStudentsWithClass,
@@ -35,6 +36,7 @@ import { getActiveSchool, School } from '../database/operations/schoolOperations
 import { useDrawer } from '../context/DrawerContext';
 import { getActiveUserRole, getActiveTeacherName } from '../utils/roleService';
 import { getTeacherAuthorizedClassIds } from '../database/operations/schoolCodeOperations';
+import { syncClassStudentsFromServer } from '../services/studentSyncService';
 
 export const ClassesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -43,6 +45,7 @@ export const ClassesScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeSchool, setActiveSchool] = useState<School | null>(null);
   const [teacherRestrictionActive, setTeacherRestrictionActive] = useState(false);
+  const [syncingClassId, setSyncingClassId] = useState<number | null>(null);
 
   // Class create/edit modal
   const [modalVisible, setModalVisible] = useState(false);
@@ -169,19 +172,47 @@ export const ClassesScreen: React.FC = () => {
 
   const handleDeleteClass = (c: ClassItem) => {
     Alert.alert(
-      'Şubeyi Sil',
-      `"${c.name}" şubesini ve bu şubeye ait tüm öğrenci, ödev ve kayıtları silmek istediğinize emin misiniz?`,
+      'Tüm Sınıfı Sil ⚠️',
+      `"${c.name}" şubesini ve bu şubeye ait TÜM öğrencileri, görüşleri, notları, quizleri ve ödevleri cihazınızdan kalıcı olarak silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!`,
       [
         { text: 'İptal', style: 'cancel' },
         {
-          text: 'Sil',
+          text: 'Tüm Sınıfı Sil',
           style: 'destructive',
           onPress: async () => {
             try {
-              await deleteClass(c.id);
+              await deleteEntireClassWithAllData(c.id);
+              Alert.alert('Silindi', `"${c.name}" şubesi ve tüm ilişkili veriler yerel cihazınızdan başarıyla silindi.`);
               loadClasses();
             } catch (error) {
-              Alert.alert('Hata', 'Şube silinirken bir sorun oluştu.');
+              Alert.alert('Hata', 'Şube ve verileri silinirken bir sorun oluştu.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSyncStudentsFromServer = (c: ClassItem) => {
+    Alert.alert(
+      'Sistemden Öğrenci Çek',
+      `"${c.name}" şubesinin öğrenci listesi okul sunucusundan çekilecek ve güncellenecektir.\n\n💡 Öğrencilerinize ait mevcut quiz notları ve görüşleriniz telefonunuzda aynen KORUNACAKTIR.\n\nDevam etmek istiyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Çek ve Güncelle',
+          onPress: async () => {
+            setSyncingClassId(c.id);
+            try {
+              const res = await syncClassStudentsFromServer(c.id, c.name, activeSchool?.code);
+              Alert.alert(res.success ? 'Başarılı 🎉' : 'Bilgi', res.message);
+              if (res.success) {
+                loadClasses();
+              }
+            } catch (e: any) {
+              Alert.alert('Hata', e.message || 'Öğrenci çekme sırasında bir hata oluştu.');
+            } finally {
+              setSyncingClassId(null);
             }
           },
         },
@@ -274,6 +305,18 @@ export const ClassesScreen: React.FC = () => {
                   </View>
                 </View>
                 <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    style={styles.iconBtn}
+                    onPress={() => handleSyncStudentsFromServer(item)}
+                    disabled={syncingClassId === item.id}
+                    accessibilityLabel="Sistemden Öğrencileri Çek"
+                  >
+                    {syncingClassId === item.id ? (
+                      <ActivityIndicator size="small" color="#4F46E5" />
+                    ) : (
+                      <Ionicons name="cloud-download-outline" size={17} color="#4F46E5" />
+                    )}
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.iconBtn}
                     onPress={() => handleOpenEdit(item)}

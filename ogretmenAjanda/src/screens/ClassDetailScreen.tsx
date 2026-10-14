@@ -38,7 +38,9 @@ import {
   deleteAllStudentsGlobally,
   bulkTransferStudents,
 } from '../database/operations/studentOperations';
-import { getClasses } from '../database/operations/classOperations';
+import { getClasses, deleteEntireClassWithAllData } from '../database/operations/classOperations';
+import { syncClassStudentsFromServer } from '../services/studentSyncService';
+import { getActiveSchool } from '../database/operations/schoolOperations';
 import {
   getNotesByStudent,
   createNote,
@@ -99,6 +101,7 @@ export const ClassDetailScreen: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
+  const [syncingServer, setSyncingServer] = useState(false);
 
   // Manual Add / Edit Modal state
   const [modalVisible, setModalVisible] = useState(false);
@@ -350,6 +353,64 @@ export const ClassDetailScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSyncStudentsFromServer = () => {
+    Alert.alert(
+      'Sistemden Öğrenci Çek',
+      `"${className}" şubesinin öğrenci listesi okul sunucusundan çekilecek ve güncellenecektir.\n\n💡 Öğrencilerinize ait mevcut quiz puanları, notları ve görüşleriniz KORUNACAKTIR.\n\nİşlemi onaylıyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Çek ve Güncelle',
+          onPress: async () => {
+            setSyncingServer(true);
+            try {
+              const activeSchool = await getActiveSchool();
+              const res = await syncClassStudentsFromServer(classId, className, activeSchool?.code);
+              Alert.alert(res.success ? 'Başarılı 🎉' : 'Bilgi', res.message);
+              if (res.success) {
+                await loadStudents();
+                if (activeViewTab === 'gradebook') {
+                  await loadGradebook();
+                }
+              }
+            } catch (e: any) {
+              Alert.alert('Hata', e.message || 'Öğrenci çekme sırasında bir hata oluştu.');
+            } finally {
+              setSyncingServer(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeleteEntireClass = () => {
+    Alert.alert(
+      'Tüm Sınıfı Sil ⚠️',
+      `"${className}" şubesini ve bu şubeye ait TÜM öğrencileri, görüşleri, notları, quizleri ve ödevleri cihazınızdan kalıcı olarak silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!`,
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Tüm Sınıfı Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteEntireClassWithAllData(classId);
+              Alert.alert('Silindi', `"${className}" şubesi ve tüm ilişkili veriler başarıyla silindi.`, [
+                {
+                  text: 'Tamam',
+                  onPress: () => navigation.goBack(),
+                },
+              ]);
+            } catch (error) {
+              Alert.alert('Hata', 'Şube ve verileri silinirken bir sorun oluştu.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const loadGradebook = async (termToLoad?: 1 | 2) => {
@@ -1285,7 +1346,23 @@ export const ClassDetailScreen: React.FC = () => {
                 </Text>
               </TouchableOpacity>
             </View>
-          ) : undefined
+          ) : (
+            <TouchableOpacity
+              style={styles.headerSyncBtn}
+              onPress={handleSyncStudentsFromServer}
+              disabled={syncingServer}
+              activeOpacity={0.8}
+            >
+              {syncingServer ? (
+                <ActivityIndicator size="small" color="#4F46E5" />
+              ) : (
+                <>
+                  <Ionicons name="cloud-download-outline" size={15} color="#4F46E5" />
+                  <Text style={styles.headerSyncBtnText}>Sistemden Çek</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )
         }
       />
 
@@ -2017,6 +2094,32 @@ export const ClassDetailScreen: React.FC = () => {
             {/* Action Items */}
             <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={true}>
               <View style={styles.actionSheetContent}>
+              {/* 0. Sistemden Öğrencileri Çek (Sunucu Senk) */}
+              <TouchableOpacity
+                style={styles.actionSheetItem}
+                onPress={() => {
+                  setActionMenuVisible(false);
+                  setTimeout(() => handleSyncStudentsFromServer(), 200);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionSheetIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="cloud-download" size={22} color="#4F46E5" />
+                </View>
+                <View style={styles.actionSheetItemTextWrap}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.actionSheetItemTitle, { color: '#4F46E5' }]}>Tüm Öğrencileri Sistemden Çek</Text>
+                    <View style={[styles.actionItemBadge, { backgroundColor: '#EEF2FF' }]}>
+                      <Text style={[styles.actionItemBadgeText, { color: '#4F46E5' }]}>Sunucu</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.actionSheetItemDesc}>
+                    Sunucudaki resmi öğrenci listesini çeker. Quiz ve görüş notlarınız telefonda korunur.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#4F46E5" />
+              </TouchableOpacity>
+
               {/* 1. Manuel Öğrenci Ekle */}
               <TouchableOpacity
                 style={styles.actionSheetItem}
@@ -2235,6 +2338,27 @@ export const ClassDetailScreen: React.FC = () => {
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </TouchableOpacity>
+
+              {/* 9. Tüm Sınıfı ve Verileri Sil */}
+              <TouchableOpacity
+                style={styles.actionSheetItem}
+                onPress={() => {
+                  setActionMenuVisible(false);
+                  setTimeout(() => handleDeleteEntireClass(), 200);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.actionSheetIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="trash" size={22} color="#DC2626" />
+                </View>
+                <View style={styles.actionSheetItemTextWrap}>
+                  <Text style={[styles.actionSheetItemTitle, { color: '#DC2626' }]}>Tüm Sınıfı Sil (Kalıcı)</Text>
+                  <Text style={styles.actionSheetItemDesc}>
+                    Bu şubeyi ve bu şubeye ait tüm öğrenci, not, quiz ve görüş kayıtlarını tamamen siler.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#DC2626" />
               </TouchableOpacity>
             </View>
             </ScrollView>
@@ -4929,6 +5053,22 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cardSubtle,
     borderRadius: 8,
     padding: 3,
+  },
+  headerSyncBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    gap: 4,
+  },
+  headerSyncBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
   },
   termBtn: {
     paddingHorizontal: 12,

@@ -68,8 +68,15 @@
 
 ### 👨‍🏫 4. Öğretmen (Okula Bağlı veya Bireysel)
 - **Arayüz:** Mevcut `odevTakip` arayüzü ve akışında, hızlı ve pratik.
-- **Hazır Veri:** Öğrenci listeleri, fotoğraflar, yıllık planlar ve ders programını okul kodundan tek tıkla çekebilme.
-- **Yerel Gizlilik:** Taslak notlar, quiz sonuçları ve kişisel görüşler yerelde gizli kalır.
+- **Yerel Öncelikli Öğrenci Listesi (Local-First):**
+  - Öğretmenin uygulamasındaki öğrenci listeleri tamamen cihazdaki yerel SQLite veritabanında tutulur.
+  - Öğretmen sisteme öğrenci ekleyebilir veya düzenleyebilir; bu ekleme sunucu tarafındaki resmi veriyi değiştirmez.
+- **Sistemden Öğrencileri Çek:**
+  - Şube üzerinde ve şube detayında tek tıkla *"Sistemden Öğrencileri Çek"* butonu bulunur.
+  - Sunucudaki resmi öğrenci listesi çekilir ve yerel şube güncellenir.
+  - **Quiz, Not ve Görüşlerin Korunması:** Eşleştirme öğrenci numarası/ismi ile yapılır. Öğrencinin yerel ID'si korunduğu için öğretmenin girdiği tüm quiz notları, öğrenci görüşleri ve ödev kayıtları **KESİNLİKLE KORUNUR**. Sadece numara, sınıf veya iletişim değişmişse güncellenir.
+- **Tüm Sınıfı Sil:**
+  - Şubeyi ve şubeye ait TÜM verileri (öğrenciler, görüşler, quiz puanları, ödevler, program) cihazdan kalıcı olarak temizler.
 - **Seçici ve Onaylı Bildirimler:**
   - Ödevler otomatik veya manuel olarak veliye/öğrenciye bildirilebilir.
   - Görüş notları hassas olduğu için varsayılan olarak paylaşılmaz; sadece öğretmen açıkça seçerse gönderilir.
