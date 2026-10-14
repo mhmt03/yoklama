@@ -36,7 +36,7 @@ import { getActiveSchool, School } from '../database/operations/schoolOperations
 import { useDrawer } from '../context/DrawerContext';
 import { getActiveUserRole, getActiveTeacherName } from '../utils/roleService';
 import { getTeacherAuthorizedClassIds } from '../database/operations/schoolCodeOperations';
-import { syncClassStudentsFromServer } from '../services/studentSyncService';
+import { syncClassStudentsFromServer, syncTeacherAssignedClassesAndStudents } from '../services/studentSyncService';
 
 export const ClassesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -46,6 +46,7 @@ export const ClassesScreen: React.FC = () => {
   const [activeSchool, setActiveSchool] = useState<School | null>(null);
   const [teacherRestrictionActive, setTeacherRestrictionActive] = useState(false);
   const [syncingClassId, setSyncingClassId] = useState<number | null>(null);
+  const [syncingAllFromSchool, setSyncingAllFromSchool] = useState(false);
 
   // Class create/edit modal
   const [modalVisible, setModalVisible] = useState(false);
@@ -220,6 +221,33 @@ export const ClassesScreen: React.FC = () => {
     );
   };
 
+  const handleSyncFromSchool = () => {
+    Alert.alert(
+      'Okuldan Şubeleri Çek 🏫',
+      'Okul idareniz (Admin) tarafından adınıza tanımlanmış tüm şubeler ve bu şubelere ait kayıtlı öğrenciler okul sunucusundan otomatik olarak çekilecektir.\n\n💡 Mevcut şube kayıtlarınız, quiz notlarınız ve görüşleriniz aynen korunur.\n\nDevam etmek istiyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Şubeleri Çek',
+          onPress: async () => {
+            setSyncingAllFromSchool(true);
+            try {
+              const res = await syncTeacherAssignedClassesAndStudents(activeSchool?.code);
+              Alert.alert(res.success ? 'Başarılı 🎉' : 'Bilgi', res.message);
+              if (res.success) {
+                await loadClasses();
+              }
+            } catch (e: any) {
+              Alert.alert('Hata', e.message || 'Şubeler çekilirken bir hata oluştu.');
+            } finally {
+              setSyncingAllFromSchool(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const totalStudents = classes.reduce((sum, c) => sum + (c.student_count || 0), 0);
 
   const schoolBgTint = activeSchool?.color ? `${activeSchool.color}0E` : Colors.background;
@@ -253,6 +281,21 @@ export const ClassesScreen: React.FC = () => {
           >
             <Ionicons name="search" size={19} color={Colors.primary} />
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.syncSchoolHeaderBtn, syncingAllFromSchool && { opacity: 0.7 }]}
+            onPress={handleSyncFromSchool}
+            disabled={syncingAllFromSchool}
+            accessibilityLabel="Okuldan Şubeleri Çek"
+          >
+            {syncingAllFromSchool ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="cloud-download-outline" size={15} color="#fff" />
+                <Text style={styles.syncSchoolBtnText}>Okuldan Çek</Text>
+              </>
+            )}
+          </TouchableOpacity>
           <Button
             title="Şube Ekle"
             icon="add"
@@ -269,13 +312,38 @@ export const ClassesScreen: React.FC = () => {
         contentContainerStyle={styles.listContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
-          <EmptyState
-            icon="school-outline"
-            title="Henüz Şube Eklenmemiş"
-            description="Öğrencilerinizi ve derslerinizi takip etmek için ilk şubenizi ekleyin."
-            actionTitle="Yeni Şube Ekle"
-            onAction={handleOpenAdd}
-          />
+          <View style={styles.emptyCardContainer}>
+            <View style={styles.emptyIconCircle}>
+              <Ionicons name="school-outline" size={40} color={Colors.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>Henüz Şube Eklenmemiş</Text>
+            <Text style={styles.emptyDesc}>
+              Okul idarenizin (Admin) adınıza tanımladığı şubeleri ve öğrencileri otomatik çekebilir ya da manuel olarak ekleyebilirsiniz.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
+              <TouchableOpacity
+                style={styles.emptySyncBtn}
+                onPress={handleSyncFromSchool}
+                disabled={syncingAllFromSchool}
+              >
+                {syncingAllFromSchool ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="cloud-download" size={16} color="#fff" />
+                    <Text style={styles.emptySyncBtnText}>Okuldan Şubeleri Çek</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.emptyAddBtn}
+                onPress={handleOpenAdd}
+              >
+                <Ionicons name="add" size={17} color={Colors.primary} />
+                <Text style={styles.emptyAddBtnText}>Manuel Ekle</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         }
         renderItem={({ item }) => (
           <TouchableOpacity
@@ -954,5 +1022,75 @@ const styles = StyleSheet.create({
   },
   hamburgerBtn: {
     padding: 4,
+  },
+  syncSchoolHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 8,
+    gap: 4,
+  },
+  syncSchoolBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  emptyCardContainer: {
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.text,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 19,
+    maxWidth: 300,
+  },
+  emptySyncBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0284C7',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+  },
+  emptySyncBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  emptyAddBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 4,
+  },
+  emptyAddBtnText: {
+    color: Colors.primary,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

@@ -1,5 +1,5 @@
 import { getDB } from '../database/db';
-import { apiRequest } from './apiClient';
+import { apiRequest, getActiveUserSession } from './apiClient';
 import { getActiveSchool } from '../database/operations/schoolOperations';
 import { getStudentsByClass } from '../database/operations/studentOperations';
 
@@ -192,3 +192,187 @@ export async function syncClassStudentsFromServer(
     };
   }
 }
+
+export interface TeacherClassesSyncResult {
+  success: boolean;
+  message: string;
+  syncedClasses: string[];
+  totalStudents: number;
+}
+
+/**
+ * Öğretmenin okul idaresi (Admin) tarafından kendisine atanmış tüm şubelerini
+ * ve bu şubelere ait öğrencileri sunucudan otomatik olarak çekip yerel ajandaya ekler.
+ */
+export async function syncTeacherAssignedClassesAndStudents(
+  providedSchoolCode?: string
+): Promise<TeacherClassesSyncResult> {
+  try {
+    const activeSchool = await getActiveSchool();
+    const session = await getActiveUserSession();
+    const code = (providedSchoolCode || activeSchool?.code || session?.schoolCode || '').trim();
+
+    if (!code) {
+      return {
+        success: false,
+        message: 'Aktif bir okul kodu bulunamadı. Lütfen önce bir okul koduna bağlanın.',
+        syncedClasses: [],
+        totalStudents: 0,
+      };
+    }
+
+    // 1. Okul bilgisini ve ID'sini tespit et
+    let schoolId = session?.schoolId;
+    if (!schoolId) {
+      try {
+        const lookup = await apiRequest<any[]>(`schools/lookup?code=${encodeURIComponent(code)}`);
+        if (lookup.success && lookup.data && lookup.data.length > 0) {
+          schoolId = lookup.data[0].id;
+        }
+      } catch {}
+    }
+
+    // Öğretmen adı
+    const { getActiveTeacherName } = await import('../utils/roleService');
+    const teacherName = (await getActiveTeacherName()) || session?.fullName || session?.username || '';
+    const assignedClassNames = new Set<string>();
+
+    // 2. Sunucudaki Öğretmen Profili (AssignedClassesJson)
+    if (schoolId) {
+      try {
+        const teachersRes = await apiRequest<any[]>(`schools/${schoolId}/teachers`);
+        if (teachersRes.success && teachersRes.data) {
+          const myProfile = teachersRes.data.find(
+            (t) =>
+              (t.username && session?.username && t.username.toLowerCase() === session.username.toLowerCase()) ||
+              (t.fullName && teacherName && (
+                t.fullName.toLowerCase().includes(teacherName.toLowerCase()) ||
+                teacherName.toLowerCase().includes(t.fullName.toLowerCase())
+              ))
+          );
+
+          if (myProfile?.assignedClassesJson) {
+            try {
+              let parsed: any = myProfile.assignedClassesJson;
+              if (typeof parsed === 'string') {
+                if (parsed.startsWith('[')) {
+                  parsed = JSON.parse(parsed);
+                } else {
+                  parsed = parsed.split(/[,;\s]+/).filter(Boolean);
+                }
+              }
+              if (Array.isArray(parsed)) {
+                parsed.forEach((c: any) => {
+                  const clean = String(c).trim();
+                  if (clean) assignedClassNames.add(clean);
+                });
+              }
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Sunucudaki Çarşaf Ders Programından gelen sınıflar (sync/schedules)
+    if (schoolId && teacherName) {
+      try {
+        const schedRes = await apiRequest<any[]>(
+          `sync/schedules?schoolId=${schoolId}&teacherName=${encodeURIComponent(teacherName)}`
+        );
+        if (schedRes.success && schedRes.data && schedRes.data.length > 0) {
+          schedRes.data.forEach((s) => {
+            if (s.grade && s.section) {
+              const cls = `${s.grade}-${s.section}`.trim();
+              assignedClassNames.add(cls);
+            }
+          });
+        }
+      } catch {}
+    }
+
+    // 4. Eğer öğretmene özel atanmış sınıf bulunamadıysa, okulun tüm şubelerini al
+    if (assignedClassNames.size === 0 && schoolId) {
+      try {
+        const classesRes = await apiRequest<any[]>(`schools/${schoolId}/classes`);
+        if (classesRes.success && classesRes.data && classesRes.data.length > 0) {
+          classesRes.data.forEach((c) => {
+            const cls = c.className || `${c.grade}-${c.section}`;
+            if (cls) assignedClassNames.add(cls);
+          });
+        }
+      } catch {}
+    }
+
+    // 5. Eğer sunucudan hala sınıf gelmediyse ama sunucuda genel öğrenciler varsa, öğrencilerin sınıflarını çıkar
+    if (assignedClassNames.size === 0) {
+      try {
+        const studRes = await apiRequest<any[]>(`sync/students?schoolCode=${encodeURIComponent(code)}`);
+        if (studRes.success && studRes.data && studRes.data.length > 0) {
+          studRes.data.forEach((st) => {
+            if (st.grade && st.section) {
+              assignedClassNames.add(`${st.grade}-${st.section}`);
+            }
+          });
+        }
+      } catch {}
+    }
+
+    if (assignedClassNames.size === 0) {
+      return {
+        success: false,
+        message: 'Okul sisteminde adınıza atanmış veya tanımlı bir şube bulunamadı. Lütfen okul idarenizle görüşünüz.',
+        syncedClasses: [],
+        totalStudents: 0,
+      };
+    }
+
+    // 6. Şubeleri yerel SQLite'a ekle/güncelle ve öğrencilerini senkronize et
+    const { getClasses, createClass } = await import('../database/operations/classOperations');
+    const localClasses = await getClasses();
+    let totalStudentsSynced = 0;
+    const syncedList: string[] = [];
+
+    for (const rawName of Array.from(assignedClassNames)) {
+      const className = rawName.trim();
+      if (!className) continue;
+
+      let existing = localClasses.find(
+        (c) => c.name.trim().toLowerCase() === className.toLowerCase()
+      );
+
+      let classId: number;
+      if (existing) {
+        classId = existing.id;
+      } else {
+        const match = className.match(/^(\d{1,2})/);
+        const gradeLevel = match ? parseInt(match[1], 10) : undefined;
+        classId = await createClass(className, 'Okuldan çekildi', gradeLevel);
+      }
+
+      // Bu sınıfın öğrencilerini çek
+      try {
+        const studentSync = await syncClassStudentsFromServer(classId, className, code);
+        if (studentSync.success && studentSync.totalServer) {
+          totalStudentsSynced += studentSync.totalServer;
+        }
+      } catch {}
+
+      syncedList.push(className);
+    }
+
+    return {
+      success: true,
+      message: `Admin tarafından tanımlanan ${syncedList.length} şube (${syncedList.join(', ')}) ve toplam ${totalStudentsSynced} öğrenci başarıyla telefonunuza aktarıldı.`,
+      syncedClasses: syncedList,
+      totalStudents: totalStudentsSynced,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Şube ve öğrenci çekme sırasında beklenmeyen bir hata oluştu.',
+      syncedClasses: [],
+      totalStudents: 0,
+    };
+  }
+}
+
