@@ -1,0 +1,3211 @@
+import React, { useState, useCallback, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
+  Alert,
+  Image,
+  ActivityIndicator,
+  Dimensions,
+} from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors, Shadows } from '../theme/colors';
+import { Card } from '../components/Card';
+import { Button } from '../components/Button';
+import { Input } from '../components/Input';
+import {
+  getLessonSlots,
+  getScheduleByDay,
+  saveScheduleSlot,
+  getCourses,
+  getWeeklySchedule,
+  getSlotsForDay,
+  getCustomDaysWithOverrides,
+  saveDaySlotTime,
+  clearEntireSchedule,
+  getSchedulePhotoUri,
+  setSchedulePhotoUri,
+  applyAnalyzedSchedule,
+} from '../database/operations/scheduleOperations';
+import {
+  analyzeSchedulePhotoWithGemini,
+  getGeminiApiKey,
+  setGeminiApiKey,
+  testGeminiApiKey,
+  getGeminiModel,
+  setGeminiModel,
+  PRESET_GEMINI_MODELS,
+  DEFAULT_GEMINI_MODEL,
+  AnalyzedLessonItem,
+  AnalyzedSlotTime,
+} from '../utils/geminiScheduleService';
+import { getClasses } from '../database/operations/classOperations';
+import { exportScheduleToExcel } from '../utils/excelService';
+import { DAYS_OF_WEEK, getDayOfWeekIndex, isTimeBetween, getCurrentTimeString } from '../utils/dateUtils';
+import { DaySlotInfo, ScheduleItem, CourseName, ClassItem } from '../types';
+import { pickSchedulePhoto, cropAndRotateSchedulePhoto } from '../utils/photoService';
+
+import { getActiveSchool, School } from '../database/operations/schoolOperations';
+
+import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
+import { useDrawer } from '../context/DrawerContext';
+
+export const ScheduleScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
+  const { openDrawer } = useDrawer();
+
+  const [selectedDay, setSelectedDay] = useState<number>(() => {
+    return getDayOfWeekIndex(); // 1..7 (Pazartesi .. Pazar)
+  });
+
+  const [slots, setSlots] = useState<DaySlotInfo[]>([]);
+  const [customDays, setCustomDays] = useState<number[]>([]);
+  const [daySchedule, setDaySchedule] = useState<ScheduleItem[]>([]);
+  const [classes, setClasses] = useState<ClassItem[]>([]);
+  const [courses, setCourses] = useState<CourseName[]>([]);
+  const [activeSchool, setActiveSchool] = useState<School | null>(null);
+
+  // Schedule Photo State
+  const [photoMenuVisible, setPhotoMenuVisible] = useState(false);
+  const [photoViewModalVisible, setPhotoViewModalVisible] = useState(false);
+  const [schedulePhotoUri, setSchedulePhotoUriState] = useState<string | null>(null);
+  const [loadingPhoto, setLoadingPhoto] = useState(false);
+
+  // Zoom & Crop State
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [cropModalVisible, setCropModalVisible] = useState(false);
+  const [cropMargins, setCropMargins] = useState<{ top: number; bottom: number; left: number; right: number }>({
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  });
+  const [isProcessingCrop, setIsProcessingCrop] = useState(false);
+
+  // Gemini AI Vision States
+  const [analyzingAi, setAnalyzingAi] = useState(false);
+  const [aiStatusText, setAiStatusText] = useState('');
+  const [apiKeyModalVisible, setApiKeyModalVisible] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [selectedGeminiModel, setSelectedGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
+  const [testingApiKey, setTestingApiKey] = useState(false);
+  const [aiPreviewModalVisible, setAiPreviewModalVisible] = useState(false);
+  const [analyzedLessons, setAnalyzedLessons] = useState<AnalyzedLessonItem[]>([]);
+  const [applyingSchedule, setApplyingSchedule] = useState(false);
+  const [autoCreateClasses, setAutoCreateClasses] = useState(true);
+  const [autoCreateCourses, setAutoCreateCourses] = useState(true);
+  const [detectedSlotTimes, setDetectedSlotTimes] = useState<AnalyzedSlotTime[]>([]);
+  const [updateSlotTimes, setUpdateSlotTimes] = useState(false);
+
+
+  // Slot Edit Modal
+  const [modalVisible, setModalVisible] = useState(false);
+  const [activeSlot, setActiveSlot] = useState<DaySlotInfo | null>(null);
+  const [selectedClassId, setSelectedClassId] = useState<number | null>(null);
+  const [selectedCourseId, setSelectedCourseId] = useState<number | null>(null);
+  const [classroomInput, setClassroomInput] = useState('');
+
+  // Inline time edit inside modal
+  const [isEditingTime, setIsEditingTime] = useState(false);
+  const [slotStartInput, setSlotStartInput] = useState('');
+  const [slotEndInput, setSlotEndInput] = useState('');
+
+  const loadData = async () => {
+    try {
+      const [daySlots, cls, crs, cDays, currentDayItems, savedPhoto, activeSch] = await Promise.all([
+        getSlotsForDay(selectedDay),
+        getClasses(),
+        getCourses(),
+        getCustomDaysWithOverrides(),
+        getScheduleByDay(selectedDay),
+        getSchedulePhotoUri(),
+        getActiveSchool(),
+      ]);
+      setSlots(daySlots);
+      setClasses(cls);
+      setCourses(crs);
+      setCustomDays(cDays);
+      setDaySchedule(currentDayItems);
+      setSchedulePhotoUriState(savedPhoto);
+      setActiveSchool(activeSch);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [selectedDay])
+  );
+
+  useEffect(() => {
+    if (schedulePhotoUri) {
+      Image.getSize(
+        schedulePhotoUri,
+        (width, height) => {
+          setImageDimensions({ width, height });
+        },
+        () => {
+          setImageDimensions(null);
+        }
+      );
+    } else {
+      setImageDimensions(null);
+    }
+  }, [schedulePhotoUri]);
+
+  const handleOpenSlotModal = (slot: DaySlotInfo) => {
+    setActiveSlot(slot);
+    const existing = daySchedule.find((item) => item.slot_id === slot.id);
+    setSelectedClassId(existing?.class_id || null);
+    setSelectedCourseId(existing?.course_id || null);
+    setClassroomInput(existing?.classroom || '');
+    setSlotStartInput(slot.start_time);
+    setSlotEndInput(slot.end_time);
+    setIsEditingTime(false);
+    setModalVisible(true);
+  };
+
+  const handleSaveSlot = async () => {
+    if (!activeSlot) return;
+    try {
+      // If user modified time for this day
+      if (
+        isEditingTime &&
+        slotStartInput.trim() &&
+        slotEndInput.trim() &&
+        (slotStartInput.trim() !== activeSlot.start_time || slotEndInput.trim() !== activeSlot.end_time)
+      ) {
+        await saveDaySlotTime(
+          selectedDay,
+          activeSlot.id,
+          slotStartInput.trim(),
+          slotEndInput.trim()
+        );
+      }
+
+      await saveScheduleSlot(
+        selectedDay,
+        activeSlot.id,
+        selectedClassId,
+        selectedCourseId,
+        classroomInput.trim()
+      );
+      setModalVisible(false);
+      loadData();
+    } catch (e) {
+      Alert.alert('Hata', 'Ders programı kaydedilemedi.');
+    }
+  };
+
+  const handleClearSlot = async () => {
+    if (!activeSlot) return;
+    try {
+      await saveScheduleSlot(selectedDay, activeSlot.id, null, null);
+      setModalVisible(false);
+      loadData();
+    } catch (e) {
+      Alert.alert('Hata', 'Kayıt temizlenemedi.');
+    }
+  };
+
+  const handleExportSchedule = async () => {
+    try {
+      const allSlots = await getLessonSlots();
+      const allSchedule = await getWeeklySchedule();
+      await exportScheduleToExcel(allSlots, allSchedule);
+    } catch (e) {
+      Alert.alert('Hata', 'Excel programı oluşturulamadı.');
+    }
+  };
+
+  const handleScanUploadedPhoto = () => {
+    setPhotoMenuVisible(false);
+    if (!schedulePhotoUri) {
+      Alert.alert(
+        'Sisteme Yüklü Resim Bulunamadı 📸',
+        'Sisteme henüz bir haftalık ders programı fotoğrafı yüklenmemiş.\n\nÖnce "Galeriden Fotoğraf Seç" veya "Kameradan Fotoğraf Çek" seçeneğiyle ders programınızın fotoğrafını sisteme ekleyiniz.',
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: 'Kameradan Çek',
+            onPress: () => handlePickSchedulePhoto('camera', true, true),
+          },
+          {
+            text: 'Galeriden Seç',
+            onPress: () => handlePickSchedulePhoto('gallery', true, true),
+          },
+        ]
+      );
+      return;
+    }
+
+    setTimeout(() => {
+      handleRunAiAnalysis(schedulePhotoUri);
+    }, 200);
+  };
+
+  const handleClearEntireSchedule = () => {
+    Alert.alert(
+      'Haftalık Ders Programını Temizle',
+      'Haftalık programdaki tüm gün ve saatlere ait şube ve ders atamaları tamamen silinecektir.\n\nBu işlemi onaylıyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Programı Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearEntireSchedule();
+              await loadData();
+              Alert.alert('Başarılı', 'Haftalık ders programı başarıyla sıfırlandı.');
+            } catch (err: any) {
+              Alert.alert('Hata', 'Program silinirken bir sorun oluştu: ' + (err?.message || err));
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRunAiAnalysis = async (targetUri?: string | null) => {
+    const uriToUse = targetUri || schedulePhotoUri;
+
+    // Check API Key first
+    const currentKey = await getGeminiApiKey();
+    if (!currentKey) {
+      setApiKeyInput('');
+      setApiKeyModalVisible(true);
+      return;
+    }
+
+    if (!uriToUse) {
+      Alert.alert(
+        'Fotoğraf Gerekli 📸',
+        'Yapay zeka ile analiz edebilmek için önce ders programının fotoğrafını çekin veya galeriden seçin.',
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          { text: 'Kameradan Çek', onPress: () => handlePickSchedulePhoto('camera', false, true) },
+          { text: 'Galeriden Seç', onPress: () => handlePickSchedulePhoto('gallery', false, true) },
+        ]
+      );
+      return;
+    }
+
+    try {
+      setPhotoMenuVisible(false);
+      setAnalyzingAi(true);
+      setAiStatusText('Fotoğraf yapay zeka (Gemini Vision) ile taranıyor...\nTablo satırları, şubeler ve ders saatleri çözümleniyor.');
+
+      const result = await analyzeSchedulePhotoWithGemini(uriToUse, currentKey);
+
+      setAnalyzingAi(false);
+      setAnalyzedLessons(result.lessons);
+      const slotsFound = result.detectedSlotTimes || [];
+      setDetectedSlotTimes(slotsFound);
+      setUpdateSlotTimes(slotsFound.length > 0);
+      setAiPreviewModalVisible(true);
+    } catch (err: any) {
+      setAnalyzingAi(false);
+      const msg = err?.message || 'Bilinmeyen bir hata oluştu.';
+      if (msg.includes('API anahtarı')) {
+        Alert.alert('API Anahtarı Gerekli', msg, [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: 'Anahtarı Gir',
+            onPress: () => {
+              setApiKeyInput('');
+              setApiKeyModalVisible(true);
+            },
+          },
+        ]);
+      } else {
+        Alert.alert('Yapay Zeka Analiz Hatası', msg);
+      }
+    }
+  };
+
+  const handleApplyAnalyzedSchedule = async () => {
+    if (!analyzedLessons || analyzedLessons.length === 0) return;
+
+    try {
+      setApplyingSchedule(true);
+      const res = await applyAnalyzedSchedule(analyzedLessons, {
+        clearDaysOption: 'all_week',
+        autoCreateClasses,
+        autoCreateCourses,
+        updateSlotTimes,
+        detectedSlotTimes,
+      });
+      await loadData();
+      setApplyingSchedule(false);
+      setAiPreviewModalVisible(false);
+
+      let msg =
+        `Toplam ${res.totalLessonsLoaded} ders saati başarıyla programa aktarıldı!\n\n` +
+        `• Şubeler: ${res.classesEnsured.join(', ') || 'Yok'}\n` +
+        `• Dersler: ${res.coursesEnsured.join(', ') || 'Yok'}\n`;
+
+      if (res.slotTimesUpdatedCount && res.slotTimesUpdatedCount > 0) {
+        msg += `• Saat Dilimleri: ${res.slotTimesUpdatedCount} ders saatinin zamanları güncellendi.\n`;
+      }
+      msg += `\nHaftalık ders programınız başarıyla güncellendi.`;
+
+      if (res.skippedLessonsCount && res.skippedLessonsCount > 0) {
+        msg += `\n\n⚠️ ${res.skippedLessonsCount} ders saati (tanımsız şube/ders ekleme kapalı olduğu için) dahil edilmedi.`;
+      }
+
+      Alert.alert('Ders Programı Başarıyla Yüklendi 🎉', msg);
+    } catch (err: any) {
+      setApplyingSchedule(false);
+      Alert.alert('Hata', 'Program kaydedilirken bir hata oluştu: ' + (err?.message || err));
+    }
+  };
+
+  const handleOpenApiKeySettings = async () => {
+    setPhotoMenuVisible(false);
+    const [key, model] = await Promise.all([getGeminiApiKey(), getGeminiModel()]);
+    setApiKeyInput(key);
+    setSelectedGeminiModel(model || DEFAULT_GEMINI_MODEL);
+    setApiKeyModalVisible(true);
+  };
+
+  const handleTestAndSaveApiKey = async () => {
+    const trimmed = apiKeyInput.trim();
+    const modelToSave = selectedGeminiModel || DEFAULT_GEMINI_MODEL;
+    if (!trimmed) {
+      await Promise.all([setGeminiApiKey(''), setGeminiModel(modelToSave)]);
+      setApiKeyModalVisible(false);
+      Alert.alert('Bilgi', 'Gemini API anahtarı temizlendi.');
+      return;
+    }
+
+    try {
+      setTestingApiKey(true);
+      const res = await testGeminiApiKey(trimmed, modelToSave);
+      setTestingApiKey(false);
+
+      if (res.success) {
+        await Promise.all([setGeminiApiKey(trimmed), setGeminiModel(modelToSave)]);
+        setApiKeyModalVisible(false);
+        Alert.alert('Başarılı ✅', `API anahtarınız ve seçili model (${modelToSave}) doğrulandı ve kaydedildi.`);
+      } else {
+        Alert.alert('Doğrulama Başarısız ❌', res.message + '\n\nYine de kaydetmek istiyor musunuz?', [
+          { text: 'Düzenle', style: 'cancel' },
+          {
+            text: 'Yine de Kaydet',
+            onPress: async () => {
+              await Promise.all([setGeminiApiKey(trimmed), setGeminiModel(modelToSave)]);
+              setApiKeyModalVisible(false);
+            },
+          },
+        ]);
+      }
+    } catch (err: any) {
+      setTestingApiKey(false);
+      Alert.alert('Hata', err?.message || 'API anahtarı test edilemedi.');
+    }
+  };
+
+  const handlePickSchedulePhoto = async (
+    source: 'camera' | 'gallery',
+    withCrop: boolean = false,
+    autoRunAi = false
+  ) => {
+    try {
+      setPhotoMenuVisible(false);
+      setCropModalVisible(false);
+      setLoadingPhoto(true);
+      const targetPath = await pickSchedulePhoto(source, { allowsEditing: withCrop });
+      if (!targetPath) {
+        setLoadingPhoto(false);
+        return;
+      }
+
+      await setSchedulePhotoUri(targetPath);
+      setSchedulePhotoUriState(targetPath);
+      setZoomScale(1);
+      setCropMargins({ top: 0, bottom: 0, left: 0, right: 0 });
+      setLoadingPhoto(false);
+
+      if (autoRunAi) {
+        handleRunAiAnalysis(targetPath);
+      } else {
+        Alert.alert(
+          'Ders Programı Fotoğrafı Kaydedildi 📸',
+          'Fotoğraftaki haftalık ders programını Yapay Zeka (Gemini) ile otomatik tarayıp programa aktarmak ister misiniz?',
+          [
+            { text: 'Yalnızca Fotoğrafı Sakla', style: 'cancel' },
+            {
+              text: '✨ Yapay Zeka ile Tara & Yükle',
+              onPress: () => handleRunAiAnalysis(targetPath),
+            },
+          ]
+        );
+      }
+
+    } catch (err: any) {
+      setLoadingPhoto(false);
+      Alert.alert('Hata', err?.message || 'Fotoğraf yüklenemedi.');
+    }
+  };
+
+  const handleRotateSchedulePhoto = async (deg: number = 90) => {
+    if (!schedulePhotoUri) return;
+    try {
+      setLoadingPhoto(true);
+      const newUri = await cropAndRotateSchedulePhoto(schedulePhotoUri, { rotate: deg });
+      await setSchedulePhotoUri(newUri);
+      setSchedulePhotoUriState(newUri);
+      setZoomScale(1);
+      setLoadingPhoto(false);
+    } catch (err: any) {
+      setLoadingPhoto(false);
+      Alert.alert('Hata', 'Fotoğraf döndürülemedi: ' + (err?.message || err));
+    }
+  };
+
+  const handleApplyCrop = async () => {
+    if (!schedulePhotoUri) return;
+    try {
+      setIsProcessingCrop(true);
+      let imgWidth = imageDimensions?.width;
+      let imgHeight = imageDimensions?.height;
+
+      if (!imgWidth || !imgHeight) {
+        await new Promise<void>((resolve) => {
+          Image.getSize(
+            schedulePhotoUri,
+            (w, h) => {
+              imgWidth = w;
+              imgHeight = h;
+              resolve();
+            },
+            () => resolve()
+          );
+        });
+      }
+
+      const w = imgWidth || 1000;
+      const h = imgHeight || 1000;
+
+      const originX = Math.round((cropMargins.left / 100) * w);
+      const originY = Math.round((cropMargins.top / 100) * h);
+      const cropW = Math.round(((100 - cropMargins.left - cropMargins.right) / 100) * w);
+      const cropH = Math.round(((100 - cropMargins.top - cropMargins.bottom) / 100) * h);
+
+      if (cropW < 20 || cropH < 20) {
+        setIsProcessingCrop(false);
+        Alert.alert('Uyarı', 'Kırpma alanı çok dar. Lütfen sınırları genişletin.');
+        return;
+      }
+
+      const newUri = await cropAndRotateSchedulePhoto(schedulePhotoUri, {
+        crop: {
+          originX,
+          originY,
+          width: cropW,
+          height: cropH,
+        },
+      });
+
+      await setSchedulePhotoUri(newUri);
+      setSchedulePhotoUriState(newUri);
+      setCropMargins({ top: 0, bottom: 0, left: 0, right: 0 });
+      setZoomScale(1);
+      setIsProcessingCrop(false);
+      setCropModalVisible(false);
+
+      Alert.alert('Başarılı ✂️', 'Ders programı fotoğrafı başarıyla kırpıldı ve kaydedildi. Tablo sınırları netleştirildi.');
+    } catch (err: any) {
+      setIsProcessingCrop(false);
+      Alert.alert('Hata', 'Kırpma işlemi gerçekleştirilemedi: ' + (err?.message || err));
+    }
+  };
+
+  const handleRemoveSchedulePhoto = async () => {
+    Alert.alert(
+      'Fotoğrafı Kaldır',
+      'Kayıtlı ders programı fotoğrafını silmek istediğinize emin misiniz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            await setSchedulePhotoUri(null);
+            setSchedulePhotoUriState(null);
+            setPhotoViewModalVisible(false);
+            setPhotoMenuVisible(false);
+            setCropModalVisible(false);
+            setZoomScale(1);
+          },
+        },
+      ]
+    );
+  };
+
+  const currentTime = getCurrentTimeString();
+  const currentDayIndex = getDayOfWeekIndex();
+  const currentDayObj = DAYS_OF_WEEK.find((d) => d.id === selectedDay);
+  const isCurrentDayCustom = customDays.includes(selectedDay);
+
+  const schoolBgTint = activeSchool?.color ? `${activeSchool.color}0E` : Colors.background;
+
+  return (
+    <View style={[styles.container, { backgroundColor: schoolBgTint }]}>
+      {/* Top Header */}
+      <View style={styles.header}>
+        <View style={[styles.headerTop, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+          <TouchableOpacity
+            style={styles.hamburgerBtn}
+            onPress={openDrawer}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="menu" size={25} color={activeSchool?.color || Colors.primary} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerTitle}>Haftalık Ders Programı</Text>
+            <Text style={styles.headerSub}>
+              {activeSchool?.name ? `${activeSchool.name} • Ders Programı` : 'Şube ve ders saatleri yönetimi (7 Gün)'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.headerActionsBar}>
+          <TouchableOpacity
+            style={styles.photoHeaderBtn}
+            onPress={() => setPhotoMenuVisible(true)}
+            activeOpacity={0.8}
+            accessibilityLabel="Fotoğraftan Yükle"
+          >
+            {loadingPhoto ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <>
+                <Ionicons name="camera" size={15} color="#FFF" />
+                <Text style={styles.photoHeaderBtnText}>Fotoğraftan Yükle</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.headerIconButtonsGroup}>
+            <TouchableOpacity
+              style={styles.actionBtnIcon}
+              onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'slots', initialDay: selectedDay })}
+              accessibilityLabel="Saat & Ders Ayarları"
+            >
+              <Ionicons name="settings-outline" size={19} color={Colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionBtnIcon}
+              onPress={handleExportSchedule}
+              accessibilityLabel="Excel'e Aktar"
+            >
+              <Ionicons name="share-outline" size={19} color={Colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionBtnIcon, { backgroundColor: '#FEE2E2' }]}
+              onPress={handleClearEntireSchedule}
+              accessibilityLabel="Programı Temizle"
+            >
+              <Ionicons name="trash-outline" size={19} color={Colors.danger} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      {/* Saved Schedule Photo Indicator Bar */}
+      {schedulePhotoUri ? (
+        <View style={styles.photoSavedBanner}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+            <Ionicons name="image" size={17} color="#047857" />
+            <Text style={styles.photoSavedBannerText}>Kayıtlı Ders Programı Fotoğrafı Mevcut</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.photoViewBtnSmall}
+            onPress={() => setPhotoViewModalVisible(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="eye-outline" size={14} color="#FFF" />
+            <Text style={styles.photoViewBtnSmallText}>Fotoğrafı İncele</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {/* Days Selector - 7 GÜN */}
+      <View style={styles.daysBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.daysScroll}>
+          {DAYS_OF_WEEK.map((day) => {
+            const isSelected = selectedDay === day.id;
+            const isToday = currentDayIndex === day.id;
+            const hasCustom = customDays.includes(day.id);
+            return (
+              <TouchableOpacity
+                key={day.id}
+                style={[
+                  styles.dayTab,
+                  isSelected && styles.dayTabActive,
+                  hasCustom && !isSelected && styles.dayTabCustom,
+                ]}
+                onPress={() => setSelectedDay(day.id)}
+              >
+                <View style={styles.dayTabContent}>
+                  <Text style={[styles.dayTabText, isSelected && styles.dayTabTextActive]}>
+                    {day.shortName}
+                  </Text>
+                  {hasCustom && (
+                    <View style={[styles.customIndicatorDot, isSelected && { backgroundColor: '#fff' }]} />
+                  )}
+                </View>
+                {isToday && (
+                  <View
+                    style={[
+                      styles.todayIndicator,
+                      isSelected ? { backgroundColor: '#fff' } : null,
+                    ]}
+                  />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Custom Day Info Banner */}
+      {isCurrentDayCustom && (
+        <View style={styles.customBanner}>
+          <View style={styles.customBannerTextWrap}>
+            <Ionicons name="time" size={16} color="#B45309" />
+            <Text style={styles.customBannerText}>
+              {currentDayObj?.name} gününe özel ders saatleri uygulanıyor.
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.customBannerBtn}
+            onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'slots', initialDay: selectedDay })}
+          >
+            <Text style={styles.customBannerBtnText}>Saatleri Düzenle</Text>
+            <Ionicons name="chevron-forward" size={12} color={Colors.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Lesson Slots List for Day */}
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {slots.length === 0 ? (
+          <Card style={styles.emptySlotsCard}>
+            <Text style={styles.emptySlotsText}>Ders saati tanımlı değil.</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Button
+                title="Saatleri Tanımla"
+                size="sm"
+                onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'slots' })}
+              />
+              
+            </View>
+          </Card>
+        ) : (
+          slots.map((slot) => {
+            const match = daySchedule.find((item) => item.slot_id === slot.id);
+            const hasLesson = match && (match.class_name || match.course_name);
+            const isNow =
+              selectedDay === currentDayIndex &&
+              isTimeBetween(currentTime, slot.start_time, slot.end_time);
+
+            return (
+              <TouchableOpacity
+                key={slot.id}
+                activeOpacity={0.8}
+                onPress={() => handleOpenSlotModal(slot)}
+              >
+                <Card
+                  style={[
+                    styles.slotCard, 
+                    isNow && styles.slotCardNow,
+                    hasLesson && activeSchool?.color ? { backgroundColor: '#FFFFFF', borderColor: `${activeSchool.color}40`, borderWidth: 1 } : null
+                  ]}
+                  highlightBorder={isNow ? Colors.success : hasLesson ? (activeSchool?.color || Colors.primary) : undefined}
+                >
+                  <View style={styles.slotRow}>
+                    <View style={styles.slotTimeWrap}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={styles.slotNum}>{slot.slot_name}</Text>
+                        {slot.is_custom_time && (
+                          <View style={styles.customSlotBadge}>
+                            <Text style={styles.customSlotBadgeText}>Özel</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.slotTimes, slot.is_custom_time && styles.slotTimesCustom]}>
+                        {slot.start_time} - {slot.end_time}
+                      </Text>
+                    </View>
+
+                    <View style={styles.slotDivider} />
+
+                    <View style={styles.slotContentWrap}>
+                      {hasLesson ? (
+                        <>
+                          <View style={styles.slotTitleRow}>
+                            <Text style={styles.slotClass}>{match.class_name || '-'}</Text>
+                            {isNow && (
+                              <View style={styles.nowBadge}>
+                                <Text style={styles.nowBadgeText}>Şu An</Text>
+                              </View>
+                            )}
+                          </View>
+                          <View style={styles.courseTagRow}>
+                            {match.course_code ? (
+                              <View
+                                style={[
+                                  styles.courseCodeBadge,
+                                  { backgroundColor: match.course_color ? `${match.course_color}18` : Colors.primaryLight },
+                                  { borderColor: match.course_color || Colors.primary },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.courseCodeBadgeText,
+                                    { color: match.course_color || Colors.primaryDark },
+                                  ]}
+                                >
+                                  {match.course_code}
+                                </Text>
+                              </View>
+                            ) : null}
+                            <Text style={styles.slotCourse} numberOfLines={1}>
+                              {match.course_name || '-'}
+                            </Text>
+                          </View>
+                          {match.classroom && (
+                            <Text style={styles.slotRoom}>Derslik: {match.classroom}</Text>
+                          )}
+                        </>
+                      ) : (
+                        <View style={styles.emptySlotContent}>
+                          <Text style={styles.emptySlotLabel}>Boş Ders</Text>
+                          <Text style={styles.emptySlotSub}>Ders atamak için tıklayın</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <Ionicons name="create-outline" size={18} color={Colors.textMuted} />
+                  </View>
+                </Card>
+              </TouchableOpacity>
+            );
+          })
+        )}
+      </ScrollView>
+
+      {/* Edit Slot Modal */}
+      <Modal visible={modalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>{activeSlot?.slot_name} Düzenle</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                  <Text style={styles.modalSub}>
+                    {currentDayObj?.name} ({activeSlot?.start_time} - {activeSlot?.end_time})
+                  </Text>
+                  {activeSlot?.is_custom_time && (
+                    <View style={styles.customSlotBadge}>
+                      <Text style={styles.customSlotBadgeText}>Güne Özel Saat</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+              {/* Optional inline day-time modifier */}
+              <TouchableOpacity
+                style={styles.timeEditToggle}
+                onPress={() => setIsEditingTime(!isEditingTime)}
+              >
+                <Ionicons
+                  name={isEditingTime ? 'chevron-up' : 'time-outline'}
+                  size={15}
+                  color={Colors.primary}
+                />
+                <Text style={styles.timeEditToggleText}>
+                  {isEditingTime
+                    ? 'Saat düzenlemeyi gizle'
+                    : `Bu günün saatini (${activeSlot?.start_time} - ${activeSlot?.end_time}) değiştir`}
+                </Text>
+              </TouchableOpacity>
+
+              {isEditingTime && (
+                <View style={styles.inlineTimeCard}>
+                  <Text style={styles.inlineTimeTitle}>
+                    {currentDayObj?.name} Günü {activeSlot?.slot_name} Saati:
+                  </Text>
+                  <View style={styles.inlineTimeInputsRow}>
+                    <View style={{ flex: 1 }}>
+                      <Input
+                        label="Başlangıç"
+                        placeholder="Örn: 11:40"
+                        value={slotStartInput}
+                        onChangeText={setSlotStartInput}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Input
+                        label="Bitiş"
+                        placeholder="Örn: 12:20"
+                        value={slotEndInput}
+                        onChangeText={setSlotEndInput}
+                      />
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Select Class */}
+              <Text style={styles.selectLabel}>Şube Seçin:</Text>
+              <View style={styles.selectGrid}>
+                {classes.map((c) => {
+                  const isSel = selectedClassId === c.id;
+                  return (
+                    <TouchableOpacity
+                      key={c.id}
+                      style={[styles.selOption, isSel && styles.selOptionActive]}
+                      onPress={() => setSelectedClassId(isSel ? null : c.id)}
+                    >
+                      <Text style={[styles.selOptionText, isSel && styles.selOptionTextActive]}>
+                        {c.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Select Course */}
+              <Text style={styles.selectLabel}>Ders Seçin:</Text>
+              <View style={styles.selectGrid}>
+                {courses.map((crs) => {
+                  const isSel = selectedCourseId === crs.id;
+                  return (
+                    <TouchableOpacity
+                      key={crs.id}
+                      style={[styles.selOption, isSel && styles.selOptionActive]}
+                      onPress={() => setSelectedCourseId(isSel ? null : crs.id)}
+                    >
+                      <Text style={[styles.selOptionText, isSel && styles.selOptionTextActive]}>
+                        {crs.name}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Optional Classroom input */}
+              <Input
+                label="Derslik / Sınıf (Opsiyonel)"
+                placeholder="Örn: Fizik Lab, 204 vb."
+                value={classroomInput}
+                onChangeText={setClassroomInput}
+              />
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <Button
+                title="Boşalt"
+                variant="outline"
+                style={{ flex: 1 }}
+                onPress={handleClearSlot}
+              />
+              <Button
+                title="Kaydet"
+                style={{ flex: 2 }}
+                onPress={handleSaveSlot}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Photo Import Action Modal (Camera / Gallery / Official) */}
+      <Modal
+        visible={photoMenuVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setPhotoMenuVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.photoModalOverlay}
+          activeOpacity={1}
+          onPress={() => setPhotoMenuVisible(false)}
+        >
+          <View style={styles.photoModalSheet} onStartShouldSetResponder={() => true}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.photoModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.photoModalTitle}>Ders Programı Yükleme & Yönetim</Text>
+                <Text style={styles.photoModalSub}>
+                  Fotoğraftan kaydedin, hazır okul programını aktarın veya düzenleyin
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.photoModalCloseBtn}
+                onPress={() => setPhotoMenuVisible(false)}
+              >
+                <Ionicons name="close" size={22} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.photoModalOptions}>
+              {/* Option 1: Sisteme Yüklü Olan Resmi Tara ve Yükle */}
+              <TouchableOpacity
+                style={[styles.photoOptionCard, { borderColor: '#C4B5FD', backgroundColor: '#F5F3FF' }]}
+                onPress={handleScanUploadedPhoto}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.photoOptionIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                  <Ionicons name="sparkles" size={24} color="#7C3AED" />
+                </View>
+                <View style={styles.photoOptionTextWrap}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.photoOptionTitle, { color: '#6D28D9' }]}>
+                      Sisteme Yüklü Olan Resmi Tara ve Yükle
+                    </Text>
+                    <View style={[styles.autoLoadBadge, { backgroundColor: '#DDD6FE' }]}>
+                      <Text style={[styles.autoLoadBadgeText, { color: '#6D28D9' }]}>Yapay Zeka</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.photoOptionDesc}>
+                    {schedulePhotoUri
+                      ? 'Sistemde kayıtlı olan haftalık ders programı fotoğrafını yapay zeka ile analiz eder ve dersleri otomatik programa aktarır.'
+                      : 'Henüz fotoğraf yüklenmemiş. Seçtiğinizde kameradan veya galeriden fotoğraf ekleyip otomatik taratabilirsiniz.'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#7C3AED" />
+              </TouchableOpacity>
+
+              {/* Option 2: Kameradan Çek */}
+              <TouchableOpacity
+                style={styles.photoOptionCard}
+                onPress={() => handlePickSchedulePhoto('camera', true)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.photoOptionIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="camera" size={24} color="#DC2626" />
+                </View>
+                <View style={styles.photoOptionTextWrap}>
+                  <Text style={styles.photoOptionTitle}>Kameradan Fotoğraf Çek & Kırp</Text>
+                  <Text style={styles.photoOptionDesc}>
+                    Masadaki veya panodaki ders programı kağıdının fotoğrafını çekip tablo sınırlarına göre kırpın.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </TouchableOpacity>
+
+              {/* Option 3: Galeriden Seç */}
+              <TouchableOpacity
+                style={styles.photoOptionCard}
+                onPress={() => handlePickSchedulePhoto('gallery', true)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.photoOptionIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                  <Ionicons name="images" size={24} color="#7C3AED" />
+                </View>
+                <View style={styles.photoOptionTextWrap}>
+                  <Text style={styles.photoOptionTitle}>Galeriden Fotoğraf Seç & Kırp</Text>
+                  <Text style={styles.photoOptionDesc}>
+                    Cihazınızdaki ders programı fotoğrafını seçin ve kırparak sisteme ekleyin.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </TouchableOpacity>
+
+              {/* Option 4: Eğer Kayıtlı Fotoğraf Varsa */}
+              {schedulePhotoUri ? (
+                <TouchableOpacity
+                  style={[styles.photoOptionCard, { borderColor: '#A7F3D0', backgroundColor: '#ECFDF5' }]}
+                  onPress={() => {
+                    setPhotoMenuVisible(false);
+                    setTimeout(() => setPhotoViewModalVisible(true), 200);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.photoOptionIconWrap, { backgroundColor: '#D1FAE5' }]}>
+                    <Ionicons name="eye" size={24} color="#059669" />
+                  </View>
+                  <View style={styles.photoOptionTextWrap}>
+                    <Text style={[styles.photoOptionTitle, { color: '#065F46' }]}>Kayıtlı Fotoğrafı Görüntüle & Büyüt</Text>
+                    <Text style={styles.photoOptionDesc}>
+                      Ders programı fotoğrafını tam ekranda açın, yakınlaştırıp inceleyin veya kırpın.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#059669" />
+                </TouchableOpacity>
+              ) : null}
+
+              {/* Option 5: Yapay Zeka (Gemini API) Ayarları */}
+              <TouchableOpacity
+                style={styles.photoOptionCard}
+                onPress={handleOpenApiKeySettings}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.photoOptionIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="key-outline" size={24} color="#D97706" />
+                </View>
+                <View style={styles.photoOptionTextWrap}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.photoOptionTitle}>Yapay Zeka (Gemini API) Ayarları</Text>
+                    <View style={[styles.autoLoadBadge, { backgroundColor: '#FEF3C7' }]}>
+                      <Text style={[styles.autoLoadBadgeText, { color: '#B45309' }]}>Ücretsiz</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.photoOptionDesc}>
+                    Otomatik görsel tarama için Google Gemini API anahtarınızı görüntüleyin veya değiştirin.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </TouchableOpacity>
+
+              {/* Option 6: Ders Programını Düzenle & Saatleri Yönet */}
+              <TouchableOpacity
+                style={styles.photoOptionCard}
+                onPress={() => {
+                  setPhotoMenuVisible(false);
+                  navigation.navigate('ScheduleManage', { initialTab: 'slots', initialDay: selectedDay });
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.photoOptionIconWrap, { backgroundColor: Colors.primaryLight }]}>
+                  <Ionicons name="create-outline" size={24} color={Colors.primary} />
+                </View>
+                <View style={styles.photoOptionTextWrap}>
+                  <Text style={styles.photoOptionTitle}>Ders Programını Düzenle & Saatleri Yönet</Text>
+                  <Text style={styles.photoOptionDesc}>
+                    Şubeler, ders saatleri ve haftalık ders programını manuel olarak düzenleyin.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </TouchableOpacity>
+
+              {/* Option 7: Ders Programını Sıfırla */}
+              <TouchableOpacity
+                style={[styles.photoOptionCard, { borderColor: '#FECACA' }]}
+                onPress={() => {
+                  setPhotoMenuVisible(false);
+                  setTimeout(() => handleClearEntireSchedule(), 200);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.photoOptionIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="trash-outline" size={24} color={Colors.danger} />
+                </View>
+                <View style={styles.photoOptionTextWrap}>
+                  <Text style={[styles.photoOptionTitle, { color: Colors.danger }]}>Haftalık Ders Programını Sıfırla</Text>
+                  <Text style={styles.photoOptionDesc}>
+                    Tüm günlerdeki şube ve ders atamalarını temizler.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Schedule Photo Viewer Modal with Zoom & Pan */}
+      <Modal
+        visible={photoViewModalVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          setPhotoViewModalVisible(false);
+          setZoomScale(1);
+        }}
+      >
+        <View style={styles.viewerModalOverlay}>
+          {/* Header Bar */}
+          <View style={styles.viewerModalHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+              <Ionicons name="image-outline" size={22} color="#FFF" />
+              <Text style={styles.viewerModalTitle}>Ders Programı Fotoğrafı</Text>
+            </View>
+
+            {/* Current Zoom Pill */}
+            <View style={styles.viewerZoomBadge}>
+              <Ionicons name="search" size={13} color="#34D399" />
+              <Text style={styles.viewerZoomBadgeText}>%{Math.round(zoomScale * 100)}</Text>
+            </View>
+
+            <TouchableOpacity
+              onPress={() => {
+                setPhotoViewModalVisible(false);
+                setZoomScale(1);
+              }}
+              style={styles.viewerCloseBtn}
+            >
+              <Ionicons name="close" size={24} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Zoom Toolbar */}
+          <View style={styles.viewerZoomBar}>
+            <View style={styles.viewerZoomControlsRow}>
+              {/* Zoom Out Button */}
+              <TouchableOpacity
+                style={[styles.viewerZoomBtn, zoomScale <= 1 && styles.viewerZoomBtnDisabled]}
+                onPress={() => setZoomScale((s) => Math.max(1, Number((s - 0.5).toFixed(1))))}
+                disabled={zoomScale <= 1}
+              >
+                <Ionicons name="remove" size={18} color={zoomScale <= 1 ? '#64748B' : '#FFF'} />
+              </TouchableOpacity>
+
+              {/* Quick Preset Chips */}
+              <View style={styles.viewerPresetPills}>
+                {[1, 1.5, 2, 3].map((preset) => (
+                  <TouchableOpacity
+                    key={preset}
+                    style={[
+                      styles.viewerPresetPill,
+                      Math.abs(zoomScale - preset) < 0.05 && styles.viewerPresetPillActive,
+                    ]}
+                    onPress={() => setZoomScale(preset)}
+                  >
+                    <Text
+                      style={[
+                        styles.viewerPresetPillText,
+                        Math.abs(zoomScale - preset) < 0.05 && styles.viewerPresetPillTextActive,
+                      ]}
+                    >
+                      {preset}x
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Zoom In Button */}
+              <TouchableOpacity
+                style={[styles.viewerZoomBtn, zoomScale >= 4 && styles.viewerZoomBtnDisabled]}
+                onPress={() => setZoomScale((s) => Math.min(4, Number((s + 0.5).toFixed(1))))}
+                disabled={zoomScale >= 4}
+              >
+                <Ionicons name="add" size={18} color={zoomScale >= 4 ? '#64748B' : '#FFF'} />
+              </TouchableOpacity>
+
+              {/* Reset / Fit Screen */}
+              <TouchableOpacity
+                style={styles.viewerResetFitBtn}
+                onPress={() => setZoomScale(1)}
+              >
+                <Ionicons name="scan-outline" size={14} color="#A7F3D0" />
+                <Text style={styles.viewerResetFitText}>Sığdır</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.viewerZoomHint}>
+              💡 Parmağınızla resmi serbestçe kaydırarak inceleyebilirsiniz. Çift dokunarak da büyütebilirsiniz.
+            </Text>
+          </View>
+
+          {/* Interactive Zoomable / Scrollable Image View */}
+          {schedulePhotoUri ? (
+            <ScrollView
+              style={{ flex: 1 }}
+              contentContainerStyle={styles.viewerVerticalScrollContent}
+              showsVerticalScrollIndicator={true}
+              maximumZoomScale={5}
+              minimumZoomScale={1}
+              bounces={false}
+            >
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={true}
+                contentContainerStyle={styles.viewerHorizontalScrollContent}
+                bounces={false}
+              >
+                <TouchableOpacity
+                  activeOpacity={0.95}
+                  onPress={() => {
+                    setZoomScale((prev) => (prev >= 3 ? 1 : Number((prev + 0.5).toFixed(1))));
+                  }}
+                >
+                  <Image
+                    source={{ uri: schedulePhotoUri }}
+                    style={{
+                      width: Math.max(
+                        Dimensions.get('window').width - 16,
+                        (Dimensions.get('window').width - 16) * zoomScale
+                      ),
+                      height: Math.max(
+                        350,
+                        (Dimensions.get('window').width - 16) *
+                          (imageDimensions && imageDimensions.width > 0
+                            ? imageDimensions.height / imageDimensions.width
+                            : 0.72) *
+                          zoomScale
+                      ),
+                    }}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              </ScrollView>
+            </ScrollView>
+          ) : (
+            <View style={styles.viewerEmptyWrap}>
+              <Text style={{ color: '#FFF' }}>Fotoğraf bulunamadı.</Text>
+            </View>
+          )}
+
+          {/* Viewer Bottom Bar */}
+          <View style={styles.viewerBottomBar}>
+            {/* Kırp & Düzenle */}
+            <TouchableOpacity
+              style={styles.viewerCropBtn}
+              onPress={() => setCropModalVisible(true)}
+            >
+              <Ionicons name="crop-outline" size={17} color="#FFF" />
+              <Text style={styles.viewerCropBtnText}>Kırp / Düzenle</Text>
+            </TouchableOpacity>
+
+            {/* 90° Döndür */}
+            <TouchableOpacity
+              style={styles.viewerRotateBtn}
+              onPress={() => handleRotateSchedulePhoto(90)}
+            >
+              <Ionicons name="reload-outline" size={16} color="#FFF" />
+              <Text style={styles.viewerRotateBtnText}>90° Döndür</Text>
+            </TouchableOpacity>
+
+            {/* Değiştir */}
+            <TouchableOpacity
+              style={styles.viewerChangeBtn}
+              onPress={() => {
+                setPhotoViewModalVisible(false);
+                setTimeout(() => setPhotoMenuVisible(true), 200);
+              }}
+            >
+              <Ionicons name="camera-reverse-outline" size={17} color="#FFF" />
+              <Text style={styles.viewerChangeBtnText}>Değiştir</Text>
+            </TouchableOpacity>
+
+            {/* Sil */}
+            <TouchableOpacity
+              style={styles.viewerDeleteBtn}
+              onPress={handleRemoveSchedulePhoto}
+            >
+              <Ionicons name="trash-outline" size={18} color="#DC2626" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Schedule Photo Crop & Optimize Modal */}
+      <Modal
+        visible={cropModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setCropModalVisible(false)}
+      >
+        <View style={styles.cropModalOverlay}>
+          <View style={styles.cropModalCard}>
+            {/* Header */}
+            <View style={styles.cropModalHeader}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="crop" size={20} color={Colors.primary} />
+                  <Text style={styles.cropModalTitle}>Ders Programını Kırp & Düzenle</Text>
+                </View>
+                <Text style={styles.cropModalSub}>
+                  Gereksiz kenarlıkları keserek tablo netliğini ve OCR başarısını artırın
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setCropModalVisible(false)}
+                style={styles.cropCloseBtn}
+              >
+                <Ionicons name="close" size={22} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.cropModalScroll}>
+              {/* OCR Pro-Tip Banner */}
+              <View style={styles.cropTipBanner}>
+                <Ionicons name="bulb-outline" size={20} color="#047857" />
+                <Text style={styles.cropTipText}>
+                  <Text style={{ fontWeight: '700' }}>OCR ve Netlik İpucu: </Text>
+                  Sadece ders tablosunun yer aldığı alanı bırakıp masa, çerçeve ve boşlukları kırptığınızda hem tablodaki yazılar çok daha netleşir hem de OCR tanıma başarısı zirveye çıkar.
+                </Text>
+              </View>
+
+              {/* Visual Crop Preview Area */}
+              {schedulePhotoUri ? (
+                <View style={styles.cropPreviewContainer}>
+                  <Image
+                    source={{ uri: schedulePhotoUri }}
+                    style={styles.cropPreviewImage}
+                    resizeMode="contain"
+                  />
+                  {/* Shaded Mask Overlays */}
+                  <View style={[styles.cropMaskTop, { height: `${cropMargins.top}%` }]} />
+                  <View style={[styles.cropMaskBottom, { height: `${cropMargins.bottom}%` }]} />
+                  <View
+                    style={[
+                      styles.cropMaskLeft,
+                      {
+                        top: `${cropMargins.top}%`,
+                        bottom: `${cropMargins.bottom}%`,
+                        width: `${cropMargins.left}%`,
+                      },
+                    ]}
+                  />
+                  <View
+                    style={[
+                      styles.cropMaskRight,
+                      {
+                        top: `${cropMargins.top}%`,
+                        bottom: `${cropMargins.bottom}%`,
+                        width: `${cropMargins.right}%`,
+                      },
+                    ]}
+                  />
+                  {/* Active Cropped Bounding Box */}
+                  <View
+                    style={[
+                      styles.cropActiveFrame,
+                      {
+                        top: `${cropMargins.top}%`,
+                        bottom: `${cropMargins.bottom}%`,
+                        left: `${cropMargins.left}%`,
+                        right: `${cropMargins.right}%`,
+                      },
+                    ]}
+                  >
+                    <View style={styles.cropFrameBadge}>
+                      <Text style={styles.cropFrameBadgeText}>
+                        Aktif Tablo Alanı (%{100 - cropMargins.left - cropMargins.right} x %{100 - cropMargins.top - cropMargins.bottom})
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Presets */}
+              <Text style={styles.cropSectionTitle}>Hızlı Kırpma Şablonları</Text>
+              <View style={styles.cropPresetsRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.cropPresetChip,
+                    cropMargins.top === 0 &&
+                      cropMargins.bottom === 0 &&
+                      cropMargins.left === 0 &&
+                      cropMargins.right === 0 &&
+                      styles.cropPresetChipActive,
+                  ]}
+                  onPress={() => setCropMargins({ top: 0, bottom: 0, left: 0, right: 0 })}
+                >
+                  <Text
+                    style={[
+                      styles.cropPresetChipText,
+                      cropMargins.top === 0 &&
+                        cropMargins.bottom === 0 &&
+                        cropMargins.left === 0 &&
+                        cropMargins.right === 0 &&
+                        styles.cropPresetChipTextActive,
+                    ]}
+                  >
+                    Orijinal (%100)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.cropPresetChip,
+                    cropMargins.top === 8 &&
+                      cropMargins.bottom === 8 &&
+                      styles.cropPresetChipActive,
+                  ]}
+                  onPress={() => setCropMargins({ top: 8, bottom: 8, left: 8, right: 8 })}
+                >
+                  <Text
+                    style={[
+                      styles.cropPresetChipText,
+                      cropMargins.top === 8 &&
+                        cropMargins.bottom === 8 &&
+                        styles.cropPresetChipTextActive,
+                    ]}
+                  >
+                    Tabloyu Kırp (%8)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.cropPresetChip,
+                    cropMargins.top === 14 &&
+                      cropMargins.bottom === 10 &&
+                      styles.cropPresetChipActive,
+                  ]}
+                  onPress={() => setCropMargins({ top: 14, bottom: 10, left: 4, right: 4 })}
+                >
+                  <Text
+                    style={[
+                      styles.cropPresetChipText,
+                      cropMargins.top === 14 &&
+                        cropMargins.bottom === 10 &&
+                        styles.cropPresetChipTextActive,
+                    ]}
+                  >
+                    Başlıkları Kes
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.cropPresetChip,
+                    cropMargins.left === 12 &&
+                      cropMargins.right === 12 &&
+                      styles.cropPresetChipActive,
+                  ]}
+                  onPress={() => setCropMargins({ top: 4, bottom: 4, left: 12, right: 12 })}
+                >
+                  <Text
+                    style={[
+                      styles.cropPresetChipText,
+                      cropMargins.left === 12 &&
+                        cropMargins.right === 12 &&
+                        styles.cropPresetChipTextActive,
+                    ]}
+                  >
+                    Yanları Kırp
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Stepper Fine-tuning */}
+              <Text style={styles.cropSectionTitle}>Hassas Kenar Ayarları (%)</Text>
+              <View style={styles.cropSteppersGrid}>
+                {/* Üst */}
+                <View style={styles.cropStepperCard}>
+                  <Text style={styles.cropStepperLabel}>Üstten Kırp</Text>
+                  <View style={styles.cropStepperControls}>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          top: Math.max(0, m.top - 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="remove" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.cropStepVal}>%{cropMargins.top}</Text>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          top: Math.min(40, m.top + 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="add" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Alttan */}
+                <View style={styles.cropStepperCard}>
+                  <Text style={styles.cropStepperLabel}>Alttan Kırp</Text>
+                  <View style={styles.cropStepperControls}>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          bottom: Math.max(0, m.bottom - 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="remove" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.cropStepVal}>%{cropMargins.bottom}</Text>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          bottom: Math.min(40, m.bottom + 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="add" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Soldan */}
+                <View style={styles.cropStepperCard}>
+                  <Text style={styles.cropStepperLabel}>Soldan Kırp</Text>
+                  <View style={styles.cropStepperControls}>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          left: Math.max(0, m.left - 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="remove" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.cropStepVal}>%{cropMargins.left}</Text>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          left: Math.min(40, m.left + 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="add" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Sağdan */}
+                <View style={styles.cropStepperCard}>
+                  <Text style={styles.cropStepperLabel}>Sağdan Kırp</Text>
+                  <View style={styles.cropStepperControls}>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          right: Math.max(0, m.right - 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="remove" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                    <Text style={styles.cropStepVal}>%{cropMargins.right}</Text>
+                    <TouchableOpacity
+                      style={styles.cropStepBtn}
+                      onPress={() =>
+                        setCropMargins((m) => ({
+                          ...m,
+                          right: Math.min(40, m.right + 2),
+                        }))
+                      }
+                    >
+                      <Ionicons name="add" size={16} color={Colors.textPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+
+              {/* Quick Rotation & Native Tool Actions */}
+              <View style={styles.cropExtraActions}>
+                <TouchableOpacity
+                  style={styles.cropRotateBtn}
+                  onPress={() => handleRotateSchedulePhoto(90)}
+                >
+                  <Ionicons name="reload-outline" size={18} color="#4F46E5" />
+                  <Text style={styles.cropRotateBtnText}>90° Sağa Döndür</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.cropNativeToolBtn}
+                  onPress={() => {
+                    Alert.alert(
+                      'Sistem Kırpma Aracı',
+                      'Hangi kaynaktan çekip kırpmak istersiniz?',
+                      [
+                        { text: 'Vazgeç', style: 'cancel' },
+                        {
+                          text: 'Kamera ile Çek & Kırp',
+                          onPress: () => handlePickSchedulePhoto('camera', true),
+                        },
+                        {
+                          text: 'Galeriden Seç & Kırp',
+                          onPress: () => handlePickSchedulePhoto('gallery', true),
+                        },
+                      ]
+                    );
+                  }}
+                >
+                  <Ionicons name="scan-outline" size={18} color="#059669" />
+                  <Text style={styles.cropNativeToolBtnText}>Sistem Kırpma Aracı</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+
+            {/* Bottom Actions */}
+            <View style={styles.cropModalFooter}>
+              <TouchableOpacity
+                style={styles.cropCancelBtn}
+                onPress={() => setCropModalVisible(false)}
+                disabled={isProcessingCrop}
+              >
+                <Text style={styles.cropCancelBtnText}>Vazgeç</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.cropSaveBtn}
+                onPress={handleApplyCrop}
+                disabled={isProcessingCrop}
+              >
+                {isProcessingCrop ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#FFF" />
+                    <Text style={styles.cropSaveBtnText}>Kırpmayı Kaydet</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Gemini AI API Key Settings Modal */}
+      <Modal
+        visible={apiKeyModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setApiKeyModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setApiKeyModalVisible(false)}
+        >
+          <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Google Gemini API Anahtarı</Text>
+                <Text style={styles.modalSub}>Ders programı fotoğraflarını yapay zeka ile otomatik taramak için kullanılır.</Text>
+              </View>
+              <TouchableOpacity onPress={() => setApiKeyModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.apiKeyInfoBox}>
+              <Ionicons name="information-circle-outline" size={20} color="#D97706" style={{ marginTop: 2 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.apiKeyInfoTitle}>Ücretsizdir & Kredi Kartı Gerekmez</Text>
+                <Text style={styles.apiKeyInfoText}>
+                  Google AI Studio (<Text style={{ fontWeight: '700' }}>aistudio.google.com</Text>) adresine Google hesabınızla giriş yapıp 1 dakikada ücretsiz API anahtarı oluşturabilirsiniz.
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ marginVertical: 10 }}>
+              <Text style={styles.inputLabel}>Gemini API Key (AIzaSy...):</Text>
+              <Input
+                placeholder="Örn: AIzaSyD..."
+                value={apiKeyInput}
+                onChangeText={setApiKeyInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+
+            {/* Model Selection in ScheduleScreen */}
+            <View style={{ marginBottom: 14 }}>
+              <Text style={styles.inputLabel}>Kullanılacak Yapay Zekâ Modeli:</Text>
+              <View style={{ gap: 6, marginTop: 4 }}>
+                {PRESET_GEMINI_MODELS.map((item) => {
+                  const isSelected = selectedGeminiModel === item.id;
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={{
+                        paddingVertical: 7,
+                        paddingHorizontal: 10,
+                        borderRadius: 8,
+                        borderWidth: 1.5,
+                        borderColor: isSelected ? '#7C3AED' : '#E2E8F0',
+                        backgroundColor: isSelected ? '#F5F3FF' : '#F8FAFC',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                      onPress={() => setSelectedGeminiModel(item.id)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                        <Ionicons
+                          name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                          size={15}
+                          color={isSelected ? '#7C3AED' : Colors.textMuted}
+                        />
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? '#7C3AED' : Colors.textPrimary }}>
+                          {item.name}
+                        </Text>
+                      </View>
+                      {item.isRecommended ? (
+                        <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#15803D' }}>ÖNERİLEN</Text>
+                        </View>
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <Button
+                title="İptal"
+                variant="outline"
+                style={{ flex: 1 }}
+                onPress={() => setApiKeyModalVisible(false)}
+              />
+              <Button
+                title={testingApiKey ? 'Test Ediliyor...' : 'Doğrula ve Kaydet'}
+                style={{ flex: 2 }}
+                loading={testingApiKey}
+                onPress={handleTestAndSaveApiKey}
+              />
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Gemini AI Analyzed Schedule Preview & Confirm Modal */}
+      <Modal
+        visible={aiPreviewModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setAiPreviewModalVisible(false)}
+      >
+        <View style={styles.aiPreviewOverlay}>
+          <View style={styles.aiPreviewContainer}>
+            <View style={styles.aiPreviewHeader}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="sparkles" size={20} color="#7C3AED" />
+                  <Text style={styles.aiPreviewTitle}>Tespit Edilen Ders Dağılımı</Text>
+                </View>
+                <Text style={styles.aiPreviewSub}>
+                  Yapay zeka fotoğraftaki tabloyu çözdü. Lütfen kontrol edip onaylayın.
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setAiPreviewModalVisible(false)}
+                style={styles.viewerCloseBtn}
+              >
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Stats Badges Bar */}
+            <View style={styles.aiStatsBar}>
+              <View style={styles.aiStatBadge}>
+                <Ionicons name="time" size={14} color="#7C3AED" />
+                <Text style={styles.aiStatBadgeText}>{analyzedLessons.length} Ders Saati</Text>
+              </View>
+              <View style={[styles.aiStatBadge, { backgroundColor: '#DCFCE7' }]}>
+                <Ionicons name="school" size={14} color="#15803D" />
+                <Text style={[styles.aiStatBadgeText, { color: '#15803D' }]}>
+                  {new Set(analyzedLessons.map((l) => l.className)).size} Şube
+                </Text>
+              </View>
+              <View style={[styles.aiStatBadge, { backgroundColor: '#FEF3C7' }]}>
+                <Ionicons name="book" size={14} color="#B45309" />
+                <Text style={[styles.aiStatBadgeText, { color: '#B45309' }]}>
+                  {new Set(analyzedLessons.map((l) => l.courseName)).size} Ders
+                </Text>
+              </View>
+              {detectedSlotTimes.length > 0 ? (
+                <View style={[styles.aiStatBadge, { backgroundColor: '#EDE9FE' }]}>
+                  <Ionicons name="alarm" size={14} color="#7C3AED" />
+                  <Text style={[styles.aiStatBadgeText, { color: '#7C3AED' }]}>
+                    {detectedSlotTimes.length} Saat Dilimi
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+
+            {/* Scrollable Grouped Days List */}
+            <ScrollView style={styles.aiLessonsScroll} showsVerticalScrollIndicator={false}>
+              {DAYS_OF_WEEK.map((day) => {
+                const dayLessons = analyzedLessons.filter((l) => l.day === day.id);
+                if (dayLessons.length === 0) return null;
+
+                return (
+                  <View key={`day-${day.id}`} style={styles.aiDayGroupCard}>
+                    <View style={styles.aiDayGroupHeader}>
+                      <Text style={styles.aiDayGroupTitle}>{day.name}</Text>
+                      <Text style={styles.aiDayGroupCount}>{dayLessons.length} Saat</Text>
+                    </View>
+
+                    <View style={styles.aiDayLessonsList}>
+                      {dayLessons.map((item, idx) => (
+                        <View key={`item-${day.id}-${idx}`} style={styles.aiLessonItemRow}>
+                          <View style={styles.aiSlotNumberCircle}>
+                            <Text style={styles.aiSlotNumberText}>{item.slotNumber}</Text>
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={styles.aiClassBadge}>{item.className}</Text>
+                              <Text style={styles.aiCourseTitle}>{item.courseName}</Text>
+                            </View>
+                            {item.courseCode && item.courseCode !== item.courseName ? (
+                              <Text style={styles.aiCourseCode}>Kod: {item.courseCode}</Text>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })}
+
+              <View style={styles.aiWarningNote}>
+                <Ionicons name="shield-checkmark-outline" size={18} color="#059669" />
+                <Text style={styles.aiWarningNoteText}>
+                  Onayladığınızda tanımladığınız özel ders saatleriniz (başlangıç/bitiş dakikaları) KORUNUR, sadece şube ve ders atamaları güncellenir.
+                </Text>
+              </View>
+            </ScrollView>
+
+            {/* Onay Kutuları: Sistemde Olmayan Şube ve Dersleri Ekle */}
+            <View style={styles.aiOptionsCard}>
+              <TouchableOpacity
+                style={styles.aiCheckboxRow}
+                onPress={() => setAutoCreateClasses(!autoCreateClasses)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={autoCreateClasses ? 'checkbox' : 'square-outline'}
+                  size={22}
+                  color={autoCreateClasses ? '#059669' : Colors.textMuted}
+                />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={[styles.aiCheckboxTitle, autoCreateClasses && styles.aiCheckboxTitleActive]}>
+                    Sistemde olmayan şubeleri sisteme ekle
+                  </Text>
+                  <Text style={styles.aiCheckboxDesc}>
+                    {autoCreateClasses
+                      ? 'Fotoğraftaki yeni şubeler otomatik olarak şube listenize kaydedilir.'
+                      : 'Kapalı: Tanımsız şubelerin dersleri programa aktarılmaz.'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.aiCheckboxDivider} />
+
+              <TouchableOpacity
+                style={styles.aiCheckboxRow}
+                onPress={() => setAutoCreateCourses(!autoCreateCourses)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={autoCreateCourses ? 'checkbox' : 'square-outline'}
+                  size={22}
+                  color={autoCreateCourses ? '#059669' : Colors.textMuted}
+                />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={[styles.aiCheckboxTitle, autoCreateCourses && styles.aiCheckboxTitleActive]}>
+                    Sistemde olmayan dersleri sisteme ekle
+                  </Text>
+                  <Text style={styles.aiCheckboxDesc}>
+                    {autoCreateCourses
+                      ? 'Fotoğraftaki yeni dersler otomatik olarak ders listenize kaydedilir.'
+                      : 'Kapalı: Tanımsız derslerin saatleri programa aktarılmaz.'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.aiCheckboxDivider} />
+
+              {/* Option 3: Saat Dilimlerini Sisteme Yükle */}
+              <TouchableOpacity
+                style={styles.aiCheckboxRow}
+                onPress={() => setUpdateSlotTimes(!updateSlotTimes)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={updateSlotTimes ? 'checkbox' : 'square-outline'}
+                  size={22}
+                  color={updateSlotTimes ? '#059669' : Colors.textMuted}
+                />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.aiCheckboxTitle, updateSlotTimes && styles.aiCheckboxTitleActive]}>
+                      Saat dilimlerini sisteme yükle
+                    </Text>
+                    {detectedSlotTimes.length > 0 ? (
+                      <View style={{ backgroundColor: '#EDE9FE', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#7C3AED' }}>
+                          {detectedSlotTimes.length} SAAT BULUNDU
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.aiCheckboxDesc}>
+                    {updateSlotTimes
+                      ? detectedSlotTimes.length > 0
+                        ? `Fotoğraftan okunan saatler (örn: 1. Ders ${detectedSlotTimes[0].startTime}-${detectedSlotTimes[0].endTime}) sisteme aktarılır.`
+                        : 'Fotoğraftaki ders başlangıç/bitiş saatleri sisteme aktarılır.'
+                      : 'Kapalı: Tanımlı özel ders saatleriniz korunur.'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.aiPreviewFooter}>
+              <Button
+                title="Vazgeç"
+                variant="outline"
+                style={{ flex: 1 }}
+                onPress={() => setAiPreviewModalVisible(false)}
+              />
+              <Button
+                title={applyingSchedule ? 'Kaydediliyor...' : 'Programı Sisteme Yükle'}
+                style={{ flex: 2, backgroundColor: '#059669' }}
+                loading={applyingSchedule}
+                onPress={handleApplyAnalyzedSchedule}
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* AI Analyzing Fullscreen Loading Overlay */}
+      {analyzingAi && (
+        <View style={styles.aiLoadingOverlay}>
+          <View style={styles.aiLoadingBox}>
+            <ActivityIndicator size="large" color="#7C3AED" />
+            <Text style={styles.aiLoadingTitle}>Yapay Zeka İnceliyor ✨</Text>
+            <Text style={styles.aiLoadingText}>{aiStatusText}</Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 12,
+    backgroundColor: Colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  headerTop: {
+    marginBottom: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  headerSub: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  headerActionsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  headerIconButtonsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  actionBtnIcon: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: Colors.primaryLight,
+  },
+  daysBar: {
+    backgroundColor: Colors.card,
+    paddingVertical: 7,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  daysScroll: {
+    paddingHorizontal: 12,
+    gap: 6,
+  },
+  dayTab: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: Colors.cardSubtle,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    minWidth: 42,
+  },
+  dayTabActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  dayTabCustom: {
+    borderColor: '#F59E0B',
+    backgroundColor: '#FEF3C7',
+  },
+  dayTabContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  dayTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+  },
+  dayTabTextActive: {
+    color: Colors.textInverse,
+  },
+  customIndicatorDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: '#F59E0B',
+  },
+  todayIndicator: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.primary,
+    marginTop: 2,
+  },
+  customBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FDE68A',
+  },
+  customBannerTextWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  customBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#92400E',
+  },
+  customBannerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    backgroundColor: '#fff',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+  },
+  customBannerBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  emptySlotsCard: {
+    padding: 24,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  emptySlotsText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  slotCard: {
+    marginBottom: 10,
+    padding: 12,
+  },
+  slotCardNow: {
+    backgroundColor: '#F0FDF4',
+    borderColor: Colors.success,
+  },
+  slotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  slotTimeWrap: {
+    width: 86,
+  },
+  slotNum: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  customSlotBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  customSlotBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#B45309',
+  },
+  slotTimes: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  slotTimesCustom: {
+    color: '#B45309',
+    fontWeight: '700',
+  },
+  slotDivider: {
+    width: 1,
+    height: 38,
+    backgroundColor: Colors.border,
+    marginHorizontal: 12,
+  },
+  slotContentWrap: {
+    flex: 1,
+  },
+  slotTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  slotClass: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.primaryDark,
+  },
+  nowBadge: {
+    backgroundColor: Colors.success,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  nowBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  slotCourse: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  slotRoom: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  emptySlotContent: {
+    justifyContent: 'center',
+  },
+  emptySlotLabel: {
+    fontSize: 14,
+    color: Colors.textMuted,
+    fontWeight: '600',
+  },
+  emptySlotSub: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 36,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  modalSub: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+  },
+  timeEditToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: Colors.cardSubtle,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  timeEditToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+  },
+  inlineTimeCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  inlineTimeTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    marginBottom: 4,
+  },
+  inlineTimeInputsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  selectLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  selectGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  selOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: Colors.cardSubtle,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  selOptionActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  selOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  selOptionTextActive: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  courseTagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  courseCodeBadge: {
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  courseCodeBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  photoHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 8,
+    ...Shadows.small,
+  },
+  photoHeaderBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  photoSavedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ECFDF5',
+    borderBottomWidth: 1,
+    borderBottomColor: '#A7F3D0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  photoSavedBannerText: {
+    fontSize: 12,
+    color: '#065F46',
+    fontWeight: '600',
+  },
+  photoViewBtnSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#059669',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  photoViewBtnSmallText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  photoModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'flex-end',
+  },
+  photoModalSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 28,
+    ...Shadows.large,
+  },
+  sheetHandle: {
+    width: 40,
+    height: 5,
+    backgroundColor: '#CBD5E1',
+    borderRadius: 3,
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  photoModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  photoModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  photoModalSub: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  photoModalCloseBtn: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+  },
+  photoModalOptions: {
+    gap: 10,
+  },
+  photoOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 12,
+  },
+  photoOptionIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoOptionTextWrap: {
+    flex: 1,
+  },
+  photoOptionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  photoOptionDesc: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  autoLoadBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 6,
+  },
+  autoLoadBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  viewerModalOverlay: {
+    flex: 1,
+    backgroundColor: '#0F172A',
+  },
+  viewerModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 10,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  viewerModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  viewerZoomBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.4)',
+    marginRight: 10,
+  },
+  viewerZoomBadgeText: {
+    color: '#34D399',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  viewerCloseBtn: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  viewerZoomBar: {
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  viewerZoomControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  viewerZoomBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#334155',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerZoomBtnDisabled: {
+    backgroundColor: '#1E293B',
+    opacity: 0.5,
+  },
+  viewerPresetPills: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  viewerPresetPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#1E293B',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  viewerPresetPillActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+  },
+  viewerPresetPillText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  viewerPresetPillTextActive: {
+    color: '#FFF',
+  },
+  viewerResetFitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.3)',
+  },
+  viewerResetFitText: {
+    color: '#A7F3D0',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  viewerZoomHint: {
+    color: '#94A3B8',
+    fontSize: 11,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  viewerVerticalScrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  viewerHorizontalScrollContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  viewerEmptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerBottomBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    gap: 8,
+  },
+  viewerCropBtn: {
+    flex: 1.2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#059669',
+    paddingVertical: 10,
+    borderRadius: 10,
+    ...Shadows.small,
+  },
+  viewerCropBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  viewerRotateBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#4F46E5',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  viewerRotateBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  viewerChangeBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#334155',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  viewerChangeBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  viewerDeleteBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEE2E2',
+  },
+
+  // Crop & Optimize Modal Styles
+  cropModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  cropModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
+    maxHeight: '92%',
+    ...Shadows.large,
+  },
+  cropModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  cropModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  cropModalSub: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  cropCloseBtn: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+  },
+  cropModalScroll: {
+    paddingBottom: 16,
+  },
+  cropTipBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 14,
+  },
+  cropTipText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#065F46',
+  },
+  cropPreviewContainer: {
+    height: 230,
+    backgroundColor: '#0F172A',
+    borderRadius: 14,
+    overflow: 'hidden',
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  cropPreviewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  cropMaskTop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+  },
+  cropMaskBottom: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+  },
+  cropMaskLeft: {
+    position: 'absolute',
+    left: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+  },
+  cropMaskRight: {
+    position: 'absolute',
+    right: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+  },
+  cropActiveFrame: {
+    position: 'absolute',
+    borderWidth: 2,
+    borderColor: '#10B981',
+    borderStyle: 'dashed',
+    borderRadius: 4,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+    padding: 4,
+  },
+  cropFrameBadge: {
+    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  cropFrameBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  cropSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  cropPresetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  cropPresetChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cropPresetChipActive: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#10B981',
+  },
+  cropPresetChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  cropPresetChipTextActive: {
+    color: '#059669',
+    fontWeight: '700',
+  },
+  cropSteppersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
+  },
+  cropStepperCard: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cropStepperLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  cropStepperControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cropStepBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cropStepVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  cropExtraActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  cropRotateBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  cropRotateBtnText: {
+    color: '#4F46E5',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cropNativeToolBtn: {
+    flex: 1.3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  cropNativeToolBtnText: {
+    color: '#15803D',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  cropModalFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  cropCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cropCancelBtnText: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  cropSaveBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#059669',
+    ...Shadows.small,
+  },
+  cropSaveBtnText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  apiKeyInfoBox: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    gap: 10,
+    marginVertical: 8,
+  },
+  apiKeyInfoTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#92400E',
+    marginBottom: 2,
+  },
+  apiKeyInfoText: {
+    fontSize: 12,
+    color: '#B45309',
+    lineHeight: 16,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  aiPreviewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  aiPreviewContainer: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    paddingBottom: 24,
+  },
+  aiPreviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  aiPreviewTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  aiPreviewSub: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  aiStatsBar: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    gap: 8,
+  },
+  aiStatBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#EDE9FE',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  aiStatBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6D28D9',
+  },
+  aiLessonsScroll: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    maxHeight: 450,
+  },
+  aiDayGroupCard: {
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  aiDayGroupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  aiDayGroupTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  aiDayGroupCount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  aiDayLessonsList: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  aiLessonItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    gap: 10,
+  },
+  aiSlotNumberCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#E0E7FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiSlotNumberText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
+  aiClassBadge: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  aiCourseTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  aiCourseCode: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  aiWarningNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 10,
+    marginVertical: 10,
+  },
+  aiWarningNoteText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#065F46',
+    lineHeight: 16,
+  },
+  aiOptionsCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 10,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  aiCheckboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 3,
+  },
+  aiCheckboxDivider: {
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 6,
+  },
+  aiCheckboxTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  aiCheckboxTitleActive: {
+    color: '#065F46',
+  },
+  aiCheckboxDesc: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  aiPreviewFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    gap: 12,
+  },
+  aiLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 9999,
+  },
+  aiLoadingBox: {
+    backgroundColor: '#FFF',
+    padding: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    maxWidth: '85%',
+    ...Shadows.medium,
+  },
+  aiLoadingTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginTop: 14,
+  },
+  aiLoadingText: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  hamburgerBtn: {
+    padding: 4,
+  },
+});

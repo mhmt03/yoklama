@@ -1,0 +1,2222 @@
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  Image,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  Linking,
+  Platform,
+  StatusBar,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { Colors, Shadows } from '../theme/colors';
+import { Card } from '../components/Card';
+import { Button } from '../components/Button';
+import {
+  getDatabaseStats,
+  exportDatabaseBackup,
+  restoreDatabaseBackup,
+  DatabaseStats,
+} from '../utils/backupService';
+import Constants from 'expo-constants';
+import appConfig from '../../app.json';
+import pkg from '../../package.json';
+import {
+  getQuickNotes,
+  addQuickNote,
+  updateQuickNote,
+  deleteQuickNote,
+  resetDefaultQuickNotes,
+  QuickNoteItem,
+} from '../database/operations/noteOperations';
+import {
+  School,
+  getSchools,
+  getDefaultSchoolId,
+  setDefaultSchoolId,
+  setActiveSchool,
+} from '../database/operations/schoolOperations';
+import { useSchoolTheme } from '../context/SchoolThemeContext';
+import {
+  getGeminiApiKey,
+  setGeminiApiKey,
+  testGeminiApiKey,
+  getGeminiModel,
+  setGeminiModel,
+  fetchAvailableGeminiModels,
+  PRESET_GEMINI_MODELS,
+  DEFAULT_GEMINI_MODEL,
+  getGeminiUsageStats,
+  resetGeminiUsageStats,
+  GeminiUsageStats,
+} from '../utils/geminiScheduleService';
+
+const APP_VERSION =
+  Constants.expoConfig?.version ||
+  (appConfig as any)?.expo?.version ||
+  (pkg as any)?.version ||
+  '1.0.0';
+
+export const OperationsScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+  const topInset = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 20
+  );
+
+  const [loading, setLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+
+  // Database stats
+  const [stats, setStats] = useState<DatabaseStats>({
+    schoolCount: 0,
+    classCount: 0,
+    studentCount: 0,
+    assignmentCount: 0,
+    noteCount: 0,
+    classNoteCount: 0,
+    scheduleCount: 0,
+    yearlyPlanCount: 0,
+    yearlyPlanDocCount: 0,
+    quickNoteCount: 0,
+    agendaCount: 0,
+    gradeCount: 0,
+    quizCount: 0,
+    teacherAssignmentCount: 0,
+  });
+
+  // Quick notes state
+  const [quickNotes, setQuickNotes] = useState<QuickNoteItem[]>([]);
+  const [newNoteText, setNewNoteText] = useState('');
+  const [editingNote, setEditingNote] = useState<QuickNoteItem | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [editModalVisible, setEditModalVisible] = useState(false);
+
+  // Default school state
+  const { reloadSchoolTheme } = useSchoolTheme();
+  const [schools, setSchools] = useState<School[]>([]);
+  const [defaultSchoolId, setDefaultSchoolIdState] = useState<number | null>(null);
+
+  // Gemini AI Settings State
+  const [geminiApiKey, setGeminiApiKeyState] = useState('');
+  const [geminiKeyInput, setGeminiKeyInput] = useState('');
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [geminiModel, setGeminiModelState] = useState(DEFAULT_GEMINI_MODEL);
+  const [availableLiveModels, setAvailableLiveModels] = useState<string[]>([]);
+  const [fetchingLiveModels, setFetchingLiveModels] = useState(false);
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [testingGeminiKey, setTestingGeminiKey] = useState(false);
+  const [savingGeminiKey, setSavingGeminiKey] = useState(false);
+  const [usageStats, setUsageStats] = useState<GeminiUsageStats | null>(null);
+
+  const loadData = async () => {
+    try {
+      const [dbStats, notes, schoolList, defId, gemKey, curModel, usage] = await Promise.all([
+        getDatabaseStats(),
+        getQuickNotes(),
+        getSchools(),
+        getDefaultSchoolId(),
+        getGeminiApiKey(),
+        getGeminiModel(),
+        getGeminiUsageStats(),
+      ]);
+      setStats(dbStats);
+      setQuickNotes(notes);
+      setSchools(schoolList);
+      setDefaultSchoolIdState(defId);
+      setGeminiApiKeyState(gemKey);
+      setGeminiKeyInput(gemKey);
+      setGeminiModelState(curModel || DEFAULT_GEMINI_MODEL);
+      setUsageStats(usage);
+    } catch (e) {
+      console.error('Error loading operations data:', e);
+    }
+  };
+
+  const handleSaveGeminiKey = async () => {
+    const trimmedKey = geminiKeyInput.trim();
+    const modelToSave = (geminiModel || DEFAULT_GEMINI_MODEL).trim();
+    try {
+      setSavingGeminiKey(true);
+      await Promise.all([
+        setGeminiApiKey(trimmedKey),
+        setGeminiModel(modelToSave),
+      ]);
+      setGeminiApiKeyState(trimmedKey);
+      setGeminiModelState(modelToSave);
+      setSavingGeminiKey(false);
+      Alert.alert(
+        'Kaydedildi ✅',
+        `Google Gemini ayarları başarıyla kaydedildi.\n\n• Aktif Model: ${modelToSave}\n• API Anahtarı: ${trimmedKey ? 'Tanımlandı' : 'Temizlendi'}`
+      );
+    } catch (e: any) {
+      setSavingGeminiKey(false);
+      Alert.alert('Hata', e?.message || 'API ayarları kaydedilemedi.');
+    }
+  };
+
+  const handleTestGeminiKey = async () => {
+    const trimmedKey = geminiKeyInput.trim();
+    if (!trimmedKey) {
+      Alert.alert('Uyarı', 'Lütfen önce bir API anahtarı giriniz.');
+      return;
+    }
+    const modelToTest = geminiModel || DEFAULT_GEMINI_MODEL;
+    try {
+      setTestingGeminiKey(true);
+      const res = await testGeminiApiKey(trimmedKey, modelToTest);
+      setTestingGeminiKey(false);
+      if (res.success) {
+        const updatedUsage = await getGeminiUsageStats();
+        setUsageStats(updatedUsage);
+        Alert.alert(
+          'Bağlantı Başarılı 🎉',
+          `Google Gemini (${res.modelUsed || modelToTest}) bağlantısı başarıyla doğrulandı!\n\nDers programı OCR, yıllık plan ve öğrenci listesi filtreleme özellikleri kullanıma hazır.`
+        );
+      } else {
+        Alert.alert('Doğrulama Başarısız ❌', res.message);
+      }
+    } catch (e: any) {
+      setTestingGeminiKey(false);
+      Alert.alert('Hata', e?.message || 'API anahtarı test edilemedi.');
+    }
+  };
+
+  const handleRefreshUsageStats = async () => {
+    const stats = await getGeminiUsageStats();
+    setUsageStats(stats);
+  };
+
+  const handleResetUsageStats = () => {
+    Alert.alert(
+      'Kullanım Sayacını Sıfırla',
+      'Bugünkü istek ve token kullanım sayacını sıfırlamak istiyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sıfırla',
+          style: 'destructive',
+          onPress: async () => {
+            await resetGeminiUsageStats();
+            const stats = await getGeminiUsageStats();
+            setUsageStats(stats);
+            Alert.alert('Bilgi', 'Kullanım sayacı başarıyla sıfırlandı.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleFetchLiveModels = async () => {
+    const key = geminiKeyInput.trim() || geminiApiKey;
+    if (!key) {
+      Alert.alert('API Anahtarı Gerekli 🔑', 'Google hesabınızdaki modelleri listelemek için lütfen önce API anahtarınızı giriniz.');
+      return;
+    }
+    try {
+      setFetchingLiveModels(true);
+      const models = await fetchAvailableGeminiModels(key);
+      setFetchingLiveModels(false);
+      if (models.length > 0) {
+        setAvailableLiveModels(models);
+        setIsModelDropdownOpen(true);
+        Alert.alert('Modeller Alındı 🎉', `Google API hesabınızda ${models.length} adet aktif model bulundu. Açılan listeden dilediğiniz modeli seçebilirsiniz.`);
+      } else {
+        Alert.alert('Bilgi', 'API üzerinden model listesi alınamadı. Standart önerilen modelleri kullanabilirsiniz.');
+      }
+    } catch (err: any) {
+      setFetchingLiveModels(false);
+      Alert.alert('Hata', err?.message || 'Modeller alınamadı.');
+    }
+  };
+
+  const handleClearGeminiKey = () => {
+    Alert.alert(
+      'API Anahtarını Kaldır',
+      'Kayıtlı Gemini API anahtarını silmek istediğinize emin misiniz? (Ders programı görsel tarama ve yıllık plan yapay zeka özellikleri anahtarsız çalışmaz)',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            await setGeminiApiKey('');
+            setGeminiApiKeyState('');
+            setGeminiKeyInput('');
+            Alert.alert('Bilgi', 'API anahtarı başarıyla kaldırıldı.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSelectDefaultSchool = async (school: School) => {
+    try {
+      if (defaultSchoolId === school.id) {
+        Alert.alert(
+          'Varsayılan Okulu Kaldır',
+          `"${school.name}" varsayılan okul olmaktan çıkarılsın mı? Uygulama son kullanılan okulla açılır.`,
+          [
+            { text: 'Vazgeç', style: 'cancel' },
+            {
+              text: 'Kaldır',
+              style: 'destructive',
+              onPress: async () => {
+                await setDefaultSchoolId(null);
+                setDefaultSchoolIdState(null);
+              },
+            },
+          ]
+        );
+        return;
+      }
+      await setDefaultSchoolId(school.id);
+      await setActiveSchool(school.id);
+      setDefaultSchoolIdState(school.id);
+      await reloadSchoolTheme();
+      setSchools(await getSchools());
+      Alert.alert(
+        'Varsayılan Okul Ayarlandı ✅',
+        `Uygulama her açıldığında "${school.name}" otomatik olarak seçilecek.`
+      );
+    } catch (e: any) {
+      Alert.alert('Hata', e?.message || 'Varsayılan okul ayarlanamadı.');
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
+
+  // --- DATABASE BACKUP HANDLERS ---
+  const handleBackupPrompt = () => {
+    Alert.alert(
+      'Veritabanı Yedekle',
+      'Yedek dosyasını (.db) cihazınıza indirmek mi yoksa paylaşmak mı istersiniz?',
+      [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Cihaza İndir / Kaydet',
+          onPress: () => performBackup('download'),
+        },
+        {
+          text: 'Paylaş (Drive / WhatsApp)',
+          onPress: () => performBackup('share'),
+        },
+      ]
+    );
+  };
+
+  const performBackup = async (action: 'download' | 'share') => {
+    try {
+      setLoading(true);
+      setLoadingMessage(
+        action === 'download'
+          ? 'Yedek dosyası hazırlanıyor ve klasör seçimi bekleniyor...'
+          : 'Yedek dosyası hazırlanıyor ve paylaşım menüsü açılıyor...'
+      );
+      const res = await exportDatabaseBackup(action);
+      if (res.success) {
+        if (res.message) {
+          Alert.alert('İşlem Başarılı', res.message);
+        }
+      } else {
+        if (res.error) {
+          Alert.alert('Hata', res.error);
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Hata', err?.message || 'Yedekleme sırasında beklenmedik bir hata oluştu.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRestorePrompt = () => {
+    Alert.alert(
+      '⚠️ Veritabanı Geri Yükle',
+      'DİKKAT: Seçilen .db yedek dosyası mevcut veritabanınızın üzerine yazılacaktır. Mevcut verilerinizi kaybetmemek için önce yedek almanızı öneririz.\n\nDevam etmek istiyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Dosya Seç ve Yükle',
+          style: 'destructive',
+          onPress: performRestore,
+        },
+      ]
+    );
+  };
+
+  const performRestore = async () => {
+    try {
+      setLoading(true);
+      setLoadingMessage('Veritabanı geri yükleniyor, lütfen bekleyin...');
+      const res = await restoreDatabaseBackup();
+      if (res.success) {
+        Alert.alert(
+          'Geri Yükleme Başarılı 🎉',
+          res.message || 'Veritabanı başarıyla geri yüklendi.',
+          [
+            {
+              text: 'Tamam',
+              onPress: () => {
+                loadData();
+              },
+            },
+          ]
+        );
+      } else {
+        if (res.error) {
+          Alert.alert('Geri Yükleme Başarısız', res.error);
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Hata', err?.message || 'Geri yükleme işlemi başarısız oldu.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- QUICK NOTES HANDLERS ---
+  const handleAddQuickNote = async () => {
+    if (!newNoteText.trim()) {
+      Alert.alert('Uyarı', 'Lütfen eklenecek hazır görüş metnini yazın.');
+      return;
+    }
+    try {
+      await addQuickNote(newNoteText.trim());
+      setNewNoteText('');
+      const updated = await getQuickNotes();
+      setQuickNotes(updated);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Hata', 'Görüş metni eklenemedi.');
+    }
+  };
+
+  const handleOpenEditModal = (item: QuickNoteItem) => {
+    setEditingNote(item);
+    setEditingText(item.text);
+    setEditModalVisible(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingNote) return;
+    if (!editingText.trim()) {
+      Alert.alert('Uyarı', 'Görüş metni boş bırakılamaz.');
+      return;
+    }
+    try {
+      await updateQuickNote(editingNote.id, editingText.trim());
+      setEditModalVisible(false);
+      setEditingNote(null);
+      const updated = await getQuickNotes();
+      setQuickNotes(updated);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Hata', 'Görüş metni güncellenemedi.');
+    }
+  };
+
+  const handleDeleteQuickNote = (item: QuickNoteItem) => {
+    Alert.alert(
+      'Görüş Metnini Sil',
+      `"${item.text}" metnini listeden silmek istediğinize emin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteQuickNote(item.id);
+              const updated = await getQuickNotes();
+              setQuickNotes(updated);
+            } catch (e) {
+              console.error(e);
+              Alert.alert('Hata', 'Silme işlemi gerçekleştirilemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleResetDefaults = () => {
+    Alert.alert(
+      'Varsayılanlara Sıfırla',
+      'Tüm hazır görüş metinleri silinecek ve başlangıç varsayılanlarına döndürülecektir. Onaylıyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sıfırla',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await resetDefaultQuickNotes();
+              const updated = await getQuickNotes();
+              setQuickNotes(updated);
+            } catch (e) {
+              console.error(e);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSendEmail = () => {
+    Linking.openURL('mailto:gundoner@yahoo.com?subject=Sinif%20Takip%20ve%20Ajanda%20Uygulamasi');
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Top Header */}
+      <View style={[styles.header, { paddingTop: topInset + 8 }]}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
+        </TouchableOpacity>
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerTitle}>İşlemler & Ayarlar</Text>
+          <Text style={styles.headerSub}>Veritabanı, Hazır Görüşler & Versiyon</Text>
+        </View>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* SECTION 0: VARSAYILAN OKUL SEÇİMİ */}
+        <View style={styles.sectionHeaderRow}>
+          <Ionicons name="star-outline" size={20} color={Colors.primary} />
+          <Text style={styles.sectionHeader}>Varsayılan Okul Seçimi</Text>
+        </View>
+
+        <Card style={styles.dbCard}>
+          <Text style={styles.cardInfoDesc}>
+            Uygulama her açıldığında seçtiğiniz okul otomatik olarak aktif olur ve ajandanız bu okulun programıyla başlar.
+          </Text>
+
+          {schools.length === 0 ? (
+            <Text style={styles.defaultSchoolEmpty}>Henüz kayıtlı okul yok. Ana sayfadan okul ekleyebilirsiniz.</Text>
+          ) : (
+            <View style={{ gap: 8 }}>
+              {schools.map((school) => {
+                const isDefault = defaultSchoolId === school.id;
+                return (
+                  <TouchableOpacity
+                    key={school.id}
+                    testID={`default-school-${school.id}`}
+                    style={[
+                      styles.defaultSchoolRow,
+                      isDefault && {
+                        borderColor: school.color,
+                        backgroundColor: `${school.color}14`,
+                      },
+                    ]}
+                    onPress={() => handleSelectDefaultSchool(school)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={[styles.defaultSchoolDot, { backgroundColor: school.color }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.defaultSchoolName} numberOfLines={1}>
+                        {school.name}
+                      </Text>
+                      {school.is_active === 1 && (
+                        <Text style={styles.defaultSchoolSub}>Şu an aktif</Text>
+                      )}
+                    </View>
+                    {isDefault && (
+                      <View style={[styles.defaultPill, { backgroundColor: school.color }]}>
+                        <Text style={styles.defaultPillText}>Varsayılan</Text>
+                      </View>
+                    )}
+                    <Ionicons
+                      name={isDefault ? 'radio-button-on' : 'radio-button-off'}
+                      size={22}
+                      color={isDefault ? school.color : Colors.textMuted}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </Card>
+
+        {/* SECTION 1: YAPAY ZEKA (GOOGLE GEMINI AI) AYARLARI */}
+        <View style={[styles.sectionHeaderRow, { marginTop: 24 }]}>
+          <Ionicons name="sparkles" size={20} color="#7C3AED" />
+          <Text style={styles.sectionHeader}>Yapay Zeka (Google Gemini AI) Ayarları</Text>
+        </View>
+
+        <Card style={styles.aiCard}>
+          <View style={styles.aiCardHeaderRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.aiCardTitle}>Google Gemini API</Text>
+              <Text style={styles.aiCardDesc}>
+                Haftalık ders programı fotoğraflarını taramak ve karmaşık yıllık plan Excel dosyalarını sınıf defterine dönüştürmek için kullanılır.
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.aiStatusBadge,
+                geminiApiKey ? styles.aiStatusBadgeActive : styles.aiStatusBadgeInactive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.aiStatusBadgeText,
+                  geminiApiKey ? styles.aiStatusBadgeTextActive : styles.aiStatusBadgeTextInactive,
+                ]}
+              >
+                {geminiApiKey ? '● Aktif' : '● Tanımlanmadı'}
+              </Text>
+            </View>
+          </View>
+
+          {/* API Key Input Row */}
+          <View style={styles.aiInputWrap}>
+            <Text style={styles.aiInputLabel}>Gemini API Anahtarı:</Text>
+            <View style={styles.aiInputFieldRow}>
+              <Ionicons name="key-outline" size={18} color={Colors.textMuted} style={{ marginLeft: 10 }} />
+              <TextInput
+                style={styles.aiTextInput}
+                placeholder="AIzaSy... ile başlayan anahtarınızı girin"
+                placeholderTextColor={Colors.textMuted}
+                value={geminiKeyInput}
+                onChangeText={setGeminiKeyInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry={!showGeminiKey}
+              />
+              <TouchableOpacity
+                style={styles.aiEyeBtn}
+                onPress={() => setShowGeminiKey(!showGeminiKey)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name={showGeminiKey ? 'eye-off-outline' : 'eye-outline'}
+                  size={18}
+                  color={Colors.textMuted}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Model Selection Row */}
+          <View style={styles.aiModelSection}>
+            <View style={styles.aiModelLabelRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="hardware-chip-outline" size={17} color={Colors.textPrimary} />
+                <Text style={styles.aiModelLabel}>Yapay Zekâ Modeli:</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.aiFetchModelsBtn}
+                onPress={handleFetchLiveModels}
+                disabled={fetchingLiveModels}
+                activeOpacity={0.7}
+              >
+                {fetchingLiveModels ? (
+                  <ActivityIndicator size="small" color="#7C3AED" />
+                ) : (
+                  <>
+                    <Ionicons name="cloud-download-outline" size={14} color="#7C3AED" />
+                    <Text style={styles.aiFetchModelsBtnText}>API'den Modelleri Çek</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {/* Açılır Liste Tetikleyici (Seçili Model Özeti) */}
+            {(() => {
+              const currentModelObj =
+                PRESET_GEMINI_MODELS.find((m) => m.id === geminiModel) || {
+                  id: geminiModel,
+                  name: geminiModel,
+                  description: 'Google API Hesabınızda Aktif Model',
+                  isRecommended: false,
+                };
+
+              return (
+                <View>
+                  <TouchableOpacity
+                    style={[
+                      styles.aiModelDropdownTrigger,
+                      isModelDropdownOpen && styles.aiModelDropdownTriggerActive,
+                    ]}
+                    onPress={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.aiModelDropdownIconWrap}>
+                      <Ionicons name="sparkles" size={17} color="#7C3AED" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.aiModelDropdownTitle} numberOfLines={1}>
+                          {currentModelObj.name}
+                        </Text>
+                        {currentModelObj.isRecommended && (
+                          <View style={styles.aiModelRecBadge}>
+                            <Text style={styles.aiModelRecBadgeText}>ÖNERİLEN</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.aiModelDropdownSub} numberOfLines={1}>
+                        {currentModelObj.description || currentModelObj.id}
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name={isModelDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color="#7C3AED"
+                    />
+                  </TouchableOpacity>
+
+                  {/* Açılır Liste Menüsü */}
+                  {isModelDropdownOpen && (
+                    <View style={styles.aiModelDropdownMenu}>
+                      <ScrollView
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator={true}
+                        style={{ maxHeight: 260 }}
+                      >
+                        <Text style={styles.aiModelGroupHeader}>Önerilen Modeller</Text>
+                        {PRESET_GEMINI_MODELS.map((item) => {
+                          const isSelected = geminiModel === item.id;
+                          return (
+                            <TouchableOpacity
+                              key={item.id}
+                              style={[
+                                styles.aiModelDropdownItem,
+                                isSelected && styles.aiModelDropdownItemSelected,
+                              ]}
+                              onPress={() => {
+                                setGeminiModelState(item.id);
+                                setIsModelDropdownOpen(false);
+                              }}
+                              activeOpacity={0.7}
+                            >
+                              <Ionicons
+                                name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                                size={18}
+                                color={isSelected ? '#7C3AED' : Colors.textMuted}
+                              />
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <Text
+                                    style={[
+                                      styles.aiModelItemTitle,
+                                      isSelected && styles.aiModelItemTitleSelected,
+                                    ]}
+                                  >
+                                    {item.name}
+                                  </Text>
+                                  {item.isRecommended && (
+                                    <View style={styles.aiModelRecBadge}>
+                                      <Text style={styles.aiModelRecBadgeText}>ÖNERİLEN</Text>
+                                    </View>
+                                  )}
+                                </View>
+                                <Text style={styles.aiModelItemDesc} numberOfLines={1}>
+                                  {item.description}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+
+                        {/* API'den Çekilen Canlı Modeller */}
+                        {availableLiveModels.filter(
+                          (m) => !PRESET_GEMINI_MODELS.some((p) => p.id === m)
+                        ).length > 0 && (
+                          <>
+                            <Text style={[styles.aiModelGroupHeader, { marginTop: 6 }]}>
+                              Google API Hesabınızdaki Diğer Modeller (
+                              {
+                                availableLiveModels.filter(
+                                  (m) => !PRESET_GEMINI_MODELS.some((p) => p.id === m)
+                                ).length
+                              }
+                              )
+                            </Text>
+                            {availableLiveModels
+                              .filter((m) => !PRESET_GEMINI_MODELS.some((p) => p.id === m))
+                              .map((m) => {
+                                const isSelected = geminiModel === m;
+                                return (
+                                  <TouchableOpacity
+                                    key={m}
+                                    style={[
+                                      styles.aiModelDropdownItem,
+                                      isSelected && styles.aiModelDropdownItemSelected,
+                                    ]}
+                                    onPress={() => {
+                                      setGeminiModelState(m);
+                                      setIsModelDropdownOpen(false);
+                                    }}
+                                    activeOpacity={0.7}
+                                  >
+                                    <Ionicons
+                                      name={isSelected ? 'checkmark-circle' : 'ellipse-outline'}
+                                      size={18}
+                                      color={isSelected ? '#7C3AED' : Colors.textMuted}
+                                    />
+                                    <View style={{ flex: 1 }}>
+                                      <Text
+                                        style={[
+                                          styles.aiModelItemTitle,
+                                          isSelected && styles.aiModelItemTitleSelected,
+                                        ]}
+                                      >
+                                        {m}
+                                      </Text>
+                                      <Text style={styles.aiModelItemDesc} numberOfLines={1}>
+                                        Google API hesabınızda aktif model
+                                      </Text>
+                                    </View>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                          </>
+                        )}
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
+          </View>
+
+          {/* Action Buttons */}
+          <View style={styles.aiActionBtnsRow}>
+            <TouchableOpacity
+              style={styles.aiTestBtn}
+              onPress={handleTestGeminiKey}
+              disabled={testingGeminiKey}
+            >
+              {testingGeminiKey ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <>
+                  <Ionicons name="flash-outline" size={16} color={Colors.primary} />
+                  <Text style={styles.aiTestBtnText}>Modeli Test Et</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.aiSaveBtn}
+              onPress={handleSaveGeminiKey}
+              disabled={savingGeminiKey}
+            >
+              {savingGeminiKey ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <Ionicons name="save-outline" size={16} color="#FFF" />
+                  <Text style={styles.aiSaveBtnText}>Ayarları Kaydet</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {geminiApiKey ? (
+              <TouchableOpacity
+                style={styles.aiClearBtn}
+                onPress={handleClearGeminiKey}
+              >
+                <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          {/* SECTION: CANLI KOTA VE TOKEN KULLANIM İBRESİ (GAUGE) */}
+          <View style={styles.aiGaugeCard}>
+            <View style={styles.aiGaugeHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="speedometer-outline" size={18} color="#7C3AED" />
+                <Text style={styles.aiGaugeTitle}>Canlı Kota & Token İbresi</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.aiGaugeRefreshBtn}
+                onPress={handleRefreshUsageStats}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="refresh" size={15} color="#7C3AED" />
+                <Text style={styles.aiGaugeRefreshText}>Yenile</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Arched Speedometer Visual */}
+            {(() => {
+              const remPct = usageStats?.remainingPercent ?? 100;
+              const isGreen = remPct >= 50;
+              const isAmber = remPct >= 20 && remPct < 50;
+              const gaugeColor = isGreen ? '#10B981' : isAmber ? '#F59E0B' : '#EF4444';
+              const gaugeBgTint = isGreen ? '#ECFDF5' : isAmber ? '#FFFBEB' : '#FEF2F2';
+              const isPro = (usageStats?.model || geminiModel).toLowerCase().includes('pro');
+
+              return (
+                <View style={[styles.aiGaugeBody, { backgroundColor: gaugeBgTint }]}>
+                  {/* Semicircular Arch Gauge */}
+                  <View style={styles.aiArchWrap}>
+                    <View
+                      style={[
+                        styles.aiArchTrack,
+                        { borderColor: gaugeColor },
+                      ]}
+                    >
+                      <View style={styles.aiArchInner}>
+                        <Ionicons
+                          name={isGreen ? 'checkmark-circle' : isAmber ? 'alert-circle' : 'warning'}
+                          size={22}
+                          color={gaugeColor}
+                        />
+                        <Text style={[styles.aiArchPercentText, { color: gaugeColor }]}>
+                          %{remPct}
+                        </Text>
+                        <Text style={styles.aiArchPercentSub}>Kalan Ücretsiz Kota</Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Horizontal Progress Bar */}
+                  <View style={styles.aiGaugeProgressTrack}>
+                    <View
+                      style={[
+                        styles.aiGaugeProgressBar,
+                        {
+                          width: `${Math.max(4, Math.min(100, remPct))}%`,
+                          backgroundColor: gaugeColor,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <View style={styles.aiGaugeProgressLabels}>
+                    <Text style={styles.aiGaugeProgressLabel}>%0 Tükendi</Text>
+                    <Text style={styles.aiGaugeProgressLabel}>
+                      {usageStats?.remainingRequests ?? 1500} İstek Kaldı
+                    </Text>
+                    <Text style={styles.aiGaugeProgressLabel}>%100 Tam</Text>
+                  </View>
+
+                  {/* 2x2 Stats Grid */}
+                  <View style={styles.aiGaugeGrid}>
+                    <View style={styles.aiGaugeGridItem}>
+                      <Text style={styles.aiGaugeGridItemLabel}>Bugünkü İstek</Text>
+                      <Text style={styles.aiGaugeGridItemVal}>
+                        {usageStats?.requestsToday ?? 0} / {usageStats?.dailyRequestLimit ?? 1500}
+                      </Text>
+                      <Text style={styles.aiGaugeGridItemSub}>
+                        {isPro ? 'Pro Günlük Sınırı (50)' : 'Flash Günlük Sınırı (1.500)'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.aiGaugeGridItem}>
+                      <Text style={styles.aiGaugeGridItemLabel}>Kullanılan Token</Text>
+                      <Text style={[styles.aiGaugeGridItemVal, { color: '#7C3AED' }]}>
+                        {(usageStats?.tokensToday ?? 0).toLocaleString('tr-TR')}
+                      </Text>
+                      <Text style={styles.aiGaugeGridItemSub}>Bugün tüketilen toplam</Text>
+                    </View>
+
+                    <View style={styles.aiGaugeGridItem}>
+                      <Text style={styles.aiGaugeGridItemLabel}>Son İstek Zamanı</Text>
+                      <Text style={styles.aiGaugeGridItemVal}>
+                        {usageStats?.lastRequestTime || '-'}
+                      </Text>
+                      <Text style={styles.aiGaugeGridItemSub}>Yerel saat</Text>
+                    </View>
+
+                    <View style={styles.aiGaugeGridItem}>
+                      <Text style={styles.aiGaugeGridItemLabel}>Son Harcanan Token</Text>
+                      <Text style={styles.aiGaugeGridItemVal}>
+                        {usageStats?.lastTokensUsed ?? 0} token
+                      </Text>
+                      <Text style={styles.aiGaugeGridItemSub}>Son işlem maliyeti</Text>
+                    </View>
+                  </View>
+
+                  {/* Model Advice Banner */}
+                  <View
+                    style={[
+                      styles.aiModelAdviceBox,
+                      isPro ? styles.aiModelAdviceBoxPro : styles.aiModelAdviceBoxFlash,
+                    ]}
+                  >
+                    <Ionicons
+                      name={isPro ? 'information-circle' : 'sparkles'}
+                      size={16}
+                      color={isPro ? '#B45309' : '#047857'}
+                    />
+                    <Text
+                      style={[
+                        styles.aiModelAdviceText,
+                        { color: isPro ? '#92400E' : '#065F46' },
+                      ]}
+                    >
+                      {isPro
+                        ? 'Dikkat: Pro modellerinde Google AI Studio günlük ücretsiz kota sınırı 50 istektir. Kota tasarrufu için Flash modellerini (1.500 istek/gün) tercih edebilirsiniz.'
+                        : 'Flash modeli seçili: Günde 1.500 ücretsiz istek hakkınız bulunmaktadır. Kotanız ders programı ve öğrenci listesi yüklemeleri için fazlasıyla yeterlidir.'}
+                    </Text>
+                  </View>
+
+                  {/* Buttons: Live Google Link & Reset */}
+                  <View style={styles.aiGaugeBottomBtns}>
+                    <TouchableOpacity
+                      style={styles.aiStudioPlanBtn}
+                      onPress={() =>
+                        Linking.openURL('https://aistudio.google.com/app/plan_information')
+                      }
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="open-outline" size={14} color="#0369A1" />
+                      <Text style={styles.aiStudioPlanBtnText}>
+                        Google AI Studio'da Kotayı Aç
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.aiResetGaugeBtn}
+                      onPress={handleResetUsageStats}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="trash-outline" size={14} color={Colors.textSecondary} />
+                      <Text style={styles.aiResetGaugeBtnText}>Sayacı Sıfırla</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              );
+            })()}
+          </View>
+
+          {/* Educational Step-by-Step Box */}
+          <View style={styles.aiGuideBox}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <Ionicons name="help-circle" size={18} color="#92400E" />
+              <Text style={styles.aiGuideTitle}>Ücretsiz API Anahtarı Nasıl Alınır?</Text>
+            </View>
+
+            <Text style={styles.aiGuideStep}>
+              <Text style={{ fontWeight: '700' }}>1. Adım: </Text>
+              Aşağıdaki butona dokunarak Google AI Studio web sayfasını açın ve Gmail hesabınızla oturum açın.
+            </Text>
+            <Text style={styles.aiGuideStep}>
+              <Text style={{ fontWeight: '700' }}>2. Adım: </Text>
+              Açılan sayfada mavi renkteki <Text style={{ fontWeight: '700' }}>"Create API key"</Text> butonuna tıklayın.
+            </Text>
+            <Text style={styles.aiGuideStep}>
+              <Text style={{ fontWeight: '700' }}>3. Adım: </Text>
+              Oluşturulan <Text style={{ fontWeight: '700' }}>AIzaSy...</Text> kodunu kopyalayıp yukarıdaki kutucuğa yapıştırın ve <Text style={{ fontWeight: '700' }}>"Kaydet"</Text> butonuna basın.
+            </Text>
+
+            <View style={styles.aiFreePillsRow}>
+              <View style={styles.aiFreePill}>
+                <Ionicons name="checkmark-circle" size={13} color="#15803D" />
+                <Text style={styles.aiFreePillText}>Tamamen Ücretsiz</Text>
+              </View>
+              <View style={styles.aiFreePill}>
+                <Ionicons name="card-outline" size={13} color="#15803D" />
+                <Text style={styles.aiFreePillText}>Kredi Kartı İstemez</Text>
+              </View>
+              <View style={styles.aiFreePill}>
+                <Ionicons name="infinite" size={13} color="#15803D" />
+                <Text style={styles.aiFreePillText}>Günde 1.500 İstek</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.openAiStudioBtn}
+              onPress={() => Linking.openURL('https://aistudio.google.com/app/apikey')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="open-outline" size={17} color="#FFF" />
+              <Text style={styles.openAiStudioBtnText}>Google AI Studio'yu Aç (Ücretsiz API Al)</Text>
+            </TouchableOpacity>
+          </View>
+        </Card>
+
+        {/* SECTION 2: VERİTABANI YEDEKLEME & GERİ YÜKLEME */}
+        <View style={[styles.sectionHeaderRow, { marginTop: 24 }]}>
+          <Ionicons name="server-outline" size={20} color={Colors.primary} />
+          <Text style={styles.sectionHeader}>Veritabanı Yedekleme & Geri Yükleme</Text>
+        </View>
+
+        <Card style={styles.dbCard}>
+          <Text style={styles.cardInfoTitle}>Veritabanı Durumu & Genel İstatistikler</Text>
+          <Text style={styles.cardInfoDesc}>
+            Tüm okullarınıza ait şubeler, öğrenciler, ödevler, görüşler ve ders programı yerel veritabanında güvenle saklanır.
+          </Text>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.schoolCount || 0}</Text>
+              <Text style={styles.statMiniLabel}>Okul</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.classCount}</Text>
+              <Text style={styles.statMiniLabel}>Toplam Şube</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.studentCount}</Text>
+              <Text style={styles.statMiniLabel}>Toplam Öğrenci</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.assignmentCount}</Text>
+              <Text style={styles.statMiniLabel}>Toplam Ödev</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.noteCount + (stats.classNoteCount || 0)}</Text>
+              <Text style={styles.statMiniLabel}>Görüş/Not</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.scheduleCount}</Text>
+              <Text style={styles.statMiniLabel}>Ders Saati</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.yearlyPlanCount || 0}</Text>
+              <Text style={styles.statMiniLabel}>Yıllık Plan</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.agendaCount || 0}</Text>
+              <Text style={styles.statMiniLabel}>Ajanda Görev</Text>
+            </View>
+            <View style={styles.statMiniBox}>
+              <Text style={styles.statMiniVal}>{stats.teacherAssignmentCount || 0}</Text>
+              <Text style={styles.statMiniLabel}>Öğretmen Atama</Text>
+            </View>
+          </View>
+
+          <View style={styles.dbActionsRow}>
+            <TouchableOpacity
+              style={styles.backupBtn}
+              onPress={handleBackupPrompt}
+              activeOpacity={0.8}
+            >
+              <View style={styles.actionIconCircle}>
+                <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.actionBtnTextWrap}>
+                <Text style={styles.actionBtnTitle}>Veritabanını Yedekle</Text>
+                <Text style={styles.actionBtnSub}>Cihaza kaydet veya paylaş (.db)</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.restoreBtn}
+              onPress={handleRestorePrompt}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.actionIconCircle, { backgroundColor: '#EF4444' }]}>
+                <Ionicons name="cloud-download-outline" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.actionBtnTextWrap}>
+                <Text style={styles.actionBtnTitle}>Yedekten Geri Yükle</Text>
+                <Text style={styles.actionBtnSub}>Mevcut .db yedeğini içe aktar</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.backupBtn, { backgroundColor: '#0284C7' }]}
+              onPress={() => navigation.navigate('Agenda')}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.actionIconCircle, { backgroundColor: '#0369A1' }]}>
+                <Ionicons name="calendar" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.actionBtnTextWrap}>
+                <Text style={styles.actionBtnTitle}>Ajanda & Hatırlatıcılar</Text>
+                <Text style={styles.actionBtnSub}>Günün görevleri, alarmlar ve yapılacaklar listesi</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </Card>
+
+        {/* SECTION 2: HAZIR GÖRÜŞLERİN METİNLERİ */}
+        <View style={[styles.sectionHeaderRow, { marginTop: 24 }]}>
+          <Ionicons name="chatbubbles-outline" size={20} color={Colors.warningDark} />
+          <Text style={styles.sectionHeader}>Hazır Görüşlerin Metinleri</Text>
+        </View>
+
+        <Card style={styles.quickNotesCard}>
+          <Text style={styles.cardInfoDesc}>
+            Öğrenci Görüşü eklerken tek dokunuşla seçebileceğiniz hazır görüş kalıplarını buradan ekleyebilir, düzenleyebilir veya silebilirsiniz.
+          </Text>
+
+          {/* New text input row */}
+          <View style={styles.addInputRow}>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Yeni hazır görüş metni (örn: Derse hazırlıklı geldi 👍)"
+              placeholderTextColor={Colors.textMuted}
+              value={newNoteText}
+              onChangeText={setNewNoteText}
+            />
+            <TouchableOpacity
+              style={styles.addBtn}
+              onPress={handleAddQuickNote}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="add" size={22} color="#FFFFFF" />
+              <Text style={styles.addBtnText}>Ekle</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Quick Notes List */}
+          <View style={styles.quickNotesList}>
+            {quickNotes.map((item, index) => (
+              <View key={item.id} style={styles.quickNoteRow}>
+                <View style={styles.quickNoteIndexBadge}>
+                  <Text style={styles.quickNoteIndexText}>{index + 1}</Text>
+                </View>
+                <Text style={styles.quickNoteText}>{item.text}</Text>
+                <View style={styles.quickNoteActions}>
+                  <TouchableOpacity
+                    style={styles.iconActionBtn}
+                    onPress={() => handleOpenEditModal(item)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="pencil" size={17} color={Colors.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.iconActionBtn}
+                    onPress={() => handleDeleteQuickNote(item)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="trash-outline" size={17} color={Colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={styles.resetDefaultsBtn}
+            onPress={handleResetDefaults}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh-outline" size={16} color={Colors.textSecondary} />
+            <Text style={styles.resetDefaultsText}>Varsayılan Şablonlara Sıfırla</Text>
+          </TouchableOpacity>
+        </Card>
+
+        {/* SECTION 3: VERSİYON VE GELİŞTİRİCİ BİLGİSİ */}
+        <View style={[styles.sectionHeaderRow, { marginTop: 24 }]}>
+          <Ionicons name="information-circle-outline" size={20} color={Colors.secondary} />
+          <Text style={styles.sectionHeader}>Uygulama & Versiyon Bilgisi</Text>
+        </View>
+
+        <Card style={styles.versionCard}>
+          <View style={styles.versionHeaderRow}>
+            <View style={styles.appLogoWrap}>
+              <Image
+                source={require('../../assets/app_logo.png')}
+                style={styles.appLogoImage}
+                resizeMode="cover"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.appTitle}>Sınıf Takip & Ajanda</Text>
+              <Text style={styles.appVersionBadge}>Sürüm {APP_VERSION}</Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.authorSection}>
+            <View style={styles.authorBadge}>
+              <Ionicons name="code-slash" size={18} color={Colors.primary} />
+              <Text style={styles.authorText}>created by M.G.</Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.emailRow}
+              onPress={handleSendEmail}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="mail" size={18} color={Colors.primary} />
+              <Text style={styles.emailText}>gundoner@yahoo.com</Text>
+              <Ionicons name="open-outline" size={14} color={Colors.textMuted} />
+            </TouchableOpacity>
+
+            <Text style={styles.copyrightText}>
+              Öğretmenler için geliştirilmiş çevrimdışı sınıf, ödev ve ajanda takip sistemi. Tüm hakları saklıdır.
+            </Text>
+          </View>
+        </Card>
+      </ScrollView>
+
+      {/* Edit Quick Note Modal */}
+      <Modal
+        visible={editModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Hazır Görüşü Düzenle</Text>
+            <TextInput
+              style={styles.modalInput}
+              value={editingText}
+              onChangeText={setEditingText}
+              placeholder="Görüş metni"
+              placeholderTextColor={Colors.textMuted}
+              autoFocus={true}
+            />
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalCancelBtn]}
+                onPress={() => setEditModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Vazgeç</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalSaveBtn]}
+                onPress={handleSaveEdit}
+              >
+                <Text style={styles.modalSaveText}>Kaydet</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Loading Overlay */}
+      {loading && (
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.loadingText}>{loadingMessage || 'Lütfen bekleyin...'}</Text>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    backgroundColor: Colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    ...Shadows.small,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  headerTitleWrap: {
+    flex: 1,
+    marginLeft: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  headerSub: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  sectionHeader: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  dbCard: {
+    padding: 16,
+  },
+  defaultSchoolEmpty: {
+    fontSize: 13,
+    color: Colors.textMuted,
+    fontStyle: 'italic',
+  },
+  defaultSchoolRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  defaultSchoolDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  defaultSchoolName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  defaultSchoolSub: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  defaultPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  defaultPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  cardInfoTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  cardInfoDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  statMiniBox: {
+    flex: 1,
+    minWidth: '30%',
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  statMiniVal: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  statMiniLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginTop: 2,
+  },
+  dbActionsRow: {
+    gap: 10,
+  },
+  backupBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+    ...Shadows.small,
+  },
+  restoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DC2626',
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+    ...Shadows.small,
+  },
+  clearScheduleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D97706',
+    borderRadius: 12,
+    padding: 14,
+    gap: 12,
+    ...Shadows.small,
+  },
+  actionIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionBtnTextWrap: {
+    flex: 1,
+  },
+  actionBtnTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  actionBtnSub: {
+    fontSize: 11,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 2,
+  },
+  quickNotesCard: {
+    padding: 16,
+  },
+  addInputRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  textInput: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: Colors.textPrimary,
+  },
+  addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    gap: 4,
+  },
+  addBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  quickNotesList: {
+    gap: 8,
+  },
+  quickNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  quickNoteIndexBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  quickNoteIndexText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  quickNoteText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  quickNoteActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginLeft: 8,
+  },
+  iconActionBtn: {
+    padding: 4,
+  },
+  resetDefaultsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  resetDefaultsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  versionCard: {
+    padding: 16,
+  },
+  versionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  appLogoWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1.5,
+    borderColor: '#E0E7FF',
+    ...Shadows.small,
+  },
+  appLogoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  appTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  appVersionBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.primary,
+    marginTop: 2,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginVertical: 14,
+  },
+  authorSection: {
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  authorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.primaryLight,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    gap: 6,
+  },
+  authorText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primaryDark,
+  },
+  emailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 2,
+  },
+  emailText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.primary,
+    textDecorationLine: 'underline',
+  },
+  copyrightText: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    backgroundColor: Colors.card,
+    borderRadius: 16,
+    padding: 20,
+    ...Shadows.medium,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginBottom: 14,
+  },
+  modalInput: {
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: Colors.textPrimary,
+    marginBottom: 16,
+  },
+  modalButtonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  modalBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+  },
+  modalCancelBtn: {
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalCancelText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  modalSaveBtn: {
+    backgroundColor: Colors.primary,
+  },
+  modalSaveText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  loadingBox: {
+    backgroundColor: Colors.card,
+    padding: 24,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: 14,
+    maxWidth: 320,
+    width: '100%',
+    ...Shadows.medium,
+  },
+  loadingText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    textAlign: 'center',
+  },
+  aiCard: {
+    padding: 16,
+    backgroundColor: Colors.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+  },
+  aiCardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
+  },
+  aiCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  aiCardDesc: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginTop: 3,
+    lineHeight: 16,
+  },
+  aiStatusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  aiStatusBadgeActive: {
+    backgroundColor: '#DCFCE7',
+  },
+  aiStatusBadgeInactive: {
+    backgroundColor: '#FEF3C7',
+  },
+  aiStatusBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  aiStatusBadgeTextActive: {
+    color: '#15803D',
+  },
+  aiStatusBadgeTextInactive: {
+    color: '#B45309',
+  },
+  aiInputWrap: {
+    marginBottom: 12,
+  },
+  aiInputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+    marginBottom: 6,
+  },
+  aiInputFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.background,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  aiTextInput: {
+    flex: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: Colors.textPrimary,
+  },
+  aiEyeBtn: {
+    padding: 10,
+  },
+  aiActionBtnsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+  },
+  aiTestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+  },
+  aiTestBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primary,
+  },
+  aiSaveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    backgroundColor: '#7C3AED',
+  },
+  aiSaveBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  aiClearBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  aiModelSection: {
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  aiModelLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  aiModelLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  aiFetchModelsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: '#EDE9FE',
+  },
+  aiFetchModelsBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7C3AED',
+  },
+  aiModelDropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 10,
+  },
+  aiModelDropdownTriggerActive: {
+    borderColor: '#7C3AED',
+    backgroundColor: '#F5F3FF',
+  },
+  aiModelDropdownIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    backgroundColor: '#EDE9FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiModelDropdownTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  aiModelDropdownSub: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  aiModelDropdownMenu: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#DDD6FE',
+    borderRadius: 12,
+    marginTop: 6,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  aiModelGroupHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7C3AED',
+    backgroundColor: '#F5F3FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  aiModelDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  aiModelDropdownItemSelected: {
+    backgroundColor: '#F5F3FF',
+  },
+  aiModelItemTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  aiModelItemTitleSelected: {
+    color: '#7C3AED',
+    fontWeight: '700',
+  },
+  aiModelItemDesc: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  aiModelRecBadge: {
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  aiModelRecBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#15803D',
+  },
+  aiGuideBox: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+  },
+  aiGuideTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#92400E',
+  },
+  aiGuideStep: {
+    fontSize: 12,
+    color: '#78350F',
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  aiFreePillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginVertical: 10,
+  },
+  aiFreePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  aiFreePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  openAiStudioBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#D97706',
+    paddingVertical: 11,
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  openAiStudioBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  aiGaugeCard: {
+    backgroundColor: '#FAF5FF',
+    borderColor: '#DDD6FE',
+    borderWidth: 1.5,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+  },
+  aiGaugeHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  aiGaugeTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#6B21A8',
+  },
+  aiGaugeRefreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#EDE9FE',
+  },
+  aiGaugeRefreshText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7C3AED',
+  },
+  aiGaugeBody: {
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  aiArchWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 6,
+  },
+  aiArchTrack: {
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    borderWidth: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    ...Shadows.small,
+  },
+  aiArchInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiArchPercentText: {
+    fontSize: 26,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  aiArchPercentSub: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  aiGaugeProgressTrack: {
+    height: 8,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  aiGaugeProgressBar: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  aiGaugeProgressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  aiGaugeProgressLabel: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    fontWeight: '600',
+  },
+  aiGaugeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  aiGaugeGridItem: {
+    flex: 1,
+    minWidth: '46%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 9,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  aiGaugeGridItemLabel: {
+    fontSize: 11,
+    color: Colors.textSecondary,
+    fontWeight: '600',
+  },
+  aiGaugeGridItemVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+    marginTop: 2,
+  },
+  aiGaugeGridItemSub: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    marginTop: 1,
+  },
+  aiModelAdviceBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  aiModelAdviceBoxFlash: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  aiModelAdviceBoxPro: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  aiModelAdviceText: {
+    flex: 1,
+    fontSize: 11.5,
+    lineHeight: 16,
+    fontWeight: '500',
+  },
+  aiGaugeBottomBtns: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  aiStudioPlanBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#E0F2FE',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+    borderRadius: 8,
+    paddingVertical: 8,
+  },
+  aiStudioPlanBtnText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#0369A1',
+  },
+  aiResetGaugeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+  },
+  aiResetGaugeBtnText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+});

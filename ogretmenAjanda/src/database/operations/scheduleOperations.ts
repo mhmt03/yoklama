@@ -1,0 +1,1150 @@
+import { getDB } from '../db';
+import { CourseName, LessonSlot, ScheduleItem, DaySlotInfo, DaySlotTime } from '../../types';
+import { getDayOfWeekIndex, getCurrentTimeString, isTimeBetween, DAYS_OF_WEEK } from '../../utils/dateUtils';
+import { AnalyzedLessonItem, AnalyzedSlotTime } from '../../utils/geminiScheduleService';
+
+// --- COURSES (Ders Adları) ---
+export const getCourses = async (): Promise<CourseName[]> => {
+  const db = await getDB();
+  return await db.getAllAsync<CourseName>('SELECT * FROM courses ORDER BY name ASC');
+};
+
+export const createCourse = async (name: string, code?: string, color?: string): Promise<number> => {
+  const db = await getDB();
+  const res = await db.runAsync(
+    'INSERT INTO courses (name, code, color) VALUES (?, ?, ?)',
+    name.trim(),
+    code?.trim() || '',
+    color || '#4F46E5'
+  );
+  return res.lastInsertRowId;
+};
+
+export const updateCourse = async (id: number, name: string, code?: string, color?: string): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync(
+    'UPDATE courses SET name = ?, code = ?, color = ? WHERE id = ?',
+    name.trim(),
+    code?.trim() || '',
+    color || '#4F46E5',
+    id
+  );
+};
+
+export const deleteCourse = async (id: number): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync('DELETE FROM courses WHERE id = ?', id);
+};
+
+// --- LESSON SLOTS (Ders Saatleri) ---
+export const getLessonSlots = async (): Promise<LessonSlot[]> => {
+  const db = await getDB();
+  return await db.getAllAsync<LessonSlot>('SELECT * FROM lesson_slots ORDER BY slot_number ASC');
+};
+
+export const createLessonSlot = async (
+  slotNumber: number,
+  slotName: string,
+  startTime: string,
+  endTime: string
+): Promise<number> => {
+  const db = await getDB();
+  const res = await db.runAsync(
+    'INSERT INTO lesson_slots (slot_number, slot_name, start_time, end_time) VALUES (?, ?, ?, ?)',
+    slotNumber,
+    slotName.trim(),
+    startTime.trim(),
+    endTime.trim()
+  );
+  return res.lastInsertRowId;
+};
+
+export const updateLessonSlot = async (
+  id: number,
+  slotNumber: number,
+  slotName: string,
+  startTime: string,
+  endTime: string
+): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync(
+    'UPDATE lesson_slots SET slot_number = ?, slot_name = ?, start_time = ?, end_time = ? WHERE id = ?',
+    slotNumber,
+    slotName.trim(),
+    startTime.trim(),
+    endTime.trim(),
+    id
+  );
+};
+
+export const deleteLessonSlot = async (id: number): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync('DELETE FROM lesson_slots WHERE id = ?', id);
+};
+
+export const clearAllLessonSlots = async (): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync('DELETE FROM lesson_slots');
+};
+
+export const restoreDefaultLessonSlots = async (): Promise<void> => {
+  const db = await getDB();
+  const starterSlots = [
+    { num: 1, name: '1. Ders', start: '08:30', end: '09:10' },
+    { num: 2, name: '2. Ders', start: '09:20', end: '10:00' },
+    { num: 3, name: '3. Ders', start: '10:10', end: '10:50' },
+    { num: 4, name: '4. Ders', start: '11:00', end: '11:40' },
+    { num: 5, name: '5. Ders', start: '11:50', end: '12:30' },
+    { num: 6, name: '6. Ders', start: '13:15', end: '13:55' },
+    { num: 7, name: '7. Ders', start: '14:05', end: '14:45' },
+    { num: 8, name: '8. Ders', start: '14:55', end: '15:35' },
+  ];
+  for (const s of starterSlots) {
+    await db.runAsync(
+      'INSERT OR IGNORE INTO lesson_slots (slot_number, slot_name, start_time, end_time) VALUES (?, ?, ?, ?)',
+      s.num,
+      s.name,
+      s.start,
+      s.end
+    );
+  }
+};
+
+// --- DAY-SPECIFIC LESSON SLOTS (Güne Özel Ders Saatleri) ---
+export const getSlotsForDay = async (dayOfWeek: number): Promise<DaySlotInfo[]> => {
+  const db = await getDB();
+  const query = `
+    SELECT 
+      ls.id,
+      ls.slot_number,
+      ls.slot_name,
+      COALESCE(dst.start_time, ls.start_time) as start_time,
+      COALESCE(dst.end_time, ls.end_time) as end_time,
+      CASE WHEN dst.id IS NOT NULL THEN 1 ELSE 0 END as is_custom_time
+    FROM lesson_slots ls
+    LEFT JOIN day_slot_times dst ON dst.slot_id = ls.id AND dst.day_of_week = ?
+    ORDER BY ls.slot_number ASC
+  `;
+  const rows = await db.getAllAsync<any>(query, dayOfWeek);
+  return rows.map((r) => ({
+    id: r.id,
+    slot_number: r.slot_number,
+    slot_name: r.slot_name,
+    start_time: r.start_time,
+    end_time: r.end_time,
+    is_custom_time: Boolean(r.is_custom_time),
+  }));
+};
+
+export const getCustomDaysWithOverrides = async (): Promise<number[]> => {
+  const db = await getDB();
+  const rows = await db.getAllAsync<{ day_of_week: number }>(
+    'SELECT DISTINCT day_of_week FROM day_slot_times'
+  );
+  return rows.map((r) => r.day_of_week);
+};
+
+export const saveDaySlotTime = async (
+  dayOfWeek: number,
+  slotId: number,
+  startTime: string,
+  endTime: string
+): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync(
+    `INSERT INTO day_slot_times (day_of_week, slot_id, start_time, end_time)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(day_of_week, slot_id) DO UPDATE SET
+       start_time = excluded.start_time,
+       end_time = excluded.end_time`,
+    dayOfWeek,
+    slotId,
+    startTime.trim(),
+    endTime.trim()
+  );
+};
+
+export const copyStandardSlotsToDay = async (dayOfWeek: number): Promise<void> => {
+  const db = await getDB();
+  const slots = await getLessonSlots();
+  for (const s of slots) {
+    await db.runAsync(
+      `INSERT INTO day_slot_times (day_of_week, slot_id, start_time, end_time)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(day_of_week, slot_id) DO UPDATE SET
+         start_time = excluded.start_time,
+         end_time = excluded.end_time`,
+      dayOfWeek,
+      s.id,
+      s.start_time,
+      s.end_time
+    );
+  }
+};
+
+export const resetDaySlotTimes = async (dayOfWeek: number): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync('DELETE FROM day_slot_times WHERE day_of_week = ?', dayOfWeek);
+};
+
+// --- WEEKLY SCHEDULE (Haftalık Ders Programı) ---
+export const getWeeklySchedule = async (): Promise<ScheduleItem[]> => {
+  const db = await getDB();
+  const { getActiveSchool } = await import('./schoolOperations');
+  const activeSchool = await getActiveSchool();
+  const activeSchoolId = activeSchool?.id || 1;
+
+  const query = `
+    SELECT 
+      ls.id as slot_id,
+      ls.slot_number,
+      ls.slot_name,
+      COALESCE(dst.start_time, ls.start_time) as start_time,
+      COALESCE(dst.end_time, ls.end_time) as end_time,
+      CASE WHEN dst.id IS NOT NULL THEN 1 ELSE 0 END as is_custom_time,
+      s.id,
+      days.day_of_week,
+      s.class_id,
+      c.name as class_name,
+      c.school_id,
+      sch.name as school_name,
+      sch.color as school_color,
+      s.course_id,
+      cr.name as course_name,
+      cr.code as course_code,
+      cr.color as course_color,
+      s.classroom
+    FROM lesson_slots ls
+    CROSS JOIN (
+      SELECT 1 as day_of_week UNION SELECT 2 UNION SELECT 3 
+      UNION SELECT 4 UNION SELECT 5 UNION SELECT 6 UNION SELECT 7
+    ) days
+    LEFT JOIN day_slot_times dst ON dst.slot_id = ls.id AND dst.day_of_week = days.day_of_week
+    LEFT JOIN schedules s ON s.slot_id = ls.id AND s.day_of_week = days.day_of_week
+    LEFT JOIN classes c ON c.id = s.class_id AND (c.school_id = ? OR c.school_id IS NULL)
+    LEFT JOIN schools sch ON sch.id = c.school_id
+    LEFT JOIN courses cr ON cr.id = s.course_id
+    ORDER BY days.day_of_week ASC, ls.slot_number ASC;
+  `;
+  const rows = await db.getAllAsync<any>(query, activeSchoolId);
+  return rows.map((r) => ({
+    ...r,
+    class_id: r.class_name ? r.class_id : null,
+    class_name: r.class_name ? r.class_name : null,
+    school_id: r.class_name ? (r.school_id ?? activeSchool?.id ?? null) : null,
+    school_name: r.class_name ? (r.school_name ?? activeSchool?.name ?? null) : null,
+    school_color: r.class_name ? (r.school_color ?? activeSchool?.color ?? null) : null,
+    course_id: r.class_name ? r.course_id : null,
+    course_name: r.class_name ? r.course_name : null,
+    course_code: r.class_name ? r.course_code : null,
+    course_color: r.class_name ? r.course_color : null,
+    classroom: r.class_name ? r.classroom : null,
+    is_custom_time: Boolean(r.is_custom_time),
+  }));
+};
+
+export const getScheduleByDay = async (
+  dayOfWeek: number,
+  schoolFilter?: number | 'all'
+): Promise<ScheduleItem[]> => {
+  const db = await getDB();
+  const { getActiveSchool } = await import('./schoolOperations');
+  const activeSchool = await getActiveSchool();
+  const activeSchoolId = activeSchool?.id || 1;
+
+  if (schoolFilter === 'all') {
+    const query = `
+      SELECT 
+        ls.id as slot_id,
+        ls.slot_number,
+        ls.slot_name,
+        COALESCE(dst.start_time, ls.start_time) as start_time,
+        COALESCE(dst.end_time, ls.end_time) as end_time,
+        CASE WHEN dst.id IS NOT NULL THEN 1 ELSE 0 END as is_custom_time,
+        s.id,
+        ? as day_of_week,
+        s.class_id,
+        c.name as class_name,
+        c.school_id,
+        sch.name as school_name,
+        sch.color as school_color,
+        s.course_id,
+        cr.name as course_name,
+        cr.code as course_code,
+        cr.color as course_color,
+        s.classroom
+      FROM lesson_slots ls
+      LEFT JOIN day_slot_times dst ON dst.slot_id = ls.id AND dst.day_of_week = ?
+      LEFT JOIN schedules s ON s.slot_id = ls.id AND s.day_of_week = ?
+      LEFT JOIN classes c ON c.id = s.class_id
+      LEFT JOIN schools sch ON sch.id = c.school_id
+      LEFT JOIN courses cr ON cr.id = s.course_id
+      ORDER BY ls.slot_number ASC;
+    `;
+    const rows = await db.getAllAsync<any>(query, dayOfWeek, dayOfWeek, dayOfWeek);
+    return rows.map((r) => ({
+      ...r,
+      class_id: r.class_name ? r.class_id : null,
+      class_name: r.class_name ? r.class_name : null,
+      school_id: r.class_name ? (r.school_id ?? activeSchool?.id ?? null) : null,
+      school_name: r.class_name ? (r.school_name ?? activeSchool?.name ?? null) : null,
+      school_color: r.class_name ? (r.school_color ?? activeSchool?.color ?? null) : null,
+      course_id: r.class_name ? r.course_id : null,
+      course_name: r.class_name ? r.course_name : null,
+      course_code: r.class_name ? r.course_code : null,
+      course_color: r.class_name ? r.course_color : null,
+      classroom: r.class_name ? r.classroom : null,
+      is_custom_time: Boolean(r.is_custom_time),
+    }));
+  }
+
+  const targetSchoolId = typeof schoolFilter === 'number' ? schoolFilter : activeSchoolId;
+
+  const query = `
+    SELECT 
+      ls.id as slot_id,
+      ls.slot_number,
+      ls.slot_name,
+      COALESCE(dst.start_time, ls.start_time) as start_time,
+      COALESCE(dst.end_time, ls.end_time) as end_time,
+      CASE WHEN dst.id IS NOT NULL THEN 1 ELSE 0 END as is_custom_time,
+      s.id,
+      ? as day_of_week,
+      s.class_id,
+      c.name as class_name,
+      c.school_id,
+      sch.name as school_name,
+      sch.color as school_color,
+      s.course_id,
+      cr.name as course_name,
+      cr.code as course_code,
+      cr.color as course_color,
+      s.classroom
+    FROM lesson_slots ls
+    LEFT JOIN day_slot_times dst ON dst.slot_id = ls.id AND dst.day_of_week = ?
+    LEFT JOIN schedules s ON s.slot_id = ls.id AND s.day_of_week = ?
+    LEFT JOIN classes c ON c.id = s.class_id AND (c.school_id = ? OR c.school_id IS NULL)
+    LEFT JOIN schools sch ON sch.id = c.school_id
+    LEFT JOIN courses cr ON cr.id = s.course_id
+    ORDER BY ls.slot_number ASC;
+  `;
+  const rows = await db.getAllAsync<any>(query, dayOfWeek, dayOfWeek, dayOfWeek, targetSchoolId);
+  return rows.map((r) => ({
+    ...r,
+    // If the matched class doesn't belong to active school, clear class/course info for this slot
+    class_id: r.class_name ? r.class_id : null,
+    class_name: r.class_name ? r.class_name : null,
+    school_id: r.class_name ? (r.school_id ?? targetSchoolId) : null,
+    school_name: r.class_name ? (r.school_name ?? activeSchool?.name ?? null) : null,
+    school_color: r.class_name ? (r.school_color ?? activeSchool?.color ?? null) : null,
+    course_id: r.class_name ? r.course_id : null,
+    course_name: r.class_name ? r.course_name : null,
+    course_code: r.class_name ? r.course_code : null,
+    course_color: r.class_name ? r.course_color : null,
+    classroom: r.class_name ? r.classroom : null,
+    is_custom_time: Boolean(r.is_custom_time),
+  }));
+};
+
+export const saveScheduleSlot = async (
+  dayOfWeek: number,
+  slotId: number,
+  classId: number | null,
+  courseId: number | null,
+  classroom?: string
+): Promise<void> => {
+  const db = await getDB();
+  if (!classId && !courseId) {
+    // If both empty, delete slot assignment
+    await db.runAsync(
+      'DELETE FROM schedules WHERE day_of_week = ? AND slot_id = ?',
+      dayOfWeek,
+      slotId
+    );
+    return;
+  }
+
+  await db.runAsync(
+    `INSERT INTO schedules (day_of_week, slot_id, class_id, course_id, classroom)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(day_of_week, slot_id) DO UPDATE SET
+       class_id = excluded.class_id,
+       course_id = excluded.course_id,
+       classroom = excluded.classroom`,
+    dayOfWeek,
+    slotId,
+    classId,
+    courseId,
+    classroom?.trim() || null
+  );
+};
+
+export const clearEntireSchedule = async (resetDayOverrides: boolean = false): Promise<void> => {
+  const db = await getDB();
+  await db.runAsync('DELETE FROM schedules');
+  if (resetDayOverrides) {
+    await db.runAsync('DELETE FROM day_slot_times');
+  }
+};
+
+export interface ActiveLessonInfo {
+  currentLesson: ScheduleItem | null;
+  nextLesson: ScheduleItem | null;
+  todayLessons: ScheduleItem[];
+}
+
+export const getActiveAndTodayLessons = async (
+  schoolFilter?: number | 'all'
+): Promise<ActiveLessonInfo> => {
+  const dayOfWeek = getDayOfWeekIndex();
+  const todayLessonsAll = await getScheduleByDay(dayOfWeek, schoolFilter);
+  const currentTime = getCurrentTimeString();
+
+  // Filter only slots that actually have a class or course assigned
+  const assignedLessons = todayLessonsAll.filter((item) => item.class_id || item.course_id);
+
+  let currentLesson: ScheduleItem | null = null;
+  let nextLesson: ScheduleItem | null = null;
+
+  for (const item of assignedLessons) {
+    if (item.start_time && item.end_time) {
+      if (isTimeBetween(currentTime, item.start_time, item.end_time)) {
+        currentLesson = item;
+      } else if (!nextLesson && item.start_time > currentTime) {
+        nextLesson = item;
+      }
+    }
+  }
+
+  return {
+    currentLesson,
+    nextLesson,
+    todayLessons: assignedLessons,
+  };
+};
+
+export interface CurrentLessonSummary {
+  hasActiveLesson: boolean;
+  dayName: string;
+  slotName: string;
+  slotNumber: number;
+  courseName?: string;
+  className?: string;
+  startTime?: string;
+  endTime?: string;
+  fullText: string;
+}
+
+export const getCurrentActiveLessonSummary = async (): Promise<CurrentLessonSummary | null> => {
+  const dayOfWeek = getDayOfWeekIndex();
+  const dayObj = DAYS_OF_WEEK.find((d) => d.id === dayOfWeek);
+  const dayName = dayObj ? dayObj.name : 'Bugün';
+
+  const todayLessonsAll = await getScheduleByDay(dayOfWeek);
+  const currentTime = getCurrentTimeString();
+
+  for (const item of todayLessonsAll) {
+    if (item.start_time && item.end_time && isTimeBetween(currentTime, item.start_time, item.end_time)) {
+      const slotName = item.slot_name || `${item.slot_number}. Ders`;
+      const courseName = item.course_name || undefined;
+      const className = item.class_name || undefined;
+
+      let fullText = `${dayName}, ${slotName}`;
+      if (courseName) {
+        fullText += ` • ${courseName}`;
+      } else if (className) {
+        fullText += ` • ${className}`;
+      }
+
+      return {
+        hasActiveLesson: true,
+        dayName,
+        slotName,
+        slotNumber: item.slot_number || 1,
+        courseName,
+        className,
+        startTime: item.start_time,
+        endTime: item.end_time,
+        fullText,
+      };
+    }
+  }
+
+  return null;
+};
+
+export interface LoadScheduleResult {
+  success: boolean;
+  totalLessonsLoaded: number;
+  classesEnsured: string[];
+  coursesEnsured: Array<{ name: string; code: string }>;
+  slotsCount: number;
+  message: string;
+}
+
+export interface SchedulePrerequisitesCheck {
+  isValid: boolean;
+  missingCourseCodes: Array<{ code: string; defaultName: string }>;
+  missingClasses: string[];
+  matchedCourses: { [code: string]: number };
+  matchedClasses: { [norm: string]: number };
+  ensuredClassNames: string[];
+}
+
+/**
+ * Resimdeki resmi haftalık ders programının yüklenebilmesi için
+ * ders kısa isimlerinin (S.FZK, HDTE2) ve şube isimlerinin (11-A, 11-B, 11-C, 12-C, 12-D, 12-E)
+ * sistemde tanımlı olup olmadığını denetler.
+ */
+export const checkOfficialSchedulePrerequisites = async (): Promise<SchedulePrerequisitesCheck> => {
+  const db = await getDB();
+
+  // 1. DERSLERİ KONTROL ET (Kısa isimler: S.FZK, HDTE2)
+  const allCourses = await db.getAllAsync<{ id: number; name: string; code?: string }>(
+    'SELECT id, name, code FROM courses'
+  );
+
+  const normalizeCode = (s?: string) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+
+  const requiredCourses = [
+    { code: 'S.FZK', norm: 'SFZK', defaultName: 'Seçmeli Fizik' },
+    { code: 'HDTE2', norm: 'HDTE2', defaultName: 'Hedef Temelli Destek Eğitimi 2' },
+  ];
+
+  const missingCourseCodes: Array<{ code: string; defaultName: string }> = [];
+  const matchedCourses: { [code: string]: number } = {};
+
+  for (const req of requiredCourses) {
+    const match = allCourses.find((c) => {
+      const cCode = (c.code || '').trim();
+      if (!cCode) return false;
+      const cUpper = cCode.toUpperCase();
+      const cNorm = normalizeCode(cCode);
+      return cUpper === req.code || cNorm === req.norm;
+    });
+
+    if (match) {
+      matchedCourses[req.code] = match.id;
+    } else {
+      missingCourseCodes.push({ code: req.code, defaultName: req.defaultName });
+    }
+  }
+
+  // 2. ŞUBELERİ KONTROL ET (11-A, 11-B, 11-C, 12-C, 12-D, 12-E)
+  const normalizeClass = (s: string) => (s || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const existingClasses = await db.getAllAsync<{ id: number; name: string }>(
+    'SELECT id, name FROM classes'
+  );
+
+  const requiredClasses = [
+    { defaultName: '11-A', norm: '11A' },
+    { defaultName: '11-B', norm: '11B' },
+    { defaultName: '11-C', norm: '11C' },
+    { defaultName: '12-C', norm: '12C' },
+    { defaultName: '12-D', norm: '12D' },
+    { defaultName: '12-E', norm: '12E' },
+  ];
+
+  const missingClasses: string[] = [];
+  const matchedClasses: { [norm: string]: number } = {};
+  const ensuredClassNames: string[] = [];
+
+  for (const req of requiredClasses) {
+    const match = existingClasses.find((c) => normalizeClass(c.name) === req.norm);
+    if (match) {
+      matchedClasses[req.norm] = match.id;
+      ensuredClassNames.push(match.name);
+    } else {
+      missingClasses.push(req.defaultName);
+    }
+  }
+
+  const isValid = missingCourseCodes.length === 0 && missingClasses.length === 0;
+
+  return {
+    isValid,
+    missingCourseCodes,
+    missingClasses,
+    matchedCourses,
+    matchedClasses,
+    ensuredClassNames,
+  };
+};
+
+/**
+ * Kamil Miras Anadolu Lisesi (Mehmet Gündöner) resmi haftalık ders programını (27 Saat)
+ * veritabanına yükler.
+ * 
+ * ÖNEMLİ KURAL:
+ * 1. Ders kısa isimleri veya şubeler eksikse yükleme yapmaz, hata fırlatır.
+ * 2. Kullanıcının tanımladığı veya değiştirdiği ders saatleri (başlangıç/bitiş zamanları)
+ *    kesinlikle silinmez veya ezilmez. Sadece slot numaralarına (1..8) göre ders atamaları yapılır.
+ */
+export const loadOfficialWeeklySchedule = async (): Promise<LoadScheduleResult> => {
+  const db = await getDB();
+
+  // 1. ÖN KOŞUL KONTROLÜ
+  const check = await checkOfficialSchedulePrerequisites();
+  if (!check.isValid) {
+    const errList: string[] = [];
+    if (check.missingCourseCodes.length > 0) {
+      errList.push(
+        `Eksik ders kısa isimleri: ${check.missingCourseCodes.map((c) => c.code).join(', ')}`
+      );
+    }
+    if (check.missingClasses.length > 0) {
+      errList.push(
+        `Sistemde kayıtlı olmayan şubeler: ${check.missingClasses.join(', ')}`
+      );
+    }
+    throw new Error(errList.join('\n'));
+  }
+
+  const courseIdFzk = check.matchedCourses['S.FZK'];
+  const courseIdHdte = check.matchedCourses['HDTE2'];
+  const classMap = check.matchedClasses;
+  const ensuredClassNames = check.ensuredClassNames;
+
+  // 3. DERS SAATLERİ: 1..8 (KULLANICININ ÖZEL SAATLERİ KORUNUR)
+  const existingSlots = await db.getAllAsync<{ id: number; slot_number: number }>(
+    'SELECT id, slot_number FROM lesson_slots ORDER BY slot_number ASC'
+  );
+  const slotMap: Record<number, number> = {};
+  for (const s of existingSlots) {
+    slotMap[s.slot_number] = s.id;
+  }
+
+  const defaultStarterTimes: Record<number, { name: string; start: string; end: string }> = {
+    1: { name: '1. Ders', start: '08:30', end: '09:10' },
+    2: { name: '2. Ders', start: '09:25', end: '10:05' },
+    3: { name: '3. Ders', start: '10:15', end: '10:55' },
+    4: { name: '4. Ders', start: '11:05', end: '11:45' },
+    5: { name: '5. Ders', start: '11:55', end: '12:35' },
+    6: { name: '6. Ders', start: '13:40', end: '14:20' },
+    7: { name: '7. Ders', start: '14:30', end: '15:10' },
+    8: { name: '8. Ders', start: '15:20', end: '16:00' },
+  };
+
+  for (let slotNum = 1; slotNum <= 8; slotNum++) {
+    if (!slotMap[slotNum]) {
+      const t = defaultStarterTimes[slotNum] || { name: `${slotNum}. Ders`, start: '08:30', end: '09:10' };
+      const res = await db.runAsync(
+        'INSERT INTO lesson_slots (slot_number, slot_name, start_time, end_time) VALUES (?, ?, ?, ?)',
+        slotNum,
+        t.name,
+        t.start,
+        t.end
+      );
+      slotMap[slotNum] = res.lastInsertRowId;
+    }
+  }
+
+  // 4. HAFTA İÇİ (Pzt - Cuma) 1..8 SAATLERİNDEKİ ESKİ PROGRAMI TEMİZLE
+  for (let day = 1; day <= 5; day++) {
+    for (let slotNum = 1; slotNum <= 8; slotNum++) {
+      const slotId = slotMap[slotNum];
+      if (slotId) {
+        await db.runAsync('DELETE FROM schedules WHERE day_of_week = ? AND slot_id = ?', day, slotId);
+      }
+    }
+  }
+
+  // 5. RESİMDEKİ 27 SAATLİK RESMİ DAĞILIM
+  const officialScheduleGrid: Array<{
+    day: number;
+    slotNum: number;
+    classNorm: string;
+    courseCode: 'S.FZK' | 'HDTE2';
+  }> = [
+    // Pazartesi (Day 1) - 6 saat
+    { day: 1, slotNum: 1, classNorm: '12D', courseCode: 'HDTE2' },
+    { day: 1, slotNum: 2, classNorm: '12D', courseCode: 'S.FZK' },
+    { day: 1, slotNum: 3, classNorm: '12D', courseCode: 'S.FZK' },
+    { day: 1, slotNum: 4, classNorm: '12C', courseCode: 'HDTE2' },
+    { day: 1, slotNum: 5, classNorm: '11C', courseCode: 'S.FZK' },
+    { day: 1, slotNum: 6, classNorm: '11C', courseCode: 'S.FZK' },
+
+    // Salı (Day 2) - 8 saat
+    { day: 2, slotNum: 1, classNorm: '11B', courseCode: 'S.FZK' },
+    { day: 2, slotNum: 2, classNorm: '11B', courseCode: 'S.FZK' },
+    { day: 2, slotNum: 3, classNorm: '12E', courseCode: 'S.FZK' },
+    { day: 2, slotNum: 4, classNorm: '12E', courseCode: 'S.FZK' },
+    { day: 2, slotNum: 5, classNorm: '12C', courseCode: 'S.FZK' },
+    { day: 2, slotNum: 6, classNorm: '12C', courseCode: 'S.FZK' },
+    { day: 2, slotNum: 7, classNorm: '12D', courseCode: 'S.FZK' },
+    { day: 2, slotNum: 8, classNorm: '12D', courseCode: 'S.FZK' },
+
+    // Çarşamba (Day 3) - 5 saat
+    { day: 3, slotNum: 1, classNorm: '11C', courseCode: 'S.FZK' },
+    { day: 3, slotNum: 2, classNorm: '11C', courseCode: 'S.FZK' },
+    { day: 3, slotNum: 3, classNorm: '11A', courseCode: 'S.FZK' },
+    { day: 3, slotNum: 4, classNorm: '11A', courseCode: 'S.FZK' },
+    { day: 3, slotNum: 5, classNorm: '12E', courseCode: 'HDTE2' },
+
+    // Perşembe (Day 4) - 6 saat
+    { day: 4, slotNum: 1, classNorm: '11A', courseCode: 'S.FZK' },
+    { day: 4, slotNum: 2, classNorm: '11A', courseCode: 'S.FZK' },
+    { day: 4, slotNum: 3, classNorm: '12E', courseCode: 'S.FZK' },
+    { day: 4, slotNum: 4, classNorm: '12E', courseCode: 'S.FZK' },
+    { day: 4, slotNum: 5, classNorm: '11B', courseCode: 'S.FZK' },
+    { day: 4, slotNum: 6, classNorm: '11B', courseCode: 'S.FZK' },
+
+    // Cuma (Day 5) - 2 saat
+    { day: 5, slotNum: 1, classNorm: '12C', courseCode: 'S.FZK' },
+    { day: 5, slotNum: 2, classNorm: '12C', courseCode: 'S.FZK' },
+  ];
+
+  for (const item of officialScheduleGrid) {
+    const slotId = slotMap[item.slotNum];
+    const classId = classMap[item.classNorm];
+    const courseId = item.courseCode === 'HDTE2' ? courseIdHdte : courseIdFzk;
+
+    await db.runAsync(
+      `INSERT INTO schedules (day_of_week, slot_id, class_id, course_id)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(day_of_week, slot_id) DO UPDATE SET
+         class_id = excluded.class_id,
+         course_id = excluded.course_id`,
+      item.day,
+      slotId,
+      classId,
+      courseId
+    );
+  }
+
+  return {
+    success: true,
+    totalLessonsLoaded: officialScheduleGrid.length,
+    classesEnsured: ensuredClassNames,
+    coursesEnsured: [
+      { name: 'Seçmeli Fizik', code: 'S.FZK' },
+      { name: 'Hedef Temelli Destek Eğitimi 2', code: 'HDTE2' },
+    ],
+    slotsCount: Object.keys(slotMap).length,
+    message: '27 saatlik resmi okul ders programı başarıyla yüklendi. Ders saatleriniz korundu.',
+  };
+};
+
+export const getSchedulePhotoUri = async (): Promise<string | null> => {
+  const db = await getDB();
+  const row = await db.getFirstAsync<{ value: string }>(
+    "SELECT value FROM app_settings WHERE key = 'schedule_photo_uri'"
+  );
+  return row?.value || null;
+};
+
+export const setSchedulePhotoUri = async (uri: string | null): Promise<void> => {
+  const db = await getDB();
+  if (uri) {
+    await db.runAsync(
+      "INSERT INTO app_settings (key, value) VALUES ('schedule_photo_uri', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      uri
+    );
+  } else {
+    await db.runAsync("DELETE FROM app_settings WHERE key = 'schedule_photo_uri'");
+  }
+};
+
+export const getShowAllSchoolsSetting = async (): Promise<boolean> => {
+  try {
+    const db = await getDB();
+    const row = await db.getFirstAsync<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = 'show_all_schools_schedule'"
+    );
+    return row?.value === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const setShowAllSchoolsSetting = async (val: boolean): Promise<void> => {
+  try {
+    const db = await getDB();
+    await db.runAsync(
+      "INSERT INTO app_settings (key, value) VALUES ('show_all_schools_schedule', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      val ? '1' : '0'
+    );
+  } catch (e) {
+    console.warn('Error saving show_all_schools_schedule setting:', e);
+  }
+};
+
+/**
+ * Farklı okullara ait ders programlarını birleştirir ve aynı saate denk gelen
+ * dersleri tespit eder. Çakışma durumunda:
+ * - Sadece tek bir okulun kartı gösterilir (aktif okul öncelikli).
+ * - O kartta 'has_conflict: true' ve çakışan diğer okul/şube bilgisi yer alır.
+ */
+export const mergeAndDetectConflicts = (
+  lessons: ScheduleItem[],
+  activeSchoolId?: number | null
+): ScheduleItem[] => {
+  if (lessons.length <= 1) return lessons;
+
+  const doTimesOverlap = (itemA: ScheduleItem, itemB: ScheduleItem): boolean => {
+    // 1. Aynı slot_id ise
+    if (itemA.slot_id === itemB.slot_id) return true;
+
+    // 2. Aynı slot_number ise
+    if (
+      itemA.slot_number !== undefined &&
+      itemB.slot_number !== undefined &&
+      itemA.slot_number === itemB.slot_number
+    ) {
+      return true;
+    }
+
+    // 3. Saat aralıkları örtüşüyor mu?
+    if (itemA.start_time && itemA.end_time && itemB.start_time && itemB.end_time) {
+      const aStart = itemA.start_time.trim();
+      const aEnd = itemA.end_time.trim();
+      const bStart = itemB.start_time.trim();
+      const bEnd = itemB.end_time.trim();
+
+      if (aStart === bStart) return true;
+      return aStart < bEnd && aEnd > bStart;
+    }
+
+    return false;
+  };
+
+  const result: ScheduleItem[] = [];
+  const processedIndices = new Set<number>();
+
+  for (let i = 0; i < lessons.length; i++) {
+    if (processedIndices.has(i)) continue;
+
+    const currentGroup: ScheduleItem[] = [lessons[i]];
+    processedIndices.add(i);
+
+    for (let j = i + 1; j < lessons.length; j++) {
+      if (processedIndices.has(j)) continue;
+
+      const other = lessons[j];
+      const schoolA = currentGroup[0].school_id ?? -1;
+      const schoolB = other.school_id ?? -1;
+
+      // Farklı okul olup çakışanlar
+      const isDiffSchool = schoolA !== schoolB;
+
+      if (isDiffSchool && doTimesOverlap(currentGroup[0], other)) {
+        currentGroup.push(other);
+        processedIndices.add(j);
+      }
+    }
+
+    if (currentGroup.length === 1) {
+      result.push({ ...currentGroup[0] });
+    } else {
+      // Çakışma var: aktif okulu öncelikli seç
+      let primaryIndex = currentGroup.findIndex(
+        (item) => activeSchoolId && item.school_id === activeSchoolId
+      );
+      if (primaryIndex === -1) {
+        primaryIndex = 0;
+      }
+
+      const primary: ScheduleItem = { ...currentGroup[primaryIndex] };
+      const conflicts = currentGroup.filter((_, idx) => idx !== primaryIndex);
+
+      primary.has_conflict = true;
+      primary.conflict_school_name = conflicts
+        .map((c) => c.school_name || 'Diğer Okul')
+        .join(', ');
+      primary.conflict_class_name = conflicts
+        .map((c) => c.class_name || '-')
+        .join(', ');
+      primary.conflict_course_name = conflicts
+        .map((c) => c.course_name || '-')
+        .join(', ');
+      primary.conflict_time = conflicts
+        .map((c) => (c.start_time && c.end_time ? `${c.start_time} - ${c.end_time}` : ''))
+        .filter(Boolean)
+        .join(', ');
+
+      result.push(primary);
+    }
+  }
+
+  // Başlangıç saatine veya slot sırasına göre sırala
+  return result.sort((a, b) => {
+    if (a.start_time && b.start_time) {
+      const cmp = a.start_time.localeCompare(b.start_time);
+      if (cmp !== 0) return cmp;
+    }
+    return (a.slot_number || 0) - (b.slot_number || 0);
+  });
+};
+
+export interface ApplyScheduleOptions {
+  clearDaysOption?: 'all_week' | 'matched_days';
+  autoCreateClasses?: boolean;
+  autoCreateCourses?: boolean;
+  updateSlotTimes?: boolean;
+  detectedSlotTimes?: AnalyzedSlotTime[];
+}
+
+export interface ApplyScheduleResult {
+  success: boolean;
+  totalLessonsLoaded: number;
+  classesEnsured: string[];
+  coursesEnsured: string[];
+  slotsCount: number;
+  message: string;
+  skippedLessonsCount?: number;
+  missingClassesSkipped?: string[];
+  missingCoursesSkipped?: string[];
+  slotTimesUpdatedCount?: number;
+}
+
+/**
+ * Yapay zeka (Gemini Vision) tarafından analiz edilen haftalık ders programını
+ * veritabanına otomatik aktarır. Eksik şubeleri ve dersleri isteğe bağlı oluşturur.
+ */
+export const applyAnalyzedSchedule = async (
+  lessons: AnalyzedLessonItem[],
+  options?: ApplyScheduleOptions | ('all_week' | 'matched_days')
+): Promise<ApplyScheduleResult> => {
+  let clearDaysOption: 'all_week' | 'matched_days' = 'all_week';
+  let autoCreateClasses = true;
+  let autoCreateCourses = true;
+  let updateSlotTimes = false;
+  let detectedSlotTimes: AnalyzedSlotTime[] = [];
+
+  if (typeof options === 'string') {
+    clearDaysOption = options;
+  } else if (options) {
+    if (options.clearDaysOption) clearDaysOption = options.clearDaysOption;
+    if (options.autoCreateClasses !== undefined) autoCreateClasses = options.autoCreateClasses;
+    if (options.autoCreateCourses !== undefined) autoCreateCourses = options.autoCreateCourses;
+    if (options.updateSlotTimes !== undefined) updateSlotTimes = options.updateSlotTimes;
+    if (options.detectedSlotTimes) detectedSlotTimes = options.detectedSlotTimes;
+  }
+
+  const db = await getDB();
+  const { getActiveSchool } = await import('./schoolOperations');
+  const activeSchool = await getActiveSchool();
+  const activeSchoolId = activeSchool?.id || 1;
+
+  if (!lessons || lessons.length === 0) {
+    throw new Error('Yüklenecek ders saati bulunamadı.');
+  }
+
+  // 1. DERS SAATLERİ (SLOTS) KONTROLÜ, OLUŞTURULMASI VE GÜNCELLENMESİ
+  const maxSlotNeeded = Math.max(...lessons.map((l) => l.slotNumber), 8);
+  const existingSlots = await db.getAllAsync<{ id: number; slot_number: number }>(
+    'SELECT id, slot_number FROM lesson_slots ORDER BY slot_number ASC'
+  );
+  const slotMap: Record<number, number> = {};
+  for (const s of existingSlots) {
+    slotMap[s.slot_number] = s.id;
+  }
+
+  // Eğer kullanıcı fotoğraftaki saat dilimlerini sisteme yüklemeyi seçtiyse
+  let slotTimesUpdatedCount = 0;
+  if (updateSlotTimes && detectedSlotTimes.length > 0) {
+    for (const dt of detectedSlotTimes) {
+      if (dt.slotNumber >= 1 && dt.startTime && dt.endTime) {
+        if (slotMap[dt.slotNumber]) {
+          await db.runAsync(
+            'UPDATE lesson_slots SET start_time = ?, end_time = ? WHERE id = ?',
+            dt.startTime,
+            dt.endTime,
+            slotMap[dt.slotNumber]
+          );
+          slotTimesUpdatedCount++;
+        } else {
+          const sName = dt.slotName || `${dt.slotNumber}. Ders`;
+          const res = await db.runAsync(
+            'INSERT INTO lesson_slots (slot_number, slot_name, start_time, end_time) VALUES (?, ?, ?, ?)',
+            dt.slotNumber,
+            sName,
+            dt.startTime,
+            dt.endTime
+          );
+          slotMap[dt.slotNumber] = res.lastInsertRowId;
+          slotTimesUpdatedCount++;
+        }
+      }
+    }
+  }
+
+  const defaultStarterTimes: Record<number, { name: string; start: string; end: string }> = {
+    1: { name: '1. Ders', start: '08:30', end: '09:10' },
+    2: { name: '2. Ders', start: '09:25', end: '10:05' },
+    3: { name: '3. Ders', start: '10:15', end: '10:55' },
+    4: { name: '4. Ders', start: '11:05', end: '11:45' },
+    5: { name: '5. Ders', start: '11:55', end: '12:35' },
+    6: { name: '6. Ders', start: '13:40', end: '14:20' },
+    7: { name: '7. Ders', start: '14:30', end: '15:10' },
+    8: { name: '8. Ders', start: '15:20', end: '16:00' },
+    9: { name: '9. Ders', start: '16:10', end: '16:50' },
+    10: { name: '10. Ders', start: '17:00', end: '17:40' },
+  };
+
+  for (let sNum = 1; sNum <= maxSlotNeeded; sNum++) {
+    if (!slotMap[sNum]) {
+      const def = defaultStarterTimes[sNum] || {
+        name: `${sNum}. Ders`,
+        start: '08:30',
+        end: '09:10',
+      };
+      const res = await db.runAsync(
+        'INSERT INTO lesson_slots (slot_number, slot_name, start_time, end_time) VALUES (?, ?, ?, ?)',
+        sNum,
+        def.name,
+        def.start,
+        def.end
+      );
+      slotMap[sNum] = res.lastInsertRowId;
+    }
+  }
+
+  // 2. ŞUBELERİN EŞLEŞTİRİLMESİ VEYA OLUŞTURULMASI
+  const existingClasses = await db.getAllAsync<{ id: number; name: string; school_id: number | null }>(
+    'SELECT id, name, school_id FROM classes'
+  );
+  const normalizeNorm = (str: string) => (str || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const classIdMap: Record<string, number> = {};
+  const classesEnsuredSet = new Set<string>();
+  const missingClassesSkipped = new Set<string>();
+
+  for (const item of lessons) {
+    const rawName = item.className.trim();
+    const norm = normalizeNorm(rawName);
+    if (!norm) continue;
+
+    if (!classIdMap[norm]) {
+      // Önce mevcut sınıflarda ara
+      const match =
+        existingClasses.find(
+          (c) => normalizeNorm(c.name) === norm && (c.school_id === activeSchoolId || !c.school_id)
+        ) || existingClasses.find((c) => normalizeNorm(c.name) === norm);
+
+      if (match) {
+        classIdMap[norm] = match.id;
+        classesEnsuredSet.add(match.name);
+      } else if (autoCreateClasses) {
+        // Yoksa ve otomatik ekleme açıksa oluştur
+        const res = await db.runAsync(
+          'INSERT INTO classes (name, school_id) VALUES (?, ?)',
+          rawName,
+          activeSchoolId
+        );
+        classIdMap[norm] = res.lastInsertRowId;
+        classesEnsuredSet.add(rawName);
+        existingClasses.push({ id: res.lastInsertRowId, name: rawName, school_id: activeSchoolId });
+      } else {
+        missingClassesSkipped.add(rawName);
+      }
+    }
+  }
+
+  // 3. DERSLERİN EŞLEŞTİRİLMESİ VEYA OLUŞTURULMASI
+  const existingCourses = await db.getAllAsync<{ id: number; name: string; code?: string }>(
+    'SELECT id, name, code FROM courses'
+  );
+  const courseIdMap: Record<string, number> = {};
+  const coursesEnsuredSet = new Set<string>();
+  const missingCoursesSkipped = new Set<string>();
+
+  const courseColors = ['#4F46E5', '#059669', '#DC2626', '#D97706', '#7C3AED', '#2563EB', '#DB2777', '#0891B2'];
+  let colorIdx = 0;
+
+  for (const item of lessons) {
+    const cName = (item.courseName || item.courseCode || 'Ders').trim();
+    const cCode = (item.courseCode || cName).trim();
+    const key = `${normalizeNorm(cName)}_${normalizeNorm(cCode)}`;
+
+    if (!courseIdMap[key]) {
+      const match = existingCourses.find((c) => {
+        const mNormName = normalizeNorm(c.name);
+        const mNormCode = normalizeNorm(c.code || '');
+        const targetNormName = normalizeNorm(cName);
+        const targetNormCode = normalizeNorm(cCode);
+        return (
+          mNormName === targetNormName ||
+          (targetNormCode && mNormCode === targetNormCode) ||
+          mNormName === targetNormCode ||
+          mNormCode === targetNormName
+        );
+      });
+
+      if (match) {
+        courseIdMap[key] = match.id;
+        coursesEnsuredSet.add(match.name);
+      } else if (autoCreateCourses) {
+        const color = courseColors[colorIdx % courseColors.length];
+        colorIdx++;
+        const res = await db.runAsync(
+          'INSERT INTO courses (name, code, color) VALUES (?, ?, ?)',
+          cName,
+          cCode,
+          color
+        );
+        courseIdMap[key] = res.lastInsertRowId;
+        coursesEnsuredSet.add(cName);
+        existingCourses.push({ id: res.lastInsertRowId, name: cName, code: cCode });
+      } else {
+        missingCoursesSkipped.add(cName);
+      }
+    }
+  }
+
+  // 4. ESKİ PROGRAMI TEMİZLE
+  if (clearDaysOption === 'all_week') {
+    await db.runAsync('DELETE FROM schedules WHERE day_of_week BETWEEN 1 AND 7');
+  } else {
+    const daysToClear = Array.from(new Set(lessons.map((l) => l.day)));
+    for (const d of daysToClear) {
+      await db.runAsync('DELETE FROM schedules WHERE day_of_week = ?', d);
+    }
+  }
+
+  // 5. YENİ DERSLERİ EKLE
+  let totalLessonsLoaded = 0;
+  let skippedLessonsCount = 0;
+
+  for (const item of lessons) {
+    const slotId = slotMap[item.slotNumber];
+    const normClass = normalizeNorm(item.className);
+    const classId = classIdMap[normClass];
+    const cName = (item.courseName || item.courseCode || 'Ders').trim();
+    const cCode = (item.courseCode || cName).trim();
+    const key = `${normalizeNorm(cName)}_${normalizeNorm(cCode)}`;
+    const courseId = courseIdMap[key];
+
+    if (slotId && classId && courseId) {
+      await db.runAsync(
+        `INSERT INTO schedules (day_of_week, slot_id, class_id, course_id, classroom)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(day_of_week, slot_id) DO UPDATE SET
+           class_id = excluded.class_id,
+           course_id = excluded.course_id,
+           classroom = excluded.classroom`,
+        item.day,
+        slotId,
+        classId,
+        courseId,
+        item.classroom || null
+      );
+      totalLessonsLoaded++;
+    } else {
+      skippedLessonsCount++;
+    }
+  }
+
+  return {
+    success: true,
+    totalLessonsLoaded,
+    classesEnsured: Array.from(classesEnsuredSet),
+    coursesEnsured: Array.from(coursesEnsuredSet),
+    slotsCount: Object.keys(slotMap).length,
+    skippedLessonsCount,
+    missingClassesSkipped: Array.from(missingClassesSkipped),
+    missingCoursesSkipped: Array.from(missingCoursesSkipped),
+    slotTimesUpdatedCount,
+    message: `${totalLessonsLoaded} ders saati başarıyla yüklendi!`,
+  };
+};
+
