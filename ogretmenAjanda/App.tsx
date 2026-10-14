@@ -164,6 +164,9 @@ function AppContent() {
   const loadRoleAndSchool = async () => {
     try {
       const role = await getActiveUserRole();
+      if (role === 'teacher') {
+        await activateDefaultSchoolOnStartup();
+      }
       const school = await getActiveSchool();
       setCurrentRole(role);
       setActiveSchool(school);
@@ -180,6 +183,9 @@ function AppContent() {
 
   const handleRoleChange = async (newRole: UserRole | null) => {
     await setActiveUserRole(newRole);
+    if (newRole === 'teacher') {
+      await activateDefaultSchoolOnStartup();
+    }
     setCurrentRole(newRole);
     if (newRole) {
       await loadRoleAndSchool();

@@ -64,7 +64,7 @@ import {
   getPendingAgendaCountToday,
 } from '../database/operations/agendaOperations';
 
-import { School, getSchools, getActiveSchool, setActiveSchool, createSchool, SCHOOL_COLORS, syncAffiliatedSchools } from '../database/operations/schoolOperations';
+import { School, getSchools, getActiveSchool, setActiveSchool, createSchool, SCHOOL_COLORS, syncAffiliatedSchools, getDefaultSchoolId, setDefaultSchoolId, activateDefaultSchoolOnStartup } from '../database/operations/schoolOperations';
 import { useSchoolTheme } from '../context/SchoolThemeContext';
 import { getActiveUserSession } from '../services/apiClient';
 
@@ -84,6 +84,7 @@ export const HomeScreen: React.FC = () => {
 
   // --- SCHOOL MANAGEMENT STATE ---
   const [activeSchool, setActiveSchoolState] = useState<School | null>(null);
+  const [defaultSchoolId, setDefaultSchoolIdState] = useState<number | null>(null);
   const [schoolsList, setSchoolsList] = useState<School[]>([]);
   const [isInstitutionalTeacher, setIsInstitutionalTeacher] = useState(false);
   const [schoolModalVisible, setSchoolModalVisible] = useState(false);
@@ -111,8 +112,11 @@ export const HomeScreen: React.FC = () => {
         await syncAffiliatedSchools(session.affiliatedSchools, session.schoolCode);
       }
 
-      const active = await getActiveSchool();
+      // Her zaman varsayılan okulu etkinleştir
+      const active = await activateDefaultSchoolOnStartup();
       setActiveSchoolState(active);
+      const defId = await getDefaultSchoolId();
+      setDefaultSchoolIdState(defId);
       const list = await getSchools();
       setSchoolsList(list);
       await reloadSchoolTheme();
@@ -120,6 +124,20 @@ export const HomeScreen: React.FC = () => {
       setShowAllSchoolsSchedule(savedSetting);
     } catch (e) {
       console.warn('Error loading schools:', e);
+    }
+  };
+
+  const handleSetDefaultSchool = async (schId: number) => {
+    try {
+      await setDefaultSchoolId(schId);
+      setDefaultSchoolIdState(schId);
+      const updated = await setActiveSchool(schId);
+      setActiveSchoolState(updated);
+      await reloadSchoolTheme();
+      await loadData();
+      Alert.alert('Varsayılan Okul Seçildi ⭐', 'Öğretmen ekranı açıldığında artık bu okul otomatik olarak seçilecektir.');
+    } catch (e: any) {
+      Alert.alert('Hata', 'Varsayılan okul ayarlanamadı.');
     }
   };
 
@@ -375,7 +393,9 @@ export const HomeScreen: React.FC = () => {
       const currentDay = getDayOfWeekIndex();
       setSelectedDay(currentDay);
       setHeroNavTarget(null);
-      loadData(currentDay);
+      loadSchools().then(() => {
+        loadData(currentDay);
+      });
       const interval = setInterval(() => {
         setCurrentTime(getCurrentTimeString());
         getActiveAndTodayLessons(showAllSchoolsSchedule ? 'all' : undefined).then(async (info) => {
@@ -1011,17 +1031,17 @@ export const HomeScreen: React.FC = () => {
                 adjustsFontSizeToFit={true}
                 minimumFontScale={0.7}
               >
-                {schoolsList.length > 1
-                  ? schoolsList.map(s => s.name).join(' • ')
-                  : (activeSchool?.name || 'Sınıf Takip & Ajanda')}
+                {activeSchool?.name || 'Sınıf Takip & Ajanda'}
               </Text>
-              <Ionicons name="chevron-down-circle" size={15} color={activeSchool?.color || Colors.primary} />
+              {schoolsList.length > 1 && (
+                <Ionicons name="chevron-down-circle" size={15} color={activeSchool?.color || Colors.primary} />
+              )}
             </View>
             {schoolsList.length > 1 && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
                 <View style={{ backgroundColor: `${activeSchool?.color || Colors.primary}18`, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6 }}>
                   <Text style={{ fontSize: 11, fontWeight: '700', color: activeSchool?.color || Colors.primary }}>
-                    Aktif: {activeSchool?.name}
+                    Okul Değiştir ({schoolsList.length} Okul)
                   </Text>
                 </View>
                 <Text style={{ fontSize: 10, color: Colors.textMuted }}>(Değiştirmek için dokunun)</Text>
@@ -2818,7 +2838,7 @@ export const HomeScreen: React.FC = () => {
                       </View>
 
                       <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.textPrimary }} numberOfLines={1}>
                             {sch.name}
                           </Text>
@@ -2827,31 +2847,56 @@ export const HomeScreen: React.FC = () => {
                               <Text style={{ fontSize: 10, fontWeight: '700', color: '#FFFFFF' }}>Aktif</Text>
                             </View>
                           )}
+                          {sch.id === defaultSchoolId && (
+                            <View style={{ backgroundColor: '#FEF08A', flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                              <Ionicons name="star" size={10} color="#CA8A04" />
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#854D0E' }}>Varsayılan</Text>
+                            </View>
+                          )}
                         </View>
                       </View>
                     </TouchableOpacity>
 
-                    {/* Action buttons (Edit & Delete) - Sadece bireysel/admin modunda göster */}
-                    {!isInstitutionalTeacher && (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <TouchableOpacity
-                          style={{ padding: 6, borderRadius: 8, backgroundColor: '#E2E8F0' }}
-                          onPress={() => handleStartEditSchool(sch)}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        >
-                          <Ionicons name="pencil" size={15} color={Colors.textSecondary} />
-                        </TouchableOpacity>
-                        {schoolsList.length > 1 && (
+                    {/* Action buttons (Varsayılan Yap, Edit & Delete) */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <TouchableOpacity
+                        style={{
+                          padding: 6,
+                          borderRadius: 8,
+                          backgroundColor: sch.id === defaultSchoolId ? '#FEF08A' : '#F1F5F9',
+                        }}
+                        onPress={() => handleSetDefaultSchool(sch.id)}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        accessibilityLabel="Varsayılan Okul Yap"
+                      >
+                        <Ionicons
+                          name={sch.id === defaultSchoolId ? 'star' : 'star-outline'}
+                          size={16}
+                          color={sch.id === defaultSchoolId ? '#CA8A04' : Colors.textMuted}
+                        />
+                      </TouchableOpacity>
+
+                      {!isInstitutionalTeacher && (
+                        <>
                           <TouchableOpacity
-                            style={{ padding: 6, borderRadius: 8, backgroundColor: '#FEE2E2' }}
-                            onPress={() => handleDeleteSchoolHandler(sch)}
+                            style={{ padding: 6, borderRadius: 8, backgroundColor: '#E2E8F0' }}
+                            onPress={() => handleStartEditSchool(sch)}
                             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                           >
-                            <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                            <Ionicons name="pencil" size={15} color={Colors.textSecondary} />
                           </TouchableOpacity>
-                        )}
-                      </View>
-                    )}
+                          {schoolsList.length > 1 && (
+                            <TouchableOpacity
+                              style={{ padding: 6, borderRadius: 8, backgroundColor: '#FEE2E2' }}
+                              onPress={() => handleDeleteSchoolHandler(sch)}
+                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            >
+                              <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                            </TouchableOpacity>
+                          )}
+                        </>
+                      )}
+                    </View>
                   </View>
                 );
               })}

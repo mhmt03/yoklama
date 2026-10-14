@@ -54,11 +54,24 @@ export const getDefaultSchoolId = async (): Promise<number | null> => {
     const row = await db.getFirstAsync<{ value: string }>(
       "SELECT value FROM app_settings WHERE key = 'default_school_id'"
     );
-    if (!row?.value) return null;
-    const id = parseInt(row.value, 10);
-    if (isNaN(id)) return null;
-    const exists = await db.getFirstAsync<{ id: number }>('SELECT id FROM schools WHERE id = ?', id);
-    return exists ? id : null;
+    if (row?.value) {
+      const id = parseInt(row.value, 10);
+      if (!isNaN(id)) {
+        const exists = await db.getFirstAsync<{ id: number }>('SELECT id FROM schools WHERE id = ?', id);
+        if (exists) return id;
+      }
+    }
+
+    // Eğer app_settings'te kayıtlı bir varsayılan okul yoksa, veritabanındaki ilk okulu otomatik varsayılan yap
+    const firstSchool = await db.getFirstAsync<{ id: number }>('SELECT id FROM schools ORDER BY id ASC LIMIT 1');
+    if (firstSchool) {
+      await db.runAsync(
+        "INSERT INTO app_settings (key, value) VALUES ('default_school_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        String(firstSchool.id)
+      );
+      return firstSchool.id;
+    }
+    return null;
   } catch (e) {
     console.warn('Error reading default school id:', e);
     return null;
@@ -205,7 +218,7 @@ export const syncAffiliatedSchools = async (
     await setGeminiModel(targetItem.geminiModel);
   }
 
-  // Şimdi hedef okulu (primaryCode) aktif yap
+  // Şimdi hedef okulu (primaryCode) aktif ve varsayılan yap
   if (primaryCode) {
     const targetSchool = await db.getFirstAsync<School>(
       'SELECT * FROM schools WHERE UPPER(code) = ? LIMIT 1',
@@ -214,6 +227,13 @@ export const syncAffiliatedSchools = async (
     if (targetSchool) {
       await db.runAsync('UPDATE schools SET is_active = 0');
       await db.runAsync('UPDATE schools SET is_active = 1 WHERE id = ?', targetSchool.id);
+      
+      const currentDef = await db.getFirstAsync<{ value: string }>(
+        "SELECT value FROM app_settings WHERE key = 'default_school_id'"
+      );
+      if (!currentDef?.value) {
+        await setDefaultSchoolId(targetSchool.id);
+      }
       return { ...targetSchool, is_active: 1 };
     }
   }
