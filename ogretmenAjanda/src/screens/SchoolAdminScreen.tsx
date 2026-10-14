@@ -308,7 +308,42 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSchools(); }} />}
       >
-        {/* Okul Kodu Kartı */}
+        {/* Çoklu Okul Değiştirici (Müşteri Birden Fazla Okul Yönetebilir) */}
+        {schools.length > 1 && (
+          <View style={styles.schoolSelectorContainer}>
+            <View style={styles.schoolSelectorHeader}>
+              <Ionicons name="business" size={14} color="#4F46E5" />
+              <Text style={styles.schoolSelectorLabel}>YÖNETTİĞİNİZ OKULLAR ({schools.length})</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
+              {schools.map(s => {
+                const isSelected = selectedSchool?.id === s.id;
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    onPress={() => {
+                      setSelectedSchool(s);
+                      loadTeachers(s.id);
+                    }}
+                    style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.schoolChipText, isSelected && styles.schoolChipTextSelected]}>
+                      {s.name}
+                    </Text>
+                    <View style={[styles.schoolCodeTag, isSelected && styles.schoolCodeTagSelected]}>
+                      <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
+                        {s.code}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Okul Kodu Kartı & Müşteri / Lisans Bilgisi */}
         {selectedSchool && (
           <View style={styles.codeCard}>
             <View style={styles.codeCardTop}>
@@ -324,8 +359,29 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 <Text style={styles.copyButtonText}>Kodu Kopyala</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Müşteri ve İlişki Kimlikleri Rozetleri */}
+            <View style={styles.licenseInfoRow}>
+              <View style={styles.licenseBadge}>
+                <Ionicons name="finger-print" size={13} color="#C7D2FE" />
+                <Text style={styles.licenseBadgeText}>Müşteri No: {selectedSchool.customerId || 'MST-10001'}</Text>
+              </View>
+              <View style={styles.licenseBadge}>
+                <Ionicons name="git-network-outline" size={13} color="#C7D2FE" />
+                <Text style={styles.licenseBadgeText}>İlişki ID: {selectedSchool.relationId || 'ILK-10001'}</Text>
+              </View>
+              <View style={[styles.licenseBadge, { backgroundColor: 'rgba(34, 197, 94, 0.25)', borderColor: '#86EFAC' }]}>
+                <Ionicons name="shield-checkmark" size={13} color="#86EFAC" />
+                <Text style={[styles.licenseBadgeText, { color: '#86EFAC', fontWeight: '800' }]}>
+                  {selectedSchool.licenseExpiresAt
+                    ? `1 Yıl Lisans (${new Date(selectedSchool.licenseExpiresAt).toLocaleDateString('tr-TR')})`
+                    : '1 Yıl Deneme Lisansı'}
+                </Text>
+              </View>
+            </View>
+
             <Text style={styles.codeCardHint}>
-              Öğretmenler uygulamayı yükledikten sonra bu kodu girerek doğrudan okulunuza bağlanır.
+              Öğretmenler bu okul koduyla bağlandığında İlişki ID'niz ({selectedSchool.relationId || 'ILK-10001'}) atanır ve lisans süreniz üzerinden yetkilendirilir.
             </Text>
           </View>
         )}
@@ -867,5 +923,95 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#4F46E5',
+  },
+  // Çoklu Okul Seçici Stilleri
+  schoolSelectorContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  schoolSelectorHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  schoolSelectorLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4F46E5',
+    letterSpacing: 0.5,
+  },
+  schoolChipsScroll: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  schoolChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 8,
+  },
+  schoolChipSelected: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4338CA',
+  },
+  schoolChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  schoolChipTextSelected: {
+    color: '#fff',
+  },
+  schoolCodeTag: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  schoolCodeTagSelected: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  schoolCodeTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#64748B',
+  },
+  schoolCodeTagTextSelected: {
+    color: '#fff',
+  },
+  // Lisans ve Müşteri Rozetleri
+  licenseInfoRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  licenseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    gap: 5,
+  },
+  licenseBadgeText: {
+    fontSize: 11,
+    color: '#fff',
+    fontWeight: '600',
   },
 });

@@ -44,8 +44,28 @@ namespace OgretmenAjanda.Api.DTOs
         public Guid? SchoolId { get; set; }
         public string? SchoolCode { get; set; }
         public string? SchoolName { get; set; }
+        public string? CustomerId { get; set; } // Müşteri No
+        public string? RelationId { get; set; } // İlişki ID
         public string? GeminiApiKey { get; set; }
         public DateTime? LicenseExpiresAt { get; set; }
+    }
+
+    public class CustomerResponse
+    {
+        public Guid Id { get; set; }
+        public string CustomerId { get; set; } = string.Empty;
+        public string RelationId { get; set; } = string.Empty;
+        public string FullName { get; set; } = string.Empty;
+        public string Username { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? LicenseExpiresAt { get; set; }
+        public bool IsActive { get; set; }
+        public int SchoolCount { get; set; }
+        public List<string> SchoolNames { get; set; } = new();
+        public int TeacherCount { get; set; }
+        public int StudentCount { get; set; }
     }
 
     public class CreateSchoolRequest
@@ -58,7 +78,7 @@ namespace OgretmenAjanda.Api.DTOs
 
     public class ExtendLicenseRequest
     {
-        public Guid TargetId { get; set; } // SchoolId veya UserId
+        public Guid TargetId { get; set; } // SchoolId veya UserId veya Customer Admin Id
         public int AdditionalYears { get; set; } = 1;
         public bool IsActive { get; set; } = true;
     }

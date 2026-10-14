@@ -50,17 +50,25 @@
 ### 👑 1. Süper Admin (Sistem Sahibi / Lisans Yöneticisi)
 - **Deneme Girişi:** Kullanıcı Adı: `mehmetsuper` | Şifre: `1234` (Ayrıca `mehmet` / `123456` desteklenir).
 - **Yetkiler:**
-  - Tüm okulları, adminleri ve bağımsız öğretmenleri listeleme.
-  - 1 yıllık lisans sürelerini takip etme, dondurma, süre uzatma (+1 yıl).
-  - İleride Google Play / App Store IAP entegrasyonu için hazır lisans bayrakları (`is_licensed`, `expires_at`, `receipt_token`).
+  - **Müşteri (Admin) Yönetimi:** Tüm müşteri adminleri (`CustomerId`), bağlı okulları, öğretmen ve öğrenci sayılarıyla birlikte takip etme.
+  - **Kademeli Lisans Uzatma:** Müşterinin lisansını uzattığında (`+1 Yıl`), müşteriye ait **tüm okullar, öğretmenler ve öğrenciler** tek tıkla otomatik olarak uzatılır.
+  - 1 yıllık deneme süresini denetleme, dondurma, süre uzatma (+1 yıl).
+  - Sistem denetim günlüklerini (Audit Logs) ve okul listelerini izleme.
 
-### 🏢 2. Okul Admini (Müdür / Kurucu)
+### 🏢 2. Müşteri & Okul Admini (Müdür / Kurucu)
 - **Deneme Girişi:** Kullanıcı Adı: `mehmetadmin` | Şifre: `1234`
-- En fazla 3 okul tanımlayabilme (Varsayılan Deneme Okulu: `Atatürk Anadolu Lisesi`, Kod: `OKL-10001`).
-- Otomatik benzersiz **Okul Kodu** üretme.
-- Sınıf düzeyleri, şubeler, dersler ve kısa adları belirleme.
+- **Müşteri No (`CustomerId`) & İlişki ID (`RelationId`):**
+  - Uygulamayı edinen her admin bir **Müşteri**dir (Örn: `MST-10001`).
+  - Müşteriye özel benzersiz bir **İlişki ID** (`RelationId`, Örn: `ILK-10001`) atanır.
+  - **Birden Fazla Okul Yönetimi:** Bir müşteri admin birden fazla okulu (örn: `Atatürk Anadolu Lisesi - OKL-10001` ve `Cumhuriyet Fen Lisesi - OKL-10002`) aynı panelden tek dokunuşla yönetebilir ve aralarında geçiş yapabilir.
+  - Yeni açılan tüm okullar otomatik olarak adminin `CustomerId` ve `RelationId` değerlerini miras alır.
+- **Kademeli Lisans Kontrolü (Cascade License Validation):**
+  - **Öğrenci Girişi:** Öğrencinin `RelationId`'sine bakılır ➔ Adminin `CustomerId`'sine gidilir ➔ Müşteri Adminin `LicenseExpiresAt` süresi denetlenir.
+  - **Öğretmen Girişi:** Okul kodu ile giren öğretmenin `RelationId`'sine bakılır ➔ Adminin `LicenseExpiresAt` süresi denetlenir.
+  - **Deneme Süresi:** Deneme sürecinde her admin müşterisine **1 yıllık tam lisans süresi** verilir (`DateTime.UtcNow.AddYears(1)`).
 - **Otomatik Öğretmen Tanımlama (Manuel veya Çarşaf Program ile):**
   - Admin öğretmen tanımladığında sistem Türkçe karakter ve branşa göre otomatik kullanıcı adı (Örn: `ahmetkayafizik`) ve varsayılan `1234` şifresi üretir.
+  - Öğretmen bu okul aracılığıyla sisteme kaydedildiğinde adminin `RelationId` ve `CustomerId` değerleri öğretmene otomatik atanır.
   - Admin tek dokunuşla bu giriş bilgilerini WhatsApp üzerinden öğretmene gönderebilir.
 - Öğrencileri sisteme aktarma (Excel, AI veya manuel) + PDF'ten fotoğrafları ayıklama.
 - Okul ders programlarını ve yıllık planları AI ile yükleme.
@@ -181,7 +189,10 @@
 
 
 ### 📍 FAZ 3: Süper Admin & Okul Admini Modülü (Mobil UI)
-- [x] Süper Admin Lisans ve Okul Yönetim Paneli (`SuperAdminScreen.tsx`)
+- [x] Süper Admin Lisans ve Okul Yönetim Paneli & Müşteriler Sekmesi (`SuperAdminScreen.tsx`)
+- [x] Müşteri (`CustomerId`) ve İlişki ID (`RelationId`) mimarisi: Tek adminin birden fazla okul yönetebilmesi (`SchoolAdminScreen.tsx`)
+- [x] Kademeli Lisans Kontrolü: Öğrenci/Öğretmen ➔ İlişki ID ➔ Müşteri ID ➔ Admin Lisans Doğrulaması (1 Yıllık deneme süresi)
+- [x] Süper Admin Müşteri Lisansı Uzatma (Tüm bağlı okulları, öğretmenleri ve öğrencileri tek tıkla uzatma)
 - [x] Okul Admini: Okul kodu üretimi, öğretmen yetkilendirme ve denetimi (`SchoolAdminScreen.tsx`)
 - [x] Okul Admini: AI Çarşaf Ders Programı ile Otomatik Okul Kurulumu (`aiScheduleParser.ts`)
 - [x] Okul Admini: e-Okul PDF ve Excel ile Öğrenci & Fotoğraf yükleme (Atomik Client Staging)

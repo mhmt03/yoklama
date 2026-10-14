@@ -33,6 +33,12 @@ namespace OgretmenAjanda.Api.Models
 
         public Guid? AdminUserId { get; set; }
 
+        [MaxLength(50)]
+        public string? CustomerId { get; set; } // Hangi müşteriye/admine ait olduğu (örn: MST-10001)
+
+        [MaxLength(50)]
+        public string? RelationId { get; set; } // İlişki ID (örn: ILK-10001)
+
         [MaxLength(200)]
         public string? GeminiApiKey { get; set; } // Okulun kurumsal ortak Gemini API Anahtarı
 
@@ -66,6 +72,12 @@ namespace OgretmenAjanda.Api.Models
 
         public Guid? SchoolId { get; set; }
 
+        [MaxLength(50)]
+        public string? CustomerId { get; set; } // Müşteri No (Admin/Müşteri için, örn: MST-10001)
+
+        [MaxLength(50)]
+        public string? RelationId { get; set; } // İlişki ID (Admin ve bağlı öğretmen/öğrenci için, örn: ILK-10001)
+
         // Bireysel öğretmen veya okul lisansı için geçerlilik
         public DateTime? LicenseExpiresAt { get; set; }
         public bool IsActive { get; set; } = true;
@@ -86,6 +98,9 @@ namespace OgretmenAjanda.Api.Models
         public Guid Id { get; set; } = Guid.NewGuid();
 
         public Guid SchoolId { get; set; }
+
+        [MaxLength(50)]
+        public string? RelationId { get; set; } // İlişki ID (Bağlı olduğu okulun ve müşterinin ilişki ID'si)
 
         [Required, MaxLength(30)]
         public string StudentNumber { get; set; } = string.Empty;

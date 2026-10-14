@@ -19,6 +19,8 @@ export interface UserSession {
   schoolId?: string;
   schoolCode?: string;
   schoolName?: string;
+  customerId?: string;
+  relationId?: string;
   geminiApiKey?: string;
   licenseExpiresAt?: string;
 }

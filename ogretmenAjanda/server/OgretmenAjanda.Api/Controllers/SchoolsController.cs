@@ -69,6 +69,17 @@ namespace OgretmenAjanda.Api.Controllers
             var randomPart = Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper();
             var schoolCode = $"OKL-{randomPart}";
 
+            var adminUser = await _context.Users.FindAsync(CurrentUserId);
+            var customerId = adminUser?.CustomerId ?? $"MST-{Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper()}";
+            var relationId = adminUser?.RelationId ?? $"ILK-{Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper()}";
+
+            if (adminUser != null)
+            {
+                if (string.IsNullOrEmpty(adminUser.CustomerId)) adminUser.CustomerId = customerId;
+                if (string.IsNullOrEmpty(adminUser.RelationId)) adminUser.RelationId = relationId;
+                if (!adminUser.LicenseExpiresAt.HasValue) adminUser.LicenseExpiresAt = DateTime.UtcNow.AddYears(1);
+            }
+
             var school = new School
             {
                 Id = Guid.NewGuid(),
@@ -77,9 +88,11 @@ namespace OgretmenAjanda.Api.Controllers
                 Address = request.Address,
                 Phone = request.Phone,
                 AdminUserId = CurrentUserId,
+                CustomerId = customerId,
+                RelationId = relationId,
                 GeminiApiKey = request.GeminiApiKey,
                 CreatedAt = DateTime.UtcNow,
-                LicenseExpiresAt = DateTime.UtcNow.AddYears(1), // Varsayılan 1 yıl deneme/lisans
+                LicenseExpiresAt = adminUser?.LicenseExpiresAt ?? DateTime.UtcNow.AddYears(1), // Admin lisansı ile senkron
                 IsActive = true
             };
 
@@ -93,7 +106,7 @@ namespace OgretmenAjanda.Api.Controllers
                 ActionType = "SCHOOL_CREATED",
                 EntityName = "School",
                 EntityId = school.Id.ToString(),
-                DetailsJson = $"{school.Name} oluşturuldu. Okul Kodu: {school.Code}",
+                DetailsJson = $"{school.Name} oluşturuldu. Okul Kodu: {school.Code}, Müşteri: {customerId}, İlişki: {relationId}",
                 Timestamp = DateTime.UtcNow
             });
 
@@ -116,6 +129,8 @@ namespace OgretmenAjanda.Api.Controllers
                     u.Email,
                     u.Phone,
                     u.Role,
+                    u.RelationId,
+                    u.CustomerId,
                     u.IsActive,
                     u.AssignedClassesJson,
                     u.CreatedAt,
@@ -162,6 +177,8 @@ namespace OgretmenAjanda.Api.Controllers
                 Phone = request.Phone,
                 Role = UserRoles.Teacher,
                 SchoolId = school.Id,
+                RelationId = school.RelationId,
+                CustomerId = school.CustomerId,
                 LicenseExpiresAt = school.LicenseExpiresAt,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow

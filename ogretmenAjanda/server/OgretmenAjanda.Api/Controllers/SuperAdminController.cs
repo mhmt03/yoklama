@@ -27,6 +27,7 @@ namespace OgretmenAjanda.Api.Controllers
         public async Task<IActionResult> GetSystemStats()
         {
             var totalSchools = await _context.Schools.CountAsync();
+            var totalCustomers = await _context.Users.CountAsync(u => u.Role == UserRoles.SchoolAdmin);
             var totalUsers = await _context.Users.CountAsync();
             var totalTeachers = await _context.Users.CountAsync(u => u.Role == UserRoles.Teacher);
             var totalStudents = await _context.Students.CountAsync();
@@ -35,11 +36,62 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(new
             {
                 totalSchools,
+                totalCustomers,
                 totalUsers,
                 totalTeachers,
                 totalStudents,
                 totalAssignments
             });
+        }
+
+        // Tüm Müşterileri (Okul Adminleri) Listele - Çoklu Okul & İlişki ID Bağlantısı
+        [HttpGet("customers")]
+        public async Task<IActionResult> GetAllCustomers()
+        {
+            var admins = await _context.Users
+                .Where(u => u.Role == UserRoles.SchoolAdmin)
+                .OrderByDescending(u => u.CreatedAt)
+                .ToListAsync();
+
+            var result = new System.Collections.Generic.List<CustomerResponse>();
+
+            foreach (var a in admins)
+            {
+                var customerId = a.CustomerId ?? a.Username;
+                var relationId = a.RelationId ?? a.Id.ToString();
+
+                var schools = await _context.Schools
+                    .Where(s => s.AdminUserId == a.Id || s.CustomerId == customerId || s.RelationId == relationId)
+                    .ToListAsync();
+
+                var schoolIds = schools.Select(s => s.Id).ToList();
+
+                var teacherCount = await _context.Users
+                    .CountAsync(u => (u.RelationId == relationId || (u.SchoolId.HasValue && schoolIds.Contains(u.SchoolId.Value))) && u.Role == UserRoles.Teacher);
+
+                var studentCount = await _context.Students
+                    .CountAsync(st => st.RelationId == relationId || schoolIds.Contains(st.SchoolId));
+
+                result.Add(new CustomerResponse
+                {
+                    Id = a.Id,
+                    CustomerId = customerId,
+                    RelationId = relationId,
+                    FullName = a.FullName,
+                    Username = a.Username,
+                    Phone = a.Phone,
+                    Email = a.Email,
+                    CreatedAt = a.CreatedAt,
+                    LicenseExpiresAt = a.LicenseExpiresAt,
+                    IsActive = a.IsActive,
+                    SchoolCount = schools.Count,
+                    SchoolNames = schools.Select(s => $"{s.Name} ({s.Code})").ToList(),
+                    TeacherCount = teacherCount,
+                    StudentCount = studentCount
+                });
+            }
+
+            return Ok(result);
         }
 
         [HttpGet("schools")]
@@ -52,6 +104,8 @@ namespace OgretmenAjanda.Api.Controllers
                     s.Name,
                     s.Code,
                     s.Phone,
+                    s.CustomerId,
+                    s.RelationId,
                     s.CreatedAt,
                     s.LicenseExpiresAt,
                     s.IsActive,
@@ -64,10 +118,63 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(schools);
         }
 
-        // 1 Yıllık Lisans Uzatma / Süre Yönetimi
+        // Lisans Uzatma / Süre Yönetimi (Müşteri Admin, Okul veya Bireysel Öğretmen)
         [HttpPost("extend-license")]
         public async Task<IActionResult> ExtendLicense([FromBody] ExtendLicenseRequest request)
         {
+            // 1. Müşteri (Okul Admini) ise: Tüm okulları, öğretmenleri ve öğrencileri tek seferde uzat
+            var adminCustomer = await _context.Users.FirstOrDefaultAsync(u => u.Id == request.TargetId && u.Role == UserRoles.SchoolAdmin);
+            if (adminCustomer != null)
+            {
+                var baseDate = (adminCustomer.LicenseExpiresAt.HasValue && adminCustomer.LicenseExpiresAt.Value > DateTime.UtcNow)
+                    ? adminCustomer.LicenseExpiresAt.Value
+                    : DateTime.UtcNow;
+
+                adminCustomer.LicenseExpiresAt = baseDate.AddYears(request.AdditionalYears);
+                adminCustomer.IsActive = request.IsActive;
+
+                var customerId = adminCustomer.CustomerId ?? adminCustomer.Username;
+                var relationId = adminCustomer.RelationId;
+
+                // Müşterinin yönettiği tüm okulların lisansını güncelle
+                var customerSchools = await _context.Schools
+                    .Where(s => s.AdminUserId == adminCustomer.Id || s.CustomerId == customerId || (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId))
+                    .ToListAsync();
+
+                foreach (var sc in customerSchools)
+                {
+                    sc.LicenseExpiresAt = adminCustomer.LicenseExpiresAt;
+                    sc.IsActive = request.IsActive;
+                }
+
+                // Bu müşteriye/ilişkiye bağlı tüm öğretmenlerin lisansını güncelle
+                var schoolIds = customerSchools.Select(s => s.Id).ToList();
+                var customerTeachers = await _context.Users
+                    .Where(u => (!string.IsNullOrEmpty(relationId) && u.RelationId == relationId) || (u.SchoolId.HasValue && schoolIds.Contains(u.SchoolId.Value)))
+                    .ToListAsync();
+
+                foreach (var t in customerTeachers)
+                {
+                    t.LicenseExpiresAt = adminCustomer.LicenseExpiresAt;
+                    t.IsActive = request.IsActive;
+                }
+
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    UserId = Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!),
+                    UserRole = UserRoles.SuperAdmin,
+                    ActionType = "CUSTOMER_LICENSE_EXTENDED",
+                    EntityName = "User",
+                    EntityId = adminCustomer.Id.ToString(),
+                    DetailsJson = $"Müşteri {adminCustomer.FullName} ({adminCustomer.CustomerId}) lisansı {request.AdditionalYears} yıl uzatıldı. ({customerSchools.Count} okul, {customerTeachers.Count} öğretmen güncellendi).",
+                    Timestamp = DateTime.UtcNow
+                });
+
+                await _context.SaveChangesAsync();
+                return Ok(new { message = $"Müşteri ({adminCustomer.CustomerId}) ve bağlı {customerSchools.Count} okulun lisansı uzatıldı. Yeni Bitiş: {adminCustomer.LicenseExpiresAt:dd.MM.yyyy}" });
+            }
+
+            // 2. Belirli bir Okul ise
             var school = await _context.Schools.FindAsync(request.TargetId);
             if (school != null)
             {
@@ -86,6 +193,17 @@ namespace OgretmenAjanda.Api.Controllers
                     t.IsActive = request.IsActive;
                 }
 
+                // Okulun sahibi olan admin müşterinin süresini de eşitle
+                if (school.AdminUserId.HasValue)
+                {
+                    var ownerAdmin = await _context.Users.FindAsync(school.AdminUserId.Value);
+                    if (ownerAdmin != null)
+                    {
+                        ownerAdmin.LicenseExpiresAt = school.LicenseExpiresAt;
+                        ownerAdmin.IsActive = request.IsActive;
+                    }
+                }
+
                 _context.AuditLogs.Add(new AuditLog
                 {
                     SchoolId = school.Id,
@@ -102,7 +220,7 @@ namespace OgretmenAjanda.Api.Controllers
                 return Ok(new { message = $"Lisans başarıyla uzatıldı. Yeni bitiş: {school.LicenseExpiresAt:dd.MM.yyyy}" });
             }
 
-            // Bireysel öğretmen lisansı kontrolü
+            // 3. Bireysel öğretmen lisansı kontrolü
             var user = await _context.Users.FindAsync(request.TargetId);
             if (user != null)
             {

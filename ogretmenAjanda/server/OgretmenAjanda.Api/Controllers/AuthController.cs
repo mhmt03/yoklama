@@ -41,16 +41,50 @@ namespace OgretmenAjanda.Api.Controllers
                 return StatusCode(403, new { message = "Hesabınız askıya alınmıştır. Lütfen yöneticinizle görüşün." });
             }
 
-            // Lisans süresi kontrolü
-            if (user.Role != UserRoles.SuperAdmin && user.LicenseExpiresAt.HasValue && user.LicenseExpiresAt.Value < DateTime.UtcNow)
-            {
-                return StatusCode(402, new { message = "Lisans süreniz dolmuştur. Lütfen yenileyiniz." });
-            }
-
             School? school = null;
             if (user.SchoolId.HasValue)
             {
                 school = await _context.Schools.FindAsync(user.SchoolId.Value);
+            }
+
+            // Hiyerarşik Lisans Kontrolü (İlişki ID -> Müşteri ID -> Admin Lisans Bitişi)
+            if (user.Role != UserRoles.SuperAdmin)
+            {
+                if (user.Role == UserRoles.SchoolAdmin)
+                {
+                    // Okul Admini doğrudan lisans sahibidir (Müşteri)
+                    if (user.LicenseExpiresAt.HasValue && user.LicenseExpiresAt.Value < DateTime.UtcNow)
+                    {
+                        return StatusCode(402, new { message = $"Müşteri hesabınızın (Müşteri No: {user.CustomerId ?? user.Username}) lisans süresi dolmuştur. Lütfen sistem yöneticisi ile iletişime geçiniz." });
+                    }
+                }
+                else if (user.Role == UserRoles.Teacher || user.Role == UserRoles.Staff)
+                {
+                    // Öğretmen: İlişki ID -> Müşteri Admin
+                    var relId = user.RelationId ?? school?.RelationId;
+                    if (!string.IsNullOrEmpty(relId))
+                    {
+                        var adminCustomer = await _context.Users
+                            .FirstOrDefaultAsync(u => u.Role == UserRoles.SchoolAdmin && u.RelationId == relId);
+
+                        if (adminCustomer != null)
+                        {
+                            if (!adminCustomer.IsActive)
+                            {
+                                return StatusCode(403, new { message = $"Bağlı olduğunuz kurumun (Müşteri No: {adminCustomer.CustomerId}) hesabı askıya alınmıştır." });
+                            }
+                            if (adminCustomer.LicenseExpiresAt.HasValue && adminCustomer.LicenseExpiresAt.Value < DateTime.UtcNow)
+                            {
+                                return StatusCode(402, new { message = $"Bağlı olduğunuz kurumun (Müşteri No: {adminCustomer.CustomerId}) lisans süresi dolmuştur. Lütfen okul yöneticiniz ile iletişime geçiniz." });
+                            }
+                        }
+                    }
+                    else if (user.LicenseExpiresAt.HasValue && user.LicenseExpiresAt.Value < DateTime.UtcNow)
+                    {
+                        // Bireysel Öğretmen
+                        return StatusCode(402, new { message = "Bireysel lisans süreniz dolmuştur. Lütfen yenileyiniz." });
+                    }
+                }
             }
 
             user.LastLoginAt = DateTime.UtcNow;
@@ -68,6 +102,8 @@ namespace OgretmenAjanda.Api.Controllers
                 SchoolId = user.SchoolId,
                 SchoolCode = school?.Code,
                 SchoolName = school?.Name,
+                CustomerId = user.CustomerId ?? school?.CustomerId,
+                RelationId = user.RelationId ?? school?.RelationId,
                 GeminiApiKey = school?.GeminiApiKey,
                 LicenseExpiresAt = user.LicenseExpiresAt ?? school?.LicenseExpiresAt
             });
@@ -93,6 +129,26 @@ namespace OgretmenAjanda.Api.Controllers
                 return NotFound(new { message = "Bu okulda belirtilen öğrenci numarası bulunamadı." });
             }
 
+            // Lisans Kontrolü: Öğrenci İlişki ID -> Müşteri ID -> Admin Lisansı
+            var studentRelationId = student.RelationId ?? school.RelationId;
+            if (!string.IsNullOrEmpty(studentRelationId))
+            {
+                var adminCustomer = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Role == UserRoles.SchoolAdmin && u.RelationId == studentRelationId);
+
+                if (adminCustomer != null)
+                {
+                    if (!adminCustomer.IsActive)
+                    {
+                        return StatusCode(403, new { message = $"Okulunuzun (Müşteri No: {adminCustomer.CustomerId}) sistemi şu anda aktif değildir." });
+                    }
+                    if (adminCustomer.LicenseExpiresAt.HasValue && adminCustomer.LicenseExpiresAt.Value < DateTime.UtcNow)
+                    {
+                        return StatusCode(402, new { message = $"Okulunuzun (Müşteri No: {adminCustomer.CustomerId}) lisans süresi dolmuştur. Lütfen okul idaresine başvurunuz." });
+                    }
+                }
+            }
+
             // Varsayılan şifre: aaaa_ + ogrencino
             string defaultPassword = $"aaaa_{student.StudentNumber}";
             var studentUser = await _context.Users
@@ -114,6 +170,7 @@ namespace OgretmenAjanda.Api.Controllers
                     FullName = student.FullName,
                     Role = UserRoles.Student,
                     SchoolId = school.Id,
+                    RelationId = studentRelationId,
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow
                 };
@@ -139,7 +196,9 @@ namespace OgretmenAjanda.Api.Controllers
                 Role = UserRoles.Student,
                 SchoolId = school.Id,
                 SchoolCode = school.Code,
-                SchoolName = school.Name
+                SchoolName = school.Name,
+                CustomerId = school.CustomerId,
+                RelationId = studentRelationId
             });
         }
 
@@ -170,6 +229,7 @@ namespace OgretmenAjanda.Api.Controllers
                 Phone = request.Phone,
                 Role = UserRoles.Teacher,
                 SchoolId = school.Id,
+                RelationId = school.RelationId,
                 LicenseExpiresAt = school.LicenseExpiresAt, // Okulun lisans süresi kadar
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
@@ -200,12 +260,14 @@ namespace OgretmenAjanda.Api.Controllers
                 UserId = teacher.Id,
                 Username = teacher.Username,
                 FullName = teacher.FullName,
-                Role = teacher.Role,
+                Role = UserRoles.Teacher,
                 SchoolId = school.Id,
                 SchoolCode = school.Code,
                 SchoolName = school.Name,
+                CustomerId = school.CustomerId,
+                RelationId = school.RelationId,
                 GeminiApiKey = school.GeminiApiKey,
-                LicenseExpiresAt = teacher.LicenseExpiresAt
+                LicenseExpiresAt = school.LicenseExpiresAt
             });
         }
 
