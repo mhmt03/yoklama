@@ -300,24 +300,19 @@ export const PRESET_GEMINI_MODELS: GeminiModelInfo[] = [
     isRecommended: true,
   },
   {
-    id: 'gemini-3.5-flash',
-    name: 'Gemini 3.5 Flash',
-    description: 'Yeni nesil yüksek performanslı multimodal model',
+    id: 'gemini-2.0-flash',
+    name: 'Gemini 2.0 Flash',
+    description: 'Yüksek kararlılık ve düşük gecikmeli multimodal model',
   },
   {
     id: 'gemini-3.8-flash',
     name: 'Gemini 3.8 Flash',
-    description: 'En son çıkan Flash modeli',
+    description: 'En son çıkan yeni nesil Flash modeli',
   },
   {
     id: 'gemini-2.5-pro',
     name: 'Gemini 2.5 Pro',
     description: 'Karmaşık el yazısı ve yoğun tablolar için gelişmiş model',
-  },
-  {
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash',
-    description: 'Klasik hafif model',
   },
 ];
 
@@ -614,9 +609,8 @@ export const analyzeSchedulePhotoWithGemini = async (
   const candidateModels = [
     selectedModel,
     'gemini-2.5-flash',
-    'gemini-3.5-flash',
+    'gemini-2.0-flash',
     'gemini-3.8-flash',
-    'gemini-1.5-flash',
   ];
   const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
   let lastError: any = null;
@@ -845,9 +839,8 @@ JSON Şeması:
   const candidateModels = [
     selectedModel,
     'gemini-2.5-flash',
-    'gemini-3.5-flash',
+    'gemini-2.0-flash',
     'gemini-3.8-flash',
-    'gemini-1.5-flash',
   ];
   const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
   let lastError: any = null;
@@ -1018,8 +1011,8 @@ GÖREVLERİN:
   const candidateModels = [
     selectedModel,
     'gemini-2.5-flash',
-    'gemini-3.5-flash',
-    'gemini-1.5-flash',
+    'gemini-2.0-flash',
+    'gemini-3.8-flash',
   ];
   const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
 

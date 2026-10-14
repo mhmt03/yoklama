@@ -138,8 +138,10 @@ Notlar:
     },
   };
 
-  const modelsToTry = Array.from(new Set([preferredModel, 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.5-flash']));
+  const candidateList = [preferredModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-3.8-flash'];
+  const modelsToTry = Array.from(new Set(candidateList.filter(Boolean)));
   let lastError: any = null;
+  let primaryError: any = null;
 
   for (const currentModel of modelsToTry) {
     try {
@@ -162,12 +164,24 @@ Notlar:
       } catch {}
 
       return parsedData;
-    } catch (err) {
+    } catch (err: any) {
+      if (!primaryError) {
+        primaryError = err;
+      }
       lastError = err;
     }
   }
 
-  throw lastError || new Error('Çarşaf ders programı analiz edilemedi.');
+  const errToReport = primaryError || lastError;
+  const errMsg = errToReport?.message || 'Bilinmeyen hata';
+  if (errMsg.includes('404') || errMsg.includes('not found')) {
+    throw new Error(
+      `Seçilen "${preferredModel}" modeli Google Gemini API'sinde bulunamadı veya bu API anahtarında aktif değil.\n\n` +
+      `Lütfen Admin panelindeki "AI Ayarları" sekmesinden "gemini-2.5-flash" veya "gemini-2.0-flash" seçin veya "Canlı Modeller" butonuna basarak API anahtarınızın desteklediği güncel modelleri listeleyin.`
+    );
+  }
+
+  throw new Error(`Çarşaf ders programı analiz edilemedi: ${errMsg}`);
 }
 
 /**
