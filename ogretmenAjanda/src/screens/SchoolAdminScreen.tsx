@@ -1726,28 +1726,45 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
-  // Oturumu Kapatma ve Çıkış
-  const handleLogout = () => {
-    Alert.alert(
-      'Sistemden Çıkış',
-      'Yönetici oturumunuzu kapatmak ve giriş ekranına dönmek istiyor musunuz?',
-      [
-        { text: 'Vazgeç', style: 'cancel' },
-        {
-          text: 'Çıkış Yap',
-          style: 'destructive',
-          onPress: async () => {
-            await clearAuthSession();
-            await setActiveUserRole(null);
-            if (onRoleChange) {
-              await onRoleChange(null);
-            } else if (navigation?.goBack) {
-              navigation.goBack();
-            }
+  // Oturumu Kapatma ve Çıkış (Web ve Mobil Uyumlu)
+  const handleLogout = async () => {
+    const doLogout = async () => {
+      await clearAuthSession();
+      await setActiveUserRole(null);
+      if (onRoleChange) {
+        await onRoleChange(null);
+      } else if (navigation?.goBack) {
+        navigation.goBack();
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Yönetici oturumunuzu kapatmak ve giriş ekranına dönmek istiyor musunuz?')) {
+        await doLogout();
+      }
+    } else {
+      Alert.alert(
+        'Sistemden Çıkış',
+        'Yönetici oturumunuzu kapatmak ve giriş ekranına dönmek istiyor musunuz?',
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: 'Çıkış Yap',
+            style: 'destructive',
+            onPress: doLogout,
           },
-        },
-      ]
-    );
+        ]
+      );
+    }
+  };
+
+  const handleSwitchToTeacher = async () => {
+    await setActiveUserRole('teacher');
+    if (onRoleChange) {
+      await onRoleChange('teacher');
+    } else if (navigation?.switchToTeacher) {
+      navigation.switchToTeacher();
+    }
   };
 
   // 0. Admin Giriş ve Şifre Güncelleme
@@ -8054,7 +8071,25 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
               <View style={styles.hamburgerMenuDivider} />
 
-              {/* 9. Çıkış Yap */}
+              {/* 9. Rol Değiştir: Öğretmen Moduna Geç */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  handleSwitchToTeacher();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#F0FDF4' }]}>
+                  <Ionicons name="school" size={18} color="#16A34A" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.hamburgerMenuLabel, { color: '#16A34A' }]}>Öğretmen Moduna Geç</Text>
+                  <Text style={styles.hamburgerMenuSub}>Ajanda ve sınıf kokpit görünümüne geçiş yap</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 10. Çıkış Yap / Rol Seçimine Dön */}
               <TouchableOpacity
                 style={[styles.hamburgerMenuItem, { marginBottom: 16 }]}
                 onPress={() => {
@@ -8066,8 +8101,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <Ionicons name="log-out" size={18} color="#DC2626" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.hamburgerMenuLabel, { color: '#DC2626' }]}>Oturumu Kapat</Text>
-                  <Text style={styles.hamburgerMenuSub}>Yönetim panelinden güvenli çıkış yap</Text>
+                  <Text style={[styles.hamburgerMenuLabel, { color: '#DC2626' }]}>Oturumu Kapat / Rol Değiştir</Text>
+                  <Text style={styles.hamburgerMenuSub}>Giriş ve rol seçimi ekranına dön</Text>
                 </View>
               </TouchableOpacity>
             </ScrollView>

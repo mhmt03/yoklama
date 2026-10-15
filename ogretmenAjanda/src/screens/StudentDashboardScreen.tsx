@@ -109,19 +109,27 @@ export function StudentDashboardScreen({ onLogout }: StudentDashboardScreenProps
   };
 
   const handleLogout = async () => {
-    Alert.alert('Çıkış Yap', 'Oturumunuz kapatılacaktır, emin misiniz?', [
-      { text: 'Vazgeç', style: 'cancel' },
-      {
-        text: 'Çıkış Yap',
-        style: 'destructive',
-        onPress: async () => {
-          await clearAuthSession();
-          setSession(null);
-          setFeed(null);
-          onLogout();
+    const doLogout = async () => {
+      await clearAuthSession();
+      setSession(null);
+      setFeed(null);
+      onLogout();
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Oturumunuz kapatılacaktır, emin misiniz?')) {
+        await doLogout();
+      }
+    } else {
+      Alert.alert('Çıkış Yap', 'Oturumunuz kapatılacaktır, emin misiniz?', [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Çıkış Yap',
+          style: 'destructive',
+          onPress: doLogout,
         },
-      },
-    ]);
+      ]);
+    }
   };
 
   const handleChangePassword = async () => {

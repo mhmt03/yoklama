@@ -9,6 +9,7 @@ import {
   Animated,
   Dimensions,
   Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -57,18 +58,26 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
   };
 
   const handleLogout = () => {
-    Alert.alert('Rol Değiştir', 'Mevcut rolünüzden çıkıp karşılama ekranına dönmek istiyor musunuz?', [
-      { text: 'İptal', style: 'cancel' },
-      {
-        text: 'Çıkış Yap',
-        style: 'destructive',
-        onPress: async () => {
-          await logoutUserRole();
-          onRoleChanged(null);
-          onClose();
+    const doLogout = async () => {
+      await logoutUserRole();
+      onRoleChanged(null);
+      onClose();
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Mevcut rolünüzden çıkıp karşılama ve rol seçimi ekranına dönmek istiyor musunuz?')) {
+        doLogout();
+      }
+    } else {
+      Alert.alert('Rol Değiştir', 'Mevcut rolünüzden çıkıp karşılama ekranına dönmek istiyor musunuz?', [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Çıkış Yap',
+          style: 'destructive',
+          onPress: doLogout,
         },
-      },
-    ]);
+      ]);
+    }
   };
 
   const navigateToScreen = (screenName: string) => {

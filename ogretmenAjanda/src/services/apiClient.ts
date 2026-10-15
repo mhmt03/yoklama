@@ -1,10 +1,39 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// Varsayılan API URL'i: Canlı mobil uygulama ve canlı web için ogretmenajanda.runasp.net (HTTPS zorunlu)
-export const DEFAULT_API_URL = Platform.OS === 'web' && typeof window !== 'undefined' && !['8081', '19006'].includes(window.location.port)
-  ? `${window.location.origin}/api`
-  : 'https://ogretmenajanda.runasp.net/api';
+const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
+
+export const getPlatformDefaultApiUrl = (): string => {
+  // Web Ortamı
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') {
+      const port = window.location.port;
+      const hostname = window.location.hostname;
+      const isLocalWeb = ['8081', '19006', '3000'].includes(port) || hostname === 'localhost' || hostname === '127.0.0.1';
+      if (isLocalWeb) {
+        // Yerel web geliştirme (localhost:8081): Yerel .NET API'sine bağlan (localhost:5079)
+        return 'http://localhost:5079/api';
+      }
+      return `${window.location.origin}/api`;
+    }
+    return 'http://localhost:5079/api';
+  }
+
+  // Mobil Geliştirme (Emülatör) Modu
+  if (isDev) {
+    if (Platform.OS === 'android') {
+      // Android emülatörün bilgisayarın yerel sunucusuna (localhost) erişim köprüsü
+      return 'http://10.0.2.2:5079/api';
+    }
+    return 'http://localhost:5079/api';
+  }
+
+  // Canlı / Canlı Yayın (Release APK / Prod)
+  return 'https://ogretmenajanda.runasp.net/api';
+};
+
+// Varsayılan API URL'i: Emülatörde 10.0.2.2:5079, yerel webde localhost:5079, canlıda runasp.net
+export const DEFAULT_API_URL = getPlatformDefaultApiUrl();
 
 
 const TOKEN_KEY = '@ogretmen_ajanda_jwt_token';
@@ -39,7 +68,7 @@ export interface UserSession {
 
 export async function getBaseApiUrl(): Promise<string> {
   const customUrl = await AsyncStorage.getItem(API_URL_KEY);
-  let url = customUrl || DEFAULT_API_URL;
+  let url = customUrl || getPlatformDefaultApiUrl();
   // HTTP -> HTTPS otomatik yükseltme (Sunucu 307 yönlendirmesinde Authorization başlığı düşmesini önler)
   if (url.startsWith('http://ogretmenajanda.runasp.net')) {
     url = url.replace('http://', 'https://');
