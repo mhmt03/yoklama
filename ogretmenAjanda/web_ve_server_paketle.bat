@@ -29,6 +29,9 @@ if %errorlevel% neq 0 (
     pause
     exit /b %errorlevel%
 )
+
+echo [EK] Web ve wasm varliklari publish klasorune senkronize ediliyor...
+xcopy /E /Y /I "dist\*" "server\OgretmenAjanda.Api\publish\wwwroot\"
 echo.
 
 echo ============================================================
