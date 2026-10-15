@@ -520,8 +520,11 @@ ${jsonSchema}
       // Total okul kotasına bildir
       try {
         const { recordGeminiApiUsage } = await import('../utils/geminiScheduleService');
-        await recordGeminiApiUsage(currentModel, result.response.usageMetadata, schoolId);
-      } catch {}
+        const estimatedTokens = result.response?.usageMetadata?.totalTokenCount || Math.max(4500, Math.round((textResponse.length + 3000) / 3));
+        await recordGeminiApiUsage(currentModel, result.response?.usageMetadata, schoolId, estimatedTokens);
+      } catch (usageErr) {
+        console.warn(LOG, 'Kullanım kotası bildirilemedi:', usageErr);
+      }
 
       onProgress?.('Ayrıştırma başarıyla tamamlandı!');
       return parsedData;

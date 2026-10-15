@@ -41,7 +41,10 @@ export interface GeminiUsageStats {
   model: string;
   dailyRequestLimit: number; // 1500 for Flash, 50 for Pro
   remainingRequests: number;
-  remainingPercent: number; // 0..100
+  dailyTokenLimit: number; // 1.000.000 for Flash, 200.000 for Pro
+  remainingTokens: number;
+  remainingPercent: number; // 0..100 (İstek ve Token kotasından en kritik olanı)
+  tokenPercent: number; // 0..100 (Token kotasından kalan yüzde)
   lastTokensUsed: number;
   scope?: 'TOTAL_SCHOOL' | 'DEVICE';
 }
@@ -86,9 +89,17 @@ export const setGeminiApiKey = async (apiKey: string): Promise<void> => {
 export const recordGeminiApiUsage = async (
   model: string,
   usageMetadata?: { totalTokenCount?: number; promptTokenCount?: number; candidatesTokenCount?: number },
-  schoolId?: string
+  schoolId?: string,
+  fallbackEstimatedTokens?: number
 ): Promise<void> => {
-  const addedTokens = usageMetadata?.totalTokenCount || 0;
+  let addedTokens = usageMetadata?.totalTokenCount || 0;
+  if (!addedTokens && fallbackEstimatedTokens) {
+    addedTokens = fallbackEstimatedTokens;
+  }
+  // Asgari token maliyeti (çağrı yapıldıysa en az 2500 token)
+  if (!addedTokens) {
+    addedTokens = 2500;
+  }
 
   // 1. Sunucu Okul TOTAL Havuzuna Bildir (Tüm öğretmenler ve admin ortak sayacı)
   try {
@@ -174,6 +185,7 @@ export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsag
   const model = await getGeminiModel();
   const isPro = model.toLowerCase().includes('pro');
   const dailyRequestLimit = isPro ? 50 : 1500;
+  const dailyTokenLimit = isPro ? 200000 : 1000000; // 1M Flash / 200k Pro
 
   // 1. Sunucudan TOTAL OKUL Kotasını Çekmeyi Dene
   try {
@@ -187,6 +199,9 @@ export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsag
       if (serverRes.success && serverRes.data) {
         return {
           ...serverRes.data,
+          dailyTokenLimit: serverRes.data.dailyTokenLimit || dailyTokenLimit,
+          remainingTokens: serverRes.data.remainingTokens ?? Math.max(0, (serverRes.data.dailyTokenLimit || dailyTokenLimit) - (serverRes.data.tokensToday || 0)),
+          tokenPercent: serverRes.data.tokenPercent ?? Math.max(0, Math.min(100, Math.round(((dailyTokenLimit - (serverRes.data.tokensToday || 0)) / dailyTokenLimit) * 1000) / 10)),
           scope: 'TOTAL_SCHOOL',
         };
       }
@@ -212,7 +227,10 @@ export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsag
         model,
         dailyRequestLimit,
         remainingRequests: dailyRequestLimit,
+        dailyTokenLimit,
+        remainingTokens: dailyTokenLimit,
         remainingPercent: 100,
+        tokenPercent: 100,
         lastTokensUsed: 0,
         scope: 'DEVICE',
       };
@@ -231,9 +249,13 @@ export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsag
     const lastTokensUsed = parseInt(lastTokRow?.value || '0', 10) || 0;
 
     const remainingRequests = Math.max(0, dailyRequestLimit - requestsToday);
+    const remainingTokens = Math.max(0, dailyTokenLimit - tokensToday);
+
+    const requestPercent = Math.max(0, Math.min(100, ((dailyRequestLimit - requestsToday) / dailyRequestLimit) * 100));
+    const tokenPercent = Math.max(0, Math.min(100, ((dailyTokenLimit - tokensToday) / dailyTokenLimit) * 100));
     const remainingPercent = Math.max(
       0,
-      Math.min(100, Math.round(((dailyRequestLimit - requestsToday) / dailyRequestLimit) * 1000) / 10)
+      Math.min(100, Math.round(Math.min(requestPercent, tokenPercent) * 10) / 10)
     );
 
     return {
@@ -244,7 +266,10 @@ export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsag
       model,
       dailyRequestLimit,
       remainingRequests,
+      dailyTokenLimit,
+      remainingTokens,
       remainingPercent,
+      tokenPercent: Math.round(tokenPercent * 10) / 10,
       lastTokensUsed,
       scope: 'DEVICE',
     };
@@ -258,7 +283,10 @@ export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsag
       model,
       dailyRequestLimit,
       remainingRequests: dailyRequestLimit,
+      dailyTokenLimit,
+      remainingTokens: dailyTokenLimit,
       remainingPercent: 100,
+      tokenPercent: 100,
       lastTokensUsed: 0,
       scope: 'DEVICE',
     };

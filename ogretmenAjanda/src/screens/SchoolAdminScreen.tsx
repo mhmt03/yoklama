@@ -121,6 +121,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [exportingLogs, setExportingLogs] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
+  // Menü ve Lisans Detay Modalları State
+  const [menuDrawerVisible, setMenuDrawerVisible] = useState(false);
+  const [licenseModalVisible, setLicenseModalVisible] = useState(false);
+
   // Okul Düzenleme Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editSchoolName, setEditSchoolName] = useState('');
@@ -1528,6 +1532,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       setSaveClassesChecked(optExtractClasses);
       setSaveLessonsChecked(optExtractLessons);
       setSaveScheduleChecked(optExtractScheduleItems);
+
+      // AI analizinin harcadığı token ve kota bilgisini ekranda hemen güncelle
+      try {
+        const usage = await getGeminiUsageStats(selectedSchool.id);
+        setUsageStats(usage);
+      } catch {}
     } catch (error: any) {
       Alert.alert('AI Ayrıştırma Hatası', error.message || 'Belge analiz edilemedi.');
       setAiModalVisible(false);
@@ -2422,41 +2432,22 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     <SafeAreaView style={styles.container}>
       {/* Üst Bar */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
-          <Ionicons name="log-out-outline" size={16} color="#DC2626" />
-          <Text style={styles.logoutButtonText}>Çıkış</Text>
-        </TouchableOpacity>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.headerTitle}>
             {isStaff ? '🛡️ Okul İdarecisi Paneli' : 'Okul Yönetim Paneli'}
           </Text>
           <Text style={styles.headerSubtitle} numberOfLines={1}>{selectedSchool?.name || 'Okul Seçiniz'}</Text>
         </View>
+
+        {/* Hamburger Menü Butonu */}
         <TouchableOpacity
-          onPress={handleOpenAdminCredentials}
-          style={styles.headerCredentialsBtn}
+          onPress={() => setMenuDrawerVisible(true)}
+          style={styles.hamburgerBtn}
+          activeOpacity={0.7}
+          accessibilityLabel="Menü"
         >
-          <Ionicons name="key-outline" size={14} color="#4F46E5" />
-          <Text style={styles.headerCredentialsBtnText}>Şifre</Text>
+          <Ionicons name="menu" size={24} color="#4F46E5" />
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => {
-            if (selectedSchool) {
-              setEditSchoolName(selectedSchool.name || '');
-              setEditSchoolPhone(selectedSchool.phone || '');
-              setEditModalVisible(true);
-            }
-          }}
-          style={styles.editSchoolBtn}
-        >
-          <Ionicons name="pencil" size={15} color="#4F46E5" />
-        </TouchableOpacity>
-        {!isStaff && (
-          <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={styles.addSchoolButton}>
-            <Ionicons name="add" size={18} color="#fff" />
-            <Text style={styles.addSchoolText}>Yeni Okul</Text>
-          </TouchableOpacity>
-        )}
       </View>
 
       <ScrollView
@@ -2506,7 +2497,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           </View>
         )}
 
-        {/* Okul Kodu Kartı & Müşteri / Lisans Bilgisi */}
+        {/* Okul Kodu Kartı */}
         {selectedSchool && (
           <View style={styles.codeCard}>
             <View style={styles.codeCardTop}>
@@ -2522,46 +2513,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 <Text style={styles.copyButtonText}>Kodu Kopyala</Text>
               </TouchableOpacity>
             </View>
-
-            {/* Müşteri ve İlişki Kimlikleri Rozetleri */}
-            <View style={styles.licenseInfoRow}>
-              <View style={styles.licenseBadge}>
-                <Ionicons name="finger-print" size={13} color="#C7D2FE" />
-                <Text style={styles.licenseBadgeText}>Müşteri: {selectedSchool.customerId || 'MST-10001'}</Text>
-              </View>
-              <View style={styles.licenseBadge}>
-                <Ionicons name="git-network-outline" size={13} color="#C7D2FE" />
-                <Text style={styles.licenseBadgeText}>İlişki: {selectedSchool.relationId || 'ILK-10001'}</Text>
-              </View>
-              <View style={[styles.licenseBadge, { backgroundColor: 'rgba(34, 197, 94, 0.25)', borderColor: '#86EFAC' }]}>
-                <Ionicons name="shield-checkmark" size={13} color="#86EFAC" />
-                <Text style={[styles.licenseBadgeText, { color: '#86EFAC', fontWeight: '800' }]}>
-                  {selectedSchool.licenseExpiresAt
-                    ? `1 Yıl Lisans (${new Date(selectedSchool.licenseExpiresAt).toLocaleDateString('tr-TR')})`
-                    : '1 Yıl Deneme Lisansı'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Hızlı AI & API Ayarları Butonu */}
-            <TouchableOpacity
-              style={styles.codeCardAiBtn}
-              onPress={() => setActiveTab('ai_settings')}
-              activeOpacity={0.85}
-            >
-              <View style={styles.codeCardAiBtnIconWrap}>
-                <Ionicons name="hardware-chip" size={16} color="#4F46E5" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.codeCardAiBtnTitle}>
-                  Okul AI & API Ayarları (Model & Kota)
-                </Text>
-                <Text style={styles.codeCardAiBtnSub} numberOfLines={1}>
-                  {selectedSchool.geminiApiKey ? `Kurumsal Key Kayıtlı • Model: ${selectedSchool.geminiModel || 'gemini-2.5-flash'}` : 'Varsayılan Gemini API Ayarı'}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#C7D2FE" />
-            </TouchableOpacity>
 
             <Text style={styles.codeCardHint}>
               Admin doğrudan sunucuya yazar. Eklenen tüm öğretmenler, sınıflar, dersler ve öğrenciler global veritabanına anında işlenir.
@@ -4322,9 +4273,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   {/* Kalan Kota Gösterge Çubuğu */}
                   <View style={styles.quotaGaugeBox}>
                     <View style={styles.quotaGaugeTop}>
-                      <Text style={styles.quotaGaugeLabel}>Kalan Günlük İstek Hakkı (Okul Toplamı):</Text>
+                      <Text style={styles.quotaGaugeLabel}>Kalan Günlük Havuz Kotası:</Text>
                       <Text style={styles.quotaGaugeVal}>
-                        {usageStats ? usageStats.remainingRequests : 1500} / {usageStats ? usageStats.dailyRequestLimit : 1500} İstek
+                        %{usageStats ? usageStats.remainingPercent : 100} Kalan
                       </Text>
                     </View>
                     <View style={styles.gaugeProgressBarTrack}>
@@ -4343,24 +4294,35 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         ]}
                       />
                     </View>
-                    <Text style={styles.gaugePercentText}>
-                      %{usageStats ? usageStats.remainingPercent : 100} Kota Mevcut (1500 İstek/Gün)
-                    </Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                      <Text style={styles.gaugePercentText}>
+                        %{usageStats ? usageStats.remainingPercent : 100} Kota Mevcut (En Kritik Limit)
+                      </Text>
+                      <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '600' }}>
+                        Token: %{usageStats?.tokenPercent ?? 100} • İstek: %{usageStats ? Math.round(((usageStats.dailyRequestLimit - usageStats.requestsToday) / usageStats.dailyRequestLimit) * 100) : 100}
+                      </Text>
+                    </View>
                   </View>
 
                   {/* Kullanım Grid */}
                   <View style={styles.quotaMiniGrid}>
                     <View style={styles.quotaMiniBox}>
-                      <Text style={styles.quotaMiniBoxVal}>{usageStats ? usageStats.requestsToday : 0}</Text>
-                      <Text style={styles.quotaMiniBoxLabel}>Okul Toplam İstek</Text>
+                      <Text style={styles.quotaMiniBoxVal}>
+                        {usageStats ? usageStats.requestsToday : 0} / {usageStats ? usageStats.dailyRequestLimit : 1500}
+                      </Text>
+                      <Text style={styles.quotaMiniBoxLabel}>Günlük İstek</Text>
                     </View>
                     <View style={styles.quotaMiniBox}>
-                      <Text style={styles.quotaMiniBoxVal}>{usageStats ? usageStats.tokensToday : 0}</Text>
+                      <Text style={styles.quotaMiniBoxVal}>
+                        {(usageStats?.tokensToday || 0).toLocaleString('tr-TR')} / {((usageStats?.dailyTokenLimit || 1000000) / 1000).toLocaleString('tr-TR')}k
+                      </Text>
                       <Text style={styles.quotaMiniBoxLabel}>Harcanan Token</Text>
                     </View>
                     <View style={styles.quotaMiniBox}>
-                      <Text style={styles.quotaMiniBoxVal}>{usageStats?.lastRequestTime || '-'}</Text>
-                      <Text style={styles.quotaMiniBoxLabel}>Son İstek Saati</Text>
+                      <Text style={styles.quotaMiniBoxVal}>
+                        {usageStats?.lastTokensUsed ? `${usageStats.lastTokensUsed.toLocaleString('tr-TR')} tok` : '-'}
+                      </Text>
+                      <Text style={styles.quotaMiniBoxLabel}>Son İşlem ({usageStats?.lastRequestTime || '-'})</Text>
                     </View>
                   </View>
 
@@ -7909,6 +7871,287 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* 🍔 HAMBURGER YÖNETİM MENÜSÜ MODALI */}
+      <Modal visible={menuDrawerVisible} animationType="fade" transparent onRequestClose={() => setMenuDrawerVisible(false)}>
+        <TouchableOpacity
+          style={styles.hamburgerModalOverlay}
+          activeOpacity={1}
+          onPress={() => setMenuDrawerVisible(false)}
+        >
+          <View style={styles.hamburgerDrawerContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.hamburgerDrawerHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.hamburgerDrawerTitle}>Yönetim Menüsü</Text>
+                <Text style={styles.hamburgerDrawerSubtitle} numberOfLines={1}>{selectedSchool?.name || 'Okul Paneli'}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setMenuDrawerVisible(false)}
+                style={styles.hamburgerDrawerCloseBtn}
+              >
+                <Ionicons name="close" size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 8 }}>
+              {/* 1. Okul Bilgilerini Düzenle */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  if (selectedSchool) {
+                    setEditSchoolName(selectedSchool.name || '');
+                    setEditSchoolPhone(selectedSchool.phone || '');
+                    setEditModalVisible(true);
+                  }
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="pencil" size={18} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Okul Bilgilerini Düzenle</Text>
+                  <Text style={styles.hamburgerMenuSub}>Okul adı ve iletişim telefonunu güncelle</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 2. Yeni Okul Ekle (Sadece yetkili) */}
+              {!isStaff && (
+                <TouchableOpacity
+                  style={styles.hamburgerMenuItem}
+                  onPress={() => {
+                    setMenuDrawerVisible(false);
+                    setCreateModalVisible(true);
+                  }}
+                >
+                  <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#DCFCE7' }]}>
+                    <Ionicons name="add" size={18} color="#166534" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.hamburgerMenuLabel}>Yeni Okul Tanımla</Text>
+                    <Text style={styles.hamburgerMenuSub}>Sisteme yeni bir okul kurumu ekleyin</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                </TouchableOpacity>
+              )}
+
+              {/* 3. İdareci & Şifre Yönetimi */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  handleOpenAdminCredentials();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="key" size={18} color="#D97706" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>İdareci Şifre Değiştir</Text>
+                  <Text style={styles.hamburgerMenuSub}>Yönetim paneli giriş şifrenizi yenileyin</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 4. Müşteri & Lisans Bilgileri (Derine taşınan alan) */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setLicenseModalVisible(true);
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                  <Ionicons name="shield-checkmark" size={18} color="#7C3AED" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Müşteri & Lisans Detayları</Text>
+                  <Text style={styles.hamburgerMenuSub}>Müşteri No, İlişki ID ve Lisans durumu</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              <View style={styles.hamburgerMenuDivider} />
+
+              {/* 5. Denetim Logları */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('logs');
+                  loadAuditLogs();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#F1F5F9' }]}>
+                  <Ionicons name="document-text" size={18} color="#475569" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Denetim Logları</Text>
+                  <Text style={styles.hamburgerMenuSub}>Kullanıcı işlem ve güvenlik kayıtları</Text>
+                </View>
+                {logStats.total > 0 && (
+                  <View style={styles.hamburgerMenuTag}>
+                    <Text style={styles.hamburgerMenuTagText}>{logStats.total}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+
+              {/* 6. Okul Mesajları */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('messages');
+                  loadSchoolMessages();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#E0F2FE' }]}>
+                  <Ionicons name="chatbubbles" size={18} color="#0284C7" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Okul İçi Mesajlar</Text>
+                  <Text style={styles.hamburgerMenuSub}>Öğretmenlere duyuru ve bildirim iletin</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 7. Raporlar */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('reports');
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="stats-chart" size={18} color="#B45309" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Raporlar & İstatistikler</Text>
+                  <Text style={styles.hamburgerMenuSub}>Yoklama ve katılım grafikleri</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 8. AI & API Ayarları */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('ai_settings');
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="hardware-chip" size={18} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>AI & API Ayarları</Text>
+                  <Text style={styles.hamburgerMenuSub}>Gemini API anahtarı, model ve kota durumu</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              <View style={styles.hamburgerMenuDivider} />
+
+              {/* 9. Çıkış Yap */}
+              <TouchableOpacity
+                style={[styles.hamburgerMenuItem, { marginBottom: 16 }]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  handleLogout();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="log-out" size={18} color="#DC2626" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.hamburgerMenuLabel, { color: '#DC2626' }]}>Oturumu Kapat</Text>
+                  <Text style={styles.hamburgerMenuSub}>Yönetim panelinden güvenli çıkış yap</Text>
+                </View>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 🛡️ MÜŞTERİ & LİSANS DETAYLARI MODALI (Derin Bilgiler) */}
+      <Modal visible={licenseModalVisible} animationType="slide" transparent onRequestClose={() => setLicenseModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 440 }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="shield-checkmark" size={22} color="#4F46E5" />
+                <Text style={styles.modalTitle}>Müşteri & Lisans Bilgileri</Text>
+              </View>
+              <TouchableOpacity onPress={() => setLicenseModalVisible(false)}>
+                <Ionicons name="close" size={22} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ marginVertical: 8 }}>
+              <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 14, lineHeight: 18 }}>
+                Kurumunuza ait müşteri tanımlayıcıları, kurumsal ilişki kodu ve lisans geçerlilik durumu aşağıda listelenmiştir.
+              </Text>
+
+              <View style={styles.licenseDetailCard}>
+                <View style={styles.licenseDetailRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="finger-print" size={16} color="#4F46E5" />
+                    <Text style={styles.licenseDetailLabel}>Müşteri No (Customer ID)</Text>
+                  </View>
+                  <Text style={styles.licenseDetailVal}>{selectedSchool?.customerId || 'MST-10001'}</Text>
+                </View>
+
+                <View style={styles.licenseDetailRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="git-network-outline" size={16} color="#4F46E5" />
+                    <Text style={styles.licenseDetailLabel}>İlişki Kimliği (Relation ID)</Text>
+                  </View>
+                  <Text style={styles.licenseDetailVal}>{selectedSchool?.relationId || 'ILK-10001'}</Text>
+                </View>
+
+                <View style={styles.licenseDetailRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="school" size={16} color="#4F46E5" />
+                    <Text style={styles.licenseDetailLabel}>Okul Kodu</Text>
+                  </View>
+                  <Text style={styles.licenseDetailVal}>{selectedSchool?.code}</Text>
+                </View>
+
+                <View style={styles.licenseDetailRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="checkmark-circle" size={16} color="#166534" />
+                    <Text style={styles.licenseDetailLabel}>Lisans Durumu</Text>
+                  </View>
+                  <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#166534' }}>
+                      {selectedSchool?.licenseExpiresAt
+                        ? `1 Yıl Lisans (${new Date(selectedSchool.licenseExpiresAt).toLocaleDateString('tr-TR')})`
+                        : '1 Yıl Deneme Lisansı'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={[styles.licenseDetailRow, { borderBottomWidth: 0 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="call" size={16} color="#64748B" />
+                    <Text style={styles.licenseDetailLabel}>İletişim Telefonu</Text>
+                  </View>
+                  <Text style={styles.licenseDetailVal}>{selectedSchool?.phone || 'Belirtilmedi'}</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.createSubmitButton, { marginTop: 16 }]}
+                onPress={() => setLicenseModalVisible(false)}
+              >
+                <Text style={styles.createSubmitText}>Kapat</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -7923,6 +8166,129 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
+  },
+  hamburgerBtn: {
+    padding: 8,
+    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hamburgerModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-end',
+    paddingTop: 54,
+    paddingRight: 12,
+  },
+  hamburgerDrawerContent: {
+    width: 320,
+    maxHeight: '85%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  hamburgerDrawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  hamburgerDrawerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  hamburgerDrawerSubtitle: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  hamburgerDrawerCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  hamburgerMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  hamburgerMenuIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  hamburgerMenuLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  hamburgerMenuSub: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  hamburgerMenuTag: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginRight: 4,
+  },
+  hamburgerMenuTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  hamburgerMenuDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginVertical: 6,
+  },
+  licenseDetailCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  licenseDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EDF2F7',
+  },
+  licenseDetailLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  licenseDetailVal: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1E293B',
   },
   logoutButton: {
     flexDirection: 'row',

@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Include="wwwroot\**" CopyToPublishDirectory="Always" />
+    <Content Update="wwwroot\**" CopyToPublishDirectory="Always" />
   </ItemGroup>
 
   <ItemGroup>

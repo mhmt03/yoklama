@@ -455,21 +455,22 @@ namespace OgretmenAjanda.Api.Controllers
 
             var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
             var nowTime = DateTime.UtcNow.AddHours(3).ToString("HH:mm");
+            var tokensToAdd = request.Tokens > 0 ? request.Tokens : 2500;
 
             if (school.LastAiUsageDate != today)
             {
                 school.LastAiUsageDate = today;
                 school.DailyAiRequests = 1;
-                school.DailyAiTokens = request.Tokens;
+                school.DailyAiTokens = tokensToAdd;
             }
             else
             {
                 school.DailyAiRequests += 1;
-                school.DailyAiTokens += request.Tokens;
+                school.DailyAiTokens += tokensToAdd;
             }
 
             school.LastAiRequestTime = nowTime;
-            school.LastTokensUsed = request.Tokens;
+            school.LastTokensUsed = tokensToAdd;
             if (!string.IsNullOrEmpty(request.Model))
             {
                 school.GeminiModel = request.Model.Trim();
@@ -499,11 +500,16 @@ namespace OgretmenAjanda.Api.Controllers
             var model = school.GeminiModel ?? "gemini-2.5-flash";
             var isPro = model.ToLowerInvariant().Contains("pro");
             var dailyLimit = isPro ? 50 : 1500;
+            var dailyTokenLimit = isPro ? 200000 : 1000000;
 
             var requestsToday = isToday ? school.DailyAiRequests : 0;
             var tokensToday = isToday ? school.DailyAiTokens : 0;
             var remainingRequests = Math.Max(0, dailyLimit - requestsToday);
-            var remainingPercent = Math.Max(0, Math.Min(100, (double)remainingRequests / dailyLimit * 100));
+            var remainingTokens = Math.Max(0, dailyTokenLimit - tokensToday);
+
+            var requestPercent = Math.Max(0, Math.Min(100, (double)remainingRequests / dailyLimit * 100));
+            var tokenPercent = Math.Max(0, Math.Min(100, (double)remainingTokens / dailyTokenLimit * 100));
+            var remainingPercent = Math.Min(requestPercent, tokenPercent);
 
             return Ok(new
             {
@@ -514,7 +520,10 @@ namespace OgretmenAjanda.Api.Controllers
                 model,
                 dailyRequestLimit = dailyLimit,
                 remainingRequests,
+                dailyTokenLimit,
+                remainingTokens,
                 remainingPercent = Math.Round(remainingPercent, 1),
+                tokenPercent = Math.Round(tokenPercent, 1),
                 lastTokensUsed = isToday ? school.LastTokensUsed : 0,
                 scope = "TOTAL_SCHOOL"
             });
