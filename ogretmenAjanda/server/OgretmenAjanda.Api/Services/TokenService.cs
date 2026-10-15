@@ -25,7 +25,7 @@ namespace OgretmenAjanda.Api.Services
 
         public string GenerateToken(User user, string? schoolCode = null)
         {
-            var jwtKey = _config["Jwt:Key"] ?? "OgretmenAjandaSuperSecretSecurityKey2026!XYZ";
+            var jwtKey = _config["Jwt:Key"] ?? "OgretmenAjandaUltraSecureJWTSecretKey2026!MehmetG!XYZ987";
             var issuer = _config["Jwt:Issuer"] ?? "OgretmenAjandaApi";
             var audience = _config["Jwt:Audience"] ?? "OgretmenAjandaClient";
 

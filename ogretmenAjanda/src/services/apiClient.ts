@@ -1,10 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// Varsayılan API URL'i: Canlı mobil uygulama ve canlı web için ogretmenajanda.runasp.net
+// Varsayılan API URL'i: Canlı mobil uygulama ve canlı web için ogretmenajanda.runasp.net (HTTPS zorunlu)
 export const DEFAULT_API_URL = Platform.OS === 'web' && typeof window !== 'undefined' && !['8081', '19006'].includes(window.location.port)
   ? `${window.location.origin}/api`
-  : 'http://ogretmenajanda.runasp.net/api';
+  : 'https://ogretmenajanda.runasp.net/api';
 
 
 const TOKEN_KEY = '@ogretmen_ajanda_jwt_token';
@@ -39,7 +39,12 @@ export interface UserSession {
 
 export async function getBaseApiUrl(): Promise<string> {
   const customUrl = await AsyncStorage.getItem(API_URL_KEY);
-  return customUrl || DEFAULT_API_URL;
+  let url = customUrl || DEFAULT_API_URL;
+  // HTTP -> HTTPS otomatik yükseltme (Sunucu 307 yönlendirmesinde Authorization başlığı düşmesini önler)
+  if (url.startsWith('http://ogretmenajanda.runasp.net')) {
+    url = url.replace('http://', 'https://');
+  }
+  return url;
 }
 
 export async function setBaseApiUrl(url: string): Promise<void> {
@@ -107,6 +112,12 @@ export async function apiRequest<T = any>(
     }
 
     if (!response.ok) {
+      if (response.status === 401) {
+        return {
+          success: false,
+          error: data.message || 'Sunucu oturumunuz doğrulanamadı veya süresi doldu (401). Lütfen Okul Admini olarak tekrar giriş yapınız.',
+        };
+      }
       return {
         success: false,
         error: data.message || `Sunucu Hatası (${response.status})`,

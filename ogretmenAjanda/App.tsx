@@ -308,20 +308,62 @@ export default function App() {
     prepare();
   }, []);
 
+  const handleResetWebStorage = async () => {
+    try {
+      if (Platform.OS === 'web') {
+        if (typeof navigator !== 'undefined' && (navigator as any).storage?.getDirectory) {
+          const root = await (navigator as any).storage.getDirectory();
+          // @ts-ignore
+          for await (const name of root.keys()) {
+            try {
+              await root.removeEntry(name, { recursive: true });
+            } catch {}
+          }
+        }
+        if (typeof window !== 'undefined') {
+          if (window.indexedDB?.databases) {
+            const dbs = await window.indexedDB.databases();
+            for (const db of dbs) {
+              if (db.name) window.indexedDB.deleteDatabase(db.name);
+            }
+          }
+          window.location.reload();
+        }
+      }
+    } catch (err) {
+      console.warn('Reset storage failed:', err);
+      if (typeof window !== 'undefined') window.location.reload();
+    }
+  };
+
   if (dbError) {
-    const locked = dbError.includes('locked');
+    const isLocked = dbError.includes('locked');
+    const isVfs = dbError.includes('VFS') || dbError.includes('wa-sqlite') || dbError.includes('Worker');
+
     return (
       <View style={styles.splashContainer}>
         <Ionicons name="alert-circle-outline" size={48} color={Colors.danger} />
-        <Text style={styles.splashText}>Veritabanı açılamadı</Text>
+        <Text style={styles.splashText}>Veritabanı Açılamadı</Text>
         <Text style={styles.errorText}>
-          {locked
-            ? 'Veritabanı başka bir işlem tarafından kilitli. Uygulamayı tamamen kapatıp (Durmaya zorla) yeniden açın.'
+          {isVfs
+            ? 'Tarayıcı yerel dosya kilidi (VFS) uyarısı.\n1. Tarayıcınızda bu sitenin açık olduğu başka bir sekme varsa lütfen kapatın.\n2. Veya aşağıdaki butona tıklayarak tarayıcı veritabanını temizleyip yeniden başlatın.'
+            : isLocked
+            ? 'Veritabanı başka bir işlem tarafından kilitli. Uygulamayı tamamen kapatıp yeniden açın.'
             : dbError}
         </Text>
-        <TouchableOpacity style={styles.retryBtn} onPress={prepare} testID="db-retry-btn">
-          <Text style={styles.retryText}>Tekrar Dene</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 12, marginTop: 18 }}>
+          <TouchableOpacity style={styles.retryBtn} onPress={prepare} testID="db-retry-btn">
+            <Text style={styles.retryText}>Tekrar Dene</Text>
+          </TouchableOpacity>
+          {Platform.OS === 'web' && (
+            <TouchableOpacity
+              style={[styles.retryBtn, { backgroundColor: Colors.danger }]}
+              onPress={handleResetWebStorage}
+            >
+              <Text style={styles.retryText}>Önbelleği Sıfırla ve Yenile</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     );
   }
