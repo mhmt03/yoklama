@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../theme/colors';
 import { UserRole, setActiveUserRole, setActiveTeacherName } from '../utils/roleService';
 import { getActiveSchool, syncAffiliatedSchools } from '../database/operations/schoolOperations';
-import { apiRequest, saveAuthToken } from '../services/apiClient';
+import { apiRequest, saveAuthToken, getBaseApiUrl, setBaseApiUrl, DEFAULT_API_URL } from '../services/apiClient';
 import { DEFAULT_GEMINI_API_KEY, setGeminiApiKey, setGeminiModel } from '../utils/geminiScheduleService';
 
 interface RoleSelectScreenProps {
@@ -44,6 +44,57 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   const [superAdminUsername, setSuperAdminUsername] = useState('mehmetsuper');
   const [superAdminPassword, setSuperAdminPassword] = useState('1234');
   const [superAdminLoading, setSuperAdminLoading] = useState(false);
+
+  // Sunucu Bağlantı Ayarları Modalı
+  const [serverSettingsModalVisible, setServerSettingsModalVisible] = useState(false);
+  const [serverUrlInput, setServerUrlInput] = useState('');
+  const [testingServerUrl, setTestingServerUrl] = useState(false);
+  const [testServerResult, setTestServerResult] = useState<{ success: boolean; msg: string } | null>(null);
+
+  const handleOpenServerSettings = async () => {
+    const current = await getBaseApiUrl();
+    setServerUrlInput(current);
+    setTestServerResult(null);
+    setServerSettingsModalVisible(true);
+  };
+
+  const handleTestServerConnection = async () => {
+    if (!serverUrlInput.trim()) {
+      Alert.alert('Uyarı', 'Lütfen geçerli bir sunucu adresi giriniz.');
+      return;
+    }
+    setTestingServerUrl(true);
+    setTestServerResult(null);
+    try {
+      const clean = serverUrlInput.trim().replace(/\/+$/, '');
+      const healthUrl = clean.endsWith('/api') ? clean.replace(/\/api$/, '/health') : `${clean}/health`;
+      const res = await fetch(healthUrl, { method: 'GET' });
+      if (res.ok) {
+        setTestServerResult({ success: true, msg: 'Bağlantı Başarılı! Sunucu yanıt veriyor.' });
+      } else {
+        setTestServerResult({ success: false, msg: `Sunucu yanıt verdi ancak durum kodu: ${res.status}` });
+      }
+    } catch (e: any) {
+      setTestServerResult({ success: false, msg: `Bağlantı Başarısız: ${e.message || 'Sunucuya ulaşılamadı'}` });
+    } finally {
+      setTestingServerUrl(false);
+    }
+  };
+
+  const handleSaveServerUrl = async () => {
+    if (!serverUrlInput.trim()) {
+      Alert.alert('Uyarı', 'Lütfen geçerli bir sunucu adresi giriniz.');
+      return;
+    }
+    await setBaseApiUrl(serverUrlInput.trim());
+    setServerSettingsModalVisible(false);
+    Alert.alert('Başarılı', 'Sunucu bağlantı adresi kaydedildi.');
+  };
+
+  const handleResetServerUrl = () => {
+    setServerUrlInput(DEFAULT_API_URL);
+    setTestServerResult(null);
+  };
 
   // Okul Admini Giriş Butonu
   const handleSelectAdmin = () => {
@@ -266,6 +317,13 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
 
       {/* Header */}
       <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.serverSettingsBtn}
+          onPress={handleOpenServerSettings}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
+          <Ionicons name="server-outline" size={20} color="#64748B" />
+        </TouchableOpacity>
         <View style={styles.brandIconWrap}>
           <Ionicons name="school" size={32} color="#FFFFFF" />
         </View>
@@ -548,6 +606,102 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           </View>
         </View>
       </Modal>
+      {/* Sunucu Bağlantı Ayarları Modalı */}
+      <Modal visible={serverSettingsModalVisible} animationType="fade" transparent>
+        <View style={styles.promptOverlay}>
+          <View style={styles.promptCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="server" size={22} color="#4F46E5" />
+                <Text style={styles.promptTitle}>Sunucu Bağlantısı</Text>
+              </View>
+              <TouchableOpacity onPress={() => setServerSettingsModalVisible(false)}>
+                <Ionicons name="close" size={22} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.promptDesc}>
+              Mobil uygulamanın bağlandığı API sunucu adresini buradan değiştirebilirsiniz.
+            </Text>
+
+            <Text style={styles.inputLabel}>API Sunucu URL'i</Text>
+            <TextInput
+              style={styles.nameInput}
+              placeholder="http://ogretmenajanda.runasp.net/api"
+              placeholderTextColor={Colors.textMuted}
+              value={serverUrlInput}
+              onChangeText={setServerUrlInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            {testServerResult && (
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginTop: 8,
+                  padding: 8,
+                  borderRadius: 8,
+                  backgroundColor: testServerResult.success ? '#DCFCE7' : '#FEE2E2',
+                }}
+              >
+                <Ionicons
+                  name={testServerResult.success ? 'checkmark-circle' : 'alert-circle'}
+                  size={16}
+                  color={testServerResult.success ? '#16A34A' : '#DC2626'}
+                />
+                <Text
+                  style={{
+                    fontSize: 12,
+                    fontWeight: '700',
+                    color: testServerResult.success ? '#166534' : '#991B1B',
+                    flex: 1,
+                  }}
+                >
+                  {testServerResult.msg}
+                </Text>
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+              <TouchableOpacity
+                style={[styles.cancelBtn, { flex: 1, backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' }]}
+                onPress={handleTestServerConnection}
+                disabled={testingServerUrl}
+              >
+                {testingServerUrl ? (
+                  <ActivityIndicator size="small" color="#4F46E5" />
+                ) : (
+                  <Text style={[styles.cancelBtnText, { color: '#4F46E5' }]}>Bağlantıyı Test Et</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.cancelBtn, { flex: 1 }]}
+                onPress={handleResetServerUrl}
+              >
+                <Text style={styles.cancelBtnText}>Varsayılana Dön</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setServerSettingsModalVisible(false)}
+              >
+                <Text style={styles.cancelBtnText}>Kapat</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.confirmBtn, { backgroundColor: '#4F46E5' }]}
+                onPress={handleSaveServerUrl}
+              >
+                <Text style={styles.confirmBtnText}>Kaydet</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -562,6 +716,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
     marginTop: 10,
+    position: 'relative',
+    width: '100%',
+  },
+  serverSettingsBtn: {
+    position: 'absolute',
+    right: 0,
+    top: 4,
+    padding: 8,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    zIndex: 10,
   },
   brandIconWrap: {
     width: 64,

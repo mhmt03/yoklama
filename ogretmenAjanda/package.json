@@ -24,9 +24,11 @@
     "expo-status-bar": "~57.0.1",
     "fflate": "^0.8.3",
     "react": "19.2.3",
+    "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
+    "react-native-web": "^0.21.2",
     "react-native-webview": "13.16.1",
     "xlsx": "^0.18.5"
   },
@@ -41,8 +43,9 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build:web": "expo export --platform web",
+    "build:all": "cmd /c web_ve_server_paketle.bat"
   },
   "private": true
 }
-

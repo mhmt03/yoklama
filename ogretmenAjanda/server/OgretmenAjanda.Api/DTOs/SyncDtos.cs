@@ -48,12 +48,35 @@ namespace OgretmenAjanda.Api.DTOs
         public List<ScheduleSyncItem> Schedules { get; set; } = new();
     }
 
+    public class SingleScheduleItemRequest
+    {
+        public Guid? Id { get; set; }
+        public Guid SchoolId { get; set; }
+        public string? TeacherName { get; set; }
+        public int DayOfWeek { get; set; }
+        public int LessonHour { get; set; }
+        public string Grade { get; set; } = string.Empty;
+        public string Section { get; set; } = string.Empty;
+        public string LessonName { get; set; } = string.Empty;
+        public string? Classroom { get; set; }
+    }
+
+    public class TeacherScheduleReplaceRequest
+    {
+        public Guid SchoolId { get; set; }
+        public string TeacherName { get; set; } = string.Empty;
+        public List<ScheduleSyncItem> Schedules { get; set; } = new();
+    }
+
     public class YearlyPlanSyncItem
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public string LessonName { get; set; } = string.Empty;
         public string Grade { get; set; } = string.Empty;
         public int WeekNumber { get; set; }
+        public DateTime? StartDate { get; set; }
+        public DateTime? EndDate { get; set; }
+        public string? DateRange { get; set; }
         public string Subject { get; set; } = string.Empty;
         public string LearningOutcomes { get; set; } = string.Empty;
     }
@@ -61,6 +84,7 @@ namespace OgretmenAjanda.Api.DTOs
     public class BatchYearlyPlanSyncRequest
     {
         public Guid SchoolId { get; set; }
+        public bool OverwriteExisting { get; set; } = false;
         public List<YearlyPlanSyncItem> PlanItems { get; set; } = new();
     }
 

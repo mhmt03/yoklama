@@ -502,3 +502,75 @@ export const convertRowsWithMapping = (
 
   return result;
 };
+
+/**
+ * Standart Yıllık Müfredat Planı Excel Şablonu (.xlsx) üretir ve paylaşım menüsünü açar.
+ */
+export async function generateYearlyPlanTemplateExcel(
+  lessonName = 'Ders',
+  gradeLevel = 'Tüm_Kademeler'
+): Promise<boolean> {
+  const { saveAndShareWorkbook } = await import('./excelService');
+  const workbook = XLSX.utils.book_new();
+
+  const header = [
+    'Hafta *',
+    'Tarih Aralığı (Örn: 09.09.2024 - 13.09.2024)',
+    'Ders Saati',
+    'Konu / Ünite (Deftere Yazılacak Ana Konu) *',
+    'Kazanımlar ve Açıklamalar',
+  ];
+
+  // 36 haftalık örnek ve doldurulabilir satırlar
+  const sampleRows: any[][] = [header];
+  const sampleTopics = [
+    'Giriş ve Tanışma, Dersin Amaç ve Yöntemleri',
+    '1. Ünite: Temel Kavramlar ve Tanımlar',
+    '1. Ünite: Temel İlkeler ve Özellikler',
+    '1. Ünite: Alıştırmalar, Problem Çözümü ve Pekiştirme',
+    '2. Ünite: Uygulama ve Analiz Yöntemleri',
+    '2. Ünite: İnceleme ve Örnek Olaylar',
+  ];
+
+  for (let w = 1; w <= 36; w++) {
+    const topic = w <= sampleTopics.length ? sampleTopics[w - 1] : `Hafta ${w} Konusu`;
+    const outcomes = w <= sampleTopics.length ? `${w}. hafta kazanımları ve sınıf içi uygulamaları.` : '';
+    sampleRows.push([
+      w,
+      '',
+      4,
+      topic,
+      outcomes,
+    ]);
+  }
+
+  const worksheet = XLSX.utils.aoa_to_sheet(sampleRows);
+  worksheet['!cols'] = [
+    { wch: 10 },
+    { wch: 32 },
+    { wch: 12 },
+    { wch: 45 },
+    { wch: 50 },
+  ];
+
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Yıllık Plan');
+
+  // Bilgilendirme sayfası
+  const infoRows = [
+    ['MEB YILLIK MÜFREDAT PLANI HAZIR ŞABLON KILAVUZU'],
+    [''],
+    ['1. "Yıllık Plan" sekmesindeki sütun başlıklarını değiştirmeden ders konularınızı giriniz.'],
+    ['2. "Hafta" (1-36 arası) ve "Konu / Ünite" sütunları zorunludur.'],
+    ['3. "Tarih Aralığı", "Ders Saati" ve "Kazanımlar" sütunları isteğe bağlıdır.'],
+    ['4. Dosyayı kaydettikten sonra Öğretmen Ajandası uygulamasında ilgili dersin "Yıllık Plan Yükle" düğmesiyle doğrudan yükleyebilirsiniz.'],
+    ['5. Yapay zeka sütunları otomatik tanıyıp defter ve ders kokpitinize hazır hale getirecektir.'],
+  ];
+  const infoSheet = XLSX.utils.aoa_to_sheet(infoRows);
+  infoSheet['!cols'] = [{ wch: 80 }];
+  XLSX.utils.book_append_sheet(workbook, infoSheet, 'Kılavuz');
+
+  const cleanLesson = (lessonName || 'Ders').replace(/[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]/g, '_');
+  const cleanGrade = String(gradeLevel || '').replace(/[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]/g, '_');
+  const fileName = `Yillik_Plan_Sablonu_${cleanLesson}_${cleanGrade}.xlsx`;
+  return await saveAndShareWorkbook(workbook, fileName);
+}

@@ -49,6 +49,10 @@ obj/
 *.db
 *.db-shm
 *.db-wal
-wwwroot/uploads/*
-!wwwroot/uploads/.gitkeep
+# Build outputs & APK
+publish/
+*.apk
+server/OgretmenAjanda.Api/publish/
+server/OgretmenAjanda.Api/wwwroot/*
+!server/OgretmenAjanda.Api/wwwroot/.gitkeep
 

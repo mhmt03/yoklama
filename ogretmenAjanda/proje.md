@@ -1,12 +1,19 @@
 # 📋 Öğretmen Ajandası (Öğretmen - Öğrenci - İdare - Süper Admin) Proje Dokümantasyonu
 
-> **Durum:** Mimari ve İşlev Tasarımı (Karara Bağlandı ve Onaylandı)  
-> **Son Güncelleme:** 2026-10-14  
-> **Platformlar:** iOS & Android (React Native / Expo SDK 57), Gelecekte Opsiyonel Web  
-> **Backend Mimarisi:** C# .NET Core Web API (`server/` klasöründe) - monsterasp.net uyumlu  
-> **Veritabanı (Server):** MSSQL / MySQL (monsterasp.net)  
-> **Veritabanı (Local):** `expo-sqlite` (UUID / GUID tabanlı, offline-first)  
-> **Bildirim Altyapısı:** Expo Push Notifications (Kilitli ekranda da bildirim)  
+> **Durum:** Canlıda & Yayında (Web API + Web SPA + Android APK)  
+> **Son Güncelleme:** 2026-10-15  
+> **Canlı Web Adresi:** [http://ogretmenajanda.runasp.net](http://ogretmenajanda.runasp.net)  
+> **Canlı REST API:** [http://ogretmenajanda.runasp.net/api](http://ogretmenajanda.runasp.net/api) | Sağlık Testi: `/health`  
+> **Doğrudan APK İndirme:** [http://ogretmenajanda.runasp.net/ogretmenajanda.apk](http://ogretmenajanda.runasp.net/ogretmenajanda.apk)  
+> **Sunucu FTP Bilgileri:**  
+>   - **FTP Host:** `site99031.siteasp.net`  
+>   - **FTP Kullanıcı:** `site99031`  
+>   - **FTP Port:** `21`  
+>   - **Web Kök Dizini:** `/wwwroot`  
+> **Platformlar:** iOS & Android (React Native / Expo SDK 57), Web SPA (React Native for Web)  
+> **Backend Mimarisi:** C# ASP.NET Core 10 Web API (`server/OgretmenAjanda.Api`)  
+> **Veritabanı (Server & Local):** SQLite (`ogretmenajanda.db`, UUID/GUID tabanlı, offline-first)  
+> **Bildirim Altyapısı:** Expo Push Notifications  
 
 ---
 
@@ -222,6 +229,18 @@
 - [x] Testler, lint & typecheck doğrulamaları (.NET 0 error, TypeScript 0 error)
 - [x] Otomatik Git Commit ve Push
 
-
-
-
+### 📍 FAZ 7: Canlı Dağıtım, Dinamik Sunucu Ayarları & Aşamalı Çarşaf Analizi
+- [x] **Canlı Web & API Sunumu (Tek Çatı Altında):**
+  - Expo Web derlemesi (`dist`) doğrudan ASP.NET Core API'sinin `wwwroot` dizinine taşınarak tek sunucuda yayınlandı.
+  - IIS için `.apk` ve `.wasm` MIME type eşleştirmeleri (`web.config` ve `Program.cs`) tamamlandı.
+  - Tek tıkla paketleme aracı oluşturuldu: [`web_ve_server_paketle.bat`](file:///f:/mehmetg_gmail/developing/react/ogretmenAjanda/web_ve_server_paketle.bat).
+- [x] **Canlı FTP Dağıtımı & APK Erişimi:**
+  - `site99031.siteasp.net` FTP sunucusuna IIS `app_offline.htm` kilit çözme sistemiyle tam yükleme yapıldı.
+  - Üretilen Android Release APK'sı [http://ogretmenajanda.runasp.net/ogretmenajanda.apk](http://ogretmenajanda.runasp.net/ogretmenajanda.apk) adresinden doğrudan indirilebilir hale getirildi.
+- [x] **Mobil Uygulama Dinamik Sunucu Ayarları:**
+  - Giriş ekranına ([`RoleSelectScreen.tsx`](file:///f:/mehmetg_gmail/developing/react/ogretmenAjanda/src/screens/RoleSelectScreen.tsx)) sağ üst köşeye sunucu ayar butonu eklendi.
+  - Sunucu adresi değiştirme, bağlantıyı canlı test etme (`/health`) ve varsayılana sıfırlama modalları bağlandı.
+- [x] **Aşamalı ve Kontrollü Çarşaf Program Analizi:**
+  - Çarşaf program yüklemeden önce ön analiz seçenek modalı eklendi.
+  - Kullanıcı isterse sadece Öğretmen Kadrosu, Sınıflar ve Dersleri ~10 saniyede hızlıca çekebilir; isterse haftalık ders dağılımını analiz ettirebilir.
+  - Şube ve öğretmen eksiklikleri için güvenlik doğrulamaları ve birden fazla ders okutan öğretmenlerin doğru branşla eşleştirilmesi kuralı eklendi.

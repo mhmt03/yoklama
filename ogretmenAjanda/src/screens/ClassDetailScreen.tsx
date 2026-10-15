@@ -41,6 +41,7 @@ import {
 import { getClasses, deleteEntireClassWithAllData } from '../database/operations/classOperations';
 import { syncClassStudentsFromServer } from '../services/studentSyncService';
 import { getActiveSchool } from '../database/operations/schoolOperations';
+import { getActiveUserRole } from '../utils/roleService';
 import {
   getNotesByStudent,
   createNote,
@@ -102,6 +103,7 @@ export const ClassDetailScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [syncingServer, setSyncingServer] = useState(false);
+  const [isSchoolTeacher, setIsSchoolTeacher] = useState(false);
 
   // Manual Add / Edit Modal state
   const [modalVisible, setModalVisible] = useState(false);
@@ -343,6 +345,9 @@ export const ClassDetailScreen: React.FC = () => {
   const loadStudents = async () => {
     try {
       setLoading(true);
+      const [role, active] = await Promise.all([getActiveUserRole(), getActiveSchool()]);
+      setIsSchoolTeacher(role === 'teacher' && !!active);
+
       const [data] = await Promise.all([
         getStudentsByClass(classId),
         loadNoteCounts(),
@@ -592,6 +597,10 @@ export const ClassDetailScreen: React.FC = () => {
 
   // --- MANUAL ADD / EDIT ---
   const handleOpenAdd = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Öğrenci ekleme yetkisi yalnızca okul idaresindedir. Öğrenci listesi okul sunucusundan otomatik eşitlenir.');
+      return;
+    }
     setEditingStudent(null);
     setStudentNoInput('');
     setFirstNameInput('');
@@ -662,6 +671,10 @@ export const ClassDetailScreen: React.FC = () => {
   };
 
   const handleDeleteStudent = (s: Student) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Öğrenci silme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     Alert.alert(
       'Öğrenciyi Sil',
       `"${s.first_name} ${s.last_name}" öğrencisini silmek istediğinize emin misiniz?`,
@@ -1260,6 +1273,10 @@ export const ClassDetailScreen: React.FC = () => {
 
   // --- EXCEL IMPORT & EXPORT ---
   const handleExcelImport = async () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Excel ile öğrenci yükleme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     try {
       setLoading(true);
       const parsed = await pickAndParseStudentsExcel();
@@ -1650,12 +1667,14 @@ export const ClassDetailScreen: React.FC = () => {
                       </TouchableOpacity>
 
                       {/* Delete button */}
-                      <TouchableOpacity
-                        style={styles.smallIconBtn}
-                        onPress={() => handleDeleteStudent(item)}
-                      >
-                        <Ionicons name="trash-outline" size={16} color={Colors.danger} />
-                      </TouchableOpacity>
+                      {!isSchoolTeacher && (
+                        <TouchableOpacity
+                          style={styles.smallIconBtn}
+                          onPress={() => handleDeleteStudent(item)}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                        </TouchableOpacity>
+                      )}
                     </View>
                   )}
                 </View>
@@ -2120,52 +2139,64 @@ export const ClassDetailScreen: React.FC = () => {
                 <Ionicons name="chevron-forward" size={18} color="#4F46E5" />
               </TouchableOpacity>
 
-              {/* 1. Manuel Öğrenci Ekle */}
-              <TouchableOpacity
-                style={styles.actionSheetItem}
-                onPress={() => {
-                  setActionMenuVisible(false);
-                  setTimeout(() => handleOpenAdd(), 200);
-                }}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.actionSheetIconWrap, { backgroundColor: '#EEF2FF' }]}>
-                  <Ionicons name="person-add" size={22} color={Colors.primary} />
-                </View>
-                <View style={styles.actionSheetItemTextWrap}>
-                  <Text style={styles.actionSheetItemTitle}>Manuel Öğrenci Ekle</Text>
-                  <Text style={styles.actionSheetItemDesc}>
-                    Numara, ad soyad ve fotoğraf ile tek tek öğrenci kaydı oluşturun.
+              {/* Okul Öğretmeni Modunda Ekleme/İçe Aktarma Kısıtlaması */}
+              {isSchoolTeacher ? (
+                <View style={{ backgroundColor: '#EEF2FF', borderRadius: 10, padding: 12, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="information-circle" size={20} color="#4F46E5" />
+                  <Text style={{ fontSize: 12, color: '#312E81', flex: 1, lineHeight: 16, fontWeight: '600' }}>
+                    Okul modunda öğrenci ekleme ve silme işlemleri okul idaresi tarafından merkezi olarak yönetilir. "Okuldan Çek" butonuyla listenizi güncelleyebilirsiniz.
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
-
-              {/* 2. Excel'den Yükle */}
-              <TouchableOpacity
-                style={styles.actionSheetItem}
-                onPress={() => {
-                  setActionMenuVisible(false);
-                  setTimeout(() => handleExcelImport(), 200);
-                }}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.actionSheetIconWrap, { backgroundColor: '#DCFCE7' }]}>
-                  <Ionicons name="document-text" size={22} color="#16A34A" />
-                </View>
-                <View style={styles.actionSheetItemTextWrap}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.actionSheetItemTitle}>Excel'den Öğrenci Yükle</Text>
-                    <View style={[styles.actionItemBadge, { backgroundColor: '#DCFCE7' }]}>
-                      <Text style={[styles.actionItemBadgeText, { color: '#15803D' }]}>Toplu Ekle</Text>
+              ) : (
+                <>
+                  {/* 1. Manuel Öğrenci Ekle */}
+                  <TouchableOpacity
+                    style={styles.actionSheetItem}
+                    onPress={() => {
+                      setActionMenuVisible(false);
+                      setTimeout(() => handleOpenAdd(), 200);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.actionSheetIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                      <Ionicons name="person-add" size={22} color={Colors.primary} />
                     </View>
-                  </View>
-                  <Text style={styles.actionSheetItemDesc}>
-                    e-Okul veya hazır Excel listesindeki öğrencileri topluca şubeye aktarın.
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
+                    <View style={styles.actionSheetItemTextWrap}>
+                      <Text style={styles.actionSheetItemTitle}>Manuel Öğrenci Ekle</Text>
+                      <Text style={styles.actionSheetItemDesc}>
+                        Numara, ad soyad ve fotoğraf ile tek tek öğrenci kaydı oluşturun.
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+                  </TouchableOpacity>
+
+                  {/* 2. Excel'den Yükle */}
+                  <TouchableOpacity
+                    style={styles.actionSheetItem}
+                    onPress={() => {
+                      setActionMenuVisible(false);
+                      setTimeout(() => handleExcelImport(), 200);
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.actionSheetIconWrap, { backgroundColor: '#DCFCE7' }]}>
+                      <Ionicons name="document-text" size={22} color="#16A34A" />
+                    </View>
+                    <View style={styles.actionSheetItemTextWrap}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.actionSheetItemTitle}>Excel'den Öğrenci Yükle</Text>
+                        <View style={[styles.actionItemBadge, { backgroundColor: '#DCFCE7' }]}>
+                          <Text style={[styles.actionItemBadgeText, { color: '#15803D' }]}>Toplu Ekle</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.actionSheetItemDesc}>
+                        e-Okul veya hazır Excel listesindeki öğrencileri topluca şubeye aktarın.
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+                  </TouchableOpacity>
+                </>
+              )}
 
               {/* 3. Örnek Excel Şablonu İndir */}
               <TouchableOpacity

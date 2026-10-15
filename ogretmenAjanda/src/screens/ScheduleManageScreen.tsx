@@ -51,6 +51,8 @@ import { EmptyState } from '../components/EmptyState';
 import { DAYS_OF_WEEK } from '../utils/dateUtils';
 
 import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
+import { getActiveSchool } from '../database/operations/schoolOperations';
+import { getActiveUserRole } from '../utils/roleService';
 export const ScheduleManageScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -106,9 +108,20 @@ export const ScheduleManageScreen: React.FC = () => {
   // Hint toggle states (hidden by default to save space, tap lightbulb to expand)
   const [showStandardSlotHint, setShowStandardSlotHint] = useState(false);
   const [showDaySlotHint, setShowDaySlotHint] = useState(false);
+  const [isSchoolTeacher, setIsSchoolTeacher] = useState(false);
+  const [activeSchoolName, setActiveSchoolName] = useState('');
 
   const loadData = async () => {
     try {
+      const [role, active] = await Promise.all([getActiveUserRole(), getActiveSchool()]);
+      if (role === 'teacher' && active) {
+        setIsSchoolTeacher(true);
+        setActiveSchoolName(active.name);
+      } else {
+        setIsSchoolTeacher(false);
+        setActiveSchoolName('');
+      }
+
       const [crs, slt, cDays, gLevels, clsList] = await Promise.all([
         getCourses(),
         getLessonSlots(),
@@ -145,6 +158,10 @@ export const ScheduleManageScreen: React.FC = () => {
 
   // Grade level handlers
   const handleOpenAddGrade = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Sınıf kademeleri okul idaresi tarafından merkezi olarak belirlenir.');
+      return;
+    }
     setEditingGrade(null);
     setGradeNumInput('');
     setGradeLabelInput('');
@@ -152,6 +169,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleOpenEditGrade = (item: GradeLevelItem) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Sınıf kademeleri okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     setEditingGrade(item);
     setGradeNumInput(String(item.level));
     setGradeLabelInput(item.label);
@@ -181,6 +202,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleDeleteGrade = (item: GradeLevelItem) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Sınıf kademeleri okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     Alert.alert(
       'Düzeyi Sil',
       `"${item.label}" sınıf düzeyini silmek istediğinize emin misiniz?`,
@@ -204,6 +229,10 @@ export const ScheduleManageScreen: React.FC = () => {
 
   // Course handlers
   const handleOpenAddCourse = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Ders tanımları okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     setEditingCourse(null);
     setCourseNameInput('');
     setCourseCodeInput('');
@@ -211,6 +240,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleOpenEditCourse = (c: CourseName) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Ders tanımları okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     setEditingCourse(c);
     setCourseNameInput(c.name);
     setCourseCodeInput(c.code || '');
@@ -236,6 +269,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleDeleteCourse = (c: CourseName) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Ders tanımları okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     Alert.alert('Dersi Sil', `"${c.name}" dersini silmek istediğinize emin misiniz?`, [
       { text: 'İptal', style: 'cancel' },
       {
@@ -255,6 +292,10 @@ export const ScheduleManageScreen: React.FC = () => {
 
   // Class handlers
   const handleOpenAddClass = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Şube tanımları okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     setEditingClass(null);
     setClassNameInput('');
     setClassDescInput('');
@@ -262,6 +303,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleOpenEditClass = (c: ClassItem) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Şube tanımları okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     setEditingClass(c);
     setClassNameInput(c.name);
     setClassDescInput(c.description || '');
@@ -288,6 +333,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleDeleteClass = (c: ClassItem) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Şube tanımları okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     Alert.alert(
       'Şubeyi Sil',
       `"${c.name}" şubesini ve bu şubeye ait tüm öğrenci ve ilişkili kayıtları silmek istediğinize emin misiniz?`,
@@ -312,6 +361,10 @@ export const ScheduleManageScreen: React.FC = () => {
 
   // Standard Slot handlers
   const handleOpenAddSlot = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Ders saatleri okul idaresi tarafından merkezi olarak belirlenir.');
+      return;
+    }
     setEditingSlot(null);
     const nextNum = slots.length > 0 ? Math.max(...slots.map((s) => s.slot_number)) + 1 : 1;
     setSlotNumInput(String(nextNum));
@@ -322,6 +375,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleOpenEditSlot = (s: LessonSlot) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Ders saatleri okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     setEditingSlot(s);
     setSlotNumInput(String(s.slot_number));
     setSlotNameInput(s.slot_name);
@@ -517,6 +574,21 @@ export const ScheduleManageScreen: React.FC = () => {
         onBack={() => navigation.goBack()}
       />
 
+      {/* Okul Yönetimi Kilit Bildirimi */}
+      {isSchoolTeacher && (
+        <View style={{ backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 12, padding: 12, marginHorizontal: 16, marginTop: 10, marginBottom: 4, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Ionicons name="lock-closed" size={22} color="#D97706" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#92400E' }}>
+              🔒 Okul Yönetim Koruması ({activeSchoolName})
+            </Text>
+            <Text style={{ fontSize: 11, color: '#B45309', marginTop: 2, lineHeight: 15 }}>
+              Dersler, şubeler, ders saatleri ve kademeler okul idaresi tarafından merkezi olarak belirlenmektedir. Öğretmenler bu alanlarda değişiklik yapamaz.
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* Main Tabs */}
       <View style={styles.tabBar}>
         <TouchableOpacity
@@ -581,7 +653,7 @@ export const ScheduleManageScreen: React.FC = () => {
         <View style={styles.tabContent}>
           <View style={styles.contentHeader}>
             <Text style={styles.sectionTitle}>Kayıtlı Ders Branşları</Text>
-            <Button title="Yeni Ders" icon="add" size="sm" onPress={handleOpenAddCourse} />
+            {!isSchoolTeacher && <Button title="Yeni Ders" icon="add" size="sm" onPress={handleOpenAddCourse} />}
           </View>
 
           <FlatList
@@ -600,20 +672,22 @@ export const ScheduleManageScreen: React.FC = () => {
                       <Text style={styles.itemSub}>Kod: {item.code}</Text>
                     ) : null}
                   </View>
-                  <View style={styles.itemActions}>
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => handleOpenEditCourse(item)}
-                    >
-                      <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => handleDeleteCourse(item)}
-                    >
-                      <Ionicons name="trash-outline" size={16} color={Colors.danger} />
-                    </TouchableOpacity>
-                  </View>
+                  {!isSchoolTeacher && (
+                    <View style={styles.itemActions}>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        onPress={() => handleOpenEditCourse(item)}
+                      >
+                        <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        onPress={() => handleDeleteCourse(item)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               </Card>
             )}
@@ -629,7 +703,7 @@ export const ScheduleManageScreen: React.FC = () => {
               <Text style={styles.sectionTitle}>Kayıtlı Şubeler ({classes.length})</Text>
               <Text style={styles.sectionSub}>Ders programı ve sınıf takibi için şube tanımları</Text>
             </View>
-            <Button title="Yeni Şube" icon="add" size="sm" onPress={handleOpenAddClass} />
+            {!isSchoolTeacher && <Button title="Yeni Şube" icon="add" size="sm" onPress={handleOpenAddClass} />}
           </View>
 
           {classes.length === 0 ? (
@@ -637,8 +711,8 @@ export const ScheduleManageScreen: React.FC = () => {
               icon="people-outline"
               title="Kayıtlı Şube Yok"
               description="Henüz hiçbir şube eklenmemiş. 'Yeni Şube' butonuna tıklayarak şube ekleyebilirsiniz."
-              actionTitle="Yeni Şube Ekle"
-              onAction={handleOpenAddClass}
+              actionTitle={isSchoolTeacher ? undefined : "Yeni Şube Ekle"}
+              onAction={isSchoolTeacher ? undefined : handleOpenAddClass}
             />
           ) : (
             <FlatList
@@ -663,22 +737,24 @@ export const ScheduleManageScreen: React.FC = () => {
                         </Text>
                       </View>
                     </View>
-                    <View style={styles.itemActions}>
-                      <TouchableOpacity
-                        style={styles.iconBtn}
-                        onPress={() => handleOpenEditClass(item)}
-                        accessibilityLabel="Düzenle"
-                      >
-                        <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.iconBtn}
-                        onPress={() => handleDeleteClass(item)}
-                        accessibilityLabel="Sil"
-                      >
-                        <Ionicons name="trash-outline" size={16} color={Colors.danger} />
-                      </TouchableOpacity>
-                    </View>
+                    {!isSchoolTeacher && (
+                      <View style={styles.itemActions}>
+                        <TouchableOpacity
+                          style={styles.iconBtn}
+                          onPress={() => handleOpenEditClass(item)}
+                          accessibilityLabel="Düzenle"
+                        >
+                          <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.iconBtn}
+                          onPress={() => handleDeleteClass(item)}
+                          accessibilityLabel="Sil"
+                        >
+                          <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                        </TouchableOpacity>
+                      </View>
+                    )}
                   </View>
                 </Card>
               )}
@@ -779,19 +855,21 @@ export const ScheduleManageScreen: React.FC = () => {
                   </View>
                   <Text style={styles.sectionSub}>Tüm günler için varsayılan zaman çizelgesi</Text>
                 </View>
-                <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                  {slots.length > 0 && (
-                    <TouchableOpacity
-                      style={styles.clearSlotsBtn}
-                      onPress={handleClearAllSlots}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                    >
-                      <Ionicons name="trash-outline" size={13} color={Colors.danger} />
-                      <Text style={styles.clearSlotsBtnText}>Temizle</Text>
-                    </TouchableOpacity>
-                  )}
-                  <Button title="Saat Ekle" icon="add" size="sm" onPress={handleOpenAddSlot} />
-                </View>
+                {!isSchoolTeacher && (
+                  <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                    {slots.length > 0 && (
+                      <TouchableOpacity
+                        style={styles.clearSlotsBtn}
+                        onPress={handleClearAllSlots}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                      >
+                        <Ionicons name="trash-outline" size={13} color={Colors.danger} />
+                        <Text style={styles.clearSlotsBtnText}>Temizle</Text>
+                      </TouchableOpacity>
+                    )}
+                    <Button title="Saat Ekle" icon="add" size="sm" onPress={handleOpenAddSlot} />
+                  </View>
+                )}
               </View>
 
               <FlatList
@@ -1081,7 +1159,7 @@ export const ScheduleManageScreen: React.FC = () => {
                 Yıllık planda takip edilecek kademeler ({gradeLevels.length} Seviye)
               </Text>
             </View>
-            <Button title="Yeni Düzey" icon="add" size="sm" onPress={handleOpenAddGrade} />
+            {!isSchoolTeacher && <Button title="Yeni Düzey" icon="add" size="sm" onPress={handleOpenAddGrade} />}
           </View>
 
           <FlatList
@@ -1100,20 +1178,22 @@ export const ScheduleManageScreen: React.FC = () => {
                     <Text style={styles.itemName}>{item.label}</Text>
                     <Text style={styles.itemSub}>Düzey Seviyesi: {item.level}</Text>
                   </View>
-                  <View style={styles.itemActions}>
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => handleOpenEditGrade(item)}
-                    >
-                      <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.iconBtn}
-                      onPress={() => handleDeleteGrade(item)}
-                    >
-                      <Ionicons name="trash-outline" size={16} color={Colors.danger} />
-                    </TouchableOpacity>
-                  </View>
+                  {!isSchoolTeacher && (
+                    <View style={styles.itemActions}>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        onPress={() => handleOpenEditGrade(item)}
+                      >
+                        <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        onPress={() => handleDeleteGrade(item)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               </Card>
             )}

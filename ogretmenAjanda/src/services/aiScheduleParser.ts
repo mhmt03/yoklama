@@ -167,18 +167,22 @@ export function extractPdfBookmarksFromBase64(base64Data: string): string[] {
     const teachers: string[] = [];
     let match: RegExpExecArray | null;
     while ((match = regex.exec(binary)) !== null) {
-      const decoded = decodePdfTitle(match[1]);
-      if (decoded && decoded.length >= 2 && !teachers.includes(decoded)) {
-        const lower = decoded.toLowerCase();
-        // İndeks, kapak veya içindekiler başlıklarını filtrele
-        if (
-          !lower.includes('içindekiler') &&
-          !lower.includes('kapak') &&
-          !lower.includes('index') &&
-          !lower.includes('çarşaf program') &&
-          !lower.includes('ders programı')
-        ) {
-          teachers.push(decoded);
+      let decoded = decodePdfTitle(match[1]);
+      if (decoded && decoded.length >= 2) {
+        // "by", "sn.", "sayın" gibi önekleri temizle (Örn: byMehmet Gündöner -> Mehmet Gündöner)
+        decoded = decoded.replace(/^(?:by|sn\.?|sayın)\s*/i, '').trim();
+        if (decoded.length >= 2 && !teachers.includes(decoded)) {
+          const lower = decoded.toLowerCase();
+          // İndeks, kapak veya içindekiler başlıklarını filtrele
+          if (
+            !lower.includes('içindekiler') &&
+            !lower.includes('kapak') &&
+            !lower.includes('index') &&
+            !lower.includes('çarşaf program') &&
+            !lower.includes('ders programı')
+          ) {
+            teachers.push(decoded);
+          }
         }
       }
     }
@@ -239,6 +243,17 @@ export function parseJsonLenient(raw: string): { data: any; repaired: boolean } 
   return { data: JSON.parse(fixed), repaired: true };
 }
 
+export interface ScheduleParseOptions {
+  extractTeachers?: boolean;
+  extractClasses?: boolean;
+  extractLessons?: boolean;
+  extractBellSchedule?: boolean;
+  extractScheduleItems?: boolean;
+  existingTeachers?: string[];
+  existingClasses?: string[];
+  existingLessons?: string[];
+}
+
 /**
  * Gemini AI ile çarşaf ders programı PDF veya görselini analiz ederek
  * okulun tüm öğretmen, sınıf, ders ve program omurgasını çıkarır.
@@ -250,8 +265,15 @@ export async function parseMasterScheduleWithAi(
   preferredModel = 'gemini-2.5-flash',
   schoolId?: string,
   onProgress?: (stageText: string) => void,
-  onModelChange?: (modelName: string) => void
+  onModelChange?: (modelName: string) => void,
+  options?: ScheduleParseOptions
 ): Promise<ParsedScheduleResult> {
+  const optTeachers = options?.extractTeachers ?? true;
+  const optClasses = options?.extractClasses ?? true;
+  const optLessons = options?.extractLessons ?? true;
+  const optBellSchedule = options?.extractBellSchedule ?? true;
+  const optScheduleItems = options?.extractScheduleItems ?? true;
+
   onModelChange?.(preferredModel);
   onProgress?.('Belge hazırlanıyor ve ön tarama yapılıyor...');
   const cleanApiKey = apiKey.trim();
@@ -261,9 +283,9 @@ export async function parseMasterScheduleWithAi(
   onProgress?.('Belge yapay zeka için taranabilir formata dönüştürülüyor...');
   const base64Data = await readUriAsBase64(fileUri);
 
-  // 1. PDF Yer İmlerini (Bookmark) tara
+  // 1. PDF Yer İmlerini (Bookmark) tara (Sadece öğretmen çıkarımı gerekliyse)
   let extractedBookmarks: string[] = [];
-  if (resolvedMime === 'application/pdf') {
+  if (resolvedMime === 'application/pdf' && optTeachers) {
     onProgress?.('📑 1. Adım: PDF yer imleri (bookmark) taranıyor...');
     extractedBookmarks = extractPdfBookmarksFromBase64(base64Data);
     if (extractedBookmarks.length > 0) {
@@ -281,68 +303,96 @@ Bu belgede her öğretmenin kendine ait bir sayfası vardır. Lütfen bu öğret
 `;
   }
 
-  const prompt = `
-Sen Türkiye'deki MEB okullarında kullanılan haftalık çarşaf ders programı (aSc Timetables, Bilsa vb.) belgelerini kusursuz çözen uzman bir yapay zekasın.
+  // Mevcut sistem verileri ipucu olarak prompt'a eklenir
+  let existingContextHint = '';
+  if (options?.existingClasses && options.existingClasses.length > 0) {
+    existingContextHint += `\nSİSTEMDE KAYITLI MEVCUT ŞUBELER (Öncelikli Kullan):\n${JSON.stringify(options.existingClasses)}\n`;
+  }
+  if (options?.existingTeachers && options.existingTeachers.length > 0) {
+    existingContextHint += `\nSİSTEMDE KAYITLI MEVCUT ÖĞRETMENLER (Öncelikli Kullan):\n${JSON.stringify(options.existingTeachers)}\n`;
+  }
+  if (options?.existingLessons && options.existingLessons.length > 0) {
+    existingContextHint += `\nSİSTEMDE KAYITLI MEVCUT DERSLER:\n${JSON.stringify(options.existingLessons)}\n`;
+  }
 
-Sana verilen belge çok sayfalı bir okul çarşaf ders programı PDF'i veya görselidir.
-Bu belgedeki TÜM SAYFALARI (1. sayfadan son sayfaya kadar) baştan sona eksiksiz inceleyeceksin.
-${bookmarkHint}
+  // Dinamik Prompt Oluşturma
+  let requestedSteps = '';
+  let jsonSchema = '{\n';
 
-AŞAĞIDAKİ ADIMLARI SIRASIYLA UYGULA VE TÜM VERİLERİ ÇÖZÜMLE:
-
---- 1. ADIM: ÖĞRETMENLERİN TESPİTİ ---
+  if (optTeachers) {
+    requestedSteps += `
+--- ÖĞRETMENLERİN TESPİTİ ---
 - Belgenin her sayfasında bir öğretmenin haftalık programı yer alır.
 - Sayfa yer imlerindeki (bookmark) isimleri ve her sayfanın üst/başlık kısmında yer alan "Adı Soyadı:", "Ad Soyadı:", "Öğretmen:" veya "Sayın:" ibaresinin yanındaki ismi oku.
-- Tüm sayfalardaki öğretmen isimlerini eksiksiz toplayıp "teachers" listesine ekle. Hiçbir sayfayı ve hiçbir öğretmeni atlama!
+- Tüm sayfalardaki öğretmen isimlerini eksiksiz toplayıp "teachers" listesine ekle.
+`;
+    jsonSchema += '  "teachers": ["Ahmet YILMAZ", "Fatma KAYA"],\n';
+  } else {
+    jsonSchema += '  "teachers": [],\n';
+  }
 
---- 2. ADIM: DERSLERİN VE ŞUBELERİN TESPİTİ (HER SAYFADAKİ DERS TABLOSU) ---
-- Her öğretmenin sayfasında (genellikle haftalık tablonun altında veya kenarında) o öğretmenin girdiği derslerin bir tablosu bulunur.
-- Bu tablonun sütun başlıkları şunlardır:
-  * "Ders Adı": Dersin açık ve tam adı (Örn: "Türk Dili ve Edebiyatı", "Matematik", "Fizik", "Görsel Sanatlar", "Beden Eğitimi ve Spor", "Biyoloji" vb.)
-  * "Ders": Dersin kısa kodu / kısaltması (Örn: "TDE", "MAT", "FİZ", "GÖRS", "BED", "BİY" vb.)
-  * "Sınıflar": Bu dersin verildiği sınıflar/şubeler (Örn: "9/A", "9/B", "10-C", "11/A, 11/B", "12/A" vb.)
-  * (Varsa) "Yer" / "Derslik": Sınıf/laboratuvar yeri
-  * (Varsa) "Hds" / "Saat": Haftalık ders saati
-- BU TABLODAN:
-  1. "Ders Adı" sütunundaki tüm benzersiz ders isimlerini toplayıp "lessons" listesine ekle (kısa kodları değil, açık isimleri yaz).
-  2. "Sınıflar" sütunundaki tüm sınıf ve şubeleri (örn: "9/A" -> "9-A", "10/B" -> "10-B") standart formatta "classes" listesine ekle.
-  3. "Ders" (kısa kod) ile "Ders Adı" (tam ad) arasındaki eşleşmeyi hafızana al.
+  if (optClasses || optLessons) {
+    requestedSteps += `
+--- DERSLERİN VE ŞUBELERİN TESPİTİ (HER SAYFADAKİ DERS TABLOSU) ---
+- Her öğretmenin sayfasındaki (tablonun altı/kenarındaki) "Ders Adı - Ders Kodu - Sınıflar" tablosunu oku:
+${optLessons ? '  * "Ders Adı" sütunundaki tüm açık ders isimlerini "lessons" listesine ekle.' : ''}
+${optClasses ? '  * "Sınıflar" sütunundaki tüm sınıf ve şubeleri (örn: "9/A" -> "9-A", "10-B") standart formatta "classes" listesine ekle.' : ''}
+`;
+    if (optClasses) jsonSchema += '  "classes": ["9-A", "9-B", "10-A", "10-B"],\n';
+    else jsonSchema += '  "classes": [],\n';
 
---- 3. ADIM: DERS GİRİŞ-ÇIKIŞ VE ZİL SAATLERİ (İLK ÖĞRETMENİN PROGRAMINDAN) ---
-- İlk öğretmenin program tablosunda veya sayfa saat başlığında yer alan ders saatlerini (1. Ders, 2. Ders...) ve saat aralıklarını (örn: "08:30 - 09:10", "09:25 - 10:05") oku ve "bellSchedule" listesine ekle.
+    if (optLessons) jsonSchema += '  "lessons": ["Türk Dili ve Edebiyatı", "Matematik", "Fizik"],\n';
+    else jsonSchema += '  "lessons": [],\n';
+  } else {
+    jsonSchema += '  "classes": [],\n  "lessons": [],\n';
+  }
 
---- 4. ADIM: HÜCRELERE BÖLÜNMÜŞ HAFTALIK DERS PROGRAMI (HER ÖĞRETMEN İÇİN) ---
+  if (optBellSchedule && optScheduleItems) {
+    requestedSteps += `
+--- DERS GİRİŞ-ÇIKIŞ VE ZİL SAATLERİ ---
+- İlk öğretmenin program tablosundaki saat aralıklarını (örn: "08:30 - 09:10") "bellSchedule" listesine ekle.
+`;
+    jsonSchema += '  "bellSchedule": [{ "period": 1, "time": "08:30 - 09:10" }],\n';
+  }
+
+  if (optScheduleItems) {
+    requestedSteps += `
+--- HÜCRELERE BÖLÜNMÜŞ HAFTALIK DERS PROGRAMI (HER ÖĞRETMEN İÇİN) ---
 - Her öğretmenin sayfasındaki hücrelere bölünmüş haftalık program tablosunu satır satır ve sütun sütun çöz:
   * Günler: Pazartesi (1), Salı (2), Çarşamba (3), Perşembe (4), Cuma (5).
   * Ders saatleri: 1, 2, 3, 4, 5, 6, 7, 8...
   * Her dolu hücrede bir şube (örn: "9/A" veya "10-B") ve bir ders kodu (örn: "MAT" veya "FİZ") yazar.
   * Şubeyi grade ("9") ve section ("A") olarak ayır.
-  * Hücredeki ders kodunu (örn: "MAT"), 2. Adımda okuduğun "Ders Adı" tablosundan eşleştirerek TAM ders adı olarak yaz (örn: "Matematik").
-  * Varsa derslik bilgisini "classroom" alanına ekle.
-- Her dolu ders hücresi için bir "scheduleItems" kaydı oluştur.
+  * ÇOK ÖNEMLİ KURAL (BİRDEN FAZLA DERS ANLATAN ÖĞRETMENLER):
+    1. Bir öğretmen birden fazla farklı ders okutuyor olabilir (Örn: Farklı sınıflara farklı dersler veya aynı sınıfa birden fazla branş dersi).
+    2. Hücredeki ders kodunu o öğretmenin sayfasındaki ders tablosundan kontrol ederek ilgili şube için TAM ders adı olarak yaz.
+  * Her dolu ders hücresi için bir "scheduleItems" kaydı oluştur.
+`;
+    jsonSchema += '  "scheduleItems": [\n    {\n      "teacherName": "Ahmet YILMAZ",\n      "grade": "9",\n      "section": "A",\n      "lessonName": "Matematik",\n      "dayOfWeek": 1,\n      "lessonHour": 1,\n      "classroom": "9-A"\n    }\n  ]\n';
+  } else {
+    requestedSteps += `
+--- DİKKAT: HIZ VE PERFORMANS KURALI ---
+- Bu analizde kullanıcı DERS PROGRAMI HÜCRELERİNİ TALEP ETMEMİŞTİR.
+- Zaman kazanmak ve işlemi saniyeler içinde tamamlamak için "scheduleItems" ÇÖZÜMLEMESİ YAPMA! "scheduleItems" alanını boş dizi [] bırak.
+`;
+    jsonSchema += '  "scheduleItems": []\n';
+  }
+
+  jsonSchema += '}';
+
+  const prompt = `
+Sen Türkiye'deki MEB okullarında kullanılan haftalık çarşaf ders programı (aSc Timetables, Bilsa vb.) belgelerini çözen uzman bir yapay zekasın.
+
+Sana verilen belge çok sayfalı bir okul çarşaf ders programı PDF'i veya görselidir.
+${bookmarkHint}
+${existingContextHint}
+
+KULLANICININ SEÇTİĞİ ANALİZ ADIMLARINI UYGULA VE JSON FORMATINDA DÖNÜŞTÜR:
+${requestedSteps}
 
 Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON yanıt üret. Markdown backtick veya açıklama yazma.
 
-{
-  "teachers": ["Ahmet YILMAZ", "Fatma KAYA"],
-  "classes": ["9-A", "9-B", "10-A", "10-B", "11-A", "12-A"],
-  "lessons": ["Türk Dili ve Edebiyatı", "Matematik", "Fizik", "Kimya", "Biyoloji"],
-  "bellSchedule": [
-    { "period": 1, "time": "08:30 - 09:10" },
-    { "period": 2, "time": "09:25 - 10:05" }
-  ],
-  "scheduleItems": [
-    {
-      "teacherName": "Ahmet YILMAZ",
-      "grade": "9",
-      "section": "A",
-      "lessonName": "Matematik",
-      "dayOfWeek": 1,
-      "lessonHour": 1,
-      "classroom": "9-A"
-    }
-  ]
-}
+${jsonSchema}
 `;
 
   const imagePart = {
@@ -391,7 +441,21 @@ Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON 
         },
       });
       const t0 = Date.now();
-      const result = await model.generateContent([prompt, imagePart]);
+      let result: any;
+      try {
+        result = await model.generateContent([prompt, imagePart]);
+      } catch (genErr: any) {
+        const genMsg = String(genErr?.message || '');
+        if (genMsg.includes('503') || genMsg.includes('overloaded') || genMsg.includes('429')) {
+          console.warn(LOG, `${currentModel} geçici yoğunluk (503/429) verdi. 3 saniye beklenip tekrar deneniyor...`);
+          onProgress?.(`⚠️ Google sunucuları anlık yoğun (${currentModel}), 3 saniye içinde tekrar deneniyor...`);
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+          result = await model.generateContent([prompt, imagePart]);
+        } else {
+          throw genErr;
+        }
+      }
+
       onProgress?.('Hücreler, öğretmenler ve ders tabloları çözümleniyor...');
       const textResponse = result.response.text().trim();
       console.log(LOG, `${currentModel} yanıt verdi: ${((Date.now() - t0) / 1000).toFixed(1)} sn, ${textResponse.length} karakter, finishReason=${result.response.candidates?.[0]?.finishReason}, usage=${JSON.stringify(result.response.usageMetadata)}`);
@@ -469,6 +533,7 @@ Lütfen aşağıdaki JSON şemasına BİREBİR uyarak sadece ve sadece saf JSON 
       console.warn(LOG, `${currentModel} başarısız:`, err?.message || err);
       const short = String(err?.message || 'Bilinmeyen hata').replace(/\s+/g, ' ').slice(0, 160);
       failures.push(`• ${currentModel}: ${short}`);
+      onProgress?.(`⚠️ ${currentModel} yanıt veremedi. Yedek model deneniyor...`);
     }
   }
 

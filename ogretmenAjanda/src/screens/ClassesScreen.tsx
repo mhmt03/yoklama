@@ -60,6 +60,7 @@ export const ClassesScreen: React.FC = () => {
   const [searchResults, setSearchResults] = useState<StudentWithClass[]>([]);
   const [allStudentsCache, setAllStudentsCache] = useState<StudentWithClass[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [isSchoolTeacher, setIsSchoolTeacher] = useState(false);
   const searchInputRef = useRef<TextInput>(null);
 
   const loadClasses = async () => {
@@ -69,7 +70,10 @@ export const ClassesScreen: React.FC = () => {
       let data = await getClasses();
 
       const role = await getActiveUserRole();
-      if (role === 'teacher' && active) {
+      const teacherInSchool = role === 'teacher' && !!active;
+      setIsSchoolTeacher(teacherInSchool);
+
+      if (teacherInSchool) {
         const teacherName = await getActiveTeacherName();
         if (teacherName) {
           const authIds = await getTeacherAuthorizedClassIds(active.id, teacherName);
@@ -139,6 +143,10 @@ export const ClassesScreen: React.FC = () => {
   };
 
   const handleOpenAdd = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Sınıf/şube ekleme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     setEditingClass(null);
     setClassNameInput('');
     setClassDescInput('');
@@ -146,6 +154,10 @@ export const ClassesScreen: React.FC = () => {
   };
 
   const handleOpenEdit = (c: ClassItem) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Şube düzenleme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     setEditingClass(c);
     setClassNameInput(c.name);
     setClassDescInput(c.description || '');
@@ -172,6 +184,10 @@ export const ClassesScreen: React.FC = () => {
   };
 
   const handleDeleteClass = (c: ClassItem) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Şube silme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     Alert.alert(
       'Tüm Sınıfı Sil ⚠️',
       `"${c.name}" şubesini ve bu şubeye ait TÜM öğrencileri, görüşleri, notları, quizleri ve ödevleri cihazınızdan kalıcı olarak silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!`,
@@ -296,14 +312,26 @@ export const ClassesScreen: React.FC = () => {
               </>
             )}
           </TouchableOpacity>
-          <Button
-            title="Şube Ekle"
-            icon="add"
-            size="sm"
-            onPress={handleOpenAdd}
-          />
+          {!isSchoolTeacher && (
+            <Button
+              title="Şube Ekle"
+              icon="add"
+              size="sm"
+              onPress={handleOpenAdd}
+            />
+          )}
         </View>
       </View>
+
+      {/* Okul Modu Bilgilendirme Rozeti */}
+      {isSchoolTeacher && (
+        <View style={{ backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE', borderRadius: 10, padding: 10, marginHorizontal: 16, marginBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Ionicons name="information-circle" size={18} color="#4F46E5" />
+          <Text style={{ fontSize: 11, color: '#312E81', flex: 1, fontWeight: '600' }}>
+            🏫 {activeSchool?.name || 'Okul'} modundasınız: Şube tanımlamaları okul idaresi tarafından merkezi olarak yönetilir.
+          </Text>
+        </View>
+      )}
 
       {/* Class List */}
       <FlatList
@@ -335,13 +363,15 @@ export const ClassesScreen: React.FC = () => {
                   </>
                 )}
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.emptyAddBtn}
-                onPress={handleOpenAdd}
-              >
-                <Ionicons name="add" size={17} color={Colors.primary} />
-                <Text style={styles.emptyAddBtnText}>Manuel Ekle</Text>
-              </TouchableOpacity>
+              {!isSchoolTeacher && (
+                <TouchableOpacity
+                  style={styles.emptyAddBtn}
+                  onPress={handleOpenAdd}
+                >
+                  <Ionicons name="add" size={17} color={Colors.primary} />
+                  <Text style={styles.emptyAddBtnText}>Manuel Ekle</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         }
@@ -385,18 +415,22 @@ export const ClassesScreen: React.FC = () => {
                       <Ionicons name="cloud-download-outline" size={17} color="#4F46E5" />
                     )}
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.iconBtn}
-                    onPress={() => handleOpenEdit(item)}
-                  >
-                    <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.iconBtn}
-                    onPress={() => handleDeleteClass(item)}
-                  >
-                    <Ionicons name="trash-outline" size={16} color={Colors.danger} />
-                  </TouchableOpacity>
+                  {!isSchoolTeacher && (
+                    <>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        onPress={() => handleOpenEdit(item)}
+                      >
+                        <Ionicons name="pencil" size={16} color={Colors.textSecondary} />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.iconBtn}
+                        onPress={() => handleDeleteClass(item)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={Colors.danger} />
+                      </TouchableOpacity>
+                    </>
+                  )}
                 </View>
               </View>
             </Card>

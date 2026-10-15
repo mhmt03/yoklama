@@ -89,7 +89,16 @@ if (!Directory.Exists(uploadsDir))
     Directory.CreateDirectory(uploadsDir);
 }
 
-app.UseStaticFiles(); // wwwroot sunumu
+// Statik dosya MIME tipleri (.apk ve .wasm desteği)
+var contentTypeProvider = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+contentTypeProvider.Mappings[".apk"] = "application/vnd.android.package-archive";
+contentTypeProvider.Mappings[".wasm"] = "application/wasm";
+
+app.UseDefaultFiles(); // index.html varsa kök dizinde otomatik aç
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = contentTypeProvider
+});  // wwwroot ve wwwroot/uploads sunumu
 
 // Swagger geliştirme ve testte açık
 app.UseSwagger();
@@ -106,13 +115,16 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Basit Canlılık / Health Check Ucu
-app.MapGet("/", () => Results.Ok(new
+// Canlılık / Health Check Ucu
+app.MapGet("/health", () => Results.Ok(new
 {
     status = "OK",
     service = "Öğretmen Ajandası Hibrit REST API",
     version = "1.0.0",
     docs = "/swagger"
 }));
+
+// SPA Yönlendirmesi: API veya dosya bulunamayan istekleri index.html'e yönlendirir
+app.MapFallbackToFile("index.html");
 
 app.Run();

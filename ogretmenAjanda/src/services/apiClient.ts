@@ -1,10 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-// Varsayılan API URL'i (Android Emulator için 10.0.2.2, iOS / Web için localhost, canlıda monsterasp.net)
-export const DEFAULT_API_URL = Platform.OS === 'android' 
-  ? 'http://10.0.2.2:5079/api' 
-  : 'http://localhost:5079/api';
+// Varsayılan API URL'i: Canlı mobil uygulama ve canlı web için ogretmenajanda.runasp.net
+export const DEFAULT_API_URL = Platform.OS === 'web' && typeof window !== 'undefined' && !['8081', '19006'].includes(window.location.port)
+  ? `${window.location.origin}/api`
+  : 'http://ogretmenajanda.runasp.net/api';
 
 
 const TOKEN_KEY = '@ogretmen_ajanda_jwt_token';

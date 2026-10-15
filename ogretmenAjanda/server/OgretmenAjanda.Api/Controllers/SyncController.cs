@@ -525,13 +525,279 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(items);
         }
 
-        // 5. Yıllık Planları Toplu Kaydet (Admin AI ile yükler)
+        // 4.1 Tek Bir Ders Programı Hücresini Güncelle / Ekle
+        [HttpPost("schedules/item")]
+        public async Task<IActionResult> SaveSingleScheduleItem([FromBody] SingleScheduleItemRequest request)
+        {
+            var school = await _context.Schools.FindAsync(request.SchoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            ScheduleItem? item = null;
+            if (request.Id.HasValue && request.Id.Value != Guid.Empty)
+            {
+                item = await _context.ScheduleItems.FirstOrDefaultAsync(s => s.Id == request.Id.Value && s.SchoolId == request.SchoolId);
+            }
+
+            if (item == null)
+            {
+                item = await _context.ScheduleItems.FirstOrDefaultAsync(s =>
+                    s.SchoolId == request.SchoolId &&
+                    s.Grade == request.Grade &&
+                    s.Section == request.Section &&
+                    s.DayOfWeek == request.DayOfWeek &&
+                    s.LessonHour == request.LessonHour);
+            }
+
+            // Eğer ders adı boşsa veya temizlenmek isteniyorsa, sil
+            if (string.IsNullOrWhiteSpace(request.LessonName))
+            {
+                if (item != null)
+                {
+                    _context.ScheduleItems.Remove(item);
+                    await _context.SaveChangesAsync();
+                }
+                return Ok(new { success = true, action = "deleted", message = "Ders saati boşaltıldı." });
+            }
+
+            if (item != null)
+            {
+                item.TeacherName = request.TeacherName?.Trim();
+                item.LessonName = request.LessonName.Trim();
+                item.Classroom = request.Classroom?.Trim();
+                item.Grade = request.Grade.Trim();
+                item.Section = request.Section.Trim().ToUpper();
+                item.DayOfWeek = request.DayOfWeek;
+                item.LessonHour = request.LessonHour;
+            }
+            else
+            {
+                item = new ScheduleItem
+                {
+                    Id = Guid.NewGuid(),
+                    SchoolId = request.SchoolId,
+                    TeacherName = request.TeacherName?.Trim(),
+                    LessonName = request.LessonName.Trim(),
+                    Classroom = request.Classroom?.Trim(),
+                    Grade = request.Grade.Trim(),
+                    Section = request.Section.Trim().ToUpper(),
+                    DayOfWeek = request.DayOfWeek,
+                    LessonHour = request.LessonHour
+                };
+                _context.ScheduleItems.Add(item);
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, action = "saved", item });
+        }
+
+        // 4.2 Tek Bir Ders Programı Hücresini Sil
+        [HttpDelete("schedules/item")]
+        public async Task<IActionResult> DeleteSingleScheduleItem(
+            [FromQuery] Guid schoolId,
+            [FromQuery] Guid? id,
+            [FromQuery] string? grade,
+            [FromQuery] string? section,
+            [FromQuery] int? dayOfWeek,
+            [FromQuery] int? lessonHour)
+        {
+            ScheduleItem? item = null;
+            if (id.HasValue && id.Value != Guid.Empty)
+            {
+                item = await _context.ScheduleItems.FirstOrDefaultAsync(s => s.Id == id.Value && s.SchoolId == schoolId);
+            }
+            else if (!string.IsNullOrEmpty(grade) && !string.IsNullOrEmpty(section) && dayOfWeek.HasValue && lessonHour.HasValue)
+            {
+                item = await _context.ScheduleItems.FirstOrDefaultAsync(s =>
+                    s.SchoolId == schoolId &&
+                    s.Grade == grade &&
+                    s.Section == section &&
+                    s.DayOfWeek == dayOfWeek.Value &&
+                    s.LessonHour == lessonHour.Value);
+            }
+
+            if (item == null) return NotFound(new { message = "Silinecek ders hücresi bulunamadı." });
+
+            _context.ScheduleItems.Remove(item);
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, message = "Ders hücresi silindi." });
+        }
+
+        // 4.3 Sadece Bir Öğretmenin Haftalık Programını Yenile (Tek Öğretmen Çarşaf / Fotoğraf Okuma Çıktısı)
+        [HttpPost("schedules/teacher-replace")]
+        public async Task<IActionResult> ReplaceTeacherSchedule([FromBody] TeacherScheduleReplaceRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.TeacherName))
+                return BadRequest(new { message = "Öğretmen adı belirtilmelidir." });
+
+            var tName = request.TeacherName.Trim().ToLower();
+
+            // Öğretmenin mevcut program satırlarını kaldır
+            var oldRows = await _context.ScheduleItems
+                .Where(s => s.SchoolId == request.SchoolId && s.TeacherName != null && s.TeacherName.ToLower() == tName)
+                .ToListAsync();
+
+            if (oldRows.Any())
+            {
+                _context.ScheduleItems.RemoveRange(oldRows);
+            }
+
+            // Yeni program satırlarını ekle
+            int added = 0;
+            if (request.Schedules != null && request.Schedules.Count > 0)
+            {
+                foreach (var sch in request.Schedules)
+                {
+                    _context.ScheduleItems.Add(new ScheduleItem
+                    {
+                        Id = Guid.NewGuid(),
+                        SchoolId = request.SchoolId,
+                        TeacherName = request.TeacherName.Trim(),
+                        DayOfWeek = sch.DayOfWeek,
+                        LessonHour = sch.LessonHour,
+                        Grade = sch.Grade.Trim(),
+                        Section = sch.Section.Trim().ToUpper(),
+                        LessonName = sch.LessonName.Trim(),
+                        Classroom = sch.Classroom?.Trim()
+                    });
+                    added++;
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, message = $"{request.TeacherName} için {added} ders saati başarıyla güncellendi." });
+        }
+
+        // 4.4 Okul Ders Programı Doğruluk, Doluluk & Çakışma Denetimi (OCR Kontrol Özeti)
+        [HttpGet("schedules/stats")]
+        public async Task<IActionResult> GetScheduleStats([FromQuery] Guid schoolId, [FromQuery] int dailyHours = 8)
+        {
+            var registeredClasses = await _context.SchoolClasses
+                .Where(c => c.SchoolId == schoolId)
+                .OrderBy(c => c.Grade).ThenBy(c => c.Section)
+                .ToListAsync();
+
+            var registeredTeachers = await _context.Users
+                .Where(u => u.SchoolId == schoolId && (u.Role == "TEACHER" || u.Role == "STAFF"))
+                .ToListAsync();
+
+            var schedules = await _context.ScheduleItems
+                .Where(s => s.SchoolId == schoolId)
+                .ToListAsync();
+
+            int weeklySlotsPerClass = dailyHours * 5;
+            int totalExpectedSlots = registeredClasses.Count * weeklySlotsPerClass;
+
+            // Şube bazlı doluluk
+            var classFullnessList = new List<object>();
+            foreach (var cls in registeredClasses)
+            {
+                var classSlots = schedules.Where(s => s.Grade == cls.Grade && s.Section == cls.Section).ToList();
+                int filledCount = classSlots.Count;
+                int missingCount = Math.Max(0, weeklySlotsPerClass - filledCount);
+                double percent = weeklySlotsPerClass > 0 ? Math.Round((double)filledCount / weeklySlotsPerClass * 100, 1) : 0;
+
+                classFullnessList.Add(new
+                {
+                    grade = cls.Grade,
+                    section = cls.Section,
+                    className = $"{cls.Grade}-{cls.Section}",
+                    filledCount,
+                    expectedCount = weeklySlotsPerClass,
+                    missingCount,
+                    percent,
+                    isFullyFilled = filledCount >= weeklySlotsPerClass
+                });
+            }
+
+            // Çakışma Kontrolleri
+            var conflicts = new List<object>();
+
+            // 1. Öğretmen Çakışması: Aynı öğretmen aynı gün ve aynı saatte birden fazla sınıfta
+            var teacherGroups = schedules
+                .Where(s => !string.IsNullOrEmpty(s.TeacherName))
+                .GroupBy(s => new { Teacher = s.TeacherName!.ToLower().Trim(), s.DayOfWeek, s.LessonHour })
+                .Where(g => g.Count() > 1);
+
+            foreach (var tg in teacherGroups)
+            {
+                var items = tg.ToList();
+                var first = items.First();
+                var conflictingClasses = string.Join(", ", items.Select(i => $"{i.Grade}-{i.Section} ({i.LessonName})"));
+                conflicts.Add(new
+                {
+                    type = "TEACHER_CONFLICT",
+                    title = "Öğretmen Çakışması",
+                    teacherName = first.TeacherName,
+                    dayOfWeek = first.DayOfWeek,
+                    lessonHour = first.LessonHour,
+                    description = $"{first.TeacherName} adlı öğretmen {first.DayOfWeek}. gün {first.LessonHour}. saatte birden fazla sınıfta görünüyor: {conflictingClasses}"
+                });
+            }
+
+            // 2. Sınıf Çakışması: Aynı sınıfta aynı gün ve aynı saatte birden fazla ders/öğretmen
+            var classGroups = schedules
+                .GroupBy(s => new { Grade = s.Grade.Trim(), Section = s.Section.Trim().ToUpper(), s.DayOfWeek, s.LessonHour })
+                .Where(g => g.Count() > 1);
+
+            foreach (var cg in classGroups)
+            {
+                var items = cg.ToList();
+                var first = items.First();
+                var conflictingDetails = string.Join(", ", items.Select(i => $"{i.LessonName} - {i.TeacherName}"));
+                conflicts.Add(new
+                {
+                    type = "CLASS_CONFLICT",
+                    title = "Şube Çakışması",
+                    className = $"{first.Grade}-{first.Section}",
+                    dayOfWeek = first.DayOfWeek,
+                    lessonHour = first.LessonHour,
+                    description = $"{first.Grade}-{first.Section} şubesinde {first.DayOfWeek}. gün {first.LessonHour}. saatte birden fazla ders tanımlanmış: {conflictingDetails}"
+                });
+            }
+
+            return Ok(new
+            {
+                totalRegisteredClasses = registeredClasses.Count,
+                totalRegisteredTeachers = registeredTeachers.Count,
+                dailyHours,
+                weeklyHoursPerClass = weeklySlotsPerClass,
+                totalActualSlots = schedules.Count,
+                totalExpectedSlots,
+                overallFillPercent = totalExpectedSlots > 0 ? Math.Round((double)schedules.Count / totalExpectedSlots * 100, 1) : 0,
+                classesWithSchedule = schedules.Select(s => $"{s.Grade}-{s.Section}").Distinct().Count(),
+                teachersWithSchedule = schedules.Where(s => !string.IsNullOrEmpty(s.TeacherName)).Select(s => s.TeacherName!.ToLower().Trim()).Distinct().Count(),
+                conflictsCount = conflicts.Count,
+                conflicts,
+                classFullness = classFullnessList
+            });
+        }
+
+        // 5. Yıllık Planları Toplu Kaydet (Admin AI veya Excel Şablonu ile yükler)
         [HttpPost("yearly-plans/batch")]
         public async Task<IActionResult> BatchSyncYearlyPlans([FromBody] BatchYearlyPlanSyncRequest request)
         {
+            if (request.PlanItems == null || request.PlanItems.Count == 0)
+            {
+                return BadRequest(new { message = "Kaydedilecek plan satırı bulunamadı." });
+            }
+
+            // Eğer OverwriteExisting true ise, bu ders/kademelere ait mevcut satırları temizle
+            if (request.OverwriteExisting)
+            {
+                var lessonNames = request.PlanItems.Select(p => p.LessonName.Trim().ToLower()).Distinct().ToList();
+                var oldItems = await _context.YearlyPlanItems
+                    .Where(p => p.SchoolId == request.SchoolId && lessonNames.Contains(p.LessonName.ToLower()))
+                    .ToListAsync();
+
+                if (oldItems.Any())
+                {
+                    _context.YearlyPlanItems.RemoveRange(oldItems);
+                }
+            }
+
             foreach (var item in request.PlanItems)
             {
-                var existing = await _context.YearlyPlanItems
+                var existing = request.OverwriteExisting ? null : await _context.YearlyPlanItems
                     .FirstOrDefaultAsync(p => p.SchoolId == request.SchoolId &&
                                               p.LessonName == item.LessonName &&
                                               p.Grade == item.Grade &&
@@ -541,6 +807,8 @@ namespace OgretmenAjanda.Api.Controllers
                 {
                     existing.Subject = item.Subject;
                     existing.LearningOutcomes = item.LearningOutcomes;
+                    if (item.StartDate.HasValue) existing.StartDate = item.StartDate;
+                    if (item.EndDate.HasValue) existing.EndDate = item.EndDate;
                 }
                 else
                 {
@@ -551,6 +819,8 @@ namespace OgretmenAjanda.Api.Controllers
                         LessonName = item.LessonName,
                         Grade = item.Grade,
                         WeekNumber = item.WeekNumber,
+                        StartDate = item.StartDate,
+                        EndDate = item.EndDate,
                         Subject = item.Subject,
                         LearningOutcomes = item.LearningOutcomes
                     });
@@ -559,7 +829,33 @@ namespace OgretmenAjanda.Api.Controllers
 
             await _context.SaveChangesAsync();
             await LogActionAsync(request.SchoolId, "BATCH_YEARLY_PLANS_SYNCED", "YearlyPlanItem", null, $"{request.PlanItems.Count} adet haftalık yıllık plan kaydı sisteme yüklendi.");
-            return Ok(new { message = "Yıllık planlar başarıyla kaydedildi." });
+            return Ok(new { message = "Yıllık planlar başarıyla kaydedildi.", count = request.PlanItems.Count });
+        }
+
+        // 5.1 Yıllık Planı Sil (Ders veya Kademe Bazında)
+        [HttpDelete("yearly-plans")]
+        public async Task<IActionResult> DeleteYearlyPlans([FromQuery] Guid schoolId, [FromQuery] string? lessonName, [FromQuery] string? grade)
+        {
+            var query = _context.YearlyPlanItems.Where(p => p.SchoolId == schoolId);
+
+            if (!string.IsNullOrWhiteSpace(lessonName))
+            {
+                var normLesson = lessonName.Trim().ToLower();
+                query = query.Where(p => p.LessonName.ToLower() == normLesson || p.LessonName.ToLower().Contains(normLesson) || normLesson.Contains(p.LessonName.ToLower()));
+            }
+
+            if (!string.IsNullOrWhiteSpace(grade))
+            {
+                var normGrade = grade.Trim().ToLower();
+                query = query.Where(p => p.Grade.ToLower() == normGrade);
+            }
+
+            var toDelete = await query.ToListAsync();
+            _context.YearlyPlanItems.RemoveRange(toDelete);
+            await _context.SaveChangesAsync();
+
+            await LogActionAsync(schoolId, "DELETE_YEARLY_PLANS", "YearlyPlanItem", null, $"{toDelete.Count} adet yıllık plan kaydı silindi ({lessonName ?? "Tüm Planlar"}).");
+            return Ok(new { message = $"{toDelete.Count} adet yıllık plan kaydı başarıyla silindi.", count = toDelete.Count });
         }
 
         // 6. Yıllık Planı Çek
