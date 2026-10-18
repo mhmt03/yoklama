@@ -16,6 +16,7 @@ export interface SingleTeacherScheduleItem {
   grade: string; // 9, 10, 11...
   section: string; // A, B, C...
   lessonName: string;
+  lessonCode?: string; // MTMTK, S.MTMK, RHBYN vb.
   classroom?: string;
 }
 
@@ -59,34 +60,47 @@ export async function parseSingleTeacherScheduleWithAi(
   });
 
   const prompt = `
-Sen bir okul ders programı ve çizelge OCR uzmanısın.
+Sen bir MEB okul ders programı ve çizelge OCR uzmanısın.
 Ekteki görsel/belge "${teacherName}" adlı öğretmenin bireysel haftalık ders programıdır.
 
 GÖREVİN:
 Bu öğretmenin Pazartesi, Salı, Çarşamba, Perşembe ve Cuma günlerine ait ders saatlerini eksiksiz oku.
-Her ders hücresinde hangi gün, kaçıncı saat, hangi sınıfa (Örn: 9-A, 10-B, 11/C) ve hangi derse (Örn: Matematik, Fizik, Biyoloji) girdiği yazar.
+
+TABLO VE HÜCRE YAPISI (ÇOK ÖNEMLİ):
+1. TABLO HÜCRELERİNDE İKİ SATIR METİN BULUNUR:
+   - ÜST SATIR: Sınıf ve Şube (Örn: "9/E", "11/D", "10/A", "12/B").
+   - ALT SATIR: Dersin Kısaltma Kodu (Örn: "MTMTK", "S.MTMK", "RHBYN", "FZK", "TRH").
+2. DERS KODLARI VE AÇIK DERS ADLARI:
+   - Sayfanın altında veya yanındaki ders dağılım tablosunda ders kodlarının açık adları ve haftalık saatleri yazar:
+     Örnek: "MTMTK" -> "Matematik", "S.MTMK" -> "Seçmeli Matematik", "RHBYN" -> "Rehberlik ve Yönlendirme".
+   - "lessonCode" alanına hücredeki kısa kodu yaz (Örn: "MTMTK", "S.MTMK").
+   - "lessonName" alanına bu kodun açık ders adını yaz (Örn: "Matematik", "Seçmeli Matematik").
+3. ÇİFT KONTROL MEKANİZMASI:
+   - Bir hücre doluysa hem Sınıf (9/E) hem Ders Kodu (MTMTK) birlikte yer alır. Her ikisini de oku.
+   - Boş hücreler öğretmenin dersinin olmadığı saatlerdir; boş hücreler için kayıt oluşturma.
+   - Öğretmenin haftalık toplam ders saati, alttaki tablodaki saatlerin toplamıyla birebir eşit olmalıdır.
 
 DİKKAT EDİLECEK KURALLAR:
 1. "dayOfWeek" değerleri: 1 (Pazartesi), 2 (Salı), 3 (Çarşamba), 4 (Perşembe), 5 (Cuma). Hafta sonu varsa 6 (Cumartesi), 7 (Pazar).
 2. "lessonHour" değerleri: 1, 2, 3, 4, 5, 6, 7, 8... (Ders saati).
-3. "grade" ve "section" değerlerini ayır. Örneğin "10-C" için grade="10", section="C". Sadece kademe varsa grade="10", section="A" yap.
-4. "lessonName": Okutulan dersin adı (Örn: Matematik). Boş saatler için kayıt oluşturma.
-5. "classroom": Varsa derslik veya atölye adı.
+3. "grade" ve "section" değerlerini ayır. Örneğin "9/E" için grade="9", section="E". "11-D" için grade="11", section="D".
+4. "classroom": Varsa derslik veya atölye adı.
 
 Aşağıdaki JSON şemasında yanıt ver:
 {
   "teacherName": "${teacherName}",
   "totalHours": 24,
-  "classes": ["9-A", "10-B"],
-  "lessons": ["Matematik", "Geometri"],
+  "classes": ["9-E", "11-D"],
+  "lessons": ["Matematik", "Seçmeli Matematik"],
   "items": [
     {
       "teacherName": "${teacherName}",
       "dayOfWeek": 1,
       "lessonHour": 1,
       "grade": "9",
-      "section": "A",
+      "section": "E",
       "lessonName": "Matematik",
+      "lessonCode": "MTMTK",
       "classroom": ""
     }
   ]
@@ -123,6 +137,7 @@ Aşağıdaki JSON şemasında yanıt ver:
         grade: String(it.grade || '').trim(),
         section: String(it.section || '').trim().toUpperCase(),
         lessonName: String(it.lessonName || '').trim(),
+        lessonCode: it.lessonCode ? String(it.lessonCode).trim() : undefined,
         classroom: it.classroom ? String(it.classroom).trim() : undefined,
       })),
       rawSummary: `${parsed.items?.length || 0} ders saati tespit edildi.`,
@@ -163,6 +178,7 @@ export async function saveSingleScheduleItemToServer(payload: {
   grade: string;
   section: string;
   lessonName: string;
+  lessonCode?: string;
   classroom?: string;
 }): Promise<{ success: boolean; message: string; item?: any }> {
   const res = await apiRequest<any>('sync/schedules/item', 'POST', payload);
@@ -181,6 +197,7 @@ export async function deleteSingleScheduleItemFromServer(params: {
   id?: string;
   grade?: string;
   section?: string;
+  teacherName?: string;
   dayOfWeek?: number;
   lessonHour?: number;
 }): Promise<{ success: boolean; message: string }> {
@@ -189,6 +206,7 @@ export async function deleteSingleScheduleItemFromServer(params: {
     ...(params.id ? { id: params.id } : {}),
     ...(params.grade ? { grade: params.grade } : {}),
     ...(params.section ? { section: params.section } : {}),
+    ...(params.teacherName ? { teacherName: params.teacherName } : {}),
     ...(params.dayOfWeek !== undefined ? { dayOfWeek: String(params.dayOfWeek) } : {}),
     ...(params.lessonHour !== undefined ? { lessonHour: String(params.lessonHour) } : {}),
   }).toString();

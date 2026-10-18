@@ -55,4 +55,7 @@ publish/
 server/OgretmenAjanda.Api/publish/
 server/OgretmenAjanda.Api/wwwroot/*
 !server/OgretmenAjanda.Api/wwwroot/.gitkeep
+logs/
+*.log
+
 

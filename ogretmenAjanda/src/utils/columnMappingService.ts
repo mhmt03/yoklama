@@ -226,7 +226,7 @@ Yanıtını SADECE şu JSON şemasında döndür:
 
   const selectedModel = await getGeminiModel();
   const models = Array.from(
-    new Set([selectedModel, 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-3.8-flash'].filter(Boolean))
+    new Set([selectedModel, 'gemini-3-flash-preview', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'].filter(Boolean))
   );
 
   for (const model of models) {

@@ -19,6 +19,7 @@ import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context'
 import { Colors } from '../theme/colors';
 
 import { apiRequest, saveAuthToken, getActiveUserSession, clearAuthSession } from '../services/apiClient';
+import { logoutUserRole } from '../utils/roleService';
 import { fetchStudentPortalFeed } from '../services/syncService';
 
 interface StudentDashboardScreenProps {
@@ -110,16 +111,17 @@ export function StudentDashboardScreen({ onLogout }: StudentDashboardScreenProps
 
   const handleLogout = async () => {
     const doLogout = async () => {
-      await clearAuthSession();
+      await logoutUserRole();
       setSession(null);
       setFeed(null);
       onLogout();
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.reload();
+      }
     };
 
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm('Oturumunuz kapatılacaktır, emin misiniz?')) {
-        await doLogout();
-      }
+      await doLogout();
     } else {
       Alert.alert('Çıkış Yap', 'Oturumunuz kapatılacaktır, emin misiniz?', [
         { text: 'Vazgeç', style: 'cancel' },

@@ -141,6 +141,7 @@ export async function apiRequest<T = any>(
     }
 
     if (!response.ok) {
+      console.error(`[API HATA ${response.status}] ${method} ${url}:`, data?.message || data?.rawText || 'Detaysız yanıt');
       if (response.status === 401) {
         return {
           success: false,
@@ -155,6 +156,7 @@ export async function apiRequest<T = any>(
 
     return { success: true, data };
   } catch (err: any) {
+    console.error(`[API BAĞLANTI HATASI] ${method} ${endpoint}:`, err?.message || err);
     return {
       success: false,
       error: err.message || 'Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edin.',

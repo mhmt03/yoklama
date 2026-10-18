@@ -31,7 +31,16 @@ namespace OgretmenAjanda.Api.DTOs
         public string Grade { get; set; } = string.Empty;
         public string Section { get; set; } = string.Empty;
         public string LessonName { get; set; } = string.Empty;
+        public string? LessonCode { get; set; }
         public string? Classroom { get; set; }
+    }
+
+    public class BatchScheduleLessonDetail
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? Code { get; set; }
+        public int? WeeklyHours { get; set; }
+        public string? Grade { get; set; }
     }
 
     public class BatchScheduleSyncRequest
@@ -45,6 +54,7 @@ namespace OgretmenAjanda.Api.DTOs
         public List<string> Teachers { get; set; } = new();
         public List<string> Classes { get; set; } = new();
         public List<string> Lessons { get; set; } = new();
+        public List<BatchScheduleLessonDetail>? LessonDetails { get; set; } = new();
         public List<ScheduleSyncItem> Schedules { get; set; } = new();
     }
 
@@ -58,6 +68,7 @@ namespace OgretmenAjanda.Api.DTOs
         public string Grade { get; set; } = string.Empty;
         public string Section { get; set; } = string.Empty;
         public string LessonName { get; set; } = string.Empty;
+        public string? LessonCode { get; set; }
         public string? Classroom { get; set; }
     }
 

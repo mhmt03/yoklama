@@ -6,7 +6,7 @@ import { getActiveSchool } from '../database/operations/schoolOperations';
 import { readUriAsBase64 } from '../services/aiScheduleParser';
 
 // Varsayılan API Anahtarı (Kullanıcı dilerse buraya doğrudan tanımlayabilir veya uygulama içinden girebilir)
-export const DEFAULT_GEMINI_API_KEY = 'AQ.Ab8RN6Jo0l8xWLJabe72du_7hkSGRYm9miUkzxV0-ISPbqFC';
+export const DEFAULT_GEMINI_API_KEY = '';
 
 export interface AnalyzedLessonItem {
   day: number; // 1: Pazartesi .. 7: Pazar
@@ -311,7 +311,7 @@ export const resetGeminiUsageStats = async (schoolId?: string): Promise<void> =>
   await db.runAsync("DELETE FROM app_settings WHERE key LIKE 'gemini_usage_%'");
 };
 
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
 
 export interface GeminiModelInfo {
   id: string;
@@ -322,25 +322,20 @@ export interface GeminiModelInfo {
 
 export const PRESET_GEMINI_MODELS: GeminiModelInfo[] = [
   {
-    id: 'gemini-2.5-flash',
-    name: 'Gemini 2.5 Flash',
-    description: 'En hızlı, güncel ve Google tarafından önerilen model (Ücretsiz kota)',
+    id: 'gemini-flash-latest',
+    name: 'Gemini Flash (En Güncel)',
+    description: 'En hızlı, güncel ve kararlı multimodal model (Google Önerilen)',
     isRecommended: true,
   },
   {
-    id: 'gemini-2.0-flash',
-    name: 'Gemini 2.0 Flash',
-    description: 'Yüksek kararlılık ve düşük gecikmeli multimodal model',
+    id: 'gemini-flash-lite-latest',
+    name: 'Gemini Flash Lite (Hafif)',
+    description: 'Hızlı, ekonomik ve hafif model',
   },
   {
-    id: 'gemini-3.8-flash',
-    name: 'Gemini 3.8 Flash',
-    description: 'En son çıkan yeni nesil Flash modeli',
-  },
-  {
-    id: 'gemini-2.5-pro',
-    name: 'Gemini 2.5 Pro',
-    description: 'Karmaşık el yazısı ve yoğun tablolar için gelişmiş model',
+    id: 'gemini-pro-latest',
+    name: 'Gemini Pro (Derin Analiz)',
+    description: 'Karmaşık çarşaf tablolar için yüksek doğruluklu model',
   },
 ];
 
@@ -636,9 +631,10 @@ export const analyzeSchedulePhotoWithGemini = async (
   const selectedModel = await getGeminiModel();
   const candidateModels = [
     selectedModel,
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-3.8-flash',
+    'gemini-3-flash-preview',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
   ];
   const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
   let lastError: any = null;
@@ -866,9 +862,10 @@ JSON Şeması:
   const selectedModel = await getGeminiModel();
   const candidateModels = [
     selectedModel,
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-3.8-flash',
+    'gemini-3-flash-preview',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
   ];
   const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
   let lastError: any = null;
@@ -1038,9 +1035,10 @@ GÖREVLERİN:
   const selectedModel = await getGeminiModel();
   const candidateModels = [
     selectedModel,
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-3.8-flash',
+    'gemini-3-flash-preview',
+    'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
   ];
   const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
 

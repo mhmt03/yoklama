@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,8 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Colors } from '../theme/colors';
 import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession, getAuthToken } from '../services/apiClient';
 import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult, readUriAsBase64 } from '../services/aiScheduleParser';
+import { countPdfPages } from '../utils/pdfSliceService';
+import { extractStudentPhotosWithAi } from '../services/aiStudentPhotoExtractor';
 import { parseStudentsFromExcel, saveParsedStudentsToServer, ParsedExcelStudent, generateStudentTemplateExcel } from '../services/excelStudentParser';
 import { analyzeUploadedDocument, convertRowsWithMapping, DocumentAnalysisResult, ColumnMappingSelection, generateYearlyPlanTemplateExcel } from '../utils/columnMappingService';
 import {
@@ -35,6 +37,9 @@ import {
   exportYearlyPlanDetailsReport,
   exportAuditLogsReport,
   exportConsolidatedSchoolMasterExcel,
+  exportTeacherCredentialsReport,
+  exportStudentCredentialsReport,
+  exportParentCredentialsReport,
 } from '../services/adminReportService';
 import {
   parseSingleTeacherScheduleWithAi,
@@ -45,7 +50,7 @@ import {
   SingleTeacherScheduleItem,
 } from '../services/singleTeacherScheduleParser';
 import { getActiveSchool, updateSchool } from '../database/operations/schoolOperations';
-import { setActiveUserRole } from '../utils/roleService';
+import { setActiveUserRole, logoutUserRole } from '../utils/roleService';
 import { pickSinglePhotoFromSource } from '../utils/photoService';
 import {
   DEFAULT_GEMINI_API_KEY,
@@ -61,6 +66,7 @@ import {
   resetGeminiUsageStats,
   GeminiUsageStats,
 } from '../utils/geminiScheduleService';
+import { extractPhotosFromPdf } from '../utils/pdfPhotoExtractor';
 
 type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'logs' | 'messages' | 'reports' | 'ai_settings';
 
@@ -96,6 +102,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [geminiApiKeyInput, setGeminiApiKeyInput] = useState('');
   const [selectedGeminiModel, setSelectedGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
   const [availableLiveModels, setAvailableLiveModels] = useState<string[]>([]);
+  const [modelDropdownModalVisible, setModelDropdownModalVisible] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [testingGeminiKey, setTestingGeminiKey] = useState(false);
   const [fetchingLiveModels, setFetchingLiveModels] = useState(false);
   const [savingAiSettings, setSavingAiSettings] = useState(false);
@@ -121,9 +129,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [exportingLogs, setExportingLogs] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
-  // Menü ve Lisans Detay Modalları State
+  // Menü, Lisans ve Okul Seçim Modalları State
   const [menuDrawerVisible, setMenuDrawerVisible] = useState(false);
   const [licenseModalVisible, setLicenseModalVisible] = useState(false);
+  const [schoolSelectModalVisible, setSchoolSelectModalVisible] = useState(false);
 
   // Okul Düzenleme Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -193,6 +202,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [optExtractClasses, setOptExtractClasses] = useState(true);
   const [optExtractLessons, setOptExtractLessons] = useState(true);
   const [optExtractScheduleItems, setOptExtractScheduleItems] = useState(true);
+  const [optAutoHealBlocks, setOptAutoHealBlocks] = useState(false); // İsteğe bağlı: Parçalı yüklemede varsayılan kapalı!
+
+  // PDF Sayfa Bölme / Aralığı State
+  const [pdfTotalPages, setPdfTotalPages] = useState<number>(0);
+  const [pdfPageRangeMode, setPdfPageRangeMode] = useState<'all' | 'half1' | 'half2' | 'custom'>('all');
+  const [pdfStartPage, setPdfStartPage] = useState<string>('1');
+  const [pdfEndPage, setPdfEndPage] = useState<string>('1');
+  const [countingPdfPages, setCountingPdfPages] = useState<boolean>(false);
+
+  // 1.8 Detaylı Program Dağılımı & İstatistik Görünüm State
+  const [scheduleSubView, setScheduleSubView] = useState<'editor' | 'analytics'>('editor');
+  const [conflictSearchQuery, setConflictSearchQuery] = useState('');
+  const [analyticsSearchQuery, setAnalyticsSearchQuery] = useState('');
+  const [analyticsFilterType, setAnalyticsFilterType] = useState<'all' | 'conflicts' | 'missing' | 'teachers' | 'courses'>('all');
 
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiParsing, setAiParsing] = useState(false);
@@ -213,26 +236,22 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [excludedClasses, setExcludedClasses] = useState<string[]>([]);
   const [excludedLessons, setExcludedLessons] = useState<string[]>([]);
 
+  const aiCancelledRef = useRef(false);
+
+  const cancelScheduleAnalysis = () => {
+    aiCancelledRef.current = true;
+    setAiParsing(false);
+    setAiModalVisible(false);
+    setAiStageText('');
+    setAiElapsedSeconds(0);
+  };
+
   useEffect(() => {
     let interval: any;
     if (aiParsing) {
       setAiElapsedSeconds(0);
       interval = setInterval(() => {
-        setAiElapsedSeconds((prev) => {
-          const next = prev + 1;
-          if (next === 5) {
-            setAiStageText('📑 1. Adım: PDF sayfa yer imleri (bookmark) ve sayfa başlıkları taranıyor...');
-          } else if (next === 20) {
-            setAiStageText('👨‍🏫 2. Adım: Her sayfadaki "Adı Soyadı" ile öğretmen kadrosu doğrulanıyor...');
-          } else if (next === 45) {
-            setAiStageText('📚 3. Adım: "Ders Adı", "Ders" (kod) ve "Sınıflar" tablosundan tüm branşlar ve şubeler çıkarılıyor...');
-          } else if (next === 80) {
-            setAiStageText('⏰ 4. Adım: İlk öğretmenin programından okulun giriş-çıkış ve ders saatleri belirleniyor...');
-          } else if (next === 120) {
-            setAiStageText('🗓️ 5. Adım: Hücrelere bölünmüş haftalık ders tablolarından tüm program çözümleniyor...');
-          }
-          return next;
-        });
+        setAiElapsedSeconds((prev) => prev + 1);
       }, 1000);
     } else {
       setAiElapsedSeconds(0);
@@ -301,12 +320,58 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [loadingScheduleStats, setLoadingScheduleStats] = useState(false);
   const [scheduleDailyHours, setScheduleDailyHours] = useState(8);
 
+  // İstatistik Filtreleme ve Türkçe Uyumlu Arama/Eşleştirme Yardımcıları
+  const normalizeSearchStr = (str?: string | null): string => {
+    if (!str) return '';
+    return str
+      .trim()
+      .replace(/İ/g, 'i')
+      .replace(/I/g, 'ı')
+      .toLocaleLowerCase('tr-TR')
+      .replace(/\s+/g, ' ');
+  };
+
+  const normalizeTeacherMatch = (name1?: string | null, name2?: string | null): boolean => {
+    if (!name1 || !name2) return false;
+    return normalizeSearchStr(name1) === normalizeSearchStr(name2);
+  };
+
+  const filteredTeacherWorkloads = useMemo(() => {
+    const list = scheduleStats?.teacherWorkloads || [];
+    if (!analyticsSearchQuery.trim()) return list;
+    const q = normalizeSearchStr(analyticsSearchQuery);
+    return list.filter((t: any) =>
+      normalizeSearchStr(t.teacherName).includes(q) ||
+      t.classes?.some((c: string) => normalizeSearchStr(c).includes(q)) ||
+      t.lessons?.some((l: string) => normalizeSearchStr(l).includes(q))
+    );
+  }, [scheduleStats?.teacherWorkloads, analyticsSearchQuery]);
+
+  const filteredClassFullness = useMemo(() => {
+    const list = scheduleStats?.classFullness || [];
+    if (!analyticsSearchQuery.trim()) return list;
+    const q = normalizeSearchStr(analyticsSearchQuery);
+    return list.filter((c: any) => normalizeSearchStr(c.className).includes(q));
+  }, [scheduleStats?.classFullness, analyticsSearchQuery]);
+
+  const filteredCourseAllocations = useMemo(() => {
+    const list = scheduleStats?.courseAllocations || [];
+    if (!analyticsSearchQuery.trim()) return list;
+    const q = normalizeSearchStr(analyticsSearchQuery);
+    return list.filter((a: any) =>
+      normalizeSearchStr(a.lessonName).includes(q) ||
+      normalizeSearchStr(a.className).includes(q) ||
+      normalizeSearchStr(a.teacherName).includes(q)
+    );
+  }, [scheduleStats?.courseAllocations, analyticsSearchQuery]);
+
   // 1.5 Canlı İnteraktif Program Düzenleyici State
   const [scheduleEditorMode, setScheduleEditorMode] = useState<'class' | 'teacher'>('class');
   const [selectedClassForEditor, setSelectedClassForEditor] = useState<string>('');
   const [selectedTeacherForEditor, setSelectedTeacherForEditor] = useState<string>('');
   const [allSchoolSchedules, setAllSchoolSchedules] = useState<any[]>([]);
   const [loadingAllSchedules, setLoadingAllSchedules] = useState(false);
+  const [scheduleResetModalVisible, setScheduleResetModalVisible] = useState(false);
 
   // 1.6 Hücre Slot Düzenleme Modalı State
   const [slotModalVisible, setSlotModalVisible] = useState(false);
@@ -318,9 +383,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     section: string;
     teacherName: string;
     lessonName: string;
+    lessonCode?: string;
     classroom?: string;
   } | null>(null);
   const [savingSlot, setSavingSlot] = useState(false);
+  const [slotLessonSearchQuery, setSlotLessonSearchQuery] = useState('');
+  const [slotTeacherSearchQuery, setSlotTeacherSearchQuery] = useState('');
 
   // 1.7 Tek Öğretmen Fotoğraftan Program Okuma State
   const [singleTeacherParsing, setSingleTeacherParsing] = useState(false);
@@ -538,6 +606,195 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  const handleExportTeacherCredentials = async () => {
+    if (!selectedSchool) return;
+    setExportingReportType('teacher_credentials');
+    try {
+      await exportTeacherCredentialsReport({
+        school: selectedSchool,
+        teachers,
+        filterBranch: reportTeacherBranch,
+        filterRole: reportTeacherRole,
+      });
+    } catch (e: any) {
+      Alert.alert('Rapor Hatası', 'Öğretmen şifre raporu oluşturulamadı: ' + e.message);
+    } finally {
+      setExportingReportType(null);
+    }
+  };
+
+  const handleExportStudentCredentials = async () => {
+    if (!selectedSchool) return;
+    setExportingReportType('student_credentials');
+    try {
+      await exportStudentCredentialsReport({
+        school: selectedSchool,
+        students,
+        filterGrade: reportStudentGrade,
+        filterSection: reportStudentSection,
+        searchQuery: reportStudentSearch,
+      });
+    } catch (e: any) {
+      Alert.alert('Rapor Hatası', 'Öğrenci şifre raporu oluşturulamadı: ' + e.message);
+    } finally {
+      setExportingReportType(null);
+    }
+  };
+
+  const handleExportParentCredentials = async () => {
+    if (!selectedSchool) return;
+    setExportingReportType('parent_credentials');
+    try {
+      await exportParentCredentialsReport({
+        school: selectedSchool,
+        students,
+        filterGrade: reportStudentGrade,
+        filterSection: reportStudentSection,
+        searchQuery: reportStudentSearch,
+      });
+    } catch (e: any) {
+      Alert.alert('Rapor Hatası', 'Veli şifre raporu oluşturulamadı: ' + e.message);
+    } finally {
+      setExportingReportType(null);
+    }
+  };
+
+  const handlePickPdfAndExtractPhotos = async () => {
+    if (!selectedSchool) return;
+    try {
+      setBulkPhotoModalVisible(true);
+      setUploadingBulkPhotos(true);
+      setBulkPhotoProgress('e-Okul PDF belgesi seçiliyor ve taranıyor...');
+
+      const res = await extractPhotosFromPdf(students);
+      if (!res.success) {
+        setBulkPhotoModalVisible(false);
+        setUploadingBulkPhotos(false);
+        if (res.error && res.error !== 'Dosya seçilmedi.') {
+          Alert.alert('PDF Fotoğraf Hatası', res.error);
+        }
+        return;
+      }
+
+      const extracted = res.extractedPhotos || [];
+      if (extracted.length === 0) {
+        setBulkPhotoModalVisible(false);
+        setUploadingBulkPhotos(false);
+        Alert.alert('Fotoğraf Bulunamadı', 'Seçilen PDF belgesinde öğrenci numarası ile eşleşen fotoğraf tespit edilemedi.');
+        return;
+      }
+
+      const matched = extracted.filter(p => p.matchedStudent?.student_number || p.detectedNumber);
+      if (matched.length === 0) {
+        setBulkPhotoModalVisible(false);
+        setUploadingBulkPhotos(false);
+        Alert.alert('Fotoğraf Eşleşmedi', 'PDF içindeki fotoğraflar sistemdeki öğrenci numaralarıyla eşleşemedi.');
+        return;
+      }
+
+      setBulkPhotoProgress(`${matched.length} öğrenci fotoğrafı sunucuya aktarılıyor...`);
+
+      const photos: { studentNumber: string; photoBase64: string; fileName: string }[] = [];
+      for (const p of matched) {
+        const stdNo = p.matchedStudent?.student_number || p.detectedNumber;
+        if (!stdNo) continue;
+        try {
+          const b64 = await readUriAsBase64(p.tempUri);
+          photos.push({
+            studentNumber: stdNo,
+            photoBase64: `data:image/jpeg;base64,${b64}`,
+            fileName: `${stdNo}.jpg`,
+          });
+        } catch (err) {
+          console.warn('Fotoğraf okunamadı:', stdNo, err);
+        }
+      }
+
+      if (photos.length === 0) {
+        setBulkPhotoModalVisible(false);
+        setUploadingBulkPhotos(false);
+        Alert.alert('Hata', 'Fotoğraflar işlenemedi.');
+        return;
+      }
+
+      const apiRes = await apiRequest<{ updatedCount: number }>(`uploads/batch-student-photos?schoolId=${selectedSchool.id}`, 'POST', {
+        photos,
+      });
+
+      if (apiRes.success) {
+        Alert.alert('Tamamlandı 🎉', `${apiRes.data?.updatedCount || photos.length} öğrencinin fotoğrafı PDF'den başarıyla yüklendi.`);
+        loadStudents(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', apiRes.error || 'Fotoğraflar sunucuya kaydedilemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setUploadingBulkPhotos(false);
+      setBulkPhotoModalVisible(false);
+      setBulkPhotoProgress('');
+    }
+  };
+
+  const handlePickAndExtractPhotosWithAi = async () => {
+    if (!selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçiniz.');
+      return;
+    }
+    try {
+      const pickerResult = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/pdf',
+          'image/jpeg',
+          'image/png',
+          'image/*',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
+        return;
+      }
+
+      const file = pickerResult.assets[0];
+      setBulkPhotoModalVisible(true);
+      setUploadingBulkPhotos(true);
+      setBulkPhotoProgress('Yapay Zeka (Gemini Vision) ile öğrenci fotoğrafları taranıyor...');
+
+      const apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY).trim();
+      const model = (selectedGeminiModel || selectedSchool.geminiModel || (await getGeminiModel()) || DEFAULT_GEMINI_MODEL).trim();
+
+      const res = await extractStudentPhotosWithAi(
+        file.uri,
+        file.name,
+        file.mimeType || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+        students,
+        selectedSchool.id,
+        apiKey,
+        model,
+        (progressText) => setBulkPhotoProgress(progressText)
+      );
+
+      if (res.success) {
+        Alert.alert(
+          'AI Fotoğraf Çıkarımı Tamamlandı 🎉',
+          `${res.uploadedCount} öğrencinin fotoğrafı yapay zeka ile başarıyla tespit edilip sunucuya kaydedildi!`
+        );
+        loadStudents(selectedSchool.id);
+      } else {
+        Alert.alert('AI Fotoğraf Hatası', res.error || 'Fotoğraf analizi tamamlanamadı.');
+      }
+    } catch (e: any) {
+      console.error('[AI Foto UI Hata]:', e);
+      Alert.alert('Hata', e.message || 'Fotoğraf çıkarma işlemi başarısız.');
+    } finally {
+      setUploadingBulkPhotos(false);
+      setBulkPhotoModalVisible(false);
+      setBulkPhotoProgress('');
+    }
+  };
+
   // 1.4 Çarşaf Doğruluk, Doluluk & Sağlamlık Denetimi Fonksiyonları
   const loadScheduleStats = async (hours = scheduleDailyHours) => {
     if (!selectedSchool) return;
@@ -569,6 +826,112 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  const [autoReconciling, setAutoReconciling] = useState(false);
+  const [autoFillingGaps, setAutoFillingGaps] = useState(false);
+
+  const executeAutoReconcile = async (includeGaps: boolean) => {
+    if (!selectedSchool) return;
+    setAutoReconciling(true);
+    try {
+      const res = await apiRequest<{ success: boolean; movedCount: number; message: string; details?: string[] }>(
+        `sync/schedules/auto-reconcile?schoolId=${selectedSchool.id}&dailyHours=${scheduleDailyHours}&includeGaps=${includeGaps}`,
+        'POST'
+      );
+
+      if (res.success) {
+        const moved = res.data?.movedCount || 0;
+        if (moved > 0) {
+          const sampleDetails = (res.data?.details || []).slice(0, 6).join('\n• ');
+          Alert.alert(
+            '🎉 Dengeleme Tamamlandı',
+            `${res.data?.message}\n\nYapılan işlemlerden örnekler:\n• ${sampleDetails}${
+              (res.data?.details || []).length > 6 ? `\n... ve ${(res.data?.details || []).length - 6} işlem daha.` : ''
+            }`
+          );
+        } else {
+          Alert.alert('Bilgi', res.data?.message || 'Taşınabilecek çakışma veya eksik saat bulunamadı.');
+        }
+        loadScheduleStats();
+        loadAllSchedules();
+      } else {
+        Alert.alert('Hata', res.error || 'Dengeleme yapılamadı.');
+      }
+    } catch (err: any) {
+      Alert.alert('Hata', err.message || 'İşlem başarısız.');
+    } finally {
+      setAutoReconciling(false);
+    }
+  };
+
+  const handleAutoReconcileSchedule = () => {
+    if (!selectedSchool) return;
+
+    Alert.alert(
+      '⚡ Akıllı Dengeleme Seçenekleri',
+      'Şubelerdeki çakışmaları boş saatlere taşıyabilir ve isterseniz müfredata göre eksik kalan öğretmen derslerini de boşluklara otomatik olarak doldurabilirsiniz.\n\nHangi işlemi yapmak istiyorsunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sadece Çakışmaları Dengele',
+          onPress: () => executeAutoReconcile(false),
+        },
+        {
+          text: '🔥 Tümünü Dengele & Boşlukları Doldur',
+          onPress: () => executeAutoReconcile(true),
+        },
+      ]
+    );
+  };
+
+  const handleAutoFillGapsSchedule = async () => {
+    if (!selectedSchool) return;
+
+    Alert.alert(
+      '🧩 Boşlukları Doldur (Müfredat & Eksik Saatler)',
+      'Haftalık ders programında müfredata göre eksik saati kalmış öğretmenler ve dersler tespit edilecek, şubelerin boş ders saatlerine (özellikle ardışık 2 saatlik blok oluşturacak şekilde) yerleştirilecektir.\n\nİşlemi başlatmak istiyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Boşlukları Doldur',
+          onPress: async () => {
+            setAutoFillingGaps(true);
+            try {
+              const res = await apiRequest<{ success: boolean; placedCount: number; message: string; details?: string[] }>(
+                `sync/schedules/auto-fill-gaps?schoolId=${selectedSchool.id}&dailyHours=${scheduleDailyHours}`,
+                'POST'
+              );
+
+              if (res.success) {
+                const placed = res.data?.placedCount || 0;
+                if (placed > 0) {
+                  const sampleDetails = (res.data?.details || []).slice(0, 6).join('\n• ');
+                  Alert.alert(
+                    '🎉 Boşluklar Dolduruldu',
+                    `${res.data?.message}\n\nYerleştirilen derslerden örnekler:\n• ${sampleDetails}${
+                      (res.data?.details || []).length > 6 ? `\n... ve ${(res.data?.details || []).length - 6} ders daha.` : ''
+                    }`
+                  );
+                } else {
+                  Alert.alert('Bilgi', res.data?.message || 'Müfredata göre yerleştirilebilecek eksik ders bulunamadı.');
+                }
+                loadScheduleStats();
+                loadAllSchedules();
+              } else {
+                Alert.alert('Hata', res.error || 'İşlem tamamlanamadı.');
+              }
+            } catch (err: any) {
+              Alert.alert('Hata', err.message || 'İşlem başarısız.');
+            } finally {
+              setAutoFillingGaps(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const [slotConflictItems, setSlotConflictItems] = useState<any[]>([]);
+
   const handleOpenSlotModal = (params: {
     dayOfWeek: number;
     lessonHour: number;
@@ -576,8 +939,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     section?: string;
     teacherName?: string;
     existingItem?: any;
+    conflictingItems?: any[];
   }) => {
     const existing = params.existingItem;
+    setSlotConflictItems(params.conflictingItems || []);
     setEditingSlotData({
       id: existing?.id,
       dayOfWeek: params.dayOfWeek,
@@ -586,10 +951,111 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       section: existing?.section || params.section || (classes[0] ? classes[0].section : 'A'),
       teacherName: existing?.teacherName || params.teacherName || (teachers[0] ? teachers[0].fullName : ''),
       lessonName: existing?.lessonName || (lessons[0] ? lessons[0].name : ''),
+      lessonCode: existing?.lessonCode || '',
       classroom: existing?.classroom || '',
     });
+    setSlotLessonSearchQuery('');
+    setSlotTeacherSearchQuery('');
     setSlotModalVisible(true);
   };
+
+  const handleDeleteSpecificConflictItem = async (item: any) => {
+    if (!selectedSchool || !item) return;
+    Alert.alert(
+      'Çakışan Dersi Sil',
+      `"${item.lessonName} - ${item.teacherName || 'Öğretmen Belirtilmedi'}" dersini bu saatten (${item.dayOfWeek}. Gün ${item.lessonHour}. Saat) programdan kaldırmak istiyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sil',
+          style: 'destructive',
+          onPress: async () => {
+            setSavingSlot(true);
+            try {
+              const res = await deleteSingleScheduleItemFromServer({
+                schoolId: selectedSchool.id,
+                id: item.id,
+                grade: item.grade,
+                section: item.section,
+                teacherName: item.teacherName,
+                dayOfWeek: item.dayOfWeek,
+                lessonHour: item.lessonHour,
+              });
+
+              if (res.success) {
+                const remaining = slotConflictItems.filter(ci => ci.id !== item.id);
+                setSlotConflictItems(remaining);
+
+                if (remaining.length > 0) {
+                  const nextItem = remaining[0];
+                  setEditingSlotData({
+                    id: nextItem.id,
+                    dayOfWeek: nextItem.dayOfWeek,
+                    lessonHour: nextItem.lessonHour,
+                    grade: nextItem.grade,
+                    section: nextItem.section,
+                    teacherName: nextItem.teacherName || '',
+                    lessonName: nextItem.lessonName || '',
+                    lessonCode: nextItem.lessonCode || '',
+                    classroom: nextItem.classroom || '',
+                  });
+                } else {
+                  setSlotModalVisible(false);
+                }
+
+                await loadAllSchedules();
+                await loadScheduleStats();
+              } else {
+                Alert.alert('Hata', res.message || 'Çakışan ders silinemedi.');
+              }
+            } catch (err: any) {
+              Alert.alert('Hata', err.message || 'İşlem başarısız.');
+            } finally {
+              setSavingSlot(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Slot Modal için alfabetik tekilleştirilmiş dersler
+  const allAvailableLessons = useMemo(() => {
+    const lessonSet = new Set<string>();
+    lessons.forEach(l => {
+      if (l.name && l.name.trim()) lessonSet.add(l.name.trim());
+    });
+    allSchoolSchedules.forEach(s => {
+      if (s.lessonName && s.lessonName.trim()) lessonSet.add(s.lessonName.trim());
+    });
+    return Array.from(lessonSet).sort((a, b) => a.localeCompare(b, 'tr-TR'));
+  }, [lessons, allSchoolSchedules]);
+
+  // Slot Modal için alfabetik tekilleştirilmiş öğretmenler
+  const allAvailableTeachers = useMemo(() => {
+    const teacherSet = new Set<string>();
+    teachers.forEach(t => {
+      if (t.fullName && t.fullName.trim()) teacherSet.add(t.fullName.trim());
+    });
+    allSchoolSchedules.forEach(s => {
+      if (s.teacherName && s.teacherName.trim()) teacherSet.add(s.teacherName.trim());
+    });
+    return Array.from(teacherSet).sort((a, b) => a.localeCompare(b, 'tr-TR'));
+  }, [teachers, allSchoolSchedules]);
+
+  // Filtrelenmiş ders listesi
+  const filteredSlotLessons = useMemo(() => {
+    if (!slotLessonSearchQuery.trim()) return allAvailableLessons;
+    const q = normalizeSearchStr(slotLessonSearchQuery);
+    return allAvailableLessons.filter(l => normalizeSearchStr(l).includes(q));
+  }, [allAvailableLessons, slotLessonSearchQuery]);
+
+  // Filtrelenmiş öğretmen listesi
+  const filteredSlotTeachers = useMemo(() => {
+    if (!slotTeacherSearchQuery.trim()) return allAvailableTeachers;
+    const q = normalizeSearchStr(slotTeacherSearchQuery);
+    return allAvailableTeachers.filter(t => normalizeSearchStr(t).includes(q));
+  }, [allAvailableTeachers, slotTeacherSearchQuery]);
 
   const handleSaveSlot = async () => {
     if (!selectedSchool || !editingSlotData) return;
@@ -604,6 +1070,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         section: editingSlotData.section,
         teacherName: editingSlotData.teacherName,
         lessonName: editingSlotData.lessonName,
+        lessonCode: editingSlotData.lessonCode,
         classroom: editingSlotData.classroom,
       });
 
@@ -642,6 +1109,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 id: editingSlotData.id,
                 grade: editingSlotData.grade,
                 section: editingSlotData.section,
+                teacherName: editingSlotData.teacherName,
                 dayOfWeek: editingSlotData.dayOfWeek,
                 lessonHour: editingSlotData.lessonHour,
               });
@@ -741,8 +1209,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           setSelectedSchool(current);
           if (current.geminiApiKey) setGeminiApiKeyInput(current.geminiApiKey);
           else setGeminiApiKeyInput('');
-          if (current.geminiModel) setSelectedGeminiModel(current.geminiModel);
-          else setSelectedGeminiModel(DEFAULT_GEMINI_MODEL);
+          const validModel = current.geminiModel && !['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'].includes(current.geminiModel)
+            ? current.geminiModel
+            : DEFAULT_GEMINI_MODEL;
+          setSelectedGeminiModel(validModel);
           await loadAllSchoolData(current.id);
           try {
             const usage = await getGeminiUsageStats(current.id);
@@ -766,6 +1236,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       loadStudents(schoolId),
       loadAuditLogs(schoolId),
     ]);
+  };
+
+  const handleSelectSchool = async (s: any) => {
+    setSelectedSchool(s);
+    if (s.geminiApiKey) setGeminiApiKeyInput(s.geminiApiKey);
+    else setGeminiApiKeyInput('');
+    const validModel = s.geminiModel && !['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'].includes(s.geminiModel)
+      ? s.geminiModel
+      : DEFAULT_GEMINI_MODEL;
+    setSelectedGeminiModel(validModel);
+    await loadAllSchoolData(s.id);
+    try {
+      const usage = await getGeminiUsageStats(s.id);
+      setUsageStats(usage);
+    } catch { }
   };
 
   const loadTeachers = async (schoolId: string) => {
@@ -1414,17 +1899,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const setAllTeachersExcluded = (exclude: boolean) => {
     if (!parsedSchedule) return;
-    setExcludedTeachers(exclude ? [...parsedSchedule.teachers] : []);
+    setExcludedTeachers(exclude ? [...(parsedSchedule.teachers || [])] : []);
   };
 
   const setAllClassesExcluded = (exclude: boolean) => {
     if (!parsedSchedule) return;
-    setExcludedClasses(exclude ? [...parsedSchedule.classes] : []);
+    setExcludedClasses(exclude ? [...(parsedSchedule.classes || [])] : []);
   };
 
   const setAllLessonsExcluded = (exclude: boolean) => {
     if (!parsedSchedule) return;
-    setExcludedLessons(exclude ? [...parsedSchedule.lessons] : []);
+    setExcludedLessons(exclude ? [...(parsedSchedule.lessons || [])] : []);
   };
 
   const handlePickAndAnalyzeSchedule = async () => {
@@ -1445,8 +1930,45 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
       const file = pickerResult.assets[0];
       setPendingScheduleFile(file);
-      // Analiz öncesi seçenek modalını aç
-      setSchedulePreOptionsModalVisible(true);
+
+      // PDF ise sayfa sayısını otomatik tara
+      if (file.name?.toLowerCase().endsWith('.pdf') || file.mimeType?.includes('pdf')) {
+        setCountingPdfPages(true);
+        setPdfTotalPages(0);
+        setSchedulePreOptionsModalVisible(true);
+        try {
+          const b64 = await readUriAsBase64(file.uri);
+          const total = await countPdfPages(b64);
+          if (total > 0) {
+            setPdfTotalPages(total);
+            setPdfStartPage('1');
+            if (total > 35) {
+              setPdfPageRangeMode('half1');
+              setPdfEndPage(String(Math.ceil(total / 2)));
+            } else {
+              setPdfPageRangeMode('all');
+              setPdfEndPage(String(total));
+            }
+          } else {
+            setPdfTotalPages(0);
+            setPdfPageRangeMode('all');
+            setPdfStartPage('1');
+            setPdfEndPage('1');
+          }
+        } catch (cntErr) {
+          console.warn('PDF sayfa sayısı okunamadı (Tüm belge modu seçildi):', cntErr);
+          setPdfTotalPages(0);
+          setPdfPageRangeMode('all');
+          setPdfStartPage('1');
+          setPdfEndPage('1');
+        } finally {
+          setCountingPdfPages(false);
+        }
+      } else {
+        setPdfTotalPages(0);
+        setPdfPageRangeMode('all');
+        setSchedulePreOptionsModalVisible(true);
+      }
     } catch (error: any) {
       Alert.alert('Dosya Seçimi Hatası', error.message || 'Belge seçilemedi.');
     }
@@ -1483,6 +2005,18 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       }
     }
 
+    // Sayfa Aralığı Belirleme
+    let pageRange: { start: number; end: number } | undefined = undefined;
+    if (pdfTotalPages > 1 && pdfPageRangeMode !== 'all') {
+      const start = parseInt(pdfStartPage, 10) || 1;
+      const end = parseInt(pdfEndPage, 10) || pdfTotalPages;
+      pageRange = {
+        start: Math.max(1, Math.min(start, pdfTotalPages)),
+        end: Math.max(start, Math.min(end, pdfTotalPages)),
+      };
+    }
+
+    aiCancelledRef.current = false;
     setSchedulePreOptionsModalVisible(false);
     setAiModalVisible(true);
     setAiParsing(true);
@@ -1496,17 +2030,48 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setAiElapsedSeconds(0);
     setAiStageText(
       optExtractScheduleItems
-        ? 'Belge taranmaya hazırlanıyor (Tam Program Çözümleme)...'
+        ? (pageRange ? `Belge taranmaya hazırlanıyor (Sayfa ${pageRange.start}-${pageRange.end})...` : 'Belge taranmaya hazırlanıyor (Tam Program Çözümleme)...')
         : 'Belge taranmaya hazırlanıyor (Hızlı Kadro, Şube & Ders Analizi)...'
     );
 
     try {
-      const apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY).trim();
-      const model = (selectedGeminiModel || selectedSchool.geminiModel || (await getGeminiModel()) || DEFAULT_GEMINI_MODEL).trim();
+      let apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY || '').trim();
+      if (!apiKey || apiKey === 'AQ.Ab8RN6Jo0l8xWLJabe72du_7hkSGRYm9miUkzxV0-ISPbqFC') {
+        apiKey = DEFAULT_GEMINI_API_KEY;
+      }
+      if (!apiKey) {
+        setAiParsing(false);
+        setAiModalVisible(false);
+        Alert.alert(
+          'API Anahtarı Bulunamadı ⚠️',
+          'Yapay zeka ile çarşaf program analizi yapabilmek için okul ayarlarından veya genel ayarlardan geçerli bir Gemini API Anahtarı giriniz.'
+        );
+        return;
+      }
+
+      const rawModel = (selectedGeminiModel || selectedSchool.geminiModel || (await getGeminiModel()) || DEFAULT_GEMINI_MODEL).trim();
+      const model = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-3-flash-preview', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'].includes(rawModel) ? DEFAULT_GEMINI_MODEL : rawModel;
 
       const existingTeacherNames = teachers.map((t: any) => t.fullName || t.name).filter(Boolean);
       const existingClassNames = classes.map((c: any) => `${c.grade}-${c.section.toUpperCase()}`).filter(Boolean);
       const existingLessonNames = lessons.map((l: any) => l.name).filter(Boolean);
+
+      console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
+      console.log('║ 🚀 [ÇARŞAF PROGRAM] ANALİZ VE YÜKLEME İŞLEMİ BAŞLATILDI           ║');
+      console.log('╚═══════════════════════════════════════════════════════════════════╝');
+      console.log('[Çarşaf UI] Seçili Okul:', selectedSchool.name, '(ID:', selectedSchool.id, ')');
+      console.log('[Çarşaf UI] Dosya Adı:', pendingScheduleFile.name);
+      console.log('[Çarşaf UI] Dosya MIME:', pendingScheduleFile.mimeType || 'otomatik');
+      console.log('[Çarşaf UI] Dosya URI:', pendingScheduleFile.uri);
+      console.log('[Çarşaf UI] Kullanılacak AI Modeli:', model);
+      console.log('[Çarşaf UI] API Anahtarı Durumu:', apiKey ? `Mevcut (${apiKey.slice(0, 6)}...${apiKey.slice(-4)})` : '❌ BULUNAMADI!');
+      console.log('[Çarşaf UI] Seçilen Analiz Kriterleri:', {
+        öğretmenKadrosu: optExtractTeachers,
+        şubeler: optExtractClasses,
+        açıkDersler: optExtractLessons,
+        haftalıkProgramHücreleri: optExtractScheduleItems,
+        sayfaAralığı: pageRange ? `${pageRange.start}-${pageRange.end}` : 'Tüm Belge',
+      });
 
       const parsed = await parseMasterScheduleWithAi(
         pendingScheduleFile.uri,
@@ -1514,8 +2079,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         pendingScheduleFile.mimeType || (pendingScheduleFile.name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
         model,
         selectedSchool.id,
-        (msg) => setAiStageText(msg),
-        (m) => setAiActiveModel(m),
+        (msg) => {
+          console.log(`[Çarşaf UI Aşaması]: ${msg}`);
+          if (!aiCancelledRef.current) setAiStageText(msg);
+        },
+        (m) => {
+          console.log(`[Çarşaf UI Aktif Model Değişti]: ${m}`);
+          if (!aiCancelledRef.current) setAiActiveModel(m);
+        },
         {
           extractTeachers: optExtractTeachers,
           extractClasses: optExtractClasses,
@@ -1524,8 +2095,24 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           existingTeachers: existingTeacherNames,
           existingClasses: existingClassNames,
           existingLessons: existingLessonNames,
+          pageRange,
+          isCancelled: () => aiCancelledRef.current,
+          autoHealBlocks: optAutoHealBlocks,
         }
       );
+
+      if (aiCancelledRef.current) {
+        console.warn('[Çarşaf UI] Kullanıcı analizi iptal etti.');
+        return;
+      }
+
+      console.log('[Çarşaf UI] Analiz Başarılı! Çıkarılan Veri Özeti:', {
+        öğretmenler: (parsed?.teachers || []).length,
+        şubeler: (parsed?.classes || []).length,
+        dersler: (parsed?.lessons || []).length,
+        programSatırları: (parsed?.scheduleItems || []).length,
+        zilSaatleri: (parsed?.bellSchedule || []).length,
+      });
 
       setParsedSchedule(parsed);
       setSaveTeachersChecked(optExtractTeachers);
@@ -1539,7 +2126,13 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setUsageStats(usage);
       } catch {}
     } catch (error: any) {
-      Alert.alert('AI Ayrıştırma Hatası', error.message || 'Belge analiz edilemedi.');
+      if (aiCancelledRef.current) return;
+      console.error('\n❌ [ÇARŞAF UI ANALİZ HATASI]:', {
+        mesaj: error?.message || String(error),
+        stack: error?.stack,
+        hataNesnesi: error,
+      });
+      Alert.alert('AI Ayrıştırma Hatası', error?.message || String(error) || 'Belge analiz edilemedi.');
       setAiModalVisible(false);
     } finally {
       setAiParsing(false);
@@ -1549,23 +2142,26 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const executeSaveSchedule = async () => {
     if (!parsedSchedule || !selectedSchool) return;
 
-    const activeTeachers = parsedSchedule.teachers.filter((t) => !excludedTeachers.includes(t));
-    const activeClasses = parsedSchedule.classes.filter((c) => !excludedClasses.includes(c));
-    const activeLessons = parsedSchedule.lessons.filter((l) => !excludedLessons.includes(l));
+    const activeTeachers = (parsedSchedule.teachers || []).filter((t) => !(excludedTeachers || []).includes(t));
+    const activeClasses = (parsedSchedule.classes || []).filter((c) => !(excludedClasses || []).includes(c));
+    const activeLessons = (parsedSchedule.lessons || []).filter((l) => !(excludedLessons || []).includes(l));
 
     if (!saveTeachersChecked && !saveClassesChecked && !saveLessonsChecked && !saveScheduleChecked) {
       Alert.alert('Seçim Yapılmadı ⚠️', 'Lütfen sisteme aktarılacak en az bir veri türü (öğretmen, sınıf, ders veya program) seçiniz.');
       return;
     }
 
-    if (saveTeachersChecked && activeTeachers.length === 0 && parsedSchedule.teachers.length > 0) {
+    if (saveTeachersChecked && activeTeachers.length === 0 && (parsedSchedule.teachers || []).length > 0) {
       Alert.alert('Uyarı', 'Tüm öğretmenleri pasif yaptınız. Lütfen en az bir öğretmeni aktif bırakın veya Öğretmen Kadrosu onay kutusunu kaldırın.');
       return;
     }
 
-    const totalExcluded = excludedTeachers.length + excludedClasses.length + excludedLessons.length;
+    const exTeachersCount = (excludedTeachers || []).length;
+    const exClassesCount = (excludedClasses || []).length;
+    const exLessonsCount = (excludedLessons || []).length;
+    const totalExcluded = exTeachersCount + exClassesCount + exLessonsCount;
     const excludedSummary = totalExcluded > 0
-      ? `\n\n📌 Dikkat: Pasif yapılan ${excludedTeachers.length > 0 ? `${excludedTeachers.length} öğretmen, ` : ''}${excludedClasses.length > 0 ? `${excludedClasses.length} şube, ` : ''}${excludedLessons.length > 0 ? `${excludedLessons.length} ders ` : ''}ve bunlara ait ders saatleri veritabanına KAYDEDİLMEYECEKTİR.`
+      ? `\n\n📌 Dikkat: Pasif yapılan ${exTeachersCount > 0 ? `${exTeachersCount} öğretmen, ` : ''}${exClassesCount > 0 ? `${exClassesCount} şube, ` : ''}${exLessonsCount > 0 ? `${exLessonsCount} ders ` : ''}ve bunlara ait ders saatleri veritabanına KAYDEDİLMEYECEKTİR.`
       : '';
 
     if (scheduleSaveMode === 'overwrite') {
@@ -1592,16 +2188,18 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setAiSaving(true);
     try {
       // Pasif yapılan öğretmenleri, şubeleri ve dersleri filtrele
-      const activeTeachers = parsedSchedule.teachers.filter((t) => !excludedTeachers.includes(t));
-      const activeClasses = parsedSchedule.classes.filter((c) => !excludedClasses.includes(c));
-      const activeLessons = parsedSchedule.lessons.filter((l) => !excludedLessons.includes(l));
+      const activeTeachers = (parsedSchedule.teachers || []).filter((t) => !excludedTeachers.includes(t));
+      const activeClasses = (parsedSchedule.classes || []).filter((c) => !excludedClasses.includes(c));
+      const activeLessons = (parsedSchedule.lessons || []).filter((l) => !excludedLessons.includes(l));
 
       // Pasif yapılan öğretmenlere, sınıflara veya derslere ait ders saatlerini de programdan hariç tut
-      const activeScheduleItems = parsedSchedule.scheduleItems.filter((item) => {
-        if (excludedTeachers.includes(item.teacherName)) return false;
-        const clsName = `${item.grade}-${item.section.toUpperCase()}`;
+      const activeScheduleItems = (parsedSchedule.scheduleItems || []).filter((item) => {
+        if (!item) return false;
+        if (item.teacherName && excludedTeachers.includes(item.teacherName)) return false;
+        const secUpper = item.section ? String(item.section).toUpperCase() : '';
+        const clsName = `${item.grade}-${secUpper}`;
         if (excludedClasses.includes(clsName)) return false;
-        if (excludedLessons.includes(item.lessonName)) return false;
+        if (item.lessonName && excludedLessons.includes(item.lessonName)) return false;
         return true;
       });
 
@@ -1609,9 +2207,27 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         teachers: activeTeachers,
         classes: activeClasses,
         lessons: activeLessons,
-        bellSchedule: parsedSchedule.bellSchedule,
+        lessonDetails: parsedSchedule.lessonDetails || [],
+        bellSchedule: parsedSchedule.bellSchedule || [],
         scheduleItems: activeScheduleItems,
+        teacherVerifications: parsedSchedule.teacherVerifications || [],
       };
+
+      console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
+      console.log('║ 💾 [ÇARŞAF KAYIT] VERİTABANINA YAZMA ADIMI BAŞLATILDI             ║');
+      console.log('╚═══════════════════════════════════════════════════════════════════╝');
+      console.log('[Çarşaf Kayıt UI] Hedef Okul:', selectedSchool.name, '(ID:', selectedSchool.id, ')');
+      console.log('[Çarşaf Kayıt UI] Kayıt Modu (Mevcut Programı Sıfırla):', scheduleSaveMode === 'overwrite');
+      console.log('[Çarşaf Kayıt UI] Gönderilecek Veri Özeti:', {
+        öğretmenler: filteredSchedule.teachers.length,
+        şubeler: filteredSchedule.classes.length,
+        dersler: filteredSchedule.lessons.length,
+        programHücreleri: filteredSchedule.scheduleItems.length,
+        öğretmenleriKaydet: saveTeachersChecked,
+        şubeleriKaydet: saveClassesChecked,
+        dersleriKaydet: saveLessonsChecked,
+        programıKaydet: saveScheduleChecked,
+      });
 
       const result = await saveMasterScheduleToServer(selectedSchool.id, filteredSchedule, {
         overwriteAll: scheduleSaveMode === 'overwrite',
@@ -1621,7 +2237,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         syncSchedules: saveScheduleChecked,
       });
 
+      console.log('[Çarşaf Kayıt UI Sonucu]:', result);
+
       if (result.success) {
+        console.log('[Çarşaf Kayıt UI] Başarılı! Ekran yenileniyor...');
         Alert.alert('Başarılı 🎉', result.message);
         setAiModalVisible(false);
         setParsedSchedule(null);
@@ -1630,9 +2249,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setExcludedLessons([]);
         loadAllSchoolData(selectedSchool.id);
       } else {
+        console.error('[Çarşaf Kayıt UI Hata Yanıtı]:', result.message);
         Alert.alert('Hata', result.message);
       }
     } catch (err: any) {
+      console.error('[Çarşaf Kayıt UI Catch Hatası]:', {
+        mesaj: err?.message,
+        stack: err?.stack,
+        tamHata: err,
+      });
       Alert.alert('Hata', err?.message || 'Kayıt işlemi başarısız oldu.');
     } finally {
       setAiSaving(false);
@@ -1729,19 +2354,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Oturumu Kapatma ve Çıkış (Web ve Mobil Uyumlu)
   const handleLogout = async () => {
     const doLogout = async () => {
-      await clearAuthSession();
-      await setActiveUserRole(null);
+      console.log('[SchoolAdmin] Oturum kapatılıyor...');
+      await logoutUserRole();
       if (onRoleChange) {
         await onRoleChange(null);
       } else if (navigation?.goBack) {
         navigation.goBack();
       }
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.reload();
+      }
     };
 
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm('Yönetici oturumunuzu kapatmak ve giriş ekranına dönmek istiyor musunuz?')) {
-        await doLogout();
-      }
+      await doLogout();
     } else {
       Alert.alert(
         'Sistemden Çıkış',
@@ -1764,6 +2390,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       await onRoleChange('teacher');
     } else if (navigation?.switchToTeacher) {
       navigation.switchToTeacher();
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.reload();
     }
   };
 
@@ -1848,6 +2477,120 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               loadClasses(selectedSchool.id);
             } else {
               Alert.alert('Hata', res.error || 'Şubeler silinemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // --- PROGRAM VE KADRO SIFIRLAMA / TEMİZLEME İŞLEMLERİ ---
+  const handleClearAllSchedules = () => {
+    if (!selectedSchool) return;
+    Alert.alert(
+      'Tüm Okul Ders Programını Sıfırla ⚠️',
+      `"${selectedSchool.name}" okuluna ait TÜM DERS PROGRAMI (tüm şubelerin ve tüm öğretmenlerin ders saatleri) silinecektir.\n\nBu işlem şube ve öğretmen kayıtlarını silmez, yalnızca ders dağılım saatlerini temizler.\n\nEmin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Tüm Programı Sil',
+          style: 'destructive',
+          onPress: async () => {
+            setScheduleResetModalVisible(false);
+            setLoadingAllSchedules(true);
+            try {
+              const res = await apiRequest(`sync/schedules/clear?schoolId=${selectedSchool.id}&scope=all`, 'DELETE');
+              if (res.success) {
+                Alert.alert('Temizlendi 🎉', res.data?.message || 'Tüm okul ders programı başarıyla silindi.');
+                await Promise.all([loadAllSchedules(), loadScheduleStats()]);
+              } else {
+                Alert.alert('Hata', res.error || 'Ders programı silinemedi.');
+              }
+            } catch (e: any) {
+              Alert.alert('Hata', e.message);
+            } finally {
+              setLoadingAllSchedules(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleClearCurrentClassSchedule = () => {
+    if (!selectedSchool) return;
+    const targetClass = selectedClassForEditor || (classes[0] ? `${classes[0].grade}-${classes[0].section}` : '');
+    if (!targetClass) {
+      Alert.alert('Uyarı', 'Lütfen silinecek bir şube seçin.');
+      return;
+    }
+    const [grade, section] = targetClass.split('-');
+    Alert.alert(
+      `${targetClass} Şubesinin Programını Sil ⚠️`,
+      `"${targetClass}" şubesine atanmış tüm haftalık ders saatleri silinecektir. İlgili öğretmenlerin programından da bu saatler kalkacaktır.\n\nEmin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Şubeyi Boşalt',
+          style: 'destructive',
+          onPress: async () => {
+            setScheduleResetModalVisible(false);
+            setLoadingAllSchedules(true);
+            try {
+              const res = await apiRequest(
+                `sync/schedules/clear?schoolId=${selectedSchool.id}&scope=class&grade=${grade}&section=${section}`,
+                'DELETE'
+              );
+              if (res.success) {
+                Alert.alert('Temizlendi 🎉', res.data?.message || `${targetClass} şubesi temizlendi.`);
+                await Promise.all([loadAllSchedules(), loadScheduleStats()]);
+              } else {
+                Alert.alert('Hata', res.error || 'Şube programı silinemedi.');
+              }
+            } catch (e: any) {
+              Alert.alert('Hata', e.message);
+            } finally {
+              setLoadingAllSchedules(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleClearCurrentTeacherSchedule = () => {
+    if (!selectedSchool) return;
+    const targetTeacher = selectedTeacherForEditor || (teachers[0] ? teachers[0].fullName : '');
+    if (!targetTeacher) {
+      Alert.alert('Uyarı', 'Lütfen silinecek bir öğretmen seçin.');
+      return;
+    }
+    Alert.alert(
+      `${targetTeacher} Öğretmeninin Programını Sil ⚠️`,
+      `"${targetTeacher}" öğretmenine ait tüm haftalık ders saatleri silinecektir. İlgili sınıfların programından da bu saatler boşalacaktır.\n\nEmin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Öğretmeni Boşalt',
+          style: 'destructive',
+          onPress: async () => {
+            setScheduleResetModalVisible(false);
+            setLoadingAllSchedules(true);
+            try {
+              const res = await apiRequest(
+                `sync/schedules/clear?schoolId=${selectedSchool.id}&scope=teacher&teacherName=${encodeURIComponent(targetTeacher)}`,
+                'DELETE'
+              );
+              if (res.success) {
+                Alert.alert('Temizlendi 🎉', res.data?.message || `${targetTeacher} programı temizlendi.`);
+                await Promise.all([loadAllSchedules(), loadScheduleStats()]);
+              } else {
+                Alert.alert('Hata', res.error || 'Öğretmen programı silinemedi.');
+              }
+            } catch (e: any) {
+              Alert.alert('Hata', e.message);
+            } finally {
+              setLoadingAllSchedules(false);
             }
           },
         },
@@ -2453,89 +3196,122 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           <Text style={styles.headerTitle}>
             {isStaff ? '🛡️ Okul İdarecisi Paneli' : 'Okul Yönetim Paneli'}
           </Text>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>{selectedSchool?.name || 'Okul Seçiniz'}</Text>
+          <TouchableOpacity
+            style={styles.headerSchoolDropdownBtn}
+            onPress={() => setSchoolSelectModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="business" size={13} color="#4F46E5" />
+            <Text style={styles.headerSchoolDropdownText} numberOfLines={1}>
+              {selectedSchool?.name || 'Okul Seçiniz'}
+            </Text>
+            <Ionicons name="chevron-down" size={13} color="#4F46E5" />
+          </TouchableOpacity>
         </View>
 
-        {/* Hamburger Menü Butonu */}
-        <TouchableOpacity
-          onPress={() => setMenuDrawerVisible(true)}
-          style={styles.hamburgerBtn}
-          activeOpacity={0.7}
-          accessibilityLabel="Menü"
-        >
-          <Ionicons name="menu" size={24} color="#4F46E5" />
-        </TouchableOpacity>
+        {/* Sağ Butonlar: Çıkış ve Menü */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <TouchableOpacity
+            onPress={handleLogout}
+            style={[styles.hamburgerBtn, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}
+            activeOpacity={0.7}
+            accessibilityLabel="Oturumu Kapat / Rol Değiştir"
+          >
+            <Ionicons name="log-out-outline" size={20} color="#DC2626" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => setMenuDrawerVisible(true)}
+            style={styles.hamburgerBtn}
+            activeOpacity={0.7}
+            accessibilityLabel="Menü"
+          >
+            <Ionicons name="menu" size={24} color="#4F46E5" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSchools(); }} />}
       >
-        {/* Çoklu Okul Değiştirici (Müşteri Birden Fazla Okul Yönetebilir - İdareci yalnızca kendi okulunu görür) */}
-        {schools.length > 1 && !isStaff && (
-          <View style={styles.schoolSelectorContainer}>
-            <View style={styles.schoolSelectorHeader}>
-              <Ionicons name="business" size={14} color="#4F46E5" />
-              <Text style={styles.schoolSelectorLabel}>YÖNETTİĞİNİZ OKULLAR ({schools.length})</Text>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
-              {schools.map(s => {
-                const isSelected = selectedSchool?.id === s.id;
-                return (
-                  <TouchableOpacity
-                    key={s.id}
-                    onPress={async () => {
-                      setSelectedSchool(s);
-                      if (s.geminiApiKey) setGeminiApiKeyInput(s.geminiApiKey);
-                      else setGeminiApiKeyInput('');
-                      if (s.geminiModel) setSelectedGeminiModel(s.geminiModel);
-                      else setSelectedGeminiModel(DEFAULT_GEMINI_MODEL);
-                      loadAllSchoolData(s.id);
-                      try {
-                        const usage = await getGeminiUsageStats(s.id);
-                        setUsageStats(usage);
-                      } catch { }
-                    }}
-                    style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[styles.schoolChipText, isSelected && styles.schoolChipTextSelected]}>
-                      {s.name}
-                    </Text>
-                    <View style={[styles.schoolCodeTag, isSelected && styles.schoolCodeTagSelected]}>
-                      <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
-                        {s.code}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
+        {/* 🏫 BİRLEŞTİRİLMİŞ OKUL VE ÖĞRETMEN BAĞLANTI KODU KARTI */}
+        <View style={styles.combinedSchoolCard}>
+          {!isStaff && (
+            <>
+              <View style={styles.schoolSelectorHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                  <Ionicons name="business" size={13} color="#4F46E5" />
+                  <Text style={styles.schoolSelectorLabel}>
+                    YÖNETTİĞİNİZ OKULLAR {schools.length > 0 ? `(${schools.length})` : ''}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setCreateModalVisible(true)}
+                  style={styles.addSchoolSmallBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="add-circle" size={12} color="#166534" />
+                  <Text style={styles.addSchoolSmallBtnText}>Yeni Okul Ekle</Text>
+                </TouchableOpacity>
+              </View>
 
-        {/* Okul Kodu Kartı */}
-        {selectedSchool && (
-          <View style={styles.codeCard}>
-            <View style={styles.codeCardTop}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.codeCardLabel}>ÖĞRETMEN BAĞLANTI KODU</Text>
-                <Text style={styles.codeCardValue}>{selectedSchool.code}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
+                {schools.map(s => {
+                  const isSelected = selectedSchool?.id === s.id;
+                  return (
+                    <TouchableOpacity
+                      key={s.id}
+                      onPress={() => handleSelectSchool(s)}
+                      style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name={isSelected ? "checkmark-circle" : "business-outline"} size={13} color={isSelected ? "#fff" : "#4F46E5"} />
+                      <Text style={[styles.schoolChipText, isSelected && styles.schoolChipTextSelected]}>
+                        {s.name}
+                      </Text>
+                      <View style={[styles.schoolCodeTag, isSelected && styles.schoolCodeTagSelected]}>
+                        <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
+                          {s.code}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                {schools.length === 0 && (
+                  <TouchableOpacity
+                    onPress={() => setCreateModalVisible(true)}
+                    style={[styles.schoolChip, { borderColor: '#166534', backgroundColor: '#F0FDF4' }]}
+                  >
+                    <Ionicons name="add" size={14} color="#166534" />
+                    <Text style={[styles.schoolChipText, { color: '#166534' }]}>Henüz Okul Yok - İlk Okulu Ekle</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            </>
+          )}
+
+          {/* Entegre Öğretmen Bağlantı Kodu Şeridi */}
+          {selectedSchool && (
+            <View style={[styles.integratedCodeSection, !isStaff && { marginTop: 8 }]}>
+              <View style={styles.integratedCodeLeft}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  <Ionicons name="key" size={11} color="#4F46E5" />
+                  <Text style={styles.integratedCodeLabel}>ÖĞRETMEN BAĞLANTI KODU</Text>
+                </View>
+                <Text style={styles.integratedCodeValue}>{selectedSchool.code}</Text>
               </View>
               <TouchableOpacity
-                style={styles.copyButton}
+                style={styles.integratedCopyBtn}
                 onPress={() => handleCopyCode(selectedSchool.code)}
+                activeOpacity={0.7}
               >
-                <Ionicons name="copy-outline" size={16} color="#fff" />
-                <Text style={styles.copyButtonText}>Kodu Kopyala</Text>
+                <Ionicons name="copy-outline" size={13} color="#4F46E5" />
+                <Text style={styles.integratedCopyBtnText}>Kopyala</Text>
               </TouchableOpacity>
             </View>
-
-            <Text style={styles.codeCardHint}>
-              Admin doğrudan sunucuya yazar. Eklenen tüm öğretmenler, sınıflar, dersler ve öğrenciler global veritabanına anında işlenir.
-            </Text>
-          </View>
-        )}
+          )}
+        </View>
 
         {/* Sekme Seçim Çubuğu (Tabs) */}
         <View style={styles.tabsContainer}>
@@ -2589,8 +3365,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           >
             <Ionicons name="sparkles" size={15} color={activeTab === 'schedule' ? '#4F46E5' : '#64748B'} />
             <Text style={[styles.tabButtonText, activeTab === 'schedule' && styles.tabButtonTextActive]}>
-              📅 Çarşaf & Program
+              📅 Program & Doğruluk Denetimi
             </Text>
+            {!!scheduleStats?.conflictsCount && scheduleStats.conflictsCount > 0 && (
+              <View style={{ backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10, marginLeft: 4 }}>
+                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
+                  {scheduleStats.conflictsCount}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -3122,6 +3905,24 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     </TouchableOpacity>
 
                     <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#4338CA' }]}
+                      onPress={handlePickPdfAndExtractPhotos}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="document-attach-outline" size={13} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>PDF'den Foto</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#9333EA' }]}
+                      onPress={handlePickAndExtractPhotosWithAi}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="sparkles" size={13} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>AI ile Foto</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
                       style={[styles.primaryAddBtn, { backgroundColor: '#059669' }]}
                       onPress={handlePickAndParseExcel}
                       activeOpacity={0.8}
@@ -3335,20 +4136,30 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         Çarşaf okumasında eksik şube, boş kalan saat veya çakışma olup olmadığını denetler.
                       </Text>
                     </View>
-                    <TouchableOpacity
-                      style={styles.sanityRefreshBtn}
-                      onPress={() => {
-                        loadScheduleStats();
-                        loadAllSchedules();
-                      }}
-                      disabled={loadingScheduleStats}
-                    >
-                      {loadingScheduleStats ? (
-                        <ActivityIndicator size="small" color="#4F46E5" />
-                      ) : (
-                        <Ionicons name="refresh" size={16} color="#4F46E5" />
-                      )}
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <TouchableOpacity
+                        style={styles.sanityResetMenuBtn}
+                        onPress={() => setScheduleResetModalVisible(true)}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="trash-outline" size={13} color="#DC2626" />
+                        <Text style={styles.sanityResetMenuBtnText}>Sıfırla / Temizle</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.sanityRefreshBtn}
+                        onPress={() => {
+                          loadScheduleStats();
+                          loadAllSchedules();
+                        }}
+                        disabled={loadingScheduleStats}
+                      >
+                        {loadingScheduleStats ? (
+                          <ActivityIndicator size="small" color="#4F46E5" />
+                        ) : (
+                          <Ionicons name="refresh" size={16} color="#4F46E5" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
                   </View>
 
                   {/* 4'lü Sayaç Kutusu */}
@@ -3398,26 +4209,148 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     />
                   </View>
 
-                  {/* Çakışma Uyarıları Bölümü (Conflicts) */}
+                  {/* Çakışma Uyarıları Bölümü (Conflicts - ListBox Formatında) */}
                   {scheduleStats?.conflictsCount > 0 ? (
-                    <View style={styles.conflictAlertBanner}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <Ionicons name="warning" size={20} color="#DC2626" />
-                        <Text style={styles.conflictAlertTitle}>
-                          ⚠️ {scheduleStats.conflictsCount} Ders / Öğretmen Çakışması Bulundu!
-                        </Text>
-                      </View>
-                      <View style={{ marginTop: 8, gap: 6 }}>
-                        {scheduleStats.conflicts.map((c: any, cIdx: number) => (
-                          <View key={cIdx} style={styles.conflictItemBox}>
-                            <Text style={styles.conflictItemType}>
-                              {c.type === 'TEACHER_CONFLICT' ? '👨‍🏫 Öğretmen Çakışması' : '🏫 Şube Çakışması'}:
-                            </Text>
-                            <Text style={styles.conflictItemDesc}>{c.description}</Text>
+                    (() => {
+                      const q = (conflictSearchQuery || '').trim().toLowerCase();
+                      const filteredConflicts = (scheduleStats.conflicts || []).filter((c: any) => {
+                        if (!q) return true;
+                        return (
+                          (c.description || '').toLowerCase().includes(q) ||
+                          (c.className || '').toLowerCase().includes(q) ||
+                          (c.teacherName || '').toLowerCase().includes(q) ||
+                          (c.title || '').toLowerCase().includes(q)
+                        );
+                      });
+
+                      return (
+                        <View style={styles.conflictAlertBanner}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                              <Ionicons name="warning" size={18} color="#DC2626" />
+                              <Text style={styles.conflictAlertTitle}>
+                                ⚠️ {scheduleStats.conflictsCount} Çakışma Tespit Edildi
+                              </Text>
+                            </View>
+                            <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '800', color: '#B91C1C' }}>
+                                {filteredConflicts.length} gösteriliyor
+                              </Text>
+                            </View>
                           </View>
-                        ))}
-                      </View>
-                    </View>
+
+                          {/* ⚡ Akıllı Çakışma-Boşluk Otomatik Dengeleme Butonları */}
+                          <View style={{ gap: 6, marginTop: 6, marginBottom: 8 }}>
+                            <TouchableOpacity
+                              style={[styles.autoReconcileBtn, { marginTop: 0, marginBottom: 0 }]}
+                              activeOpacity={0.8}
+                              onPress={handleAutoReconcileSchedule}
+                              disabled={autoReconciling || autoFillingGaps}
+                            >
+                              {autoReconciling ? (
+                                <ActivityIndicator size="small" color="#FFFFFF" />
+                              ) : (
+                                <>
+                                  <Ionicons name="flash" size={15} color="#FFFFFF" />
+                                  <Text style={styles.autoReconcileBtnText}>
+                                    ⚡ Akıllı Dengele (Çakışmalar & Boş Saatler)
+                                  </Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.autoFillGapsBtn}
+                              activeOpacity={0.8}
+                              onPress={handleAutoFillGapsSchedule}
+                              disabled={autoFillingGaps || autoReconciling}
+                            >
+                              {autoFillingGaps ? (
+                                <ActivityIndicator size="small" color="#FFFFFF" />
+                              ) : (
+                                <>
+                                  <Ionicons name="grid" size={15} color="#FFFFFF" />
+                                  <Text style={styles.autoFillGapsBtnText}>
+                                    🧩 Boşlukları Doldur (Eksik Öğretmen & Müfredat Saatleri)
+                                  </Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+
+                          {/* Hızlı Filtre / Arama Girişi */}
+                          {scheduleStats.conflicts.length > 5 && (
+                            <View style={styles.listboxSearchWrap}>
+                              <Ionicons name="search" size={14} color="#94A3B8" style={{ marginLeft: 8 }} />
+                              <TextInput
+                                style={styles.listboxSearchInput}
+                                placeholder="Şube veya öğretmen ara (örn: 10-A, Ahmet)..."
+                                placeholderTextColor="#94A3B8"
+                                value={conflictSearchQuery}
+                                onChangeText={setConflictSearchQuery}
+                              />
+                              {!!conflictSearchQuery && (
+                                <TouchableOpacity onPress={() => setConflictSearchQuery('')} style={{ padding: 6 }}>
+                                  <Ionicons name="close-circle" size={15} color="#94A3B8" />
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          )}
+
+                          {/* Kaydırılabilir Çakışma ListBox */}
+                          <ScrollView
+                            nestedScrollEnabled={true}
+                            style={{ maxHeight: 260, marginTop: 4 }}
+                            contentContainerStyle={{ gap: 6, paddingRight: 2 }}
+                            showsVerticalScrollIndicator={true}
+                          >
+                            {filteredConflicts.length === 0 ? (
+                              <View style={{ padding: 12, alignItems: 'center', justifyContent: 'center' }}>
+                                <Text style={{ fontSize: 11, color: '#94A3B8', fontWeight: '600' }}>
+                                  Arama kriterine uygun çakışma bulunamadı.
+                                </Text>
+                              </View>
+                            ) : (
+                              filteredConflicts.map((c: any, cIdx: number) => (
+                                <TouchableOpacity
+                                  key={cIdx}
+                                  style={styles.conflictItemBox}
+                                  activeOpacity={0.7}
+                                  onPress={() => {
+                                    if (c.className) {
+                                      setScheduleSubView('editor');
+                                      setScheduleEditorMode('class');
+                                      setSelectedClassForEditor(c.className);
+                                    } else if (c.teacherName) {
+                                      setScheduleSubView('editor');
+                                      setScheduleEditorMode('teacher');
+                                      setSelectedTeacherForEditor(c.teacherName);
+                                    }
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                      <Text style={styles.conflictItemType}>
+                                        {c.type === 'TEACHER_CONFLICT' ? '👨‍🏫 Öğretmen' : '🏫 Şube'}:
+                                      </Text>
+                                      <View style={{ backgroundColor: '#FEE2E2', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 }}>
+                                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#991B1B' }}>
+                                          {c.dayOfWeek}. Gün {c.lessonHour}. Ders
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    <Text style={{ fontSize: 11, color: '#4F46E5', fontWeight: '700' }}>
+                                      {c.className || c.teacherName} Düzenle ➔
+                                    </Text>
+                                  </View>
+                                  <Text style={styles.conflictItemDesc}>{c.description}</Text>
+                                </TouchableOpacity>
+                              ))
+                            )}
+                          </ScrollView>
+                        </View>
+                      );
+                    })()
                   ) : (
                     <View style={styles.conflictClearBanner}>
                       <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
@@ -3462,8 +4395,36 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   )}
                 </View>
 
-                {/* 3. İNTERAKTİF CANLI DERS PROGRAMI DÜZENLEYİCİ */}
-                <View style={styles.interactiveEditorCard}>
+                {/* 3. GÖRÜNÜM GEÇİŞ SEKMESİ (Canlı Düzenleyici vs İstatistik & Dağılım) */}
+                <View style={styles.scheduleSubTabSegment}>
+                  <TouchableOpacity
+                    style={[styles.scheduleSubTabBtn, scheduleSubView === 'editor' && styles.scheduleSubTabBtnActive]}
+                    onPress={() => setScheduleSubView('editor')}
+                  >
+                    <Ionicons name="create-outline" size={16} color={scheduleSubView === 'editor' ? '#FFFFFF' : '#4F46E5'} />
+                    <Text style={[styles.scheduleSubTabBtnText, scheduleSubView === 'editor' && styles.scheduleSubTabBtnTextActive]}>
+                      ✏️ Canlı Program Düzenleyici
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.scheduleSubTabBtn, scheduleSubView === 'analytics' && styles.scheduleSubTabBtnActive]}
+                    onPress={() => {
+                      setScheduleSubView('analytics');
+                      if (!scheduleStats?.teacherWorkloads) {
+                        loadScheduleStats();
+                      }
+                    }}
+                  >
+                    <Ionicons name="stats-chart" size={16} color={scheduleSubView === 'analytics' ? '#FFFFFF' : '#4F46E5'} />
+                    <Text style={[styles.scheduleSubTabBtnText, scheduleSubView === 'analytics' && styles.scheduleSubTabBtnTextActive]}>
+                      📊 Detaylı Dağılım & İstatistikler
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {scheduleSubView === 'editor' && (
+                  <View style={styles.interactiveEditorCard}>
                   <View style={styles.interactiveHeaderRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.interactiveTitle}>✏️ Canlı Ders Programı Düzenleyici</Text>
@@ -3471,6 +4432,22 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         Hatalı saatlere dokunarak anında ders atayın, öğretmeni değiştirin veya boşaltın.
                       </Text>
                     </View>
+                    <TouchableOpacity
+                      style={styles.editorClearScopeBtn}
+                      onPress={() => {
+                        if (scheduleEditorMode === 'class') {
+                          handleClearCurrentClassSchedule();
+                        } else {
+                          handleClearCurrentTeacherSchedule();
+                        }
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="trash-outline" size={13} color="#DC2626" />
+                      <Text style={styles.editorClearScopeBtnText}>
+                        {scheduleEditorMode === 'class' ? 'Bu Şubeyi Boşalt' : 'Bu Öğretmeni Boşalt'}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
 
                   {/* Mod Seçici (Şube vs Öğretmen) */}
@@ -3558,31 +4535,37 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               const lessonHour = hIdx + 1;
 
                               // İlgili hücreyi allSchoolSchedules içinden bul
-                              let matchedItem: any = null;
+                              let matchedItems: any[] = [];
                               if (scheduleEditorMode === 'class') {
                                 const [g, sec] = activeClass.split('-');
-                                matchedItem = allSchoolSchedules.find(
+                                matchedItems = allSchoolSchedules.filter(
                                   (s) =>
                                     String(s.grade) === String(g) &&
-                                    (s.section || '').toUpperCase() === (sec || '').toUpperCase() &&
+                                    (s.section || '').trim().toUpperCase() === (sec || '').trim().toUpperCase() &&
                                     s.dayOfWeek === dayNumber &&
                                     s.lessonHour === lessonHour
                                 );
                               } else {
-                                matchedItem = allSchoolSchedules.find(
+                                matchedItems = allSchoolSchedules.filter(
                                   (s) =>
-                                    (s.teacherName || '').toLowerCase() === activeTeacher.toLowerCase() &&
+                                    normalizeTeacherMatch(s.teacherName, activeTeacher) &&
                                     s.dayOfWeek === dayNumber &&
                                     s.lessonHour === lessonHour
                                 );
                               }
 
+                              const matchedItem = matchedItems[0] || null;
+                              const hasConflict = matchedItems.length > 1;
                               const isFilled = !!matchedItem && !!matchedItem.lessonName;
 
                               return (
                                 <TouchableOpacity
                                   key={lessonHour}
-                                  style={[styles.slotCell, isFilled ? styles.slotCellFilled : styles.slotCellEmpty]}
+                                  style={[
+                                    styles.slotCell,
+                                    isFilled ? styles.slotCellFilled : styles.slotCellEmpty,
+                                    hasConflict && { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: '#FEF2F2' },
+                                  ]}
                                   onPress={() => {
                                     if (scheduleEditorMode === 'class') {
                                       const [g, sec] = activeClass.split('-');
@@ -3592,6 +4575,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                         grade: g,
                                         section: sec,
                                         existingItem: matchedItem,
+                                        conflictingItems: matchedItems,
                                       });
                                     } else {
                                       handleOpenSlotModal({
@@ -3599,35 +4583,47 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                         lessonHour,
                                         teacherName: activeTeacher,
                                         existingItem: matchedItem,
+                                        conflictingItems: matchedItems,
                                       });
                                     }
                                   }}
                                   activeOpacity={0.8}
                                 >
                                   <View style={styles.slotCellTop}>
-                                    <View style={[styles.slotHourBadge, isFilled && styles.slotHourBadgeFilled]}>
-                                      <Text style={[styles.slotHourText, isFilled && styles.slotHourTextFilled]}>
+                                    <View style={[styles.slotHourBadge, isFilled && styles.slotHourBadgeFilled, hasConflict && { backgroundColor: '#FEE2E2' }]}>
+                                      <Text style={[styles.slotHourText, isFilled && styles.slotHourTextFilled, hasConflict && { color: '#DC2626' }]}>
                                         {lessonHour}. Ders
                                       </Text>
                                     </View>
-                                    <Ionicons
-                                      name={isFilled ? 'pencil' : 'add-circle-outline'}
-                                      size={12}
-                                      color={isFilled ? '#4F46E5' : '#94A3B8'}
-                                    />
+                                    {hasConflict ? (
+                                      <View style={{ backgroundColor: '#EF4444', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4 }}>
+                                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#fff' }}>⚠️ Çakışma</Text>
+                                      </View>
+                                    ) : (
+                                      <Ionicons
+                                        name={isFilled ? 'pencil' : 'add-circle-outline'}
+                                        size={12}
+                                        color={isFilled ? '#4F46E5' : '#94A3B8'}
+                                      />
+                                    )}
                                   </View>
 
                                   {isFilled ? (
                                     <View style={styles.slotContentBox}>
-                                      <Text style={styles.slotLessonTitle} numberOfLines={1}>
-                                        {matchedItem.lessonName}
+                                      <Text style={[styles.slotLessonTitle, hasConflict && { color: '#B91C1C' }]} numberOfLines={1}>
+                                        {matchedItem.lessonName}{matchedItem.lessonCode ? ` (${matchedItem.lessonCode})` : ''}
                                       </Text>
                                       <Text style={styles.slotSubDetail} numberOfLines={1}>
                                         {scheduleEditorMode === 'class'
                                           ? (matchedItem.teacherName || 'Öğretmen Atanmadı')
                                           : `${matchedItem.grade}-${matchedItem.section}`}
                                       </Text>
-                                      {!!matchedItem.classroom && (
+                                      {hasConflict && (
+                                        <Text style={{ fontSize: 9, color: '#DC2626', fontWeight: '700', marginTop: 1 }} numberOfLines={1}>
+                                          +{matchedItems.length - 1} çakışan ders!
+                                        </Text>
+                                      )}
+                                      {!!matchedItem.classroom && !hasConflict && (
                                         <Text style={styles.slotRoomText} numberOfLines={1}>
                                           📍 {matchedItem.classroom}
                                         </Text>
@@ -3647,6 +4643,303 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     })}
                   </View>
                 </View>
+              )}
+
+                {/* 4. DETAYLI DERS & ÖĞRETMEN DAĞILIMI VE İSTATİSTİK ANALİZ GÖRÜNÜMÜ */}
+                {scheduleSubView === 'analytics' && (
+                  <View style={styles.interactiveEditorCard}>
+                    {/* Başlık ve Yenile */}
+                    <View style={styles.interactiveHeaderRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.interactiveTitle}>📊 Haftalık Ders Dağılımı & Öğretmen İstatistikleri</Text>
+                        <Text style={styles.interactiveSub}>
+                          Tüm şubelerin ders doluluklarını, öğretmenlerin haftalık toplam ders saatlerini ve ders dağılım matrisini inceleyin.
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.sanityRefreshBtn}
+                        onPress={() => loadScheduleStats()}
+                        disabled={loadingScheduleStats}
+                      >
+                        {loadingScheduleStats ? (
+                          <ActivityIndicator size="small" color="#4F46E5" />
+                        ) : (
+                          <Ionicons name="refresh" size={16} color="#4F46E5" />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Arama Kutusu */}
+                    <View style={styles.analyticsSearchWrap}>
+                      <Ionicons name="search" size={18} color="#94A3B8" />
+                      <TextInput
+                        style={styles.analyticsSearchInput}
+                        placeholder="Öğretmen, ders veya şube ara (örn: Matematik, 9-A, Ahmet)..."
+                        placeholderTextColor="#94A3B8"
+                        value={analyticsSearchQuery}
+                        onChangeText={setAnalyticsSearchQuery}
+                      />
+                      {analyticsSearchQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setAnalyticsSearchQuery('')}>
+                          <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {/* Filtre Butonları */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.analyticsFilterScroll}>
+                      <TouchableOpacity
+                        style={[styles.analyticsFilterBtn, analyticsFilterType === 'all' && styles.analyticsFilterBtnActive]}
+                        onPress={() => setAnalyticsFilterType('all')}
+                      >
+                        <Text style={[styles.analyticsFilterBtnText, analyticsFilterType === 'all' && styles.analyticsFilterBtnTextActive]}>
+                          Tümü ({scheduleStats?.totalActualSlots || allSchoolSchedules.length} Saat)
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.analyticsFilterBtn, analyticsFilterType === 'teachers' && styles.analyticsFilterBtnActive]}
+                        onPress={() => setAnalyticsFilterType('teachers')}
+                      >
+                        <Text style={[styles.analyticsFilterBtnText, analyticsFilterType === 'teachers' && styles.analyticsFilterBtnTextActive]}>
+                          👨‍🏫 Öğretmen Yükleri ({filteredTeacherWorkloads.length})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.analyticsFilterBtn, analyticsFilterType === 'missing' && styles.analyticsFilterBtnActive]}
+                        onPress={() => setAnalyticsFilterType('missing')}
+                      >
+                        <Text style={[styles.analyticsFilterBtnText, analyticsFilterType === 'missing' && styles.analyticsFilterBtnTextActive]}>
+                          🏫 Şube Dolulukları ({filteredClassFullness.length})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.analyticsFilterBtn, analyticsFilterType === 'courses' && styles.analyticsFilterBtnActive]}
+                        onPress={() => setAnalyticsFilterType('courses')}
+                      >
+                        <Text style={[styles.analyticsFilterBtnText, analyticsFilterType === 'courses' && styles.analyticsFilterBtnTextActive]}>
+                          📚 Ders Dağılım Matrisi ({filteredCourseAllocations.length})
+                        </Text>
+                      </TouchableOpacity>
+
+                      {(scheduleStats?.conflictsCount || 0) > 0 && (
+                        <TouchableOpacity
+                          style={[styles.analyticsFilterBtn, analyticsFilterType === 'conflicts' && styles.analyticsFilterBtnActive, { backgroundColor: '#FEE2E2', borderColor: '#EF4444' }]}
+                          onPress={() => setAnalyticsFilterType('conflicts')}
+                        >
+                          <Text style={[styles.analyticsFilterBtnText, { color: '#DC2626', fontWeight: 'bold' }]}>
+                            ⚠️ Çakışmalar ({scheduleStats?.conflictsCount})
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </ScrollView>
+
+                    {/* 1. ÇAKIŞMA DETAYLARI (Eğer Varsa) */}
+                    {(analyticsFilterType === 'all' || analyticsFilterType === 'conflicts') && scheduleStats?.conflictsCount > 0 && (
+                      <View style={{ marginTop: 12 }}>
+                        <Text style={styles.analyticsSectionLabel}>⚠️ Tespit Edilen Çakışmalar ({scheduleStats.conflictsCount})</Text>
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          style={{ maxHeight: 280, marginTop: 6 }}
+                          contentContainerStyle={{ gap: 8, paddingRight: 2 }}
+                          showsVerticalScrollIndicator={true}
+                        >
+                          {scheduleStats.conflicts
+                            .filter((c: any) => {
+                              if (!analyticsSearchQuery) return true;
+                              const q = analyticsSearchQuery.toLowerCase();
+                              return (
+                                (c.description || '').toLowerCase().includes(q) ||
+                                (c.title || '').toLowerCase().includes(q) ||
+                                (c.className || '').toLowerCase().includes(q) ||
+                                (c.teacherName || '').toLowerCase().includes(q)
+                              );
+                            })
+                            .map((c: any, cIdx: number) => (
+                              <View key={cIdx} style={styles.analyticsConflictCard}>
+                                <View style={{ flex: 1 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Ionicons name="warning" size={16} color="#DC2626" />
+                                    <Text style={styles.analyticsConflictTitle}>{c.title}</Text>
+                                    <Text style={styles.analyticsConflictHourBadge}>{c.dayOfWeek}. Gün {c.lessonHour}. Ders</Text>
+                                  </View>
+                                  <Text style={styles.analyticsConflictDesc}>{c.description}</Text>
+                                </View>
+                                <TouchableOpacity
+                                  style={styles.analyticsFixBtn}
+                                  onPress={() => {
+                                    if (c.className) {
+                                      setScheduleEditorMode('class');
+                                      setSelectedClassForEditor(c.className);
+                                    } else if (c.teacherName) {
+                                      setScheduleEditorMode('teacher');
+                                      setSelectedTeacherForEditor(c.teacherName);
+                                    }
+                                    setScheduleSubView('editor');
+                                  }}
+                                >
+                                  <Ionicons name="pencil" size={13} color="#FFFFFF" />
+                                  <Text style={styles.analyticsFixBtnText}>Düzenle</Text>
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                        </ScrollView>
+                      </View>
+                    )}
+
+                    {/* 2. ÖĞRETMEN DERS YÜKLERİ (Teacher Workload) */}
+                    {(analyticsFilterType === 'all' || analyticsFilterType === 'teachers') && (
+                      <View style={{ marginTop: 16 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={styles.analyticsSectionLabel}>
+                            👨‍🏫 Öğretmen Haftalık Ders Saatleri ({filteredTeacherWorkloads.length})
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#64748B' }}>Ders saatine göre sıralı</Text>
+                        </View>
+
+                        {filteredTeacherWorkloads.length === 0 ? (
+                          <View style={styles.analyticsEmptyBox}>
+                            <Text style={styles.analyticsEmptyText}>Eşleşen öğretmen bulunamadı.</Text>
+                          </View>
+                        ) : (
+                          <View style={{ gap: 8 }}>
+                            {filteredTeacherWorkloads.map((t: any, idx: number) => {
+                              const isHeavy = t.totalHours >= 24;
+                              const isMedium = t.totalHours >= 15;
+                              return (
+                                <View key={idx} style={styles.teacherWorkloadCard}>
+                                  <View style={{ flex: 1 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                      <Text style={styles.teacherWorkloadName}>{t.teacherName}</Text>
+                                      <View style={[styles.teacherHoursBadge, isHeavy ? styles.hoursBadgeHigh : isMedium ? styles.hoursBadgeNormal : styles.hoursBadgeLow]}>
+                                        <Text style={[styles.teacherHoursText, isHeavy ? { color: '#047857' } : isMedium ? { color: '#1D4ED8' } : { color: '#B45309' }]}>
+                                          {t.totalHours} Saat/Hafta
+                                        </Text>
+                                      </View>
+                                    </View>
+
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                                      {t.classes?.map((cls: string, cIdx: number) => (
+                                        <View key={cIdx} style={styles.workloadChipClass}>
+                                          <Text style={styles.workloadChipClassText}>{cls}</Text>
+                                        </View>
+                                      ))}
+                                      {t.lessons?.map((les: string, lIdx: number) => (
+                                        <View key={lIdx} style={styles.workloadChipLesson}>
+                                          <Text style={styles.workloadChipLessonText}>{les}</Text>
+                                        </View>
+                                      ))}
+                                    </View>
+                                  </View>
+
+                                  <TouchableOpacity
+                                    style={styles.analyticsGoEditorBtn}
+                                    onPress={() => {
+                                      setScheduleEditorMode('teacher');
+                                      setSelectedTeacherForEditor(t.teacherName);
+                                      setScheduleSubView('editor');
+                                    }}
+                                  >
+                                    <Ionicons name="create-outline" size={14} color="#4F46E5" />
+                                    <Text style={styles.analyticsGoEditorText}>Program</Text>
+                                  </TouchableOpacity>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* 3. ŞUBELERİN DERS DOLULUKLARI */}
+                    {(analyticsFilterType === 'all' || analyticsFilterType === 'missing') && (
+                      <View style={{ marginTop: 18 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={styles.analyticsSectionLabel}>
+                            🏫 Şube Haftalık Ders Dolulukları ({filteredClassFullness.length})
+                          </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {filteredClassFullness.map((cf: any, idx: number) => {
+                            const isFull = cf.isFullyFilled;
+                            return (
+                              <TouchableOpacity
+                                key={idx}
+                                style={[styles.classFullnessDetailCard, isFull ? styles.cardBorderGreen : styles.cardBorderOrange]}
+                                onPress={() => {
+                                  setScheduleEditorMode('class');
+                                  setSelectedClassForEditor(cf.className);
+                                  setScheduleSubView('editor');
+                                }}
+                              >
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <Text style={styles.classFullnessCardTitle}>{cf.className}</Text>
+                                  <Text style={[styles.classFullnessCardPercent, isFull ? { color: '#166534' } : { color: '#EA580C' }]}>
+                                    %{cf.percent}
+                                  </Text>
+                                </View>
+                                <Text style={styles.classFullnessCardSub}>
+                                  {cf.filledCount} / {cf.expectedCount} Saat
+                                </Text>
+                                <Text style={[styles.classFullnessCardStatus, isFull ? { color: '#15803D' } : { color: '#C2410C' }]}>
+                                  {isFull ? '✅ Tam Dolu' : `⚠️ ${cf.missingCount} Saat Boş`}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </View>
+                    )}
+
+                    {/* 4. DERS DAĞILIM MATRİSİ (Hangi Dersi Kim Hangi Sınıfa Kaç Saat Veriyor) */}
+                    {(analyticsFilterType === 'all' || analyticsFilterType === 'courses') && (
+                      <View style={{ marginTop: 18 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Text style={styles.analyticsSectionLabel}>
+                            📚 Ders Dağılım Matrisi ({filteredCourseAllocations.length})
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#64748B' }}>Ders - Şube - Öğretmen Eşleşmeleri</Text>
+                        </View>
+
+                        {filteredCourseAllocations.length === 0 ? (
+                          <View style={styles.analyticsEmptyBox}>
+                            <Text style={styles.analyticsEmptyText}>Eşleşen ders dağılımı bulunamadı.</Text>
+                          </View>
+                        ) : (
+                          <View style={{ gap: 6 }}>
+                            {filteredCourseAllocations.map((item: any, idx: number) => (
+                              <View key={idx} style={styles.courseAllocRow}>
+                                <View style={styles.courseAllocClassBadge}>
+                                  <Text style={styles.courseAllocClassText}>{item.className}</Text>
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 8 }}>
+                                  <Text style={styles.courseAllocLessonName}>{item.lessonName}</Text>
+                                  <Text style={styles.courseAllocTeacherName}>👨‍🏫 {item.teacherName}</Text>
+                                </View>
+                                <View style={styles.courseAllocHoursBadge}>
+                                  <Text style={styles.courseAllocHoursText}>{item.hours} Saat</Text>
+                                </View>
+                                <TouchableOpacity
+                                  style={{ padding: 6, marginLeft: 4 }}
+                                  onPress={() => {
+                                    setScheduleEditorMode('class');
+                                    setSelectedClassForEditor(item.className);
+                                    setScheduleSubView('editor');
+                                  }}
+                                >
+                                  <Ionicons name="pencil" size={15} color="#4F46E5" />
+                                </TouchableOpacity>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                )}
               </View>
             )}
 
@@ -4200,71 +5493,45 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     </TouchableOpacity>
                   </View>
 
-                  {/* Preset & Live Model Listesi */}
-                  <View style={styles.modelsGrid}>
-                    {PRESET_GEMINI_MODELS.map((m) => {
-                      const isSelected = selectedGeminiModel === m.id;
-                      return (
-                        <TouchableOpacity
-                          key={m.id}
-                          style={[styles.modelOptionCard, isSelected && styles.modelOptionCardSelected]}
-                          onPress={() => setSelectedGeminiModel(m.id)}
-                          activeOpacity={0.85}
-                        >
-                          <View style={styles.modelOptionTop}>
-                            <View style={{ flex: 1 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                <Text style={[styles.modelOptionName, isSelected && styles.modelOptionNameSelected]}>
-                                  {m.name}
-                                </Text>
-                                {m.isRecommended && (
-                                  <View style={styles.recommendedBadge}>
-                                    <Text style={styles.recommendedBadgeText}>ÖNERİLEN</Text>
-                                  </View>
-                                )}
-                              </View>
-                              <Text style={styles.modelOptionId}>{m.id}</Text>
-                            </View>
-                            <Ionicons
-                              name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                              size={20}
-                              color={isSelected ? '#4F46E5' : '#94A3B8'}
-                            />
-                          </View>
-                          <Text style={styles.modelOptionDesc}>{m.description}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                  {/* Kompakt Model Seçim Dropdown Tetikleyicisi */}
+                  {(() => {
+                    const preset = PRESET_GEMINI_MODELS.find(p => p.id === selectedGeminiModel);
+                    const modelDisplayName = preset ? preset.name : selectedGeminiModel;
+                    const isRecommended = preset?.isRecommended;
 
-                    {/* Dinamik Olarak Çekilen Modeller */}
-                    {availableLiveModels
-                      .filter((lm) => !PRESET_GEMINI_MODELS.some((pm) => pm.id === lm))
-                      .map((liveModel) => {
-                        const isSelected = selectedGeminiModel === liveModel;
-                        return (
-                          <TouchableOpacity
-                            key={liveModel}
-                            style={[styles.modelOptionCard, isSelected && styles.modelOptionCardSelected]}
-                            onPress={() => setSelectedGeminiModel(liveModel)}
-                            activeOpacity={0.85}
-                          >
-                            <View style={styles.modelOptionTop}>
-                              <View style={{ flex: 1 }}>
-                                <Text style={[styles.modelOptionName, isSelected && styles.modelOptionNameSelected]}>
-                                  {liveModel}
-                                </Text>
-                                <Text style={styles.modelOptionId}>Google API Canlı Model</Text>
-                              </View>
-                              <Ionicons
-                                name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                                size={20}
-                                color={isSelected ? '#4F46E5' : '#94A3B8'}
-                              />
+                    return (
+                      <TouchableOpacity
+                        style={styles.modelDropdownTrigger}
+                        onPress={() => setModelDropdownModalVisible(true)}
+                        activeOpacity={0.85}
+                      >
+                        <View style={styles.modelDropdownTriggerLeft}>
+                          <View style={styles.modelDropdownIconBox}>
+                            <Ionicons name="hardware-chip" size={22} color="#4F46E5" />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Text style={styles.modelDropdownTriggerTitle} numberOfLines={1}>
+                                {modelDisplayName}
+                              </Text>
+                              {isRecommended && (
+                                <View style={styles.recommendedBadge}>
+                                  <Text style={styles.recommendedBadgeText}>ÖNERİLEN</Text>
+                                </View>
+                              )}
                             </View>
-                          </TouchableOpacity>
-                        );
-                      })}
-                  </View>
+                            <Text style={styles.modelDropdownTriggerId} numberOfLines={1}>
+                              ID: {selectedGeminiModel}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={styles.modelDropdownTriggerRight}>
+                          <Text style={styles.modelDropdownChangeText}>Model Seç</Text>
+                          <Ionicons name="chevron-down" size={16} color="#4F46E5" />
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })()}
                 </View>
 
                 {/* Kota ve Kullanım Göstergesi (Real-time Gauge) */}
@@ -4903,13 +6170,209 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     )}
                   </TouchableOpacity>
                 </View>
+
+                {/* 7. ŞİFRE VE SİSTEM ERİŞİM RAPORLARI KARTI */}
+                <View style={[styles.reportSectionCard, { borderColor: '#818CF8', borderWidth: 1.5 }]}>
+                  <View style={styles.reportCardHeader}>
+                    <View style={[styles.reportIconBox, { backgroundColor: '#EEF2FF' }]}>
+                      <Ionicons name="key" size={20} color="#4F46E5" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.reportCardTitle}>🔐 Şifre ve Sistem Erişim Raporları</Text>
+                        <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#166534' }}>YENİ</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.reportCardDesc}>
+                        Öğretmenler, öğrenciler ve veliler için sistem giriş kimlikleri, okul kodları ve başlangıç şifre dökümleri.
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ gap: 10, marginTop: 6 }}>
+                    {/* Öğretmen Şifreleri */}
+                    <TouchableOpacity
+                      style={[styles.exportActionBtn, { backgroundColor: '#4F46E5', paddingVertical: 12 }]}
+                      onPress={handleExportTeacherCredentials}
+                      disabled={exportingReportType === 'teacher_credentials'}
+                      activeOpacity={0.88}
+                    >
+                      {exportingReportType === 'teacher_credentials' ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="person-circle-outline" size={20} color="#fff" />
+                          <View style={{ flex: 1, marginLeft: 4 }}>
+                            <Text style={styles.exportActionBtnText}>Öğretmen Şifre Excel Raporu (.xlsx)</Text>
+                            <Text style={{ fontSize: 10, color: '#C7D2FE', marginTop: 1 }}>Kullanıcı adı, okul kodu, branş ve başlangıç şifresi (1234)</Text>
+                          </View>
+                          <Ionicons name="download-outline" size={17} color="#fff" />
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    {/* Öğrenci Şifreleri */}
+                    <TouchableOpacity
+                      style={[styles.exportActionBtn, { backgroundColor: '#059669', paddingVertical: 12 }]}
+                      onPress={handleExportStudentCredentials}
+                      disabled={exportingReportType === 'student_credentials'}
+                      activeOpacity={0.88}
+                    >
+                      {exportingReportType === 'student_credentials' ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="school-outline" size={20} color="#fff" />
+                          <View style={{ flex: 1, marginLeft: 4 }}>
+                            <Text style={styles.exportActionBtnText}>Öğrenci Şifre Excel Raporu (.xlsx)</Text>
+                            <Text style={{ fontSize: 10, color: '#A7F3D0', marginTop: 1 }}>Öğrenci no, sınıf-şube, okul kodu ve portal şifresi (aaaa_no)</Text>
+                          </View>
+                          <Ionicons name="download-outline" size={17} color="#fff" />
+                        </>
+                      )}
+                    </TouchableOpacity>
+
+                    {/* Veli Şifreleri */}
+                    <TouchableOpacity
+                      style={[styles.exportActionBtn, { backgroundColor: '#D97706', paddingVertical: 12 }]}
+                      onPress={handleExportParentCredentials}
+                      disabled={exportingReportType === 'parent_credentials'}
+                      activeOpacity={0.88}
+                    >
+                      {exportingReportType === 'parent_credentials' ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="people-outline" size={20} color="#fff" />
+                          <View style={{ flex: 1, marginLeft: 4 }}>
+                            <Text style={styles.exportActionBtnText}>Veli Bilgilendirme & Şifre Excel Raporu (.xlsx)</Text>
+                            <Text style={{ fontSize: 10, color: '#FDE68A', marginTop: 1 }}>Veli adı, telefon, öğrenci no ve veli erişim şifresi dökümü</Text>
+                          </View>
+                          <Ionicons name="download-outline" size={17} color="#fff" />
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             )}
           </>
         )}
       </ScrollView>
 
-      {/* --- MODALLAR --- */}
+      {/* AI Model Seçim Modalı (Dropdown List) */}
+      <Modal visible={modelDropdownModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="hardware-chip" size={22} color="#4F46E5" />
+                <Text style={styles.modalTitle}>Gemini Modeli Seçin</Text>
+              </View>
+              <TouchableOpacity onPress={() => setModelDropdownModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Model Arama Filtresi */}
+            <View style={styles.modelSearchWrap}>
+              <Ionicons name="search" size={16} color="#64748B" />
+              <TextInput
+                style={styles.modelSearchInput}
+                placeholder="Model ara (örn: 2.5, flash, pro)..."
+                value={modelSearchQuery}
+                onChangeText={setModelSearchQuery}
+                placeholderTextColor="#94A3B8"
+              />
+              {!!modelSearchQuery && (
+                <TouchableOpacity onPress={() => setModelSearchQuery('')}>
+                  <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
+              {/* 1. Önerilen & Hazır Modeller */}
+              <Text style={styles.modelCategoryTitle}>ÖNERİLEN MODELLER</Text>
+              {PRESET_GEMINI_MODELS
+                .filter(m => !modelSearchQuery.trim() || m.name.toLowerCase().includes(modelSearchQuery.toLowerCase()) || m.id.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                .map((m) => {
+                  const isSelected = selectedGeminiModel === m.id;
+                  return (
+                    <TouchableOpacity
+                      key={m.id}
+                      style={[styles.modelDropdownItem, isSelected && styles.modelDropdownItemSelected]}
+                      onPress={() => {
+                        setSelectedGeminiModel(m.id);
+                        setModelDropdownModalVisible(false);
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={[styles.modelDropdownItemName, isSelected && styles.modelDropdownItemNameSelected]}>
+                            {m.name}
+                          </Text>
+                          {m.isRecommended && (
+                            <View style={styles.recommendedBadge}>
+                              <Text style={styles.recommendedBadgeText}>ÖNERİLEN</Text>
+                            </View>
+                          )}
+                        </View>
+                        <Text style={styles.modelDropdownItemId}>{m.id}</Text>
+                        <Text style={styles.modelDropdownItemDesc} numberOfLines={2}>{m.description}</Text>
+                      </View>
+                      <Ionicons
+                        name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                        size={22}
+                        color={isSelected ? '#4F46E5' : '#CBD5E1'}
+                      />
+                    </TouchableOpacity>
+                  );
+                })}
+
+              {/* 2. Google API Canlı Modeller */}
+              {availableLiveModels.filter(lm => !PRESET_GEMINI_MODELS.some(pm => pm.id === lm)).length > 0 && (
+                <>
+                  <Text style={[styles.modelCategoryTitle, { marginTop: 16 }]}>
+                    GOOGLE API CANLI MODELLERİ ({availableLiveModels.filter(lm => !PRESET_GEMINI_MODELS.some(pm => pm.id === lm)).length})
+                  </Text>
+                  {availableLiveModels
+                    .filter(lm => !PRESET_GEMINI_MODELS.some(pm => pm.id === lm))
+                    .filter(lm => !modelSearchQuery.trim() || lm.toLowerCase().includes(modelSearchQuery.toLowerCase()))
+                    .map((liveModel) => {
+                      const isSelected = selectedGeminiModel === liveModel;
+                      return (
+                        <TouchableOpacity
+                          key={liveModel}
+                          style={[styles.modelDropdownItem, isSelected && styles.modelDropdownItemSelected]}
+                          onPress={() => {
+                            setSelectedGeminiModel(liveModel);
+                            setModelDropdownModalVisible(false);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.modelDropdownItemName, isSelected && styles.modelDropdownItemNameSelected]}>
+                              {liveModel}
+                            </Text>
+                            <Text style={styles.modelDropdownItemId}>API Canlı Model</Text>
+                          </View>
+                          <Ionicons
+                            name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                            size={22}
+                            color={isSelected ? '#4F46E5' : '#CBD5E1'}
+                          />
+                        </TouchableOpacity>
+                      );
+                    })}
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* 1. Öğretmen Ekle Modal */}
       <Modal visible={addTeacherModalVisible} animationType="slide" transparent>
@@ -5949,6 +7412,134 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
+      {/* 🏫 OKUL DEĞİŞTİRME VE YÖNETİMİ MODALI */}
+      <Modal visible={schoolSelectModalVisible} animationType="slide" transparent onRequestClose={() => setSchoolSelectModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="business" size={24} color="#4F46E5" />
+                <Text style={styles.modalTitle}>Okul Seç & Değiştir</Text>
+              </View>
+              <TouchableOpacity onPress={() => setSchoolSelectModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, color: '#64748B', marginBottom: 14 }}>
+              Yönettiğiniz okullar arasında geçiş yapabilir veya yeni bir okul kurumu tanımlayabilirsiniz.
+            </Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 380 }}>
+              {schools.map((s) => {
+                const isSelected = selectedSchool?.id === s.id;
+                return (
+                  <TouchableOpacity
+                    key={s.id}
+                    onPress={() => {
+                      handleSelectSchool(s);
+                      setSchoolSelectModalVisible(false);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      padding: 12,
+                      borderRadius: 12,
+                      borderWidth: 1.5,
+                      borderColor: isSelected ? '#4F46E5' : '#E2E8F0',
+                      backgroundColor: isSelected ? '#EEF2FF' : '#FFFFFF',
+                      marginBottom: 10,
+                      gap: 10,
+                    }}
+                  >
+                    <View
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: 10,
+                        backgroundColor: isSelected ? '#4F46E5' : '#F1F5F9',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Ionicons
+                        name={isSelected ? 'checkmark' : 'business-outline'}
+                        size={20}
+                        color={isSelected ? '#FFFFFF' : '#64748B'}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: isSelected ? '800' : '600',
+                          color: isSelected ? '#312E81' : Colors.text,
+                        }}
+                      >
+                        {s.name}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 3 }}>
+                        <Text style={{ fontSize: 11, color: '#64748B' }}>
+                          Kod: <Text style={{ fontWeight: '700', color: '#4F46E5' }}>{s.code}</Text>
+                        </Text>
+                        {isSelected && (
+                          <View
+                            style={{
+                              backgroundColor: '#DCFCE7',
+                              paddingHorizontal: 6,
+                              paddingVertical: 1,
+                              borderRadius: 4,
+                            }}
+                          >
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#166534' }}>ŞU AN AKTİF</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                    <Ionicons
+                      name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                      size={20}
+                      color={isSelected ? '#4F46E5' : '#CBD5E1'}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+              {schools.length === 0 && (
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ color: '#64748B', fontSize: 13 }}>Henüz kayıtlı bir okulunuz bulunmuyor.</Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {!isStaff && (
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#F0FDF4',
+                  borderWidth: 1.5,
+                  borderColor: '#86EFAC',
+                  borderRadius: 12,
+                  paddingVertical: 12,
+                  marginTop: 10,
+                  gap: 8,
+                }}
+                onPress={() => {
+                  setSchoolSelectModalVisible(false);
+                  setCreateModalVisible(true);
+                }}
+              >
+                <Ionicons name="add-circle" size={20} color="#166534" />
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#166534' }}>
+                  Yeni Okul Tanımla
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* AI Çarşaf Program Ön Seçenekler Modalı (Neleri Çekelim?) */}
       <Modal visible={schedulePreOptionsModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -6139,6 +7730,31 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </View>
               </TouchableOpacity>
 
+              {/* 5. Otomatik Akıllı Blok Dengeleme (İsteğe Bağlı) */}
+              {optExtractScheduleItems && (
+                <TouchableOpacity
+                  style={[styles.preOptItemCard, optAutoHealBlocks && styles.preOptItemCardChecked, { borderColor: optAutoHealBlocks ? '#4F46E5' : '#E2E8F0' }]}
+                  onPress={() => setOptAutoHealBlocks(!optAutoHealBlocks)}
+                >
+                  <Ionicons
+                    name={optAutoHealBlocks ? 'checkbox' : 'square-outline'}
+                    size={24}
+                    color={optAutoHealBlocks ? '#4F46E5' : '#94A3B8'}
+                  />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text style={styles.preOptItemTitle}>⚡ Akıllı Blok Dengeleme (İsteğe Bağlı)</Text>
+                      <Text style={[styles.preOptBadgeSpeed, { backgroundColor: optAutoHealBlocks ? '#EEF2FF' : '#F1F5F9', color: optAutoHealBlocks ? '#4F46E5' : '#64748B' }]}>
+                        {optAutoHealBlocks ? 'Aktif' : 'Devre Dışı (Önerilen)'}
+                      </Text>
+                    </View>
+                    <Text style={styles.preOptItemSub}>
+                      Çarşaf programı parça parça veya 2 kerede yüklüyorsanız KAPALI tutunuz. Öğretmenin eksik dersleri diğer sayfalarda olabilir. Tüm sayfalar yüklendikten sonra "Program Denetimi" ekranından tek tuşla dilediğiniz zaman dengeleyebilirsiniz.
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+
               {/* Sistem Mevcut Durum Kartı */}
               <View style={styles.preOptSystemStatusBox}>
                 <Ionicons name="information-circle" size={20} color="#0284C7" />
@@ -6159,6 +7775,117 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   )}
                 </View>
               </View>
+              {/* 5. PDF Sayfa Aralığı / Parça Parça Okuma Kartı */}
+              {pendingScheduleFile?.name?.toLowerCase().endsWith('.pdf') && (
+                <View style={styles.preOptPageRangeCard}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="documents" size={18} color="#4F46E5" />
+                      <Text style={styles.preOptPageRangeTitle}>📄 PDF Sayfa Aralığı Seçimi</Text>
+                    </View>
+                    {countingPdfPages ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <ActivityIndicator size="small" color="#4F46E5" />
+                        <Text style={{ fontSize: 11, color: '#64748B' }}>Sayfalar taranıyor...</Text>
+                      </View>
+                    ) : pdfTotalPages > 0 ? (
+                      <View style={styles.preOptPageBadge}>
+                        <Text style={styles.preOptPageBadgeText}>Toplam {pdfTotalPages} Sayfa</Text>
+                      </View>
+                    ) : null}
+                  </View>
+
+                  <Text style={styles.preOptPageRangeSub}>
+                    {pdfTotalPages > 35
+                      ? '💡 Belgeniz çok sayfalı. Token tavanına takılmamak ve %100 eksiksiz okuma için parçalara bölmeniz önerilir.'
+                      : 'İhtiyaca göre belgenin sadece belirli sayfalarını (örn: 1-25) okutabilirsiniz.'}
+                  </Text>
+
+                  {/* Hızlı Seçim Butonları */}
+                  {pdfTotalPages > 1 && (
+                    <View style={styles.pdfRangePresetRow}>
+                      <TouchableOpacity
+                        style={[styles.pdfRangePresetBtn, pdfPageRangeMode === 'all' && styles.pdfRangePresetBtnActive]}
+                        onPress={() => {
+                          setPdfPageRangeMode('all');
+                          setPdfStartPage('1');
+                          setPdfEndPage(String(pdfTotalPages));
+                        }}
+                      >
+                        <Text style={[styles.pdfRangePresetText, pdfPageRangeMode === 'all' && styles.pdfRangePresetTextActive]}>
+                          Tümü (1-{pdfTotalPages})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.pdfRangePresetBtn, pdfPageRangeMode === 'half1' && styles.pdfRangePresetBtnActive]}
+                        onPress={() => {
+                          setPdfPageRangeMode('half1');
+                          setPdfStartPage('1');
+                          setPdfEndPage(String(Math.ceil(pdfTotalPages / 2)));
+                        }}
+                      >
+                        <Text style={[styles.pdfRangePresetText, pdfPageRangeMode === 'half1' && styles.pdfRangePresetTextActive]}>
+                          1. Yarı (1-{Math.ceil(pdfTotalPages / 2)})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.pdfRangePresetBtn, pdfPageRangeMode === 'half2' && styles.pdfRangePresetBtnActive]}
+                        onPress={() => {
+                          setPdfPageRangeMode('half2');
+                          setPdfStartPage(String(Math.ceil(pdfTotalPages / 2) + 1));
+                          setPdfEndPage(String(pdfTotalPages));
+                        }}
+                      >
+                        <Text style={[styles.pdfRangePresetText, pdfPageRangeMode === 'half2' && styles.pdfRangePresetTextActive]}>
+                          2. Yarı ({Math.ceil(pdfTotalPages / 2) + 1}-{pdfTotalPages})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.pdfRangePresetBtn, pdfPageRangeMode === 'custom' && styles.pdfRangePresetBtnActive]}
+                        onPress={() => setPdfPageRangeMode('custom')}
+                      >
+                        <Text style={[styles.pdfRangePresetText, pdfPageRangeMode === 'custom' && styles.pdfRangePresetTextActive]}>
+                          Özel Aralık
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {/* Sayfa Giriş Kutuları */}
+                  <View style={styles.pdfRangeInputsRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.pdfRangeInputLabel}>Başlangıç:</Text>
+                      <TextInput
+                        style={styles.pdfRangeInput}
+                        keyboardType="numeric"
+                        value={pdfStartPage}
+                        onChangeText={(txt) => {
+                          setPdfStartPage(txt);
+                          setPdfPageRangeMode('custom');
+                        }}
+                      />
+                    </View>
+
+                    <Text style={{ color: '#94A3B8', fontWeight: 'bold' }}>—</Text>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.pdfRangeInputLabel}>Bitiş:</Text>
+                      <TextInput
+                        style={styles.pdfRangeInput}
+                        keyboardType="numeric"
+                        value={pdfEndPage}
+                        onChangeText={(txt) => {
+                          setPdfEndPage(txt);
+                          setPdfPageRangeMode('custom');
+                        }}
+                      />
+                    </View>
+                  </View>
+                </View>
+              )}
             </ScrollView>
 
             {/* Butonlar */}
@@ -6188,7 +7915,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>🪄 AI Çarşaf Program Analizi</Text>
-              <TouchableOpacity onPress={() => setAiModalVisible(false)}>
+              <TouchableOpacity onPress={cancelScheduleAnalysis}>
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
@@ -6202,6 +7929,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     İşlem Sürüyor: {Math.floor(aiElapsedSeconds / 60) > 0 ? `${Math.floor(aiElapsedSeconds / 60)} dk ${aiElapsedSeconds % 60} sn` : `${aiElapsedSeconds} sn`}
                   </Text>
                 </View>
+
+                {/* Mod Bilgisi */}
+                {!optExtractScheduleItems ? (
+                  <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, marginTop: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#92400E' }}>⚡ Hızlı Liste Modu: Program hücreleri çözümlenmiyor</Text>
+                  </View>
+                ) : (
+                  <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, marginTop: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>🗓️ Tam Dağılım Modu: Haftalık program hücreleri taranıyor</Text>
+                  </View>
+                )}
 
                 {/* Spinner & Ana Başlık */}
                 <ActivityIndicator size="large" color="#4F46E5" style={{ marginVertical: 10 }} />
@@ -6219,73 +7957,87 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <Text style={styles.aiStageText}>{aiStageText}</Text>
                 </View>
 
-                {/* Adım Listesi (Progress Steps - 5 Aşamalı Çözümleme) */}
+                {/* Adım Listesi (Sadece kullanıcının seçtiği kategorileri gösterir) */}
                 <View style={styles.aiStepsContainer}>
-                  <View style={styles.aiStepRow}>
-                    <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
-                    <Text style={styles.aiStepDoneText}>1. PDF Sayfa Bookmarkları ve sayfa başlıkları taranıyor</Text>
-                  </View>
-                  <View style={styles.aiStepRow}>
-                    <Ionicons
-                      name={aiElapsedSeconds >= 15 ? 'checkmark-circle' : 'time-outline'}
-                      size={16}
-                      color={aiElapsedSeconds >= 15 ? '#16A34A' : '#4F46E5'}
-                    />
-                    <Text style={aiElapsedSeconds >= 15 ? styles.aiStepDoneText : styles.aiStepActiveText}>
-                      2. Her sayfa başlığından ("Adı Soyadı") öğretmen kadrosu doğrulanıyor
-                    </Text>
-                  </View>
-                  <View style={styles.aiStepRow}>
-                    <Ionicons
-                      name={aiElapsedSeconds >= 35 ? 'checkmark-circle' : 'time-outline'}
-                      size={16}
-                      color={aiElapsedSeconds >= 35 ? '#16A34A' : '#94A3B8'}
-                    />
-                    <Text style={aiElapsedSeconds >= 35 ? styles.aiStepDoneText : styles.aiStepPendingText}>
-                      3. "Ders Adı", "Ders" (kod) ve "Sınıflar" tablosundan branş ve şubeler çıkarılıyor
-                    </Text>
-                  </View>
-                  <View style={styles.aiStepRow}>
-                    <Ionicons
-                      name={aiElapsedSeconds >= 60 ? 'checkmark-circle' : 'time-outline'}
-                      size={16}
-                      color={aiElapsedSeconds >= 60 ? '#16A34A' : '#94A3B8'}
-                    />
-                    <Text style={aiElapsedSeconds >= 60 ? styles.aiStepDoneText : styles.aiStepPendingText}>
-                      4. İlk öğretmenin programından okulun giriş-çıkış ve ders saatleri belirleniyor
-                    </Text>
-                  </View>
-                  <View style={styles.aiStepRow}>
-                    <Ionicons
-                      name={aiElapsedSeconds >= 90 ? 'checkmark-circle' : 'time-outline'}
-                      size={16}
-                      color={aiElapsedSeconds >= 90 ? '#16A34A' : '#94A3B8'}
-                    />
-                    <Text style={aiElapsedSeconds >= 90 ? styles.aiStepDoneText : styles.aiStepPendingText}>
-                      5. Hücrelere bölünmüş haftalık ders tablolarından tüm program omurgası çıkarılıyor
-                    </Text>
-                  </View>
+                  {optExtractTeachers && (
+                    <View style={styles.aiStepRow}>
+                      <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
+                      <Text style={styles.aiStepDoneText}>• Öğretmen kadrosu taranıyor (sayfa yer imleri & başlıklar)</Text>
+                    </View>
+                  )}
+                  {optExtractClasses && (
+                    <View style={styles.aiStepRow}>
+                      <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
+                      <Text style={styles.aiStepDoneText}>• Şubeler ve sınıflar tespit ediliyor</Text>
+                    </View>
+                  )}
+                  {optExtractLessons && (
+                    <View style={styles.aiStepRow}>
+                      <Ionicons name="checkmark-circle" size={16} color="#16A34A" />
+                      <Text style={styles.aiStepDoneText}>• Ders adları ve branşlar ayıklanıyor</Text>
+                    </View>
+                  )}
+                  {optExtractScheduleItems && (
+                    <View style={styles.aiStepRow}>
+                      <Ionicons name="time-outline" size={16} color="#4F46E5" />
+                      <Text style={styles.aiStepActiveText}>
+                        • Hücrelere bölünmüş haftalık ders tablolarından tüm program omurgası çıkarılıyor
+                      </Text>
+                    </View>
+                  )}
                 </View>
+
+                {/* İptal Butonu */}
+                <TouchableOpacity
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: '#FEE2E2',
+                    borderWidth: 1,
+                    borderColor: '#FCA5A5',
+                    borderRadius: 10,
+                    paddingVertical: 10,
+                    paddingHorizontal: 16,
+                    marginTop: 12,
+                    gap: 6,
+                  }}
+                  onPress={cancelScheduleAnalysis}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="stop-circle-outline" size={18} color="#DC2626" />
+                  <Text style={{ color: '#DC2626', fontWeight: '700', fontSize: 13 }}>Analizi Durdur / İptal Et</Text>
+                </TouchableOpacity>
 
                 {/* Bilgilendirme Kutusu */}
                 <View style={styles.aiProgressInfoBox}>
                   <Ionicons name="information-circle-outline" size={18} color="#166534" />
                   <Text style={styles.aiProgressInfoBoxText}>
-                    Çarşaf programlar sayfa sayfa onlarca öğretmen, derslik ve yüzlerce ders hücresi içeren büyük tablolardır. Belge boyutuna ve sayfa sayısına göre yapay zekanın tüm sayfaları titizlikle çözmesi <Text style={{ fontWeight: '800' }}>birkaç dakika (yaklaşık 2-10 dakika)</Text> sürebilir. Bu işlem tamamen normaldir, lütfen ekranı kapatmadan bekleyiniz.
+                    {optExtractScheduleItems
+                      ? 'Tam program çözümlemesi çok sayfalı tablolarda birkaç dakika sürebilir. İstemediğiniz kategorileri analiz öncesi seçeneklerden kapatarak işlemi saniyeler içinde tamamlayabilirsiniz.'
+                      : 'Hızlı mod seçildiği için ders programı hücreleri çözümlenmeyecek; sadece öğretmen, sınıf ve ders listeleri hızla toplanacaktır.'}
                   </Text>
                 </View>
               </View>
             ) : parsedSchedule ? (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
                 {(() => {
-                  const activeTeachersCount = parsedSchedule.teachers.length - excludedTeachers.length;
-                  const activeClassesCount = parsedSchedule.classes.length - excludedClasses.length;
-                  const activeLessonsCount = parsedSchedule.lessons.length - excludedLessons.length;
-                  const activeScheduleItemsCount = parsedSchedule.scheduleItems.filter((item) => {
-                    if (excludedTeachers.includes(item.teacherName)) return false;
-                    const clsName = `${item.grade}-${item.section.toUpperCase()}`;
+                  const teachersList = parsedSchedule.teachers || [];
+                  const classesList = parsedSchedule.classes || [];
+                  const lessonsList = parsedSchedule.lessons || [];
+                  const scheduleItemsList = parsedSchedule.scheduleItems || [];
+                  const bellScheduleList = parsedSchedule.bellSchedule || [];
+
+                  const activeTeachersCount = teachersList.length - excludedTeachers.length;
+                  const activeClassesCount = classesList.length - excludedClasses.length;
+                  const activeLessonsCount = lessonsList.length - excludedLessons.length;
+                  const activeScheduleItemsCount = scheduleItemsList.filter((item) => {
+                    if (!item) return false;
+                    if (item.teacherName && excludedTeachers.includes(item.teacherName)) return false;
+                    const sec = item.section ? String(item.section).toUpperCase() : '';
+                    const clsName = `${item.grade}-${sec}`;
                     if (excludedClasses.includes(clsName)) return false;
-                    if (excludedLessons.includes(item.lessonName)) return false;
+                    if (item.lessonName && excludedLessons.includes(item.lessonName)) return false;
                     return true;
                   }).length;
 
@@ -6299,7 +8051,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           <Text style={styles.previewVal}>
                             {activeTeachersCount}
                             {excludedTeachers.length > 0 && (
-                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{parsedSchedule.teachers.length}</Text>
+                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{teachersList.length}</Text>
                             )}
                           </Text>
                           <Text style={styles.previewLbl}>
@@ -6310,7 +8062,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           <Text style={styles.previewVal}>
                             {activeClassesCount}
                             {excludedClasses.length > 0 && (
-                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{parsedSchedule.classes.length}</Text>
+                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{classesList.length}</Text>
                             )}
                           </Text>
                           <Text style={styles.previewLbl}>
@@ -6321,7 +8073,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           <Text style={styles.previewVal}>
                             {activeLessonsCount}
                             {excludedLessons.length > 0 && (
-                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{parsedSchedule.lessons.length}</Text>
+                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{lessonsList.length}</Text>
                             )}
                           </Text>
                           <Text style={styles.previewLbl}>
@@ -6331,8 +8083,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         <View style={styles.previewItem}>
                           <Text style={styles.previewVal}>
                             {activeScheduleItemsCount}
-                            {activeScheduleItemsCount !== parsedSchedule.scheduleItems.length && (
-                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{parsedSchedule.scheduleItems.length}</Text>
+                            {scheduleItemsList.length > 0 && activeScheduleItemsCount !== scheduleItemsList.length && (
+                              <Text style={{ fontSize: 13, color: '#94A3B8' }}>/{scheduleItemsList.length}</Text>
                             )}
                           </Text>
                           <Text style={styles.previewLbl}>Ders Saati</Text>
@@ -6340,19 +8092,113 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       </View>
 
                       {/* Okul Ders & Giriş-Çıkış Saatleri (Varsa) */}
-                      {parsedSchedule.bellSchedule && parsedSchedule.bellSchedule.length > 0 && (
+                      {bellScheduleList && bellScheduleList.length > 0 && (
                         <View style={[styles.scheduleOptionSection, { backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 14 }]}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                             <Ionicons name="time" size={16} color="#4F46E5" />
                             <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
-                              ⏰ TESPİT EDİLEN OKUL GİRİŞ - ÇIKIŞ SAATLERİ ({parsedSchedule.bellSchedule.length} Ders):
+                              ⏰ TESPİT EDİLEN OKUL GİRİŞ - ÇIKIŞ SAATLERİ ({bellScheduleList.length} Ders):
                             </Text>
                           </View>
                           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                            {parsedSchedule.bellSchedule.map((b) => (
+                            {bellScheduleList.map((b) => (
                               <View key={b.period} style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}>
                                 <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>
                                   {b.period}. Ders: <Text style={{ fontWeight: '600', color: '#1E293B' }}>{b.time}</Text>
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      )}
+
+                      {/* Öğretmen Haftalık Saat (HS) Doğrulama & Çizelge Sağlaması */}
+                      {parsedSchedule.teacherVerifications && parsedSchedule.teacherVerifications.length > 0 && (
+                        <View style={{ backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#CBD5E1', padding: 12, marginBottom: 14 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                              <Ionicons name="shield-checkmark" size={17} color="#4F46E5" />
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#1E293B' }}>
+                                ⚖️ Öğretmen Haftalık Ders Saati (HS) Sağlaması
+                              </Text>
+                            </View>
+                            <View style={{
+                              backgroundColor: parsedSchedule.teacherVerifications.every(v => v.isConsistent) ? '#DCFCE7' : '#FEF3C7',
+                              paddingHorizontal: 8,
+                              paddingVertical: 2,
+                              borderRadius: 6
+                            }}>
+                              <Text style={{
+                                fontSize: 11,
+                                fontWeight: '800',
+                                color: parsedSchedule.teacherVerifications.every(v => v.isConsistent) ? '#15803D' : '#B45309'
+                              }}>
+                                {parsedSchedule.teacherVerifications.every(v => v.isConsistent)
+                                  ? '✅ Tüm Kadro Tam Tutarlı'
+                                  : `⚠️ ${parsedSchedule.teacherVerifications.filter(v => !v.isConsistent).length} Öğretmende Saat Farkı`}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
+                            Çarşafın altındaki resmî ders dağılım çizelgesindeki toplam saat (HS) ile ızgaradan çıkarılan dersler karşılaştırıldı:
+                          </Text>
+
+                          <ScrollView nestedScrollEnabled style={{ maxHeight: 180 }} contentContainerStyle={{ gap: 6 }}>
+                            {parsedSchedule.teacherVerifications.map((v, vIdx) => (
+                              <View key={vIdx} style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                backgroundColor: v.isConsistent ? '#FFFFFF' : '#FFFBEB',
+                                paddingHorizontal: 10,
+                                paddingVertical: 7,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: v.isConsistent ? '#E2E8F0' : '#FCD34D'
+                              }}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>{v.teacherName}</Text>
+                                  <Text style={{ fontSize: 10, color: '#64748B' }}>
+                                    Çizelgedeki Saat: {v.expectedWeeklyHours != null ? `${v.expectedWeeklyHours} Saat` : '—'} • Çıkarılan: {v.extractedWeeklyHours} Saat
+                                  </Text>
+                                </View>
+                                <View style={{
+                                  backgroundColor: v.isConsistent ? '#F0FDF4' : '#FEF2F2',
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 3,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  borderColor: v.isConsistent ? '#BBF7D0' : '#FECACA'
+                                }}>
+                                  <Text style={{
+                                    fontSize: 10,
+                                    fontWeight: '800',
+                                    color: v.isConsistent ? '#166534' : '#DC2626'
+                                  }}>
+                                    {v.isConsistent ? `✅ ${v.extractedWeeklyHours}/${v.expectedWeeklyHours || v.extractedWeeklyHours} Saat` : `⚠️ ${v.extractedWeeklyHours}/${v.expectedWeeklyHours} Saat`}
+                                  </Text>
+                                </View>
+                              </View>
+                            ))}
+                          </ScrollView>
+                        </View>
+                      )}
+
+                      {/* Derslerin Gerçek Haftalık Saatleri (HS) */}
+                      {parsedSchedule.lessonDetails && parsedSchedule.lessonDetails.some(l => (l.weeklyHours || 0) > 0) && (
+                        <View style={{ backgroundColor: '#F0FDF4', borderRadius: 8, borderWidth: 1, borderColor: '#BBF7D0', padding: 10, marginBottom: 14 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <Ionicons name="checkmark-done-circle" size={16} color="#16A34A" />
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#166534' }}>
+                              📚 Çizelgeden Okunan Gerçek Haftalık Ders Saatleri (HS):
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                            {parsedSchedule.lessonDetails.filter(l => (l.weeklyHours || 0) > 0).map((l, lIdx) => (
+                              <View key={lIdx} style={{ backgroundColor: '#FFFFFF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#86EFAC' }}>
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803D' }}>
+                                  {l.name}: <Text style={{ fontWeight: '800', color: '#166534' }}>{l.weeklyHours} Saat</Text>
                                 </Text>
                               </View>
                             ))}
@@ -6432,7 +8278,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               />
                               <View style={{ flex: 1, marginLeft: 8 }}>
                                 <Text style={styles.scheduleCheckboxTitle}>
-                                  👨‍🏫 Öğretmen Kadrosu ({activeTeachersCount}/{parsedSchedule.teachers.length} Aktif)
+                                  👨‍🏫 Öğretmen Kadrosu ({activeTeachersCount}/{teachersList.length} Aktif)
                                 </Text>
                                 <Text style={styles.scheduleCheckboxSub}>
                                   Bulunan öğretmenleri okul kadrosuna ekler / eşleştirir.
@@ -6469,7 +8315,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 </View>
                               </View>
                               <View style={styles.chipsContainer}>
-                                {parsedSchedule.teachers.map((t, idx) => {
+                                {teachersList.map((t, idx) => {
                                   const isExcluded = excludedTeachers.includes(t);
                                   return (
                                     <TouchableOpacity
@@ -6510,7 +8356,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               />
                               <View style={{ flex: 1, marginLeft: 8 }}>
                                 <Text style={styles.scheduleCheckboxTitle}>
-                                  🏫 Sınıflar & Şubeler ({activeClassesCount}/{parsedSchedule.classes.length} Aktif)
+                                  🏫 Sınıflar & Şubeler ({activeClassesCount}/{classesList.length} Aktif)
                                 </Text>
                                 <Text style={styles.scheduleCheckboxSub}>
                                   Belirlenen şubeleri okulun sınıf listesine kaydeder.
@@ -6547,7 +8393,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 </View>
                               </View>
                               <View style={styles.chipsContainer}>
-                                {parsedSchedule.classes.map((c, idx) => {
+                                {classesList.map((c, idx) => {
                                   const isExcluded = excludedClasses.includes(c);
                                   return (
                                     <TouchableOpacity
@@ -6598,7 +8444,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               />
                               <View style={{ flex: 1, marginLeft: 8 }}>
                                 <Text style={styles.scheduleCheckboxTitle}>
-                                  📚 Ders Havuzu ({activeLessonsCount}/{parsedSchedule.lessons.length} Aktif)
+                                  📚 Ders Havuzu ({activeLessonsCount}/{lessonsList.length} Aktif)
                                 </Text>
                                 <Text style={styles.scheduleCheckboxSub}>
                                   Bulunan dersleri okulun dersler havuzuna ekler.
@@ -6635,7 +8481,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 </View>
                               </View>
                               <View style={styles.chipsContainer}>
-                                {parsedSchedule.lessons.map((l, idx) => {
+                                {lessonsList.map((l, idx) => {
                                   const isExcluded = excludedLessons.includes(l);
                                   return (
                                     <TouchableOpacity
@@ -6686,7 +8532,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               />
                               <View style={{ flex: 1, marginLeft: 8 }}>
                                 <Text style={styles.scheduleCheckboxTitle}>
-                                  📅 Haftalık Ders Programı ({activeScheduleItemsCount}/{parsedSchedule.scheduleItems.length} Ders Saati Aktif)
+                                  📅 Haftalık Ders Programı ({activeScheduleItemsCount}/{scheduleItemsList.length} Ders Saati Aktif)
                                 </Text>
                                 <Text style={styles.scheduleCheckboxSub}>
                                   Haftalık gün ve saat bazında tüm ders eşleştirmelerini yazar.
@@ -7433,6 +9279,141 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
+      {/* 🧹 PROGRAM VE KADRO SIFIRLAMA / TEMİZLEME MODALI */}
+      <Modal visible={scheduleResetModalVisible} animationType="fade" transparent onRequestClose={() => setScheduleResetModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 540 }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={[styles.sanityHeaderIconBox, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="trash" size={20} color="#DC2626" />
+                </View>
+                <View>
+                  <Text style={styles.modalTitle}>Program & Kadro Sıfırlama</Text>
+                  <Text style={styles.modalSubTitle}>İstediğiniz veri grubunu temizleyerek artık verilerden arının.</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setScheduleResetModalVisible(false)}>
+                <Ionicons name="close" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 460, marginTop: 12 }}>
+              {/* Seçenek 1: Tüm Okul Ders Programını Sil */}
+              <TouchableOpacity
+                style={styles.resetActionCard}
+                onPress={handleClearAllSchedules}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.resetActionIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="calendar-outline" size={22} color="#DC2626" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.resetActionTitle}>🗑️ Tüm Okul Ders Programını Sil</Text>
+                  <Text style={styles.resetActionDesc}>
+                    Tüm şubelerin ve tüm öğretmenlerin haftalık ders saatlerini tamamen siler ({allSchoolSchedules.length} saat). Şube ve öğretmen isimleri korunur.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Seçenek 2: Yalnızca Seçili Şubeyi Boşalt */}
+              <TouchableOpacity
+                style={styles.resetActionCard}
+                onPress={handleClearCurrentClassSchedule}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.resetActionIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="school-outline" size={22} color="#D97706" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.resetActionTitle}>
+                    🏫 Seçili Şubenin Programını Sil ({selectedClassForEditor || (classes[0] ? `${classes[0].grade}-${classes[0].section}` : 'Şube')})
+                  </Text>
+                  <Text style={styles.resetActionDesc}>
+                    Yalnızca bu şubeye ait haftalık ders saatlerini boşaltır. İlgili öğretmenlerin saatlerinden de düşer.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Seçenek 3: Yalnızca Seçili Öğretmeni Boşalt */}
+              <TouchableOpacity
+                style={styles.resetActionCard}
+                onPress={handleClearCurrentTeacherSchedule}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.resetActionIconWrap, { backgroundColor: '#E0E7FF' }]}>
+                  <Ionicons name="person-outline" size={22} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.resetActionTitle}>
+                    👨‍🏫 Seçili Öğretmenin Programını Sil ({selectedTeacherForEditor || (teachers[0] ? teachers[0].fullName : 'Öğretmen')})
+                  </Text>
+                  <Text style={styles.resetActionDesc}>
+                    Yalnızca bu öğretmenin haftalık ders saatlerini boşaltır. İlgili şubelerin saatlerinden de kaldırılır.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Seçenek 4: Tüm Öğretmen Kadrosunu Sil */}
+              <TouchableOpacity
+                style={styles.resetActionCard}
+                onPress={() => {
+                  setScheduleResetModalVisible(false);
+                  handleDeleteAllTeachers();
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.resetActionIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="people-outline" size={22} color="#DC2626" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.resetActionTitle, { color: '#DC2626' }]}>
+                    👥 Tüm Öğretmen Kadrosunu Sil ({teachers.length} Öğretmen)
+                  </Text>
+                  <Text style={styles.resetActionDesc}>
+                    Sisteme kayıtlı öğretmen kullanıcılarını tamamen siler.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Seçenek 5: Tüm Şubeleri Sil */}
+              <TouchableOpacity
+                style={styles.resetActionCard}
+                onPress={() => {
+                  setScheduleResetModalVisible(false);
+                  handleDeleteAllClasses();
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.resetActionIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                  <Ionicons name="business-outline" size={22} color="#DC2626" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.resetActionTitle, { color: '#DC2626' }]}>
+                    🏢 Tüm Şubeleri ve Sınıfları Sil ({classes.length} Şube)
+                  </Text>
+                  <Text style={styles.resetActionDesc}>
+                    Sisteme kayıtlı sınıf ve şube tanımlarını tamamen siler.
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.modalCancelBtn, { marginTop: 16 }]}
+              onPress={() => setScheduleResetModalVisible(false)}
+            >
+              <Text style={styles.modalCancelBtnText}>Kapat</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* 1.3 Öğretmen Haftalık Ders Programı Çizelgesi Modalı */}
       <Modal visible={teacherScheduleModalVisible} animationType="slide" transparent>
         <View style={styles.topDownOverlay}>
@@ -7587,6 +9568,84 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 12 }}>
+              {/* Çift Yönlü Otomatik Senkronizasyon Bilgi Notu */}
+              <View style={{ backgroundColor: '#EEF2FF', borderRadius: 8, padding: 10, marginBottom: 14, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: '#C7D2FE' }}>
+                <Ionicons name="sync-circle" size={22} color="#4F46E5" />
+                <Text style={{ fontSize: 11.5, color: '#3730A3', flex: 1, fontWeight: '500', lineHeight: 16 }}>
+                  Bu ders hücresini kaydettiğinizde veya sildiğinizde; hem <Text style={{ fontWeight: '700' }}>{editingSlotData?.grade || '?'}-{editingSlotData?.section || '?'} şubesinin</Text> hem de <Text style={{ fontWeight: '700' }}>{editingSlotData?.teacherName || 'ilgili öğretmenin'}</Text> programı otomatik olarak güncellenir.
+                </Text>
+              </View>
+
+              {/* Çakışma Varsa: Çakışan Dersleri Göster ve Seçmeli Sil */}
+              {slotConflictItems.length > 1 && (
+                <View style={styles.conflictResolutionBox}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <Ionicons name="warning" size={18} color="#DC2626" />
+                    <Text style={styles.conflictResolutionTitle}>
+                      Bu Saatte {slotConflictItems.length} Farklı Ders Çakışıyor!
+                    </Text>
+                  </View>
+                  <Text style={styles.conflictResolutionDesc}>
+                    Bu şubede aynı saatte birden fazla ders tanımlanmış. Doğru olan dersi seçebilir, yanlış olanı tek tıkla silebilirsiniz:
+                  </Text>
+
+                  <View style={{ gap: 8, marginTop: 10 }}>
+                    {slotConflictItems.map((cItem, cIdx) => {
+                      const isCurrentSelected = editingSlotData?.id === cItem.id;
+                      return (
+                        <View
+                          key={cItem.id || cIdx}
+                          style={[
+                            styles.conflictResolutionItem,
+                            isCurrentSelected && styles.conflictResolutionItemActive,
+                          ]}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.conflictResolutionItemLesson}>
+                              {cItem.lessonName} {cItem.lessonCode ? `(${cItem.lessonCode})` : ''}
+                            </Text>
+                            <Text style={styles.conflictResolutionItemTeacher}>
+                              👨‍🏫 {cItem.teacherName || 'Öğretmen Belirtilmedi'} • 🏫 {cItem.grade}-{cItem.section}
+                            </Text>
+                          </View>
+
+                          <View style={{ flexDirection: 'row', gap: 6 }}>
+                            <TouchableOpacity
+                              style={[styles.conflictSelectBtn, isCurrentSelected && styles.conflictSelectBtnActive]}
+                              onPress={() => {
+                                setEditingSlotData({
+                                  id: cItem.id,
+                                  dayOfWeek: cItem.dayOfWeek,
+                                  lessonHour: cItem.lessonHour,
+                                  grade: cItem.grade,
+                                  section: cItem.section,
+                                  teacherName: cItem.teacherName || '',
+                                  lessonName: cItem.lessonName || '',
+                                  lessonCode: cItem.lessonCode || '',
+                                  classroom: cItem.classroom || '',
+                                });
+                              }}
+                            >
+                              <Text style={[styles.conflictSelectBtnText, isCurrentSelected && { color: '#4F46E5', fontWeight: '800' }]}>
+                                {isCurrentSelected ? '✓ Seçili' : 'Seç'}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.conflictDeleteBtn}
+                              onPress={() => handleDeleteSpecificConflictItem(cItem)}
+                            >
+                              <Ionicons name="trash" size={13} color="#DC2626" />
+                              <Text style={styles.conflictDeleteBtnText}>Sil</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
               {/* Gün ve Saat Seçimi */}
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
                 <View style={{ flex: 1 }}>
@@ -7659,60 +9718,176 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </ScrollView>
               </View>
 
-              {/* Ders Adı */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={styles.slotModalLabel}>Ders Adı</Text>
-                <TextInput
-                  style={[styles.slotModalInput, { marginTop: 4 }]}
-                  placeholder="Ders adı yazın (örn: Matematik, Fizik...)"
-                  value={editingSlotData?.lessonName || ''}
-                  onChangeText={(val) => setEditingSlotData(prev => prev ? { ...prev, lessonName: val } : null)}
-                />
-                {/* Hızlı Ders Seçici */}
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
-                  {lessons.map((lsn) => {
-                    const isSel = (editingSlotData?.lessonName || '').toLowerCase() === (lsn.name || '').toLowerCase();
-                    return (
-                      <TouchableOpacity
-                        key={lsn.id}
-                        style={[styles.slotQuickChip, isSel && styles.slotQuickChipActive]}
-                        onPress={() => setEditingSlotData(prev => prev ? { ...prev, lessonName: lsn.name } : null)}
-                      >
-                        <Text style={[styles.slotQuickChipText, isSel && styles.slotQuickChipTextActive]}>
-                          {lsn.name}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+              {/* 1. DERS SEÇİMİ (ALFABETİK LİSTBOX & ARAMA) */}
+              <View style={{ marginBottom: 14 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={styles.slotModalLabel}>📚 Ders Seçimi (Alfabetik Liste)</Text>
+                  {editingSlotData?.lessonName ? (
+                    <View style={styles.listboxSelectedBadge}>
+                      <Text style={styles.listboxSelectedBadgeText} numberOfLines={1}>
+                        Seçili: {editingSlotData.lessonName}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Ders Arama Çubuğu */}
+                <View style={styles.listboxSearchWrap}>
+                  <Ionicons name="search" size={15} color="#64748B" style={{ marginLeft: 8 }} />
+                  <TextInput
+                    style={styles.listboxSearchInput}
+                    placeholder="Ders ara (örn: Matematik, Fizik, Biyoloji...)"
+                    value={slotLessonSearchQuery}
+                    onChangeText={setSlotLessonSearchQuery}
+                    placeholderTextColor="#94A3B8"
+                  />
+                  {!!slotLessonSearchQuery && (
+                    <TouchableOpacity onPress={() => setSlotLessonSearchQuery('')} style={{ padding: 6 }}>
+                      <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Dikey Alfabetik Listbox */}
+                <View style={styles.listboxContainer}>
+                  <ScrollView
+                    nestedScrollEnabled={true}
+                    style={{ maxHeight: 145 }}
+                    showsVerticalScrollIndicator={true}
+                  >
+                    {filteredSlotLessons.length === 0 ? (
+                      <View style={{ padding: 12, alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: '#94A3B8' }}>Eşleşen ders bulunamadı.</Text>
+                        {!!slotLessonSearchQuery.trim() && (
+                          <TouchableOpacity
+                            style={styles.listboxAddCustomBtn}
+                            onPress={() => {
+                              setEditingSlotData(prev => prev ? { ...prev, lessonName: slotLessonSearchQuery.trim() } : null);
+                              setSlotLessonSearchQuery('');
+                            }}
+                          >
+                            <Text style={styles.listboxAddCustomBtnText}>
+                              + "{slotLessonSearchQuery.trim()}" dersini seç
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ) : (
+                      filteredSlotLessons.map((lsnName, idx) => {
+                        const isSelected = normalizeSearchStr(editingSlotData?.lessonName) === normalizeSearchStr(lsnName);
+                        return (
+                          <TouchableOpacity
+                            key={idx}
+                            style={[styles.listboxItem, isSelected && styles.listboxItemSelected]}
+                            onPress={() => {
+                              setEditingSlotData(prev => prev ? { ...prev, lessonName: lsnName } : null);
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                              <View style={[styles.listboxItemDot, isSelected && styles.listboxItemDotSelected]}>
+                                <Text style={[styles.listboxItemDotText, isSelected && { color: '#fff' }]}>
+                                  {lsnName.charAt(0).toLocaleUpperCase('tr-TR')}
+                                </Text>
+                              </View>
+                              <Text style={[styles.listboxItemText, isSelected && styles.listboxItemTextSelected]} numberOfLines={1}>
+                                {lsnName}
+                              </Text>
+                            </View>
+                            {isSelected && (
+                              <Ionicons name="checkmark-circle" size={18} color="#4F46E5" />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })
+                    )}
+                  </ScrollView>
+                </View>
               </View>
 
-              {/* Öğretmen */}
-              <View style={{ marginBottom: 12 }}>
-                <Text style={styles.slotModalLabel}>Öğretmen Adı Soyadı</Text>
-                <TextInput
-                  style={[styles.slotModalInput, { marginTop: 4 }]}
-                  placeholder="Öğretmen adı yazın"
-                  value={editingSlotData?.teacherName || ''}
-                  onChangeText={(val) => setEditingSlotData(prev => prev ? { ...prev, teacherName: val } : null)}
-                />
-                {/* Hızlı Öğretmen Seçici */}
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
-                  {teachers.map((tch) => {
-                    const isSel = (editingSlotData?.teacherName || '').toLowerCase() === (tch.fullName || '').toLowerCase();
-                    return (
-                      <TouchableOpacity
-                        key={tch.id}
-                        style={[styles.slotQuickChip, isSel && styles.slotQuickChipActive]}
-                        onPress={() => setEditingSlotData(prev => prev ? { ...prev, teacherName: tch.fullName } : null)}
-                      >
-                        <Text style={[styles.slotQuickChipText, isSel && styles.slotQuickChipTextActive]}>
-                          {tch.fullName}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+              {/* 2. ÖĞRETMEN SEÇİMİ (ALFABETİK LİSTBOX & ARAMA) */}
+              <View style={{ marginBottom: 14 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <Text style={styles.slotModalLabel}>👨‍🏫 Öğretmen Seçimi (Alfabetik Liste)</Text>
+                  {editingSlotData?.teacherName ? (
+                    <View style={[styles.listboxSelectedBadge, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}>
+                      <Text style={[styles.listboxSelectedBadgeText, { color: '#16A34A' }]} numberOfLines={1}>
+                        Seçili: {editingSlotData.teacherName}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                {/* Öğretmen Arama Çubuğu */}
+                <View style={styles.listboxSearchWrap}>
+                  <Ionicons name="search" size={15} color="#64748B" style={{ marginLeft: 8 }} />
+                  <TextInput
+                    style={styles.listboxSearchInput}
+                    placeholder="Öğretmen ara (örn: Ahmet, Ayşe, Mehmet...)"
+                    value={slotTeacherSearchQuery}
+                    onChangeText={setSlotTeacherSearchQuery}
+                    placeholderTextColor="#94A3B8"
+                  />
+                  {!!slotTeacherSearchQuery && (
+                    <TouchableOpacity onPress={() => setSlotTeacherSearchQuery('')} style={{ padding: 6 }}>
+                      <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Dikey Alfabetik Listbox */}
+                <View style={styles.listboxContainer}>
+                  <ScrollView
+                    nestedScrollEnabled={true}
+                    style={{ maxHeight: 155 }}
+                    showsVerticalScrollIndicator={true}
+                  >
+                    {filteredSlotTeachers.length === 0 ? (
+                      <View style={{ padding: 12, alignItems: 'center' }}>
+                        <Text style={{ fontSize: 12, color: '#94A3B8' }}>Eşleşen öğretmen bulunamadı.</Text>
+                        {!!slotTeacherSearchQuery.trim() && (
+                          <TouchableOpacity
+                            style={[styles.listboxAddCustomBtn, { backgroundColor: '#10B981' }]}
+                            onPress={() => {
+                              setEditingSlotData(prev => prev ? { ...prev, teacherName: slotTeacherSearchQuery.trim() } : null);
+                              setSlotTeacherSearchQuery('');
+                            }}
+                          >
+                            <Text style={styles.listboxAddCustomBtnText}>
+                              + "{slotTeacherSearchQuery.trim()}" öğretmenini ata
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    ) : (
+                      filteredSlotTeachers.map((tchName, idx) => {
+                        const isSelected = normalizeTeacherMatch(editingSlotData?.teacherName, tchName);
+                        return (
+                          <TouchableOpacity
+                            key={idx}
+                            style={[styles.listboxItem, isSelected && styles.listboxItemSelected]}
+                            onPress={() => {
+                              setEditingSlotData(prev => prev ? { ...prev, teacherName: tchName } : null);
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                              <View style={[styles.listboxItemDot, isSelected ? { backgroundColor: '#10B981' } : { backgroundColor: '#E0E7FF' }]}>
+                                <Text style={[styles.listboxItemDotText, isSelected ? { color: '#fff' } : { color: '#4338CA' }]}>
+                                  {tchName.charAt(0).toLocaleUpperCase('tr-TR')}
+                                </Text>
+                              </View>
+                              <Text style={[styles.listboxItemText, isSelected && styles.listboxItemTextSelected]} numberOfLines={1}>
+                                {tchName}
+                              </Text>
+                            </View>
+                            {isSelected && (
+                              <Ionicons name="checkmark-circle" size={18} color="#10B981" />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })
+                    )}
+                  </ScrollView>
+                </View>
               </View>
 
               {/* Derslik / Oda (Opsiyonel) */}
@@ -7911,6 +10086,24 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 8 }}>
+              {/* 0. Aktif Okulu Değiştir */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setSchoolSelectModalVisible(true);
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="swap-horizontal" size={18} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Aktif Okulu Değiştir</Text>
+                  <Text style={styles.hamburgerMenuSub}>{schools.length > 0 ? `${schools.length} kayıtlı okul arasında geçiş yapın` : 'Okul seçimi yapın'}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
               {/* 1. Okul Bilgilerini Düzenle */}
               <TouchableOpacity
                 style={styles.hamburgerMenuItem}
@@ -8361,6 +10554,26 @@ const styles = StyleSheet.create({
   headerTitleContainer: { flex: 1, marginLeft: 10 },
   headerTitle: { fontSize: 15, fontWeight: '800', color: Colors.text },
   headerSubtitle: { fontSize: 11, color: Colors.textMuted },
+  headerSchoolDropdownBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 2,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    maxWidth: 240,
+  },
+  headerSchoolDropdownText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+    flexShrink: 1,
+  },
   editSchoolBtn: {
     padding: 7,
     borderRadius: 8,
@@ -8524,6 +10737,62 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   scrollContent: { padding: 14, paddingBottom: 40 },
+  combinedSchoolCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  integratedCodeSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  integratedCodeLeft: {
+    flex: 1,
+  },
+  integratedCodeLabel: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#4338CA',
+    letterSpacing: 0.4,
+  },
+  integratedCodeValue: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#312E81',
+    letterSpacing: 0.6,
+    marginTop: 1,
+  },
+  integratedCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    gap: 4,
+  },
+  integratedCopyBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
   schoolSelectorContainer: {
     backgroundColor: '#fff',
     borderRadius: 12,
@@ -8543,6 +10812,22 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#4F46E5',
     letterSpacing: 0.5,
+  },
+  addSchoolSmallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#DCFCE7',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#86EFAC',
+  },
+  addSchoolSmallBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#166534',
   },
   schoolChipsScroll: {
     flexDirection: 'row',
@@ -9060,6 +11345,21 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   modalTitle: { fontSize: 16, fontWeight: '800', color: Colors.text },
+  modalSubTitle: { fontSize: 11, color: '#64748B', marginTop: 2 },
+  modalCancelBtn: {
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  modalCancelBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
   inputLabel: {
     fontSize: 11,
     fontWeight: '700',
@@ -9553,33 +11853,117 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
-  modelsGrid: {
-    gap: 8,
-  },
-  modelOptionCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-  },
-  modelOptionCardSelected: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#F5F3FF',
-  },
-  modelOptionTop: {
+  modelDropdownTrigger: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
   },
-  modelOptionName: {
+  modelDropdownTriggerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    marginRight: 8,
+  },
+  modelDropdownIconBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modelDropdownTriggerTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  modelDropdownTriggerId: {
+    fontSize: 11,
+    color: '#64748B',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop: 2,
+  },
+  modelDropdownTriggerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  modelDropdownChangeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  modelSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginVertical: 10,
+    gap: 8,
+  },
+  modelSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1E293B',
+    padding: 0,
+  },
+  modelCategoryTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+    marginTop: 6,
+  },
+  modelDropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 8,
+    gap: 10,
+  },
+  modelDropdownItemSelected: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#4F46E5',
+    borderWidth: 1.5,
+  },
+  modelDropdownItemName: {
     fontSize: 13,
     fontWeight: '700',
     color: '#1E293B',
   },
-  modelOptionNameSelected: {
+  modelDropdownItemNameSelected: {
     color: '#4F46E5',
     fontWeight: '800',
+  },
+  modelDropdownItemId: {
+    fontSize: 11,
+    color: '#64748B',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop: 2,
+  },
+  modelDropdownItemDesc: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 4,
+    lineHeight: 15,
   },
   recommendedBadge: {
     backgroundColor: '#DCFCE7',
@@ -9591,18 +11975,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
     color: '#166534',
-  },
-  modelOptionId: {
-    fontSize: 11,
-    color: '#64748B',
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    marginTop: 2,
-  },
-  modelOptionDesc: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 6,
-    lineHeight: 15,
   },
   refreshIconBtn: {
     padding: 6,
@@ -11025,6 +13397,127 @@ const styles = StyleSheet.create({
     color: '#DC2626',
     flex: 1,
   },
+  autoReconcileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#DC2626',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 8,
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  autoReconcileBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  autoFillGapsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#4F46E5',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  autoFillGapsBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  conflictResolutionBox: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1.5,
+    borderColor: '#FECACA',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 14,
+  },
+  conflictResolutionTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#DC2626',
+    flex: 1,
+  },
+  conflictResolutionDesc: {
+    fontSize: 11,
+    color: '#7F1D1D',
+    lineHeight: 15,
+  },
+  conflictResolutionItem: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  conflictResolutionItemActive: {
+    borderColor: '#4F46E5',
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1.5,
+  },
+  conflictResolutionItemLesson: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  conflictResolutionItemTeacher: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    marginTop: 2,
+  },
+  conflictSelectBtn: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  conflictSelectBtnActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#C7D2FE',
+  },
+  conflictSelectBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  conflictDeleteBtn: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  conflictDeleteBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
   conflictItemBox: {
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
@@ -11670,6 +14163,521 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: '#FFFFFF',
+  },
+
+  // --- 📄 PDF SAYFA ARALIĞI SEÇİM STİLLERİ ---
+  preOptPageRangeCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 14,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  preOptPageRangeTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  preOptPageRangeSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 4,
+    marginBottom: 8,
+    lineHeight: 15,
+  },
+  preOptPageBadge: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  preOptPageBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  pdfRangePresetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  pdfRangePresetBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  pdfRangePresetBtnActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4F46E5',
+  },
+  pdfRangePresetText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  pdfRangePresetTextActive: {
+    color: '#FFFFFF',
+  },
+  pdfRangeInputsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  pdfRangeInputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  pdfRangeInput: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1E293B',
+    minWidth: 45,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+
+  // --- 📊 PROGRAM ALT SEKMESİ VE İSTATİSTİK STİLLERİ ---
+  scheduleSubTabSegment: {
+    flexDirection: 'row',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    padding: 4,
+    gap: 6,
+    marginBottom: 14,
+  },
+  scheduleSubTabBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 9,
+  },
+  scheduleSubTabBtnActive: {
+    backgroundColor: '#4F46E5',
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  scheduleSubTabBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  scheduleSubTabBtnTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  analyticsSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 8,
+    marginBottom: 10,
+  },
+  analyticsSearchInput: {
+    flex: 1,
+    fontSize: 12,
+    color: '#1E293B',
+    padding: 0,
+  },
+  analyticsFilterScroll: {
+    gap: 6,
+    paddingBottom: 4,
+    marginBottom: 6,
+  },
+  analyticsFilterBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  analyticsFilterBtnActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4F46E5',
+  },
+  analyticsFilterBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  analyticsFilterBtnTextActive: {
+    color: '#FFFFFF',
+  },
+  analyticsSectionLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  analyticsConflictCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: 10,
+    padding: 10,
+    gap: 10,
+  },
+  analyticsConflictTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+  analyticsConflictHourBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B91C1C',
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  analyticsConflictDesc: {
+    fontSize: 11,
+    color: '#7F1D1D',
+    marginTop: 3,
+  },
+  analyticsFixBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#DC2626',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  analyticsFixBtnText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  teacherWorkloadCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 8,
+  },
+  teacherWorkloadName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  teacherHoursBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  hoursBadgeHigh: { backgroundColor: '#D1FAE5' },
+  hoursBadgeNormal: { backgroundColor: '#DBEAFE' },
+  hoursBadgeLow: { backgroundColor: '#FEF3C7' },
+  teacherHoursText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  workloadChipClass: {
+    backgroundColor: '#E2E8F0',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  workloadChipClassText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  workloadChipLesson: {
+    backgroundColor: '#EDE9FE',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  workloadChipLessonText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6D28D9',
+  },
+  analyticsGoEditorBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  analyticsGoEditorText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  classFullnessDetailCard: {
+    width: '48%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+  },
+  cardBorderGreen: {
+    borderColor: '#BBF7D0',
+    backgroundColor: '#F0FDF4',
+  },
+  cardBorderOrange: {
+    borderColor: '#FED7AA',
+    backgroundColor: '#FFF7ED',
+  },
+  classFullnessCardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  classFullnessCardPercent: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  classFullnessCardSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 3,
+  },
+  classFullnessCardStatus: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  courseAllocRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  courseAllocClassBadge: {
+    backgroundColor: '#4F46E5',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  courseAllocClassText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  courseAllocLessonName: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  courseAllocTeacherName: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  courseAllocHoursBadge: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  courseAllocHoursText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#B45309',
+  },
+  analyticsEmptyBox: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  analyticsEmptyText: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  sanityResetMenuBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  sanityResetMenuBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#DC2626',
+  },
+  editorClearScopeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  editorClearScopeBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#DC2626',
+  },
+  resetActionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 8,
+  },
+  resetActionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  resetActionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginBottom: 2,
+  },
+  resetActionDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 16,
+  },
+  listboxSelectedBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    maxWidth: '55%',
+  },
+  listboxSelectedBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  listboxSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  listboxSearchInput: {
+    flex: 1,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    fontSize: 13,
+    color: '#1E293B',
+  },
+  listboxContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    overflow: 'hidden',
+  },
+  listboxItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  listboxItemSelected: {
+    backgroundColor: '#EEF2FF',
+  },
+  listboxItemDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#E0E7FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listboxItemDotSelected: {
+    backgroundColor: '#4F46E5',
+  },
+  listboxItemDotText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  listboxItemText: {
+    fontSize: 13,
+    color: '#334155',
+  },
+  listboxItemTextSelected: {
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  listboxAddCustomBtn: {
+    marginTop: 6,
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  listboxAddCustomBtnText: {
+    fontSize: 11,
+    color: '#fff',
+    fontWeight: '700',
   },
 });
 

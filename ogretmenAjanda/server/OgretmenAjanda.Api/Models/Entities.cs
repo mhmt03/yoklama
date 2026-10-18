@@ -252,6 +252,9 @@ namespace OgretmenAjanda.Api.Models
         public string LessonName { get; set; } = string.Empty;
 
         [MaxLength(50)]
+        public string? LessonCode { get; set; } // Örn: MTMTK, S.MTMK, RHBYN vb.
+
+        [MaxLength(50)]
         public string? Classroom { get; set; }
     }
 

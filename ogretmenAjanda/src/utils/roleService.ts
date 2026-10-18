@@ -1,6 +1,10 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDB } from '../database/db';
+import { clearAuthSession } from '../services/apiClient';
 
 export type UserRole = 'superadmin' | 'admin' | 'teacher' | 'student' | 'staff';
+
+export const ROLE_STORAGE_KEY = '@ogretmen_ajanda_active_role';
 
 export interface StudentProfileData {
   studentId: number;
@@ -14,16 +18,28 @@ export interface StudentProfileData {
 }
 
 /**
- * SQLite app_settings tablosundan kaydedilmiş aktif kullanıcı rolünü okur.
- * Kayıt yoksa null döner (böylece ilk açılışta Rol Seçim Ekranı açılır).
+ * Kaydedilmiş aktif kullanıcı rolünü okur.
+ * Web ve mobilde maksimum güvenilirlik için önce AsyncStorage, ardından SQLite kontrol edilir.
  */
 export const getActiveUserRole = async (): Promise<UserRole | null> => {
+  // 1. AsyncStorage kontrolü (Web ve React Native genelinde anında ve kilitlenmesiz)
+  try {
+    const asyncRole = await AsyncStorage.getItem(ROLE_STORAGE_KEY);
+    if (asyncRole && ['superadmin', 'admin', 'teacher', 'student', 'staff'].includes(asyncRole)) {
+      return asyncRole as UserRole;
+    }
+  } catch {}
+
+  // 2. SQLite veritabanı kontrolü
   try {
     const db = await getDB();
     const row = await db.getFirstAsync<{ value: string }>(
       "SELECT value FROM app_settings WHERE key = 'active_user_role'"
     );
-    if (row && (row.value === 'superadmin' || row.value === 'admin' || row.value === 'teacher' || row.value === 'student' || row.value === 'staff')) {
+    if (row && ['superadmin', 'admin', 'teacher', 'student', 'staff'].includes(row.value)) {
+      try {
+        await AsyncStorage.setItem(ROLE_STORAGE_KEY, row.value);
+      } catch {}
       return row.value as UserRole;
     }
     return null;
@@ -32,7 +48,6 @@ export const getActiveUserRole = async (): Promise<UserRole | null> => {
     return null;
   }
 };
-
 
 /**
  * Aktif öğretmenin adını kaydeder (Sınıf/ders atamalarında filtreleme ve tanıma için).
@@ -63,8 +78,21 @@ export const setActiveTeacherName = async (name: string): Promise<void> => {
 
 /**
  * Aktif kullanıcı rolünü kalıcı olarak kaydeder veya siler.
+ * Hem AsyncStorage hem de SQLite'a yazar.
  */
 export const setActiveUserRole = async (role: UserRole | null): Promise<void> => {
+  // 1. AsyncStorage
+  try {
+    if (role) {
+      await AsyncStorage.setItem(ROLE_STORAGE_KEY, role);
+    } else {
+      await AsyncStorage.removeItem(ROLE_STORAGE_KEY);
+    }
+  } catch (e) {
+    console.warn('AsyncStorage rol kayıt hatası:', e);
+  }
+
+  // 2. SQLite
   try {
     const db = await getDB();
     if (role) {
@@ -119,13 +147,24 @@ export const setStudentSessionProfile = async (profile: StudentProfileData | nul
 };
 
 /**
- * Rolü ve öğrenci oturumunu sıfırlar (Çıkış yapma ve rol değiştirme için).
+ * Rolü, token'ları ve kullanıcı oturumunu tamamen sıfırlar (Çıkış yapma ve rol değiştirme için).
  */
 export const logoutUserRole = async (): Promise<void> => {
+  console.log('[RoleService] Çıkış yapılıyor: Oturum ve roller tamamen sıfırlanıyor...');
+  try {
+    await clearAuthSession();
+  } catch (e) {
+    console.warn('clearAuthSession hatası:', e);
+  }
+
+  try {
+    await AsyncStorage.removeItem(ROLE_STORAGE_KEY);
+  } catch {}
+
   try {
     const db = await getDB();
     await db.runAsync("DELETE FROM app_settings WHERE key IN ('active_user_role', 'student_session_profile')");
   } catch (err) {
-    console.warn('Çıkış işlemi başarısız:', err);
+    console.warn('Çıkış işlemi SQLite hatası:', err);
   }
 };

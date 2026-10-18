@@ -1,7 +1,7 @@
 # 📋 Öğretmen Ajandası (Öğretmen - Öğrenci - İdare - Süper Admin) Proje Dokümantasyonu
 
 > **Durum:** Canlıda & Yayında (Web API + Web SPA + Android APK)  
-> **Son Güncelleme:** 2026-10-15  
+> **Son Güncelleme:** 2026-10-18  
 > **Canlı Web Adresi:** [http://ogretmenajanda.runasp.net](http://ogretmenajanda.runasp.net)  
 > **Canlı REST API:** [http://ogretmenajanda.runasp.net/api](http://ogretmenajanda.runasp.net/api) | Sağlık Testi: `/health`  
 > **Doğrudan APK İndirme:** [http://ogretmenajanda.runasp.net/ogretmenajanda.apk](http://ogretmenajanda.runasp.net/ogretmenajanda.apk)  
@@ -244,3 +244,46 @@
   - Çarşaf program yüklemeden önce ön analiz seçenek modalı eklendi.
   - Kullanıcı isterse sadece Öğretmen Kadrosu, Sınıflar ve Dersleri ~10 saniyede hızlıca çekebilir; isterse haftalık ders dağılımını analiz ettirebilir.
   - Şube ve öğretmen eksiklikleri için güvenlik doğrulamaları ve birden fazla ders okutan öğretmenlerin doğru branşla eşleştirilmesi kuralı eklendi.
+
+### 📍 FAZ 8: Akıllı Çarşaf Ayrıştırma, Çakışma Denetimi & Canlı Program Editörü
+- [x] **Çok Sayfalı PDF Dilimleme & Bellek İçi Sayfa Kesme:**
+  - 40+ sayfalık toplu öğretmen programlarında `pdf-lib` ve çift yönlü regex hiyerarşisiyle tam sayfa sayısı tespiti (`countPdfPages`).
+  - Kullanıcının belirlediği sayfa aralığını bellekte sıfır kayıpla yeni bir PDF olarak dilimleme (`slicePdfPages`).
+  - React Native (Hermes/Buffer) ve Web ortamlarıyla tam uyumlu, optimize `uint8ArrayToBase64` dönüştürücüsü.
+- [x] **Çift Kontrollü 8 Slotlu Sabit Gün Izgarası (Grid-Array) & Sözlük Eşleme:**
+  - Hücrelerin serbest metin yerine her gün için **tam 8 elemanlı sabit bir dizi** (`["", "", "10/D TRH", "10/D TRH", "", "", "", ""]`) olarak alınması.
+  - İndeks numarası (0..7) ile ders saatinin (1..8) matematiksel olarak kilitlenmesi; boş hücrelerin kaymaya yol açmasının kesin olarak önlenmesi.
+  - Sayfa altındaki/yanındaki özet tablodan ders kodlarının açık adına (`SEÇMELİ ALMANCA`, `REHBERLİK VE YÖNLENDİRME`) otomatik sözlük dönüşümü.
+  - Sayfa altındaki günlük toplam ders saatleriyle (Pzt 4, Salı 6 vb.) haftalık hücre dağılımının sağlaması.
+- [x] **Program Doğruluk, Doluluk & Çakışma Analitik Motoru:**
+  - Backend API (`/api/sync/schedules/stats`): Şube doluluk yüzdeleri, eksik saatler, şube çakışmaları ve öğretmen çakışmalarının hesaplanması.
+  - Şube ve öğretmen bazlı haftalık ders yükü ve dağılım istatistikleri.
+- [x] **Kompakt Çakışma ListBox'ı ve Anlık Arama:**
+  - Çok sayıda çakışma (50+) durumunda ekranın aşağı uzamasını önleyen, kendi içinde kaydırılabilen (`maxHeight: 260`, `ScrollView nestedScrollEnabled`) kompakt ListBox.
+  - Şube, öğretmen veya ders adına göre anlık filtreleme / arama kutusu ve tek tıkla ilgili hücreye yönlendiren "Düzenle ➔" köprüsü.
+- [x] **Canlı İnteraktif Ders Programı Editörü:**
+  - Hem "Şube Bazlı" hem "Öğretmen Bazlı" haftalık ders programını grid üzerinde canlı görüntüleme.
+  - Hücreye tıklandığında açılan düzenleme modalında ders ve öğretmen seçimi için alfabetik aranabilir ListBox seçicileri.
+  - Tek tıkla ders silme, boş saate yeni ders atama ve ders saati güncelleme.
+- [x] **Bireysel / Tek Öğretmen Programı Güncelleme:**
+  - Tüm okul programını silmeden veya baştan taramadan, sadece tek bir öğretmenin el programı fotoğrafı veya PDF'i üzerinden derslerini güncelleme (`parseSingleTeacherScheduleWithAi`).
+- [x] **Gemini Canlı Model Dinamik Sorgulama & Kararlılık:**
+  - Kullanıcının API anahtarıyla Google API'sinde canlı ve aktif modelleri anlık sorgulama (`fetchAvailableGeminiModels`).
+  - Kullanımdan kalkan modellerin otomatik elenmesi ve kararlı modellere (`gemini-flash-latest`, `gemini-pro-latest`) öncelik verilmesi.
+- [x] **⚡ Akıllı Çakışma-Boşluk Eşleştirici ve Otomatik Dengeleyici (Auto-Reconcile Engine):**
+  - Çakışmalar ile şubelerin boş kalan saatlerini aynı gün içerisinde çapraz analiz eden matematiksel motor (`POST /api/sync/schedules/auto-reconcile`).
+  - Çakışan dersi, öğretmenin aynı günde boş olduğu uygun ders saatine otomatik aktarma.
+  - Aynı anda hem çakışmayı sıfırlama hem de şubedeki boşluğu doldurarak tam 40/40 doluluğa ulaştırma.
+  - **Otomatik Çalışma (Zero-Click):** Program toplu yüklendiğinde (`sync/schedules/batch`) arka planda otomatik devreye girerek çakışmaları kullanıcı tıklamasına gerek kalmadan kendiliğinden çözer.
+  - **Yerel Ham Veri Stack Dosyası:** AI tarafından ayrıştırılan tüm ham program yığını telefondaki yerel depolama alanına (`schedule_cache/latest_parsed_schedule.json`) anlık yedeklenir. Kotayı tekrar harcamadan stack üzerinden yeniden yerleşim imkânı sunar.
+- [x] **Ders Dağılım ve Saat Çizelgesi (HS) Tabanlı Çapraz Sağlama & Blok Tamamlama:**
+  - **Alt Tablo Çözümlemesi:** Her öğretmenin sayfasındaki "Ders Dağılım ve Saat Çizelgesi" özet tablosu taranarak açık ders adları, şubeler, günlük saatler ve `HS` (Haftalık Saat) eksiksiz okundu (`workloadSummary`, `totalWeeklyHours`).
+  - **⚡ Akıllı Blok Tamamlama (Self-Healing Grid):** Çizelgedeki günlük ders saati (örn: Salı günü 11/C için 2 saat Beden) ile haftalık ızgara karşılaştırılır. Blok ders tek saate düşmüşse ardışık saate (örn: 3 ise 4'e) otomatik tamamlanır. Sıradaki derslerin (Kimya vb.) erken saate kayması kökten önlenir.
+  - **Derslerin Gerçek Haftalık Saatleri (HS):** Seçmeli Fizik'in 4 saat, Beden Eğitimi'nin 2 saat, Seçmeli Klasik Ahlak'ın 1 saat, Edebiyat'ın 5 saat olduğu doğrudan `HS` sütunundan alınarak veritabanındaki ders havuzuna işlendi (`Lesson.WeeklyHours`).
+  - **Öğretmen Haftalık Saat (HS) Ön Doğrulama Modalı:** Yükleme öncesinde her öğretmenin belgedeki toplam saati ile ızgaradan çıkarılan saatleri karşılaştıran interaktif sağlama paneli eklendi (`TeacherScheduleVerification`).
+- [x] **Kullanıcı Kontrollü İsteğe Bağlı Dengeleme (Multi-Part Upload Compatibility):**
+  - Çarşaf programın 2 veya daha fazla kerede (sayfa aralıklarıyla parça parça) yüklenmesi durumunda, henüz okunmayan sayfalardaki derslerin yanlışlıkla "eksik" sanılıp erken tamamlanmasını önlemek için otomatik blok tamamlama motoru varsayılan olarak devre dışı bırakıldı (`autoHealBlocks: false`).
+  - Ön seçenekler modalına isteğe bağlı seçim anahtarı (`optAutoHealBlocks`) eklendi.
+  - Tüm sayfalar yüklendikten sonra Program Denetimi ekranından tek tıkla (`auto-reconcile`) tüm okul programının bütünsel olarak dengelenmesi sağlandı.
+- [x] **Okul Yönetim Paneli Kart Birleştirme:**
+  - "Yönettiğiniz Okullar" ve "Öğretmen Bağlantı Kodu" kartları tek bir kompakt kart (`combinedSchoolCard`) olarak birleştirildi; ekran alanı optimize edildi.

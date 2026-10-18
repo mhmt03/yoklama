@@ -342,27 +342,47 @@ namespace OgretmenAjanda.Api.Controllers
 
             // 2. Dersleri Ders Havuzuna Eşle / Ekle
             int addedLessonsCount = 0;
-            if (request.SyncLessons && request.Lessons != null && request.Lessons.Count > 0)
+            if (request.SyncLessons && ((request.Lessons != null && request.Lessons.Count > 0) || (request.LessonDetails != null && request.LessonDetails.Count > 0)))
             {
                 var existingLessons = await _context.SchoolLessons
                     .Where(l => l.SchoolId == request.SchoolId)
                     .ToListAsync();
 
-                foreach (var lessonName in request.Lessons)
+                var lessonNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (request.Lessons != null)
                 {
-                    var cleanLesson = lessonName?.Trim();
-                    if (string.IsNullOrWhiteSpace(cleanLesson)) continue;
+                    foreach (var l in request.Lessons) if (!string.IsNullOrWhiteSpace(l)) lessonNames.Add(l.Trim());
+                }
+                if (request.LessonDetails != null)
+                {
+                    foreach (var ld in request.LessonDetails) if (!string.IsNullOrWhiteSpace(ld.Name)) lessonNames.Add(ld.Name.Trim());
+                }
 
-                    if (!existingLessons.Any(l => string.Equals(l.Name.Trim(), cleanLesson, StringComparison.OrdinalIgnoreCase)))
+                foreach (var cleanLesson in lessonNames)
+                {
+                    var detail = request.LessonDetails?.FirstOrDefault(ld => string.Equals(ld.Name.Trim(), cleanLesson, StringComparison.OrdinalIgnoreCase));
+                    int realWeeklyHours = (detail != null && detail.WeeklyHours.HasValue && detail.WeeklyHours.Value > 0) ? detail.WeeklyHours.Value : 2;
+                    string shortCode = detail?.Code?.Trim() ?? (cleanLesson.Length > 3 ? cleanLesson.Substring(0, 3).ToUpper() : cleanLesson.ToUpper());
+                    string grade = !string.IsNullOrWhiteSpace(detail?.Grade) ? detail.Grade.Trim() : "Tüm Kademeler";
+
+                    var existing = existingLessons.FirstOrDefault(l => string.Equals(l.Name.Trim(), cleanLesson, StringComparison.OrdinalIgnoreCase));
+                    if (existing != null)
+                    {
+                        if (detail != null && detail.WeeklyHours.HasValue && detail.WeeklyHours.Value > 0 && existing.WeeklyHours != detail.WeeklyHours.Value)
+                        {
+                            existing.WeeklyHours = detail.WeeklyHours.Value;
+                        }
+                    }
+                    else
                     {
                         var newLesson = new SchoolLesson
                         {
                             Id = Guid.NewGuid(),
                             SchoolId = request.SchoolId,
                             Name = cleanLesson,
-                            ShortCode = cleanLesson.Length > 3 ? cleanLesson.Substring(0, 3).ToUpper() : cleanLesson.ToUpper(),
-                            Grade = "Tüm Kademeler",
-                            WeeklyHours = 2,
+                            ShortCode = shortCode,
+                            Grade = grade,
+                            WeeklyHours = realWeeklyHours,
                             CreatedAt = DateTime.UtcNow
                         };
                         _context.SchoolLessons.Add(newLesson);
@@ -432,6 +452,7 @@ namespace OgretmenAjanda.Api.Controllers
                             Grade = item.Grade,
                             Section = item.Section,
                             LessonName = item.LessonName,
+                            LessonCode = item.LessonCode?.Trim(),
                             Classroom = item.Classroom
                         });
                         savedScheduleCount++;
@@ -461,6 +482,7 @@ namespace OgretmenAjanda.Api.Controllers
                             existing.Grade = item.Grade;
                             existing.Section = item.Section;
                             existing.LessonName = item.LessonName;
+                            if (!string.IsNullOrEmpty(item.LessonCode)) existing.LessonCode = item.LessonCode.Trim();
                             if (!string.IsNullOrEmpty(item.Classroom)) existing.Classroom = item.Classroom;
                         }
                         else
@@ -475,6 +497,7 @@ namespace OgretmenAjanda.Api.Controllers
                                 Grade = item.Grade,
                                 Section = item.Section,
                                 LessonName = item.LessonName,
+                                LessonCode = item.LessonCode?.Trim(),
                                 Classroom = item.Classroom
                             });
                         }
@@ -500,6 +523,13 @@ namespace OgretmenAjanda.Api.Controllers
             await _context.SaveChangesAsync();
             await LogActionAsync(request.SchoolId, "BATCH_SCHEDULE_SYNCED", "ScheduleItem", null, detailText);
             
+            // ⚡ Otomatik Dengeleyici: Yükleme biter bitmez çakışmaları şubelerin boş saatleriyle otomatik eşleştir
+            var (autoMovedCount, autoMovedDetails) = await RunAutoReconcileInternalAsync(request.SchoolId, 8);
+            if (autoMovedCount > 0)
+            {
+                detailText += $" | ⚡ Otomatik Dengeleme: {autoMovedCount} ders boş saatlere yerleştirildi!";
+            }
+
             return Ok(new
             {
                 message = detailText,
@@ -507,6 +537,7 @@ namespace OgretmenAjanda.Api.Controllers
                 addedClassesCount,
                 addedLessonsCount,
                 savedScheduleCount,
+                autoMovedCount
             });
         }
 
@@ -548,6 +579,16 @@ namespace OgretmenAjanda.Api.Controllers
                     s.LessonHour == request.LessonHour);
             }
 
+            if (item == null && !string.IsNullOrEmpty(request.TeacherName))
+            {
+                var tName = request.TeacherName.Trim().ToLower();
+                item = await _context.ScheduleItems.FirstOrDefaultAsync(s =>
+                    s.SchoolId == request.SchoolId &&
+                    s.TeacherName != null && s.TeacherName.ToLower() == tName &&
+                    s.DayOfWeek == request.DayOfWeek &&
+                    s.LessonHour == request.LessonHour);
+            }
+
             // Eğer ders adı boşsa veya temizlenmek isteniyorsa, sil
             if (string.IsNullOrWhiteSpace(request.LessonName))
             {
@@ -563,6 +604,7 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 item.TeacherName = request.TeacherName?.Trim();
                 item.LessonName = request.LessonName.Trim();
+                item.LessonCode = request.LessonCode?.Trim();
                 item.Classroom = request.Classroom?.Trim();
                 item.Grade = request.Grade.Trim();
                 item.Section = request.Section.Trim().ToUpper();
@@ -577,6 +619,7 @@ namespace OgretmenAjanda.Api.Controllers
                     SchoolId = request.SchoolId,
                     TeacherName = request.TeacherName?.Trim(),
                     LessonName = request.LessonName.Trim(),
+                    LessonCode = request.LessonCode?.Trim(),
                     Classroom = request.Classroom?.Trim(),
                     Grade = request.Grade.Trim(),
                     Section = request.Section.Trim().ToUpper(),
@@ -597,6 +640,7 @@ namespace OgretmenAjanda.Api.Controllers
             [FromQuery] Guid? id,
             [FromQuery] string? grade,
             [FromQuery] string? section,
+            [FromQuery] string? teacherName,
             [FromQuery] int? dayOfWeek,
             [FromQuery] int? lessonHour)
         {
@@ -614,12 +658,62 @@ namespace OgretmenAjanda.Api.Controllers
                     s.DayOfWeek == dayOfWeek.Value &&
                     s.LessonHour == lessonHour.Value);
             }
+            else if (!string.IsNullOrEmpty(teacherName) && dayOfWeek.HasValue && lessonHour.HasValue)
+            {
+                var tName = teacherName.Trim().ToLower();
+                item = await _context.ScheduleItems.FirstOrDefaultAsync(s =>
+                    s.SchoolId == schoolId &&
+                    s.TeacherName != null && s.TeacherName.ToLower() == tName &&
+                    s.DayOfWeek == dayOfWeek.Value &&
+                    s.LessonHour == lessonHour.Value);
+            }
 
             if (item == null) return NotFound(new { message = "Silinecek ders hücresi bulunamadı." });
 
             _context.ScheduleItems.Remove(item);
             await _context.SaveChangesAsync();
             return Ok(new { success = true, message = "Ders hücresi silindi." });
+        }
+
+        // 4.2.1 Toplu Program Silme (Tüm Okul, Tek Şube veya Tek Öğretmen)
+        [HttpDelete("schedules/clear")]
+        public async Task<IActionResult> ClearSchedules(
+            [FromQuery] Guid schoolId,
+            [FromQuery] string? scope, // "all", "class", "teacher"
+            [FromQuery] string? grade,
+            [FromQuery] string? section,
+            [FromQuery] string? teacherName)
+        {
+            var query = _context.ScheduleItems.Where(s => s.SchoolId == schoolId);
+
+            string actionMsg = "";
+            if (scope == "class" && !string.IsNullOrEmpty(grade) && !string.IsNullOrEmpty(section))
+            {
+                query = query.Where(s => s.Grade == grade && s.Section == section);
+                actionMsg = $"{grade}-{section} şubesinin tüm ders saatleri silindi.";
+            }
+            else if (scope == "teacher" && !string.IsNullOrEmpty(teacherName))
+            {
+                var tName = teacherName.Trim().ToLower();
+                query = query.Where(s => s.TeacherName != null && s.TeacherName.ToLower() == tName);
+                actionMsg = $"{teacherName} öğretmeninin tüm ders saatleri silindi.";
+            }
+            else
+            {
+                // Tüm okul programını sil
+                actionMsg = "Okulun tüm haftalık ders programı (tüm saatler) tamamen silindi.";
+            }
+
+            var itemsToDelete = await query.ToListAsync();
+            int count = itemsToDelete.Count;
+            if (count > 0)
+            {
+                _context.ScheduleItems.RemoveRange(itemsToDelete);
+                await LogActionAsync(schoolId, "SCHEDULES_CLEARED", "ScheduleItem", null, $"{actionMsg} (Toplam {count} saat)");
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new { success = true, deletedCount = count, message = $"{actionMsg} ({count} saat kaldırıldı)." });
         }
 
         // 4.3 Sadece Bir Öğretmenin Haftalık Programını Yenile (Tek Öğretmen Çarşaf / Fotoğraf Okuma Çıktısı)
@@ -657,6 +751,7 @@ namespace OgretmenAjanda.Api.Controllers
                         Grade = sch.Grade.Trim(),
                         Section = sch.Section.Trim().ToUpper(),
                         LessonName = sch.LessonName.Trim(),
+                        LessonCode = sch.LessonCode?.Trim(),
                         Classroom = sch.Classroom?.Trim()
                     });
                     added++;
@@ -755,6 +850,44 @@ namespace OgretmenAjanda.Api.Controllers
                 });
             }
 
+            // 3. Öğretmen Bazlı Ders Dağılımı ve Haftalık Toplam Saatleri
+            var teacherWorkloads = schedules
+                .Where(s => !string.IsNullOrWhiteSpace(s.TeacherName))
+                .GroupBy(s => s.TeacherName!.Trim())
+                .Select(g => new
+                {
+                    teacherName = g.Key,
+                    totalHours = g.Count(),
+                    classes = g.Select(s => $"{s.Grade}-{s.Section}").Distinct().OrderBy(c => c).ToList(),
+                    lessons = g.Select(s => s.LessonName).Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).ToList()
+                })
+                .OrderByDescending(t => t.totalHours)
+                .ThenBy(t => t.teacherName)
+                .ToList();
+
+            // 4. Detaylı Ders Dağılım Listesi (Hangi dersi kim hangi sınıfa kaç saat veriyor)
+            var courseAllocations = schedules
+                .GroupBy(s => new
+                {
+                    Lesson = (s.LessonName ?? "Belirtilmemiş").Trim(),
+                    Grade = s.Grade.Trim(),
+                    Section = s.Section.Trim().ToUpper(),
+                    Teacher = (s.TeacherName ?? "Atanmamış").Trim()
+                })
+                .Select(g => new
+                {
+                    lessonName = g.Key.Lesson,
+                    className = $"{g.Key.Grade}-{g.Key.Section}",
+                    grade = g.Key.Grade,
+                    section = g.Key.Section,
+                    teacherName = g.Key.Teacher,
+                    hours = g.Count()
+                })
+                .OrderBy(c => c.className)
+                .ThenBy(c => c.lessonName)
+                .ThenBy(c => c.teacherName)
+                .ToList();
+
             return Ok(new
             {
                 totalRegisteredClasses = registeredClasses.Count,
@@ -768,8 +901,565 @@ namespace OgretmenAjanda.Api.Controllers
                 teachersWithSchedule = schedules.Where(s => !string.IsNullOrEmpty(s.TeacherName)).Select(s => s.TeacherName!.ToLower().Trim()).Distinct().Count(),
                 conflictsCount = conflicts.Count,
                 conflicts,
-                classFullness = classFullnessList
+                classFullness = classFullnessList,
+                teacherWorkloads,
+                courseAllocations
             });
+        }
+
+        // 4.5 Akıllı Çakışma-Boşluk Eşleştirici ve Dengeleyici (Auto-Reconcile Gaps & Conflicts)
+        [HttpPost("schedules/auto-reconcile")]
+        public async Task<IActionResult> AutoReconcileSchedule([FromQuery] Guid schoolId, [FromQuery] int dailyHours = 8, [FromQuery] bool includeGaps = false)
+        {
+            var (movedCount, movedDescriptions) = await RunAutoReconcileInternalAsync(schoolId, dailyHours);
+
+            int placedCount = 0;
+            var placedDescriptions = new List<string>();
+
+            if (includeGaps)
+            {
+                var fillResult = await RunAutoFillMissingLessonsAsync(schoolId, dailyHours);
+                placedCount = fillResult.placedCount;
+                placedDescriptions = fillResult.placedDescriptions;
+            }
+
+            int totalActionCount = movedCount + placedCount;
+            var allDetails = new List<string>(movedDescriptions);
+            allDetails.AddRange(placedDescriptions);
+
+            string msg;
+            if (totalActionCount > 0)
+            {
+                var parts = new List<string>();
+                if (movedCount > 0) parts.Add($"{movedCount} çakışan ders boş saatlere aktarıldı");
+                if (placedCount > 0) parts.Add($"{placedCount} eksik ders saati müfredata göre tamamlandı");
+                msg = $"{string.Join(" ve ", parts)}!";
+            }
+            else
+            {
+                msg = "Taşınabilecek çakışma veya müfredata göre eklenebilecek eksik ders bulunamadı.";
+            }
+
+            return Ok(new
+            {
+                success = true,
+                movedCount = totalActionCount,
+                reconciledConflictsCount = movedCount,
+                placedGapsCount = placedCount,
+                message = msg,
+                details = allDetails
+            });
+        }
+
+        // 4.6 Boşlukları Doldur & Eksik Öğretmen Saatlerini Müfredata Göre Tamamla
+        [HttpPost("schedules/auto-fill-gaps")]
+        public async Task<IActionResult> AutoFillMissingLessons([FromQuery] Guid schoolId, [FromQuery] int dailyHours = 8)
+        {
+            var (placedCount, placedDescriptions) = await RunAutoFillMissingLessonsAsync(schoolId, dailyHours);
+
+            return Ok(new
+            {
+                success = true,
+                placedCount,
+                message = placedCount > 0
+                    ? $"{placedCount} adet eksik ders saati müfredata ve öğretmen dağılımına göre şubelerin boş saatlerine başarıyla yerleştirildi!"
+                    : "Tüm sınıflar ve öğretmen saatleri müfredata uygun veya yerleştirilebilecek boş ders bulunamadı.",
+                details = placedDescriptions
+            });
+        }
+
+        private async Task<(int movedCount, List<string> movedDescriptions)> RunAutoReconcileInternalAsync(Guid schoolId, int dailyHours = 8)
+        {
+            var schedules = await _context.ScheduleItems
+                .Where(s => s.SchoolId == schoolId)
+                .ToListAsync();
+
+            if (!schedules.Any())
+            {
+                return (0, new List<string>());
+            }
+
+            int movedCount = 0;
+            var movedDescriptions = new List<string>();
+
+            // 🎯 ALTIN KURAL: "Hiçbir sınıfın boş dersi olamaz!" (MEB Standartı: 40/40 Saat)
+            // Çoklu geçişli (Multi-pass) Dengeleme: Taşınan bir ders başka bir çakışmayı veya boşluğu açabilir.
+            for (int pass = 1; pass <= 3; pass++)
+            {
+                int movedInPass = 0;
+
+                // 1. ÖNCELİK: Sınıfları boş ders (eksik saat) sayısına göre sırala!
+                // Boş saati en fazla olan sınıflar İLK SIRADA analiz edilir ve boşlukları doldurulur.
+                var rawClassGroups = schedules
+                    .GroupBy(s => $"{s.Grade.Trim()}-{s.Section.Trim().ToUpper()}")
+                    .Select(cg =>
+                    {
+                        var classSlots = cg.ToList();
+                        var occupied = new HashSet<string>(classSlots.Select(s => $"{s.DayOfWeek}_{s.LessonHour}"));
+                        var emptySlots = new List<(int day, int hour)>();
+                        for (int d = 1; d <= 5; d++)
+                        {
+                            for (int h = 1; h <= dailyHours; h++)
+                            {
+                                if (!occupied.Contains($"{d}_{h}"))
+                                {
+                                    emptySlots.Add((d, h));
+                                }
+                            }
+                        }
+
+                        var conflictGroups = classSlots
+                            .GroupBy(s => new { s.DayOfWeek, s.LessonHour })
+                            .Where(g => g.Count() > 1)
+                            .ToList();
+
+                        return new
+                        {
+                            ClassName = cg.Key,
+                            ClassSlots = classSlots,
+                            EmptySlots = emptySlots,
+                            ConflictGroups = conflictGroups,
+                            MissingCount = emptySlots.Count
+                        };
+                    })
+                    .OrderByDescending(c => c.MissingCount)
+                    .ThenByDescending(c => c.ConflictGroups.Count)
+                    .ToList();
+
+                // FAZ 1: Şube İçi Çakışmaları Şubenin Kendi Boş Saatlerine Yerleştirme (Önce Boş Dersi Olan Şubeler)
+                foreach (var cg in rawClassGroups)
+                {
+                    if (!cg.ConflictGroups.Any() || !cg.EmptySlots.Any()) continue;
+
+                    var emptySlots = new List<(int day, int hour)>(cg.EmptySlots);
+                    var classSlots = cg.ClassSlots;
+
+                    foreach (var conf in cg.ConflictGroups)
+                    {
+                        // 2. AKILLI ADAY PUANLAMA:
+                        // Blok ders oluşturan (+25 puan) korunmalı, başka sınıfta da çakışan (-35 puan) öncelikle taşınmalı!
+                        var scoredCandidates = conf.Select(item =>
+                        {
+                            int score = 0;
+
+                            // Önceki saat (h-1) veya sonraki saat (h+1) ile ardışık 2 saat blok oluşturuyor mu?
+                            bool hasAdjacentBlock = classSlots.Any(s =>
+                                s.Id != item.Id &&
+                                s.DayOfWeek == item.DayOfWeek &&
+                                (s.LessonHour == item.LessonHour - 1 || s.LessonHour == item.LessonHour + 1) &&
+                                !string.IsNullOrEmpty(s.TeacherName) &&
+                                string.Equals(s.TeacherName.Trim(), item.TeacherName?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                            if (hasAdjacentBlock) score += 25; // Blok ders kesinlikle yerinde kalmalı
+
+                            // Aday öğretmenin aynı saatte başka bir şubede de çakışması var mı?
+                            bool busyElsewhere = schedules.Any(other =>
+                                other.Id != item.Id &&
+                                !string.IsNullOrEmpty(other.TeacherName) &&
+                                string.Equals(other.TeacherName.Trim(), item.TeacherName?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                other.DayOfWeek == item.DayOfWeek &&
+                                other.LessonHour == item.LessonHour);
+
+                            if (busyElsewhere) score -= 35; // Başka sınıfta da çakışan öğretmen öncelikle taşınmalı
+
+                            return new { Item = item, Score = score };
+                        })
+                        .OrderBy(x => x.Score) // En düşük puanlı (taşınmaya en uygun) adaylar ilk sırada!
+                        .ToList();
+
+                        // Taşınmaya en uygun adaydan başlayarak geçerli boşluk ara
+                        foreach (var candWrap in scoredCandidates)
+                        {
+                            var candidate = candWrap.Item;
+                            (int day, int hour)? targetSlot = null;
+
+                            var sameDayEmpty = emptySlots.Where(e => e.day == conf.Key.DayOfWeek).ToList();
+
+                            // Tercih A: Aynı günde adayın bu sınıftaki başka bir tekil dersinin yanındaki boş saat (Blok Tamamlama)
+                            foreach (var emp in sameDayEmpty)
+                            {
+                                bool completesBlock = classSlots.Any(s =>
+                                    s.Id != candidate.Id &&
+                                    s.DayOfWeek == emp.day &&
+                                    (s.LessonHour == emp.hour - 1 || s.LessonHour == emp.hour + 1) &&
+                                    !string.IsNullOrEmpty(s.TeacherName) &&
+                                    string.Equals(s.TeacherName.Trim(), candidate.TeacherName?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                                if (completesBlock)
+                                {
+                                    bool teacherBusy = !string.IsNullOrEmpty(candidate.TeacherName) && schedules.Any(other =>
+                                        other.Id != candidate.Id &&
+                                        !string.IsNullOrEmpty(other.TeacherName) &&
+                                        string.Equals(other.TeacherName.Trim(), candidate.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                        other.DayOfWeek == emp.day &&
+                                        other.LessonHour == emp.hour);
+
+                                    if (!teacherBusy)
+                                    {
+                                        targetSlot = emp;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // Tercih B: Aynı günde öğretmenin boş olduğu en yakın boş saat
+                            if (!targetSlot.HasValue)
+                            {
+                                var sortedSameDay = sameDayEmpty.OrderBy(e => Math.Abs(e.hour - conf.Key.LessonHour)).ToList();
+                                foreach (var emp in sortedSameDay)
+                                {
+                                    bool teacherBusy = !string.IsNullOrEmpty(candidate.TeacherName) && schedules.Any(other =>
+                                        other.Id != candidate.Id &&
+                                        !string.IsNullOrEmpty(other.TeacherName) &&
+                                        string.Equals(other.TeacherName.Trim(), candidate.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                        other.DayOfWeek == emp.day &&
+                                        other.LessonHour == emp.hour);
+
+                                    if (!teacherBusy)
+                                    {
+                                        targetSlot = emp;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // Tercih C: Diğer günlerde adayın tek kalan dersiyle blok oluşturan boş saat
+                            if (!targetSlot.HasValue)
+                            {
+                                var otherDaysEmpty = emptySlots.Where(e => e.day != conf.Key.DayOfWeek).ToList();
+                                foreach (var emp in otherDaysEmpty)
+                                {
+                                    bool completesBlock = classSlots.Any(s =>
+                                        s.Id != candidate.Id &&
+                                        s.DayOfWeek == emp.day &&
+                                        (s.LessonHour == emp.hour - 1 || s.LessonHour == emp.hour + 1) &&
+                                        !string.IsNullOrEmpty(s.TeacherName) &&
+                                        string.Equals(s.TeacherName.Trim(), candidate.TeacherName?.Trim(), StringComparison.OrdinalIgnoreCase));
+
+                                    if (completesBlock)
+                                    {
+                                        bool teacherBusy = !string.IsNullOrEmpty(candidate.TeacherName) && schedules.Any(other =>
+                                            other.Id != candidate.Id &&
+                                            !string.IsNullOrEmpty(other.TeacherName) &&
+                                            string.Equals(other.TeacherName.Trim(), candidate.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                            other.DayOfWeek == emp.day &&
+                                            other.LessonHour == emp.hour);
+
+                                        if (!teacherBusy)
+                                        {
+                                            targetSlot = emp;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Tercih D: Diğer günlerde öğretmenin okul genelinde boş olduğu herhangi bir boş saat
+                            if (!targetSlot.HasValue)
+                            {
+                                var otherDaysEmpty = emptySlots.Where(e => e.day != conf.Key.DayOfWeek).ToList();
+                                foreach (var emp in otherDaysEmpty)
+                                {
+                                    bool teacherBusy = !string.IsNullOrEmpty(candidate.TeacherName) && schedules.Any(other =>
+                                        other.Id != candidate.Id &&
+                                        !string.IsNullOrEmpty(other.TeacherName) &&
+                                        string.Equals(other.TeacherName.Trim(), candidate.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                        other.DayOfWeek == emp.day &&
+                                        other.LessonHour == emp.hour);
+
+                                    if (!teacherBusy)
+                                    {
+                                        targetSlot = emp;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if (targetSlot.HasValue)
+                            {
+                                var oldDay = candidate.DayOfWeek;
+                                var oldHour = candidate.LessonHour;
+                                candidate.DayOfWeek = targetSlot.Value.day;
+                                candidate.LessonHour = targetSlot.Value.hour;
+
+                                emptySlots.Remove(targetSlot.Value);
+                                movedInPass++;
+                                movedCount++;
+                                movedDescriptions.Add($"{candidate.Grade}-{candidate.Section} {candidate.LessonName} ({candidate.TeacherName}): {oldDay}. Gün {oldHour}. Saat ➔ {targetSlot.Value.day}. Gün {targetSlot.Value.hour}. Saat (Boş Saate Aktarıldı)");
+                                break; // Bu çakışma çözüldü, sıradaki çakışmaya geç
+                            }
+                        }
+                    }
+                }
+
+                // FAZ 2: Sınıflar Arası Öğretmen Çakışmaları (Bir öğretmenin aynı saatte iki sınıfta olması)
+                // Boş dersi olan sınıftaki ders, o sınıfın boş bir saatine aktarılır (Böylece boş ders dolar ve çakışma biter!)
+                var teacherConflicts = schedules
+                    .Where(s => !string.IsNullOrEmpty(s.TeacherName))
+                    .GroupBy(s => new { Teacher = s.TeacherName!.ToLower().Trim(), s.DayOfWeek, s.LessonHour })
+                    .Where(g => g.Count() > 1)
+                    .ToList();
+
+                foreach (var tg in teacherConflicts)
+                {
+                    var candidates = tg.ToList();
+                    // Boş saati en çok olan sınıf adayını belirle
+                    var candidateWithHoles = candidates
+                        .Select(c =>
+                        {
+                            var cSlots = schedules.Where(s => s.Grade == c.Grade && s.Section == c.Section).ToList();
+                            var occ = new HashSet<string>(cSlots.Select(s => $"{s.DayOfWeek}_{s.LessonHour}"));
+                            var empties = new List<(int day, int hour)>();
+                            for (int d = 1; d <= 5; d++)
+                            {
+                                for (int h = 1; h <= dailyHours; h++)
+                                {
+                                    if (!occ.Contains($"{d}_{h}")) empties.Add((d, h));
+                                }
+                            }
+                            return new { Item = c, ClassName = $"{c.Grade}-{c.Section}", Empties = empties };
+                        })
+                        .Where(x => x.Empties.Any())
+                        .OrderByDescending(x => x.Empties.Count)
+                        .FirstOrDefault();
+
+                    if (candidateWithHoles != null)
+                    {
+                        var itemToMove = candidateWithHoles.Item;
+                        var target = candidateWithHoles.Empties.FirstOrDefault(emp =>
+                            !schedules.Any(s =>
+                                s.Id != itemToMove.Id &&
+                                !string.IsNullOrEmpty(s.TeacherName) &&
+                                string.Equals(s.TeacherName.Trim(), itemToMove.TeacherName?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                                s.DayOfWeek == emp.day &&
+                                s.LessonHour == emp.hour));
+
+                        if (target != default)
+                        {
+                            int oldD = itemToMove.DayOfWeek;
+                            int oldH = itemToMove.LessonHour;
+                            itemToMove.DayOfWeek = target.day;
+                            itemToMove.LessonHour = target.hour;
+
+                            movedInPass++;
+                            movedCount++;
+                            movedDescriptions.Add($"[Öğretmen Çakışması Çözüldü] {candidateWithHoles.ClassName} {itemToMove.LessonName} ({itemToMove.TeacherName}): {oldD}. Gün {oldH}. Saat ➔ {target.day}. Gün {target.hour}. Saat (Boş Saate Aktarıldı)");
+                        }
+                    }
+                }
+
+                if (movedInPass == 0) break; // Artık taşınabilecek çakışma kalmadı
+            }
+
+            if (movedCount > 0)
+            {
+                await _context.SaveChangesAsync();
+                await LogActionAsync(schoolId, "SCHEDULES_AUTO_RECONCILED", "ScheduleItem", null, $"Akıllı Dengeleyici: {movedCount} çakışan ders başarıyla boş saatlere yerleştirildi.");
+            }
+
+            return (movedCount, movedDescriptions);
+        }
+
+        private async Task<(int placedCount, List<string> placedDescriptions)> RunAutoFillMissingLessonsAsync(Guid schoolId, int dailyHours = 8)
+        {
+            var schedules = await _context.ScheduleItems
+                .Where(s => s.SchoolId == schoolId)
+                .ToListAsync();
+
+            if (!schedules.Any())
+            {
+                return (0, new List<string>());
+            }
+
+            var curriculumLessons = await _context.SchoolLessons
+                .Where(l => l.SchoolId == schoolId)
+                .ToListAsync();
+
+            if (!curriculumLessons.Any())
+            {
+                return (0, new List<string>());
+            }
+
+            int placedCount = 0;
+            var placedDescriptions = new List<string>();
+
+            // Okuldaki şubeleri grupla
+            var classGroups = schedules
+                .GroupBy(s => $"{s.Grade.Trim()}-{s.Section.Trim().ToUpper()}")
+                .ToList();
+
+            foreach (var cg in classGroups)
+            {
+                var classSlots = cg.ToList();
+                var occupied = new HashSet<string>(classSlots.Select(s => $"{s.DayOfWeek}_{s.LessonHour}"));
+                var emptySlots = new List<(int day, int hour)>();
+
+                for (int d = 1; d <= 5; d++)
+                {
+                    for (int h = 1; h <= dailyHours; h++)
+                    {
+                        if (!occupied.Contains($"{d}_{h}"))
+                        {
+                            emptySlots.Add((d, h));
+                        }
+                    }
+                }
+
+                if (!emptySlots.Any()) continue;
+
+                // Bu sınıfta okutulan mevcut dersleri ve öğretmenleri analiz et
+                var lessonTeacherGroups = classSlots
+                    .GroupBy(s => new { Lesson = s.LessonName?.Trim() ?? string.Empty, Teacher = s.TeacherName?.Trim() ?? string.Empty })
+                    .Where(g => !string.IsNullOrEmpty(g.Key.Lesson))
+                    .Select(g =>
+                    {
+                        // Müfredat tablosunda bu derse karşılık gelen haftalık ders saatini bul
+                        var curr = curriculumLessons.FirstOrDefault(cl =>
+                            string.Equals(cl.Name.Trim(), g.Key.Lesson, StringComparison.OrdinalIgnoreCase) &&
+                            (string.Equals(cl.Grade?.Trim(), "Tüm Kademeler", StringComparison.OrdinalIgnoreCase) ||
+                             (cl.Grade != null && cl.Grade.Contains(classSlots.First().Grade.Trim()))))
+                            ?? curriculumLessons.FirstOrDefault(cl =>
+                            string.Equals(cl.Name.Trim(), g.Key.Lesson, StringComparison.OrdinalIgnoreCase));
+
+                        int expected = curr != null && curr.WeeklyHours > 0 ? curr.WeeklyHours : 0;
+                        int actual = g.Count();
+                        int missing = expected > actual ? expected - actual : 0;
+
+                        return new
+                        {
+                            Lesson = g.Key.Lesson,
+                            Teacher = g.Key.Teacher,
+                            Actual = actual,
+                            Expected = expected,
+                            Missing = missing,
+                            ExistingItems = g.ToList()
+                        };
+                    })
+                    .Where(x => x.Missing > 0)
+                    .OrderByDescending(x => x.Missing)
+                    .ToList();
+
+                foreach (var lt in lessonTeacherGroups)
+                {
+                    int missingToFill = lt.Missing;
+                    var sampleItem = lt.ExistingItems.First();
+
+                    for (int m = 0; m < missingToFill; m++)
+                    {
+                        if (!emptySlots.Any()) break;
+
+                        (int day, int hour)? bestSlot = null;
+
+                        // Öncelik 1: Aynı günde adayın bu sınıftaki dersinin yanındaki boş saat (2 saatlik blok tamamlama!)
+                        foreach (var emp in emptySlots)
+                        {
+                            bool completesBlock = classSlots.Any(s =>
+                                s.DayOfWeek == emp.day &&
+                                (s.LessonHour == emp.hour - 1 || s.LessonHour == emp.hour + 1) &&
+                                !string.IsNullOrEmpty(s.TeacherName) &&
+                                string.Equals(s.TeacherName.Trim(), lt.Teacher, StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(s.LessonName?.Trim(), lt.Lesson, StringComparison.OrdinalIgnoreCase));
+
+                            if (completesBlock)
+                            {
+                                bool busy = !string.IsNullOrEmpty(lt.Teacher) && schedules.Any(s =>
+                                    !string.IsNullOrEmpty(s.TeacherName) &&
+                                    string.Equals(s.TeacherName.Trim(), lt.Teacher, StringComparison.OrdinalIgnoreCase) &&
+                                    s.DayOfWeek == emp.day &&
+                                    s.LessonHour == emp.hour);
+
+                                if (!busy)
+                                {
+                                    bestSlot = emp;
+                                    break;
+                                }
+                            }
+                        }
+
+                        // Öncelik 2: Aynı günde en yakın boş saat
+                        if (!bestSlot.HasValue)
+                        {
+                            foreach (var item in lt.ExistingItems)
+                            {
+                                var sameDayEmpties = emptySlots
+                                    .Where(e => e.day == item.DayOfWeek)
+                                    .OrderBy(e => Math.Abs(e.hour - item.LessonHour))
+                                    .ToList();
+
+                                foreach (var emp in sameDayEmpties)
+                                {
+                                    bool busy = !string.IsNullOrEmpty(lt.Teacher) && schedules.Any(s =>
+                                        !string.IsNullOrEmpty(s.TeacherName) &&
+                                        string.Equals(s.TeacherName.Trim(), lt.Teacher, StringComparison.OrdinalIgnoreCase) &&
+                                        s.DayOfWeek == emp.day &&
+                                        s.LessonHour == emp.hour);
+
+                                    if (!busy)
+                                    {
+                                        bestSlot = emp;
+                                        break;
+                                    }
+                                }
+
+                                if (bestSlot.HasValue) break;
+                            }
+                        }
+
+                        // Öncelik 3: Diğer günlerde öğretmenin okul genelinde boş olduğu herhangi bir boş saat
+                        if (!bestSlot.HasValue)
+                        {
+                            foreach (var emp in emptySlots)
+                            {
+                                bool busy = !string.IsNullOrEmpty(lt.Teacher) && schedules.Any(s =>
+                                    !string.IsNullOrEmpty(s.TeacherName) &&
+                                    string.Equals(s.TeacherName.Trim(), lt.Teacher, StringComparison.OrdinalIgnoreCase) &&
+                                    s.DayOfWeek == emp.day &&
+                                    s.LessonHour == emp.hour);
+
+                                if (!busy)
+                                {
+                                    bestSlot = emp;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (bestSlot.HasValue)
+                        {
+                            var newItem = new ScheduleItem
+                            {
+                                Id = Guid.NewGuid(),
+                                SchoolId = schoolId,
+                                Grade = sampleItem.Grade,
+                                Section = sampleItem.Section,
+                                LessonName = lt.Lesson,
+                                TeacherName = lt.Teacher,
+                                TeacherId = sampleItem.TeacherId,
+                                LessonCode = sampleItem.LessonCode,
+                                Classroom = sampleItem.Classroom,
+                                DayOfWeek = bestSlot.Value.day,
+                                LessonHour = bestSlot.Value.hour
+                            };
+
+                            _context.ScheduleItems.Add(newItem);
+                            schedules.Add(newItem);
+                            classSlots.Add(newItem);
+                            emptySlots.Remove(bestSlot.Value);
+
+                            placedCount++;
+                            placedDescriptions.Add($"{cg.Key} {lt.Lesson} ({lt.Teacher}): {bestSlot.Value.day}. Gün {bestSlot.Value.hour}. Saate eklendi (Müfredata göre eksik saat tamamlandı)");
+                        }
+                    }
+                }
+            }
+
+            if (placedCount > 0)
+            {
+                await _context.SaveChangesAsync();
+                await LogActionAsync(schoolId, "SCHEDULES_AUTO_FILLED_GAPS", "ScheduleItem", null, $"Müfredat Tamamlayıcı: {placedCount} eksik ders saati boşluklara yerleştirildi.");
+            }
+
+            return (placedCount, placedDescriptions);
         }
 
         // 5. Yıllık Planları Toplu Kaydet (Admin AI veya Excel Şablonu ile yükler)

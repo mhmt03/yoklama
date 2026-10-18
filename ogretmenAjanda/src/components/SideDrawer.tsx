@@ -59,15 +59,17 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
 
   const handleLogout = () => {
     const doLogout = async () => {
+      console.log('[SideDrawer] Öğretmen oturumu kapatılıyor...');
       await logoutUserRole();
       onRoleChanged(null);
       onClose();
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.reload();
+      }
     };
 
     if (Platform.OS === 'web') {
-      if (typeof window !== 'undefined' && window.confirm('Mevcut rolünüzden çıkıp karşılama ve rol seçimi ekranına dönmek istiyor musunuz?')) {
-        doLogout();
-      }
+      doLogout();
     } else {
       Alert.alert('Rol Değiştir', 'Mevcut rolünüzden çıkıp karşılama ekranına dönmek istiyor musunuz?', [
         { text: 'İptal', style: 'cancel' },

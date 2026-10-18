@@ -743,3 +743,245 @@ export async function exportConsolidatedSchoolMasterExcel(params: {
   const fileName = `Tum_Okul_Veritabani_${school.code || 'Master'}_${Date.now()}.xlsx`;
   return await saveAndShareWorkbook(wb, fileName);
 }
+
+/**
+ * 7. Öğretmen Giriş Bilgileri ve Şifre Listesi Excel Raporu
+ */
+export async function exportTeacherCredentialsReport(params: {
+  school: ReportSchoolInfo;
+  teachers: any[];
+  filterBranch?: string;
+  filterRole?: string;
+}): Promise<boolean> {
+  const { school, teachers, filterBranch, filterRole } = params;
+
+  let filtered = [...teachers];
+  if (filterBranch && filterBranch !== 'all') {
+    filtered = filtered.filter((t) => (t.branch || '').toLowerCase() === filterBranch.toLowerCase());
+  }
+  if (filterRole && filterRole !== 'all') {
+    filtered = filtered.filter((t) => t.role === filterRole);
+  }
+
+  filtered.sort((a, b) => safeStr(a.fullName || a.name).localeCompare(safeStr(b.fullName || b.name), 'tr'));
+
+  const rows: any[][] = [
+    [`${school.name.toUpperCase()} - ÖĞRETMEN SİSTEMİ GİRİŞ VE ŞİFRE LİSTESİ`],
+    [`Okul Kodu: ${school.code || '-'} | Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')} | Toplam Öğretmen: ${filtered.length}`],
+    ['NOT: Öğretmenler uygulamaya "Okul Kodu", "Kullanıcı Adı" ve "Şifre" bilgileri ile giriş yaparlar. İlk girişte şifre varsayılan olarak "1234"tür.'],
+    [],
+    [
+      'Sıra No',
+      'Öğretmen Adı Soyadı',
+      'Branş',
+      'Yetki / Rol',
+      'Okul Kodu',
+      'Kullanıcı Adı',
+      'Başlangıç Şifresi',
+      'Telefon Numarası',
+      'E-Posta Adresi',
+      'Hesap Durumu',
+    ],
+  ];
+
+  filtered.forEach((t, i) => {
+    rows.push([
+      i + 1,
+      safeStr(t.fullName || t.name),
+      safeStr(t.branch || 'Genel'),
+      t.role === 'STAFF' ? 'Okul İdarecisi' : 'Öğretmen',
+      safeStr(school.code || '-'),
+      safeStr(t.username || '-'),
+      '1234', // Sistem varsayılan başlangıç şifresi
+      safeStr(t.phone || '-'),
+      safeStr(t.email || '-'),
+      t.isActive !== false ? 'Aktif' : 'Pasif',
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = calculateColWidths(rows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Ogretmen_Sifreleri');
+
+  const cleanName = school.name.replace(/[^a-zA-Z0-9çÇğĞıİöÖşŞüÜ]/g, '_');
+  const fileName = `${cleanName}_Ogretmen_Sifre_Listesi_${Date.now()}.xlsx`;
+  return await saveAndShareWorkbook(wb, fileName);
+}
+
+/**
+ * 8. Öğrenci Portalı Giriş Bilgileri ve Şifre Listesi Excel Raporu
+ */
+export async function exportStudentCredentialsReport(params: {
+  school: ReportSchoolInfo;
+  students: any[];
+  filterGrade?: string;
+  filterSection?: string;
+  searchQuery?: string;
+}): Promise<boolean> {
+  const { school, students, filterGrade, filterSection, searchQuery } = params;
+
+  let filtered = [...students];
+  if (filterGrade && filterGrade !== 'all') {
+    filtered = filtered.filter((s) => String(s.grade) === String(filterGrade));
+  }
+  if (filterSection && filterSection !== 'all') {
+    filtered = filtered.filter((s) => (s.section || '').toUpperCase() === filterSection.toUpperCase());
+  }
+  if (searchQuery && searchQuery.trim()) {
+    const q = searchQuery.trim().toLowerCase();
+    filtered = filtered.filter(
+      (s) =>
+        safeStr(s.fullName || s.name).toLowerCase().includes(q) ||
+        safeStr(s.studentNumber).includes(q) ||
+        safeStr(s.parentName).toLowerCase().includes(q)
+    );
+  }
+
+  // Sınıf ve no sıralaması
+  filtered.sort((a, b) => {
+    const grA = Number(a.grade) || 0;
+    const grB = Number(b.grade) || 0;
+    if (grA !== grB) return grA - grB;
+    const secA = safeStr(a.section).toUpperCase();
+    const secB = safeStr(b.section).toUpperCase();
+    if (secA !== secB) return secA.localeCompare(secB);
+    const noA = Number(a.studentNumber) || 0;
+    const noB = Number(b.studentNumber) || 0;
+    return noA - noB;
+  });
+
+  const rows: any[][] = [
+    [`${school.name.toUpperCase()} - ÖĞRENCİ PORTALI GİRİŞ VE ŞİFRE LİSTESİ`],
+    [`Okul Kodu: ${school.code || '-'} | Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')} | Toplam Öğrenci: ${filtered.length}`],
+    ['NOT: Öğrenci portalı girişi için "Okul Kodu" + "Öğrenci Numarası" + "Şifre" kullanılır. Varsayılan şifre: "aaaa_öğrencino" şeklindedir.'],
+    [],
+    [
+      'Sıra No',
+      'Öğrenci No',
+      'Sınıfı / Şubesi',
+      'Öğrenci Adı Soyadı',
+      'Okul Kodu',
+      'Giriş Kimliği (No)',
+      'Varsayılan Şifre',
+      'Veli Adı Soyadı',
+      'Veli Telefonu',
+      'Giriş Yönergesi',
+    ],
+  ];
+
+  filtered.forEach((s, i) => {
+    const stdNo = safeStr(s.studentNumber);
+    const defaultPass = stdNo ? `aaaa_${stdNo}` : '-';
+    rows.push([
+      i + 1,
+      stdNo,
+      s.grade && s.section ? `${s.grade}-${String(s.section).toUpperCase()}` : `${s.grade || ''}${s.section || ''}`,
+      safeStr(s.fullName || s.name),
+      safeStr(school.code || '-'),
+      stdNo,
+      defaultPass,
+      safeStr(s.parentName || '-'),
+      safeStr(s.parentPhone || '-'),
+      'Öğrenci Girişinden: Okul Kodu + No + Şifre',
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = calculateColWidths(rows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Ogrenci_Sifreleri');
+
+  const cleanName = school.name.replace(/[^a-zA-Z0-9çÇğĞıİöÖşŞüÜ]/g, '_');
+  const fileName = `${cleanName}_Ogrenci_Sifre_Listesi_${Date.now()}.xlsx`;
+  return await saveAndShareWorkbook(wb, fileName);
+}
+
+/**
+ * 9. Veli Bilgilendirme ve Giriş Şifreleri Excel Raporu
+ */
+export async function exportParentCredentialsReport(params: {
+  school: ReportSchoolInfo;
+  students: any[];
+  filterGrade?: string;
+  filterSection?: string;
+  searchQuery?: string;
+}): Promise<boolean> {
+  const { school, students, filterGrade, filterSection, searchQuery } = params;
+
+  let filtered = [...students];
+  if (filterGrade && filterGrade !== 'all') {
+    filtered = filtered.filter((s) => String(s.grade) === String(filterGrade));
+  }
+  if (filterSection && filterSection !== 'all') {
+    filtered = filtered.filter((s) => (s.section || '').toUpperCase() === filterSection.toUpperCase());
+  }
+  if (searchQuery && searchQuery.trim()) {
+    const q = searchQuery.trim().toLowerCase();
+    filtered = filtered.filter(
+      (s) =>
+        safeStr(s.fullName || s.name).toLowerCase().includes(q) ||
+        safeStr(s.studentNumber).includes(q) ||
+        safeStr(s.parentName).toLowerCase().includes(q)
+    );
+  }
+
+  filtered.sort((a, b) => {
+    const grA = Number(a.grade) || 0;
+    const grB = Number(b.grade) || 0;
+    if (grA !== grB) return grA - grB;
+    const secA = safeStr(a.section).toUpperCase();
+    const secB = safeStr(b.section).toUpperCase();
+    if (secA !== secB) return secA.localeCompare(secB);
+    return safeStr(sParent(a)).localeCompare(safeStr(sParent(b)), 'tr');
+  });
+
+  function sParent(item: any) {
+    return item.parentName || item.fullName || item.name || '';
+  }
+
+  const rows: any[][] = [
+    [`${school.name.toUpperCase()} - VELİ BİLGİLENDİRME VE PORTAL ERİŞİM ŞİFRE LİSTESİ`],
+    [`Okul Kodu: ${school.code || '-'} | Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')} | Toplam Veli / Öğrenci: ${filtered.length}`],
+    ['NOT: Veliler öğrenci takip paneline öğrencinin numarası veya kayıtlı veli telefonu ile giriş yaparlar. Başlangıç şifresi: "aaaa_öğrencino" şeklindedir.'],
+    [],
+    [
+      'Sıra No',
+      'Veli Adı Soyadı',
+      'Veli Telefon Numarası',
+      'Öğrenci Adı Soyadı',
+      'Sınıfı / Şubesi',
+      'Öğrenci Numarası',
+      'Okul Kodu',
+      'Veli Portalı Şifresi',
+      'Erişim Kanalı',
+      'Veli Bilgilendirme Notu',
+    ],
+  ];
+
+  filtered.forEach((s, i) => {
+    const stdNo = safeStr(s.studentNumber);
+    const defaultPass = stdNo ? `aaaa_${stdNo}` : '-';
+    rows.push([
+      i + 1,
+      safeStr(s.parentName || 'Belirtilmedi'),
+      safeStr(s.parentPhone || '-'),
+      safeStr(s.fullName || s.name),
+      s.grade && s.section ? `${s.grade}-${String(s.section).toUpperCase()}` : `${s.grade || ''}${s.section || ''}`,
+      stdNo,
+      safeStr(school.code || '-'),
+      defaultPass,
+      'Mobil Uygulama & Web Portalı',
+      'Öğrenci & Veli Girişinden: Okul Kodu + No veya Veli Telefonu ile şifre girilerek erişilir.',
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = calculateColWidths(rows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Veli_Sifreleri');
+
+  const cleanName = school.name.replace(/[^a-zA-Z0-9çÇğĞıİöÖşŞüÜ]/g, '_');
+  const fileName = `${cleanName}_Veli_Sifre_Listesi_${Date.now()}.xlsx`;
+  return await saveAndShareWorkbook(wb, fileName);
+}
