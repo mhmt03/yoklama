@@ -169,6 +169,22 @@ export const HomeScreen: React.FC = () => {
       setActiveSchoolState(updated);
       await reloadSchoolTheme();
       setSchoolModalVisible(false);
+
+      // Kurumsal okul ise verileri (program, şube/öğrenci, yıllık plan) bu okul için otomatik senkronize et
+      if (updated?.code) {
+        try {
+          const { syncScheduleFromSchool } = await import('../services/scheduleSyncService');
+          const { syncTeacherAssignedClassesAndStudents } = await import('../services/studentSyncService');
+          const { syncYearlyPlansFromSchool } = await import('../services/yearlyPlanSyncService');
+
+          await syncScheduleFromSchool(updated.code);
+          await syncTeacherAssignedClassesAndStudents(updated.code);
+          await syncYearlyPlansFromSchool({ providedSchoolCode: updated.code });
+        } catch (syncErr) {
+          console.warn('School switch auto-sync error:', syncErr);
+        }
+      }
+
       await loadData();
     } catch (e) {
       Alert.alert('Hata', 'Okul değiştirilemedi.');
@@ -1092,6 +1108,53 @@ export const HomeScreen: React.FC = () => {
           </View>
         </View>
       </View>
+
+      {/* 🏫 ÇOKLU OKUL SEÇİCİ TAB ÇUBUĞU (Öğretmen Bağlı Olduğu Okullar Arasında Tek Dokunuşla Geçiş Yapar) */}
+      {schoolsList.length > 1 && (
+        <View style={styles.schoolSwitcherBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.schoolSwitcherScroll}
+          >
+            {schoolsList.map((sch) => {
+              const isSelected = activeSchool?.id === sch.id;
+              const schColor = sch.color || Colors.primary;
+              return (
+                <TouchableOpacity
+                  key={sch.id}
+                  style={[
+                    styles.schoolSwitchTab,
+                    isSelected ? [styles.schoolSwitchTabActive, { borderColor: schColor, backgroundColor: `${schColor}14` }] : null,
+                  ]}
+                  onPress={() => handleSelectSchool(sch.id)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="school"
+                    size={14}
+                    color={isSelected ? schColor : Colors.textMuted}
+                  />
+                  <Text
+                    style={[
+                      styles.schoolSwitchTabText,
+                      isSelected ? [styles.schoolSwitchTabTextActive, { color: schColor }] : null,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {sch.name}
+                  </Text>
+                  {isSelected && (
+                    <View style={[styles.activeSchoolBadge, { backgroundColor: schColor }]}>
+                      <Ionicons name="checkmark" size={10} color="#fff" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
 
       {/* 🚨 TÜM GÜN EKRANDA UYARI KARTI (Günün Kritik Ajanda / Hatırlatma Notları) */}
       {todayAlertItems.length > 0 && (
@@ -3041,6 +3104,47 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 6,
+  },
+  schoolSwitcherBar: {
+    marginBottom: 10,
+    marginTop: 2,
+  },
+  schoolSwitcherScroll: {
+    gap: 8,
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+  },
+  schoolSwitchTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    ...Shadows.small,
+  },
+  schoolSwitchTabActive: {
+    borderWidth: 1.5,
+  },
+  schoolSwitchTabText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+    maxWidth: 180,
+  },
+  schoolSwitchTabTextActive: {
+    fontWeight: '800',
+  },
+  activeSchoolBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 2,
   },
   hamburgerBtn: {
     padding: 6,

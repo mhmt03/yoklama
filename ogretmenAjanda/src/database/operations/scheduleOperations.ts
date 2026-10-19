@@ -221,7 +221,7 @@ export const getWeeklySchedule = async (): Promise<ScheduleItem[]> => {
     ) days
     LEFT JOIN day_slot_times dst ON dst.slot_id = ls.id AND dst.day_of_week = days.day_of_week
     LEFT JOIN schedules s ON s.slot_id = ls.id AND s.day_of_week = days.day_of_week
-    LEFT JOIN classes c ON c.id = s.class_id AND (c.school_id = ? OR c.school_id IS NULL)
+    LEFT JOIN classes c ON c.id = s.class_id AND c.school_id = ?
     LEFT JOIN schools sch ON sch.id = c.school_id
     LEFT JOIN courses cr ON cr.id = s.course_id
     ORDER BY days.day_of_week ASC, ls.slot_number ASC;
@@ -323,7 +323,7 @@ export const getScheduleByDay = async (
     FROM lesson_slots ls
     LEFT JOIN day_slot_times dst ON dst.slot_id = ls.id AND dst.day_of_week = ?
     LEFT JOIN schedules s ON s.slot_id = ls.id AND s.day_of_week = ?
-    LEFT JOIN classes c ON c.id = s.class_id AND (c.school_id = ? OR c.school_id IS NULL)
+    LEFT JOIN classes c ON c.id = s.class_id AND c.school_id = ?
     LEFT JOIN schools sch ON sch.id = c.school_id
     LEFT JOIN courses cr ON cr.id = s.course_id
     ORDER BY ls.slot_number ASC;
@@ -1015,11 +1015,10 @@ export const applyAnalyzedSchedule = async (
     if (!norm) continue;
 
     if (!classIdMap[norm]) {
-      // Önce mevcut sınıflarda ara
-      const match =
-        existingClasses.find(
-          (c) => normalizeNorm(c.name) === norm && (c.school_id === activeSchoolId || !c.school_id)
-        ) || existingClasses.find((c) => normalizeNorm(c.name) === norm);
+      // Önce mevcut okul sınıflarında ara
+      const match = existingClasses.find(
+        (c) => normalizeNorm(c.name) === norm && c.school_id === activeSchoolId
+      );
 
       if (match) {
         classIdMap[norm] = match.id;
@@ -1091,13 +1090,30 @@ export const applyAnalyzedSchedule = async (
     }
   }
 
-  // 4. ESKİ PROGRAMI TEMİZLE
+  // 4. ESKİ PROGRAMI TEMİZLE (SADECE BU OKULUN PROGRAMI)
   if (clearDaysOption === 'all_week') {
-    await db.runAsync('DELETE FROM schedules WHERE day_of_week BETWEEN 1 AND 7');
+    if (activeSchoolId) {
+      await db.runAsync(
+        'DELETE FROM schedules WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?) OR school_id = ?',
+        activeSchoolId,
+        activeSchoolId
+      );
+    } else {
+      await db.runAsync('DELETE FROM schedules WHERE day_of_week BETWEEN 1 AND 7');
+    }
   } else {
     const daysToClear = Array.from(new Set(lessons.map((l) => l.day)));
     for (const d of daysToClear) {
-      await db.runAsync('DELETE FROM schedules WHERE day_of_week = ?', d);
+      if (activeSchoolId) {
+        await db.runAsync(
+          'DELETE FROM schedules WHERE day_of_week = ? AND (class_id IN (SELECT id FROM classes WHERE school_id = ?) OR school_id = ?)',
+          d,
+          activeSchoolId,
+          activeSchoolId
+        );
+      } else {
+        await db.runAsync('DELETE FROM schedules WHERE day_of_week = ?', d);
+      }
     }
   }
 
@@ -1116,17 +1132,19 @@ export const applyAnalyzedSchedule = async (
 
     if (slotId && classId && courseId) {
       await db.runAsync(
-        `INSERT INTO schedules (day_of_week, slot_id, class_id, course_id, classroom)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO schedules (day_of_week, slot_id, class_id, course_id, classroom, school_id)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(day_of_week, slot_id) DO UPDATE SET
            class_id = excluded.class_id,
            course_id = excluded.course_id,
-           classroom = excluded.classroom`,
+           classroom = excluded.classroom,
+           school_id = excluded.school_id`,
         item.day,
         slotId,
         classId,
         courseId,
-        item.classroom || null
+        item.classroom || null,
+        activeSchoolId
       );
       totalLessonsLoaded++;
     } else {

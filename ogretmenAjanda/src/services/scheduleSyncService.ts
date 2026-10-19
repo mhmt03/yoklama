@@ -46,7 +46,18 @@ export async function syncScheduleFromSchool(
     }
 
     // 1. Okul ID'sini tespit et
-    let schoolId = session?.schoolId;
+    let schoolId: string | undefined;
+    if (session?.affiliatedSchools && session.affiliatedSchools.length > 0) {
+      const matchAff = session.affiliatedSchools.find(
+        (s: any) => s.code && s.code.trim().toUpperCase() === code.toUpperCase()
+      );
+      if (matchAff?.id) {
+        schoolId = matchAff.id;
+      }
+    }
+    if (!schoolId && session?.schoolCode?.toUpperCase() === code.toUpperCase() && session?.schoolId) {
+      schoolId = session.schoolId;
+    }
     if (!schoolId) {
       try {
         const lookup = await apiRequest<any[]>(`schools/lookup?code=${encodeURIComponent(code)}`);
@@ -87,57 +98,54 @@ export async function syncScheduleFromSchool(
     // 4. Eğer bulunamadıysa, okulun tüm programını çekip esnek isim eşleştirmesi yap
     if (matchedItems.length === 0) {
       const allRes = await apiRequest<ServerScheduleItem[]>(`sync/schedules?schoolId=${schoolId}`);
-      if (!allRes.success || !allRes.data || allRes.data.length === 0) {
-        return {
-          success: false,
-          message: 'Okulunuzda admin tarafından henüz yüklenmiş bir ders programı (çarşaf program) bulunamadı.',
-        };
-      }
+      if (allRes.success && allRes.data && allRes.data.length > 0) {
+        const allItems = allRes.data;
+        const distinctTeachers = Array.from(
+          new Set(allItems.map((s) => (s.teacherName || '').trim()).filter(Boolean))
+        );
 
-      const allItems = allRes.data;
-      const distinctTeachers = Array.from(
-        new Set(allItems.map((s) => (s.teacherName || '').trim()).filter(Boolean))
-      );
+        if (rawTeacherName) {
+          const normTarget = rawTeacherName.toLowerCase();
+          const targetWords = normTarget.split(/\s+/).filter((w) => w.length >= 2);
 
-      if (rawTeacherName) {
-        const normTarget = rawTeacherName.toLowerCase();
-        const targetWords = normTarget.split(/\s+/).filter((w) => w.length >= 2);
+          // Akıllı eşleşme (ad veya soyad kelimesi geçenler)
+          const matchedName = distinctTeachers.find((tName) => {
+            const normT = tName.toLowerCase();
+            if (normT === normTarget || normT.includes(normTarget) || normTarget.includes(normT)) {
+              return true;
+            }
+            return targetWords.some((word) => normT.includes(word));
+          });
 
-        // Akıllı eşleşme (ad veya soyad kelimesi geçenler)
-        const matchedName = distinctTeachers.find((tName) => {
-          const normT = tName.toLowerCase();
-          if (normT === normTarget || normT.includes(normTarget) || normTarget.includes(normT)) {
-            return true;
+          if (matchedName) {
+            detectedTeacher = matchedName;
+            matchedItems = allItems.filter(
+              (s) => (s.teacherName || '').trim().toLowerCase() === matchedName.toLowerCase()
+            );
           }
-          return targetWords.some((word) => normT.includes(word));
-        });
-
-        if (matchedName) {
-          detectedTeacher = matchedName;
-          matchedItems = allItems.filter(
-            (s) => (s.teacherName || '').trim().toLowerCase() === matchedName.toLowerCase()
-          );
-        }
-      }
-
-      // Eğer hala eşleşmediyse ve programda tek bir öğretmen varsa veya hiç isim girilmediyse
-      if (matchedItems.length === 0) {
-        if (distinctTeachers.length === 1) {
-          detectedTeacher = distinctTeachers[0];
-          matchedItems = allItems;
-        } else {
-          return {
-            success: false,
-            message: `Okulda ders programı mevcut fakat "${rawTeacherName || 'Öğretmen'}" adına atanmış ders bulunamadı.\n\nOkul programındaki kayıtlı öğretmenler:\n${distinctTeachers.slice(0, 6).join(', ')}${distinctTeachers.length > 6 ? '...' : ''}`,
-          };
         }
       }
     }
 
     if (matchedItems.length === 0) {
+      // Bu okulda öğretmenin dersi yok, mevcut okul programını temizle
+      try {
+        const db = await (await import('../database/db')).getDB();
+        const localSchool = await db.getFirstAsync<{ id: number }>('SELECT id FROM schools WHERE UPPER(code) = ?', code.toUpperCase());
+        if (localSchool) {
+          await db.runAsync(
+            'DELETE FROM schedules WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?) OR school_id = ?',
+            localSchool.id,
+            localSchool.id
+          );
+        }
+      } catch {}
       return {
-        success: false,
-        message: 'Ders programınızda atanmış herhangi bir ders saati bulunamadı.',
+        success: true,
+        message: 'Bu okulda adınıza atanmış bir ders saati bulunmamaktadır.',
+        totalLessons: 0,
+        classesEnsured: [],
+        coursesEnsured: [],
       };
     }
 

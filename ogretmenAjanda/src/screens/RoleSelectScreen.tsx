@@ -187,6 +187,20 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             await setGeminiApiKey(res.data.geminiApiKey);
           }
 
+          // OTOMATİK VERİ SENKRONİZASYONU:
+          // Öğretmen okul kodunu girip giriş yaptığı için program, sınıflar/öğrenciler ve yıllık planlar otomatik çekilir
+          try {
+            const { syncScheduleFromSchool } = await import('../services/scheduleSyncService');
+            const { syncTeacherAssignedClassesAndStudents } = await import('../services/studentSyncService');
+            const { syncYearlyPlansFromSchool } = await import('../services/yearlyPlanSyncService');
+
+            await syncScheduleFromSchool(schoolCodeClean);
+            await syncTeacherAssignedClassesAndStudents(schoolCodeClean);
+            await syncYearlyPlansFromSchool({ providedSchoolCode: schoolCodeClean });
+          } catch (syncErr) {
+            console.warn('Auto-sync on teacher login error:', syncErr);
+          }
+
           setShowTeacherLoginModal(false);
           onRoleSelected(nextRole);
         } else {

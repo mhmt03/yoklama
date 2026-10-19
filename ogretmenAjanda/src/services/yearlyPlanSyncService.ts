@@ -49,6 +49,15 @@ export async function syncYearlyPlansFromSchool(options?: {
 
     // 1. Okul ID'sini tespit et
     let schoolId = session?.schoolId;
+    if (session?.affiliatedSchools && Array.isArray(session.affiliatedSchools)) {
+      const match = session.affiliatedSchools.find(
+        (s: any) => (s.schoolCode || s.code || '').toLowerCase() === code.toLowerCase()
+      );
+      if (match?.id) {
+        schoolId = match.id;
+      }
+    }
+
     if (!schoolId) {
       try {
         const lookup = await apiRequest<any[]>(`schools/lookup?code=${encodeURIComponent(code)}`);
@@ -92,6 +101,9 @@ export async function syncYearlyPlansFromSchool(options?: {
     // Filtreleme: Eğer spesifik bir ders ve sınıf seçildiyse ve syncAll zorlanmadıysa
     let plansToProcess = allServerPlans;
 
+    const { getActiveTeacherName } = await import('../utils/roleService');
+    const teacherName = (await getActiveTeacherName()) || session?.fullName || session?.username || '';
+
     if (!options?.syncAll && (options?.courseName || options?.courseId) && options?.gradeLevel) {
       const targetName = (options.courseName || '').trim().toLowerCase();
       const targetGrade = String(options.gradeLevel);
@@ -111,6 +123,36 @@ export async function syncYearlyPlansFromSchool(options?: {
       if (matched.length > 0) {
         plansToProcess = matched;
       }
+    } else if (!options?.syncAll && !options?.courseName && !options?.courseId && schoolId && teacherName) {
+      try {
+        const schedRes = await apiRequest<any[]>(
+          `sync/schedules?schoolId=${schoolId}&teacherName=${encodeURIComponent(teacherName)}`
+        );
+        if (schedRes.success && schedRes.data) {
+          if (schedRes.data.length === 0) {
+            return {
+              success: true,
+              message: 'Bu okulda adınıza tanımlı ders bulunmadığından yıllık plan senkronize edilmedi.',
+              totalPlans: 0,
+              totalWeeks: 0,
+            };
+          }
+          const teacherLessonNames = new Set<string>();
+          schedRes.data.forEach((s) => {
+            if (s.lessonName) teacherLessonNames.add(s.lessonName.trim().toLowerCase());
+          });
+
+          const matched = allServerPlans.filter((p) => {
+            const pLesson = (p.lessonName || '').trim().toLowerCase();
+            return Array.from(teacherLessonNames).some(
+              (tl) => tl === pLesson || tl.includes(pLesson) || pLesson.includes(tl)
+            );
+          });
+          if (matched.length > 0) {
+            plansToProcess = matched;
+          }
+        }
+      } catch {}
     }
 
     // 4. Planları ders ve sınıf düzeyine göre grupla

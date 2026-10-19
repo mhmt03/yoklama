@@ -1,10 +1,10 @@
 import { getDB } from '../db';
 import { ClassItem } from '../../types';
 
-export const getClasses = async (): Promise<ClassItem[]> => {
+export const getClasses = async (targetSchoolId?: number): Promise<ClassItem[]> => {
   const db = await getDB();
   const activeSchool = await db.getFirstAsync<{ id: number }>('SELECT id FROM schools WHERE is_active = 1 LIMIT 1');
-  const schoolId = activeSchool?.id || 1;
+  const schoolId = targetSchoolId ?? activeSchool?.id ?? 1;
 
   const query = `
     SELECT 
@@ -17,7 +17,7 @@ export const getClasses = async (): Promise<ClassItem[]> => {
       COUNT(s.id) as student_count
     FROM classes c
     LEFT JOIN students s ON s.class_id = c.id
-    WHERE c.school_id = ? OR c.school_id IS NULL
+    WHERE c.school_id = ?
     GROUP BY c.id
     ORDER BY c.name ASC;
   `;
@@ -46,11 +46,12 @@ export const getClassById = async (id: number): Promise<ClassItem | null> => {
 export const createClass = async (
   name: string,
   description?: string,
-  gradeLevel?: number
+  gradeLevel?: number,
+  targetSchoolId?: number
 ): Promise<number> => {
   const db = await getDB();
   const activeSchool = await db.getFirstAsync<{ id: number }>('SELECT id FROM schools WHERE is_active = 1 LIMIT 1');
-  const schoolId = activeSchool?.id || 1;
+  const schoolId = targetSchoolId ?? activeSchool?.id ?? 1;
 
   let calculatedGradeLevel = gradeLevel;
   if (calculatedGradeLevel === undefined) {

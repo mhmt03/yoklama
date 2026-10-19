@@ -501,6 +501,28 @@ const runSchema = async (db: SQLite.SQLiteDatabase): Promise<void> => {
     }
   }
 
+  // Okul ve Program Çoklu Okul İzolasyon Migrasyonları
+  try {
+    await db.runAsync('ALTER TABLE schools ADD COLUMN daily_lesson_hours INTEGER DEFAULT 8;');
+  } catch {}
+  try {
+    await db.runAsync('ALTER TABLE schedules ADD COLUMN school_id INTEGER;');
+  } catch {}
+
+  // Sınıf ve ders programı okul bağlantılarını backfill et
+  try {
+    await db.runAsync(`
+      UPDATE classes 
+      SET school_id = (SELECT id FROM schools WHERE is_active = 1 LIMIT 1) 
+      WHERE school_id IS NULL;
+    `);
+    await db.runAsync(`
+      UPDATE schedules 
+      SET school_id = (SELECT c.school_id FROM classes c WHERE c.id = schedules.class_id) 
+      WHERE school_id IS NULL AND class_id IS NOT NULL;
+    `);
+  } catch {}
+
 
   // Backfill unique code for schools if missing
   try {

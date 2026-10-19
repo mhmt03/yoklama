@@ -222,7 +222,23 @@ export async function syncTeacherAssignedClassesAndStudents(
     }
 
     // 1. Okul bilgisini ve ID'sini tespit et
+    const { getSchools } = await import('../database/operations/schoolOperations');
+    const allSchools = await getSchools();
+    const targetLocalSchool = allSchools.find(
+      (s) => (s.code || '').toLowerCase() === code.toLowerCase()
+    ) || activeSchool;
+    const targetLocalSchoolId = targetLocalSchool?.id || activeSchool?.id || 1;
+
     let schoolId = session?.schoolId;
+    if (session?.affiliatedSchools && Array.isArray(session.affiliatedSchools)) {
+      const match = session.affiliatedSchools.find(
+        (s: any) => (s.schoolCode || s.code || '').toLowerCase() === code.toLowerCase()
+      );
+      if (match?.id) {
+        schoolId = match.id;
+      }
+    }
+
     if (!schoolId) {
       try {
         const lookup = await apiRequest<any[]>(`schools/lookup?code=${encodeURIComponent(code)}`);
@@ -290,45 +306,19 @@ export async function syncTeacherAssignedClassesAndStudents(
       } catch {}
     }
 
-    // 4. Eğer öğretmene özel atanmış sınıf bulunamadıysa, okulun tüm şubelerini al
-    if (assignedClassNames.size === 0 && schoolId) {
-      try {
-        const classesRes = await apiRequest<any[]>(`schools/${schoolId}/classes`);
-        if (classesRes.success && classesRes.data && classesRes.data.length > 0) {
-          classesRes.data.forEach((c) => {
-            const cls = c.className || `${c.grade}-${c.section}`;
-            if (cls) assignedClassNames.add(cls);
-          });
-        }
-      } catch {}
-    }
-
-    // 5. Eğer sunucudan hala sınıf gelmediyse ama sunucuda genel öğrenciler varsa, öğrencilerin sınıflarını çıkar
-    if (assignedClassNames.size === 0) {
-      try {
-        const studRes = await apiRequest<any[]>(`sync/students?schoolCode=${encodeURIComponent(code)}`);
-        if (studRes.success && studRes.data && studRes.data.length > 0) {
-          studRes.data.forEach((st) => {
-            if (st.grade && st.section) {
-              assignedClassNames.add(`${st.grade}-${st.section}`);
-            }
-          });
-        }
-      } catch {}
-    }
-
+    // 4. Öğretmenin bu okulda hiç atanmış şubesi/dersi yoksa (2. okulda dersi yoksa veri göremez kuralı)
     if (assignedClassNames.size === 0) {
       return {
-        success: false,
-        message: 'Okul sisteminde adınıza atanmış veya tanımlı bir şube bulunamadı. Lütfen okul idarenizle görüşünüz.',
+        success: true,
+        message: `"${targetLocalSchool?.name || 'Okul'}" kurumunda adınıza kayıtlı şube veya ders bulunmamaktadır.`,
         syncedClasses: [],
         totalStudents: 0,
       };
     }
 
-    // 6. Şubeleri yerel SQLite'a ekle/güncelle ve öğrencilerini senkronize et
+    // 5. Şubeleri yerel SQLite'ta ilgili okul (school_id) altına ekle/güncelle ve öğrencilerini senkronize et
     const { getClasses, createClass } = await import('../database/operations/classOperations');
-    const localClasses = await getClasses();
+    const localClasses = await getClasses(targetLocalSchoolId);
     let totalStudentsSynced = 0;
     const syncedList: string[] = [];
 
@@ -346,7 +336,7 @@ export async function syncTeacherAssignedClassesAndStudents(
       } else {
         const match = className.match(/^(\d{1,2})/);
         const gradeLevel = match ? parseInt(match[1], 10) : undefined;
-        classId = await createClass(className, 'Okuldan çekildi', gradeLevel);
+        classId = await createClass(className, 'Okuldan çekildi', gradeLevel, targetLocalSchoolId);
       }
 
       // Bu sınıfın öğrencilerini çek
@@ -362,7 +352,7 @@ export async function syncTeacherAssignedClassesAndStudents(
 
     return {
       success: true,
-      message: `Admin tarafından tanımlanan ${syncedList.length} şube (${syncedList.join(', ')}) ve toplam ${totalStudentsSynced} öğrenci başarıyla telefonunuza aktarıldı.`,
+      message: `"${targetLocalSchool?.name || 'Okul'}" için ${syncedList.length} şube (${syncedList.join(', ')}) ve toplam ${totalStudentsSynced} öğrenci başarıyla telefonunuza aktarıldı.`,
       syncedClasses: syncedList,
       totalStudents: totalStudentsSynced,
     };

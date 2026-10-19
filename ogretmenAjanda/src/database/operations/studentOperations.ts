@@ -30,10 +30,10 @@ export interface StudentWithClass extends Student {
   grade_level?: number;
 }
 
-export const getAllStudentsWithClass = async (): Promise<StudentWithClass[]> => {
+export const getAllStudentsWithClass = async (targetSchoolId?: number): Promise<StudentWithClass[]> => {
   const db = await getDB();
   const activeSchool = await db.getFirstAsync<{ id: number }>('SELECT id FROM schools WHERE is_active = 1 LIMIT 1');
-  const schoolId = activeSchool?.id || 1;
+  const schoolId = targetSchoolId ?? activeSchool?.id ?? 1;
 
   const query = `
     SELECT 
@@ -53,7 +53,7 @@ export const getAllStudentsWithClass = async (): Promise<StudentWithClass[]> => 
       c.name as class_name
     FROM students s
     INNER JOIN classes c ON s.class_id = c.id
-    WHERE c.school_id = ? OR c.school_id IS NULL
+    WHERE c.school_id = ?
     ORDER BY c.name ASC, CAST(s.student_number AS INTEGER) ASC, s.first_name ASC;
   `;
   return await db.getAllAsync<StudentWithClass>(query, schoolId);
