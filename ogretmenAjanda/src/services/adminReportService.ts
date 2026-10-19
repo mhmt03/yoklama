@@ -427,9 +427,11 @@ export async function exportSchedulesReport(params: {
 
   const matrixHeaderRow1: string[] = ['Sınıf / Şube'];
 
+  const maxDailyHours = (school as any).dailyLessonHours || 8;
+
   for (let d = 1; d <= 5; d++) {
     const dayName = DAY_NAMES[d];
-    for (let h = 1; h <= 8; h++) {
+    for (let h = 1; h <= maxDailyHours; h++) {
       matrixHeaderRow1.push(`${dayName} (${h}. Saat)`);
     }
   }
@@ -445,7 +447,7 @@ export async function exportSchedulesReport(params: {
     const row: string[] = [clsName];
 
     for (let d = 1; d <= 5; d++) {
-      for (let h = 1; h <= 8; h++) {
+      for (let h = 1; h <= maxDailyHours; h++) {
         const found = schedules.find(
           (s) =>
             String(s.grade) === String(cls.grade) &&

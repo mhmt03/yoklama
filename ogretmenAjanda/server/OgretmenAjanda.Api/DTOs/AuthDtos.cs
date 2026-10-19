@@ -67,6 +67,7 @@ namespace OgretmenAjanda.Api.DTOs
         public string? Phone { get; set; }
         public string? GeminiApiKey { get; set; }
         public string? GeminiModel { get; set; }
+        public int DailyLessonHours { get; set; } = 8;
     }
 
     public class CustomerResponse
@@ -93,6 +94,7 @@ namespace OgretmenAjanda.Api.DTOs
         public string? Address { get; set; }
         public string? Phone { get; set; }
         public string? GeminiApiKey { get; set; }
+        public int? DailyLessonHours { get; set; } = 8;
     }
 
 

@@ -54,6 +54,7 @@ namespace OgretmenAjanda.Api.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LicenseExpiresAt { get; set; } // Okul lisansı son kullanma tarihi
+        public int DailyLessonHours { get; set; } = 8; // Okulun günlük ders saati (varsayılan 8, örn: 7, 8, 9, 10)
         public bool IsActive { get; set; } = true;
     }
 

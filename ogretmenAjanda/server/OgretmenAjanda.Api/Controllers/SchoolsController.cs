@@ -92,6 +92,7 @@ namespace OgretmenAjanda.Api.Controllers
                     s.Phone,
                     s.GeminiApiKey,
                     s.GeminiModel,
+                    DailyLessonHours = s.DailyLessonHours > 0 ? s.DailyLessonHours : 8,
                     s.LicenseExpiresAt,
                     s.IsActive,
                     TeacherCount = _context.Users.Count(u => u.SchoolId == s.Id && u.Role == UserRoles.Teacher),
@@ -135,6 +136,7 @@ namespace OgretmenAjanda.Api.Controllers
                     s.Phone,
                     s.GeminiApiKey,
                     s.GeminiModel,
+                    DailyLessonHours = s.DailyLessonHours > 0 ? s.DailyLessonHours : 8,
                     IsPrimary = s.Id == primarySchool.Id
                 })
                 .ToListAsync();
@@ -183,6 +185,7 @@ namespace OgretmenAjanda.Api.Controllers
                 CustomerId = customerId,
                 RelationId = relationId,
                 GeminiApiKey = request.GeminiApiKey,
+                DailyLessonHours = request.DailyLessonHours.HasValue && request.DailyLessonHours.Value >= 4 && request.DailyLessonHours.Value <= 14 ? request.DailyLessonHours.Value : 8,
                 CreatedAt = DateTime.UtcNow,
                 LicenseExpiresAt = adminUser?.LicenseExpiresAt ?? DateTime.UtcNow.AddYears(1), // Admin lisansı ile senkron
                 IsActive = true
@@ -396,6 +399,10 @@ namespace OgretmenAjanda.Api.Controllers
             if (request.GeminiModel != null && CurrentUserRole != UserRoles.Staff)
             {
                 school.GeminiModel = request.GeminiModel.Trim();
+            }
+            if (request.DailyLessonHours.HasValue && request.DailyLessonHours.Value >= 4 && request.DailyLessonHours.Value <= 14)
+            {
+                school.DailyLessonHours = request.DailyLessonHours.Value;
             }
 
             await LogActionAsync(
@@ -1075,6 +1082,7 @@ namespace OgretmenAjanda.Api.Controllers
         public string? Address { get; set; }
         public string? GeminiApiKey { get; set; }
         public string? GeminiModel { get; set; }
+        public int? DailyLessonHours { get; set; }
     }
 
 

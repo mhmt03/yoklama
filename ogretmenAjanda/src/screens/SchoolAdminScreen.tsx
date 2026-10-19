@@ -142,6 +142,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [editSchoolAddress, setEditSchoolAddress] = useState('');
   const [editSchoolApiKey, setEditSchoolApiKey] = useState('');
   const [editSchoolModel, setEditSchoolModel] = useState('');
+  const [editSchoolDailyHours, setEditSchoolDailyHours] = useState('8');
   const [updatingSchool, setUpdatingSchool] = useState(false);
   const [deletingSchoolId, setDeletingSchoolId] = useState<string | null>(null);
 
@@ -150,6 +151,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [newSchoolName, setNewSchoolName] = useState('');
   const [newSchoolPhone, setNewSchoolPhone] = useState('');
   const [newSchoolApiKey, setNewSchoolApiKey] = useState('');
+  const [newSchoolDailyHours, setNewSchoolDailyHours] = useState('8');
 
   // 1. Öğretmen Ekleme / Düzenleme Modalları
   const [addTeacherModalVisible, setAddTeacherModalVisible] = useState(false);
@@ -1254,6 +1256,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         if (res.data.length > 0) {
           const current = selectedSchool ? res.data.find(s => s.id === selectedSchool.id) || res.data[0] : res.data[0];
           setSelectedSchool(current);
+          if (current.dailyLessonHours && current.dailyLessonHours > 0) {
+            setScheduleDailyHours(current.dailyLessonHours);
+          }
           if (current.geminiApiKey) setGeminiApiKeyInput(current.geminiApiKey);
           else setGeminiApiKeyInput('');
           const validModel = current.geminiModel && !['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'].includes(current.geminiModel)
@@ -1287,6 +1292,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const handleSelectSchool = async (s: any) => {
     setSelectedSchool(s);
+    if (s.dailyLessonHours && s.dailyLessonHours > 0) {
+      setScheduleDailyHours(s.dailyLessonHours);
+    }
     if (s.geminiApiKey) setGeminiApiKeyInput(s.geminiApiKey);
     else setGeminiApiKeyInput('');
     const validModel = s.geminiModel && !['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash'].includes(s.geminiModel)
@@ -1298,6 +1306,23 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       const usage = await getGeminiUsageStats(s.id);
       setUsageStats(usage);
     } catch { }
+  };
+
+  const handleChangeDailyHours = async (newHours: number) => {
+    if (newHours === scheduleDailyHours || newHours < 4 || newHours > 14) return;
+    setScheduleDailyHours(newHours);
+    if (selectedSchool) {
+      try {
+        await apiRequest(`schools/${selectedSchool.id}`, 'PUT', {
+          name: selectedSchool.name,
+          dailyLessonHours: newHours,
+        });
+        selectedSchool.dailyLessonHours = newHours;
+      } catch (e) {
+        console.warn('Failed to update school dailyLessonHours:', e);
+      }
+      loadScheduleStats(newHours);
+    }
   };
 
   const loadTeachers = async (schoolId: string) => {
@@ -1366,10 +1391,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       Alert.alert('Uyarı', 'Lütfen okul adı girin.');
       return;
     }
+    const parsedHours = parseInt(newSchoolDailyHours, 10) || 8;
     const res = await apiRequest('schools', 'POST', {
       name: newSchoolName.trim(),
       phone: newSchoolPhone.trim(),
       geminiApiKey: newSchoolApiKey.trim(),
+      dailyLessonHours: parsedHours >= 4 && parsedHours <= 14 ? parsedHours : 8,
     });
 
     if (res.success && res.data) {
@@ -1378,6 +1405,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       setNewSchoolName('');
       setNewSchoolPhone('');
       setNewSchoolApiKey('');
+      setNewSchoolDailyHours('8');
       loadSchools();
     } else {
       Alert.alert('Hata', res.error || 'Okul oluşturulamadı.');
@@ -1392,6 +1420,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setEditSchoolAddress(schoolToEdit.address || '');
     setEditSchoolApiKey(schoolToEdit.geminiApiKey || '');
     setEditSchoolModel(schoolToEdit.geminiModel || '');
+    setEditSchoolDailyHours(String(schoolToEdit.dailyLessonHours || scheduleDailyHours || 8));
     setEditModalVisible(true);
   };
 
@@ -1404,15 +1433,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
     setUpdatingSchool(true);
     try {
+      const parsedHours = parseInt(editSchoolDailyHours, 10);
       const res = await apiRequest(`schools/${target.id}`, 'PUT', {
         name: editSchoolName.trim(),
         phone: editSchoolPhone.trim() || undefined,
         address: editSchoolAddress.trim() || undefined,
         geminiApiKey: editSchoolApiKey.trim() || undefined,
         geminiModel: editSchoolModel.trim() || undefined,
+        dailyLessonHours: !isNaN(parsedHours) && parsedHours >= 4 && parsedHours <= 14 ? parsedHours : 8,
       });
 
       if (res.success) {
+        if (!isNaN(parsedHours) && parsedHours >= 4 && parsedHours <= 14) {
+          setScheduleDailyHours(parsedHours);
+        }
+
         // Yerel veritabanında da okul adını güncelle
         try {
           const localSchools = await getSchools();
@@ -4367,13 +4402,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         {scheduleStats?.teachersWithSchedule || 0} Öğretmen Atandı
                       </Text>
                     </View>
-                    <View style={styles.sanityBox}>
-                      <Text style={styles.sanityBoxVal}>{scheduleDailyHours}</Text>
-                      <Text style={styles.sanityBoxLbl}>Günlük Ders Saati</Text>
-                      <Text style={styles.sanityBoxSub}>
-                        {scheduleDailyHours * 5} Saat/Hafta
+                    <TouchableOpacity
+                      style={[styles.sanityBox, { borderColor: '#818CF8', backgroundColor: '#EEF2FF' }]}
+                      onPress={() => handleOpenEditSchool(selectedSchool)}
+                      activeOpacity={0.7}
+                      accessibilityLabel="Günlük ders saatini değiştir"
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={[styles.sanityBoxVal, { color: '#4F46E5' }]}>{scheduleDailyHours}</Text>
+                        <Ionicons name="pencil-sharp" size={12} color="#4F46E5" />
+                      </View>
+                      <Text style={[styles.sanityBoxLbl, { color: '#4338CA' }]}>Günlük Ders Saati</Text>
+                      <Text style={[styles.sanityBoxSub, { color: '#6366F1' }]}>
+                        {scheduleDailyHours * 5} Saat/Hafta (Değiştir)
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                     <View style={[styles.sanityBox, { borderColor: (scheduleStats?.overallFillPercent || 0) >= 95 ? '#BBF7D0' : '#FED7AA' }]}>
                       <Text style={[styles.sanityBoxVal, { color: (scheduleStats?.overallFillPercent || 0) >= 95 ? '#16A34A' : '#EA580C' }]}>
                         %{scheduleStats?.overallFillPercent ?? 0}
@@ -4396,6 +4439,51 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         },
                       ]}
                     />
+                  </View>
+
+                  {/* Hızlı Günlük Saat Ayarlayıcı */}
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: '#F8FAFC',
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: '#E2E8F0',
+                    marginTop: 8,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="time-outline" size={16} color="#4F46E5" />
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
+                        Okul Günlük Ders Saati:
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      {[6, 7, 8, 9, 10].map((h) => {
+                        const isActive = scheduleDailyHours === h;
+                        return (
+                          <TouchableOpacity
+                            key={h}
+                            onPress={() => handleChangeDailyHours(h)}
+                            style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 5,
+                              borderRadius: 6,
+                              backgroundColor: isActive ? '#4F46E5' : '#FFFFFF',
+                              borderWidth: 1,
+                              borderColor: isActive ? '#4338CA' : '#CBD5E1',
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: isActive ? '#FFFFFF' : '#475569' }}>
+                              {h} Saat
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                   </View>
 
                   {/* Çakışma Uyarıları Bölümü (Conflicts - ListBox Formatında) */}
@@ -7811,6 +7899,42 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 multiline
               />
 
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
+                Okul Günlük Ders Saati (Örn: 7, 8, 9, 10 Saat)
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+                {[6, 7, 8, 9, 10].map((h) => {
+                  const isSelected = String(h) === String(editSchoolDailyHours);
+                  return (
+                    <TouchableOpacity
+                      key={h}
+                      onPress={() => setEditSchoolDailyHours(String(h))}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 7,
+                        borderRadius: 8,
+                        backgroundColor: isSelected ? '#4F46E5' : '#F1F5F9',
+                        borderWidth: 1,
+                        borderColor: isSelected ? '#4338CA' : '#CBD5E1',
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: isSelected ? '#fff' : '#475569' }}>
+                        {h} Saat
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                <TextInput
+                  style={[styles.modalInput, { width: 65, marginBottom: 0, textAlign: 'center', fontWeight: '700' }]}
+                  placeholder="8"
+                  value={editSchoolDailyHours}
+                  onChangeText={setEditSchoolDailyHours}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                />
+              </View>
+
               {!isStaff && (
                 <>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
@@ -7906,6 +8030,42 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               onChangeText={setNewSchoolApiKey}
               autoCapitalize="none"
             />
+
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
+              Okul Günlük Ders Saati
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+              {[6, 7, 8, 9, 10].map((h) => {
+                const isSelected = String(h) === String(newSchoolDailyHours);
+                return (
+                  <TouchableOpacity
+                    key={h}
+                    onPress={() => setNewSchoolDailyHours(String(h))}
+                    style={{
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                      borderRadius: 8,
+                      backgroundColor: isSelected ? '#4F46E5' : '#F1F5F9',
+                      borderWidth: 1,
+                      borderColor: isSelected ? '#4338CA' : '#CBD5E1',
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: isSelected ? '#fff' : '#475569' }}>
+                      {h} Saat
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TextInput
+                style={[styles.modalInput, { width: 65, marginBottom: 0, textAlign: 'center', fontWeight: '700' }]}
+                placeholder="8"
+                value={newSchoolDailyHours}
+                onChangeText={setNewSchoolDailyHours}
+                keyboardType="number-pad"
+                maxLength={2}
+              />
+            </View>
 
             <TouchableOpacity style={styles.createSubmitButton} onPress={handleCreateSchool}>
               <Text style={styles.createSubmitText}>Okulu Oluştur</Text>

@@ -792,6 +792,12 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpGet("schedules/stats")]
         public async Task<IActionResult> GetScheduleStats([FromQuery] Guid schoolId, [FromQuery] int dailyHours = 8)
         {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school?.DailyLessonHours > 0 && dailyHours == 8)
+            {
+                dailyHours = school.DailyLessonHours;
+            }
+
             var registeredClasses = await _context.SchoolClasses
                 .Where(c => c.SchoolId == schoolId)
                 .OrderBy(c => c.Grade).ThenBy(c => c.Section)
@@ -937,6 +943,12 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPost("schedules/auto-reconcile")]
         public async Task<IActionResult> AutoReconcileSchedule([FromQuery] Guid schoolId, [FromQuery] int dailyHours = 8, [FromQuery] bool includeGaps = false)
         {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school?.DailyLessonHours > 0 && dailyHours == 8)
+            {
+                dailyHours = school.DailyLessonHours;
+            }
+
             var (movedCount, movedDescriptions) = await RunAutoReconcileInternalAsync(schoolId, dailyHours);
 
             int placedCount = 0;
@@ -981,6 +993,12 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPost("schedules/auto-fill-gaps")]
         public async Task<IActionResult> AutoFillMissingLessons([FromQuery] Guid schoolId, [FromQuery] int dailyHours = 8)
         {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school?.DailyLessonHours > 0 && dailyHours == 8)
+            {
+                dailyHours = school.DailyLessonHours;
+            }
+
             var (placedCount, placedDescriptions) = await RunAutoFillMissingLessonsAsync(schoolId, dailyHours);
 
             return Ok(new
