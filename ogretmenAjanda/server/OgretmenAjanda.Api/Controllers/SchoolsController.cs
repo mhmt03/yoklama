@@ -58,7 +58,7 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpGet("my-schools")]
         public async Task<IActionResult> GetMySchools()
         {
-            IQueryable<School> query = _context.Schools;
+            IQueryable<School> query = _context.Schools.Where(s => s.IsActive);
 
             if (CurrentUserRole == UserRoles.SuperAdmin)
             {
@@ -359,27 +359,112 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPut("{schoolId}")]
         public async Task<IActionResult> UpdateSchoolDetails(Guid schoolId, [FromBody] UpdateSchoolRequest request)
         {
-            var school = await _context.Schools.FindAsync(schoolId);
+            if (CurrentUserRole != UserRoles.SuperAdmin && CurrentUserRole != UserRoles.SchoolAdmin && CurrentUserRole != UserRoles.Staff)
+            {
+                return Forbid();
+            }
+
+            var school = await _context.Schools.FirstOrDefaultAsync(s => s.Id == schoolId && s.IsActive);
             if (school == null) return NotFound(new { message = "Okul bulunamadı." });
 
-            school.Name = request.Name.Trim();
-            if (request.Phone != null) school.Phone = request.Phone;
-            if (request.Address != null) school.Address = request.Address;
-
-            _context.AuditLogs.Add(new AuditLog
+            var currentUser = await _context.Users.FindAsync(CurrentUserId);
+            if (CurrentUserRole != UserRoles.SuperAdmin)
             {
-                SchoolId = school.Id,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "SCHOOL_UPDATED",
-                EntityName = "School",
-                EntityId = school.Id.ToString(),
-                DetailsJson = $"Okul adı güncellendi: {school.Name}",
-                Timestamp = DateTime.UtcNow
-            });
+                bool isOwner = school.AdminUserId == CurrentUserId;
+                bool isSameCustomer = !string.IsNullOrEmpty(school.CustomerId) && school.CustomerId == currentUser?.CustomerId;
+                bool isStaffOfThisSchool = CurrentUserRole == UserRoles.Staff && currentUser?.SchoolId == school.Id;
+
+                if (!isOwner && !isSameCustomer && !isStaffOfThisSchool)
+                {
+                    return Forbid();
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Name))
+            {
+                return BadRequest(new { message = "Okul adı boş bırakılamaz." });
+            }
+
+            var oldName = school.Name;
+            school.Name = request.Name.Trim();
+            if (request.Phone != null) school.Phone = request.Phone.Trim();
+            if (request.Address != null) school.Address = request.Address.Trim();
+            if (request.GeminiApiKey != null && CurrentUserRole != UserRoles.Staff)
+            {
+                school.GeminiApiKey = request.GeminiApiKey.Trim();
+            }
+            if (request.GeminiModel != null && CurrentUserRole != UserRoles.Staff)
+            {
+                school.GeminiModel = request.GeminiModel.Trim();
+            }
+
+            await LogActionAsync(
+                school.Id,
+                "SCHOOL_UPDATED",
+                "School",
+                school.Id.ToString(),
+                $"{oldName} okulu güncellendi: {school.Name}",
+                System.Text.Json.JsonSerializer.Serialize(new { school.Name, school.Phone, school.Address, school.GeminiModel })
+            );
 
             await _context.SaveChangesAsync();
             return Ok(school);
+        }
+
+        // Okulu Sil (Soft delete: IsActive = false)
+        [HttpDelete("{schoolId}")]
+        public async Task<IActionResult> DeleteSchool(Guid schoolId)
+        {
+            if (CurrentUserRole != UserRoles.SuperAdmin && CurrentUserRole != UserRoles.SchoolAdmin)
+            {
+                return Forbid();
+            }
+
+            var school = await _context.Schools.FirstOrDefaultAsync(s => s.Id == schoolId && s.IsActive);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            var currentUser = await _context.Users.FindAsync(CurrentUserId);
+            if (CurrentUserRole != UserRoles.SuperAdmin)
+            {
+                bool isOwner = school.AdminUserId == CurrentUserId;
+                bool isSameCustomer = !string.IsNullOrEmpty(school.CustomerId) && school.CustomerId == currentUser?.CustomerId;
+
+                if (!isOwner && !isSameCustomer)
+                {
+                    return Forbid();
+                }
+
+                // En az bir okul kalmalı
+                var activeSchoolCount = await _context.Schools.CountAsync(s => 
+                    s.IsActive && 
+                    (s.AdminUserId == CurrentUserId || (!string.IsNullOrEmpty(school.CustomerId) && s.CustomerId == school.CustomerId))
+                );
+
+                if (activeSchoolCount <= 1)
+                {
+                    return BadRequest(new { message = "En az bir okul bulunmalıdır. Son kalan okul silinemez." });
+                }
+            }
+
+            school.IsActive = false;
+
+            // Bu okula bağlı kullanıcıları pasife al
+            var teachers = await _context.Users.Where(u => u.SchoolId == school.Id).ToListAsync();
+            foreach (var teacher in teachers)
+            {
+                teacher.IsActive = false;
+            }
+
+            await LogActionAsync(
+                school.Id,
+                "SCHOOL_DELETED",
+                "School",
+                school.Id.ToString(),
+                $"{school.Name} ({school.Code}) okulu silindi (arşive alındı)."
+            );
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Okul başarıyla silindi.", deletedSchoolId = school.Id });
         }
 
         // Okul Ortak Gemini API Key ve Model Güncelleme
@@ -988,6 +1073,8 @@ namespace OgretmenAjanda.Api.Controllers
         public string Name { get; set; } = string.Empty;
         public string? Phone { get; set; }
         public string? Address { get; set; }
+        public string? GeminiApiKey { get; set; }
+        public string? GeminiModel { get; set; }
     }
 
 

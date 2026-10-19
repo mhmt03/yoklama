@@ -49,7 +49,7 @@ import {
   fetchScheduleIntegrityStats,
   SingleTeacherScheduleItem,
 } from '../services/singleTeacherScheduleParser';
-import { getActiveSchool, updateSchool } from '../database/operations/schoolOperations';
+import { getActiveSchool, updateSchool, deleteSchool, getSchools } from '../database/operations/schoolOperations';
 import { setActiveUserRole, logoutUserRole } from '../utils/roleService';
 import { pickSinglePhotoFromSource } from '../utils/photoService';
 import {
@@ -136,9 +136,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   // Okul Düzenleme Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingSchoolObj, setEditingSchoolObj] = useState<any>(null);
   const [editSchoolName, setEditSchoolName] = useState('');
   const [editSchoolPhone, setEditSchoolPhone] = useState('');
+  const [editSchoolAddress, setEditSchoolAddress] = useState('');
+  const [editSchoolApiKey, setEditSchoolApiKey] = useState('');
+  const [editSchoolModel, setEditSchoolModel] = useState('');
   const [updatingSchool, setUpdatingSchool] = useState(false);
+  const [deletingSchoolId, setDeletingSchoolId] = useState<string | null>(null);
 
   // Okul Ekleme Modal State
   const [createModalVisible, setCreateModalVisible] = useState(false);
@@ -1379,31 +1384,120 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  const handleOpenEditSchool = (schoolToEdit: any) => {
+    if (!schoolToEdit) return;
+    setEditingSchoolObj(schoolToEdit);
+    setEditSchoolName(schoolToEdit.name || '');
+    setEditSchoolPhone(schoolToEdit.phone || '');
+    setEditSchoolAddress(schoolToEdit.address || '');
+    setEditSchoolApiKey(schoolToEdit.geminiApiKey || '');
+    setEditSchoolModel(schoolToEdit.geminiModel || '');
+    setEditModalVisible(true);
+  };
+
   const handleUpdateSchool = async () => {
-    if (!editSchoolName.trim() || !selectedSchool) {
+    const target = editingSchoolObj || selectedSchool;
+    if (!target) return;
+    if (!editSchoolName.trim()) {
       Alert.alert('Uyarı', 'Lütfen okul adı girin.');
       return;
     }
     setUpdatingSchool(true);
     try {
-      await apiRequest(`schools/${selectedSchool.id}`, 'PUT', {
+      const res = await apiRequest(`schools/${target.id}`, 'PUT', {
         name: editSchoolName.trim(),
-        phone: editSchoolPhone.trim(),
+        phone: editSchoolPhone.trim() || undefined,
+        address: editSchoolAddress.trim() || undefined,
+        geminiApiKey: editSchoolApiKey.trim() || undefined,
+        geminiModel: editSchoolModel.trim() || undefined,
       });
 
-      const active = await getActiveSchool();
-      if (active) {
-        await updateSchool(active.id, editSchoolName.trim(), active.color, selectedSchool.code);
-      }
+      if (res.success) {
+        // Yerel veritabanında da okul adını güncelle
+        try {
+          const localSchools = await getSchools();
+          const match = localSchools.find(
+            s => (s.code && s.code.toUpperCase() === target.code?.toUpperCase()) || s.name.toLowerCase() === target.name?.toLowerCase()
+          );
+          if (match) {
+            await updateSchool(match.id, editSchoolName.trim(), match.color, target.code);
+          }
+        } catch (localErr) {
+          console.warn('Yerel okul güncelleme uyarısı:', localErr);
+        }
 
-      Alert.alert('Başarılı', 'Okul adı güncellendi.');
-      setEditModalVisible(false);
-      loadSchools();
+        Alert.alert('Başarılı', `"${editSchoolName.trim()}" okul bilgileri güncellendi.`);
+        setEditModalVisible(false);
+        await loadSchools();
+      } else {
+        Alert.alert('Hata', res.error || 'Okul bilgileri güncellenemedi.');
+      }
     } catch (e: any) {
-      Alert.alert('Hata', e.message);
+      Alert.alert('Hata', e.message || 'Bir hata oluştu.');
     } finally {
       setUpdatingSchool(false);
     }
+  };
+
+  const handleDeleteSchool = (schoolToDelete: any) => {
+    if (!schoolToDelete) return;
+    if (schools.length <= 1) {
+      Alert.alert(
+        'Okul Silinemez',
+        'Sistemde en az bir okul bulunmalıdır. Yönettiğiniz tek ve son okulu silemezsiniz.'
+      );
+      return;
+    }
+
+    Alert.alert(
+      '⚠️ Okulu Sil',
+      `"${schoolToDelete.name}" (${schoolToDelete.code}) okulunu silmek istediğinize emin misiniz?\n\nBu işlem okulu ve ilişkili kayıtları arşivleyecek/devre dışı bırakacaktır. Bu işlem geri alınamaz!`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Okulu Sil',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingSchoolId(schoolToDelete.id);
+            try {
+              const res = await apiRequest(`schools/${schoolToDelete.id}`, 'DELETE');
+              if (res.success) {
+                // Yerel SQLite'tan da temizle
+                try {
+                  const localSchools = await getSchools();
+                  const match = localSchools.find(
+                    s => s.code && s.code.toUpperCase() === schoolToDelete.code?.toUpperCase()
+                  );
+                  if (match && localSchools.length > 1) {
+                    await deleteSchool(match.id);
+                  }
+                } catch (localErr) {
+                  console.warn('Yerel okul silme uyarısı:', localErr);
+                }
+
+                setEditModalVisible(false);
+                setSchoolSelectModalVisible(false);
+
+                // Kalan okullardan birini seç
+                const remaining = schools.filter(s => s.id !== schoolToDelete.id);
+                if (selectedSchool?.id === schoolToDelete.id && remaining.length > 0) {
+                  await handleSelectSchool(remaining[0]);
+                }
+
+                Alert.alert('Başarılı', `"${schoolToDelete.name}" okulu sistemden silindi.`);
+                await loadSchools();
+              } else {
+                Alert.alert('Hata', res.error || 'Okul silinemedi.');
+              }
+            } catch (err: any) {
+              Alert.alert('Hata', err.message || 'Okul silinirken hata oluştu.');
+            } finally {
+              setDeletingSchoolId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // --- 1. ÖĞRETMEN İŞLEMLERİ ---
@@ -3288,14 +3382,41 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     YÖNETTİĞİNİZ OKULLAR {schools.length > 0 ? `(${schools.length})` : ''}
                   </Text>
                 </View>
-                <TouchableOpacity
-                  onPress={() => setCreateModalVisible(true)}
-                  style={styles.addSchoolSmallBtn}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="add-circle" size={12} color="#166534" />
-                  <Text style={styles.addSchoolSmallBtnText}>Yeni Okul Ekle</Text>
-                </TouchableOpacity>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {selectedSchool && (
+                    <>
+                      <TouchableOpacity
+                        onPress={() => handleOpenEditSchool(selectedSchool)}
+                        style={styles.editSchoolSmallBtn}
+                        activeOpacity={0.7}
+                        accessibilityLabel="Seçili Okulu Düzenle"
+                      >
+                        <Ionicons name="pencil" size={12} color="#4F46E5" />
+                        <Text style={styles.editSchoolSmallBtnText}>Düzenle</Text>
+                      </TouchableOpacity>
+                      {schools.length > 1 && (
+                        <TouchableOpacity
+                          onPress={() => handleDeleteSchool(selectedSchool)}
+                          style={styles.deleteSchoolSmallBtn}
+                          activeOpacity={0.7}
+                          accessibilityLabel="Seçili Okulu Sil"
+                        >
+                          <Ionicons name="trash-outline" size={12} color="#DC2626" />
+                          <Text style={styles.deleteSchoolSmallBtnText}>Sil</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => setCreateModalVisible(true)}
+                    style={styles.addSchoolSmallBtn}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="add-circle" size={12} color="#166534" />
+                    <Text style={styles.addSchoolSmallBtnText}>Yeni Okul</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
@@ -3316,6 +3437,32 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
                           {s.code}
                         </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 2 }}>
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            handleOpenEditSchool(s);
+                          }}
+                          style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#E2E8F0' }}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          accessibilityLabel={`${s.name} Düzenle`}
+                        >
+                          <Ionicons name="pencil" size={11} color={isSelected ? '#fff' : '#4F46E5'} />
+                        </TouchableOpacity>
+                        {schools.length > 1 && (
+                          <TouchableOpacity
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              handleDeleteSchool(s);
+                            }}
+                            style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#FEE2E2' }}
+                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            accessibilityLabel={`${s.name} Sil`}
+                          >
+                            <Ionicons name="trash-outline" size={11} color={isSelected ? '#fff' : '#DC2626'} />
+                          </TouchableOpacity>
+                        )}
                       </View>
                     </TouchableOpacity>
                   );
@@ -7578,38 +7725,152 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
-      {/* Okul Adı Düzenleme Modalı */}
-      <Modal visible={editModalVisible} animationType="slide" transparent>
+      {/* Okul Adı & Bilgileri Düzenleme Modalı */}
+      <Modal visible={editModalVisible} animationType="slide" transparent onRequestClose={() => setEditModalVisible(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
+          <View style={[styles.modalContent, { maxHeight: '90%' }]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>🏫 Okul Bilgilerini Güncelle</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="pencil" size={20} color="#4F46E5" />
+                <Text style={styles.modalTitle}>Okul Bilgilerini Güncelle</Text>
+              </View>
               <TouchableOpacity onPress={() => setEditModalVisible(false)}>
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
 
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Okul Adı"
-              value={editSchoolName}
-              onChangeText={setEditSchoolName}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Okul Telefonu"
-              value={editSchoolPhone}
-              onChangeText={setEditSchoolPhone}
-              keyboardType="phone-pad"
-            />
-
-            <TouchableOpacity style={styles.createSubmitButton} onPress={handleUpdateSchool} disabled={updatingSchool}>
-              {updatingSchool ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.createSubmitText}>Güncelle</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Okul Kodu Kartı */}
+              {(editingSchoolObj?.code || selectedSchool?.code) && (
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor: '#EEF2FF',
+                  padding: 10,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: '#C7D2FE',
+                  marginBottom: 12,
+                }}>
+                  <View>
+                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#4338CA' }}>ÖĞRETMEN BAĞLANTI KODU</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '900', color: '#312E81', marginTop: 1 }}>
+                      {editingSchoolObj?.code || selectedSchool?.code}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => handleCopyCode(editingSchoolObj?.code || selectedSchool?.code)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: '#FFFFFF',
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: '#C7D2FE',
+                    }}
+                  >
+                    <Ionicons name="copy-outline" size={13} color="#4F46E5" />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>Kopyala</Text>
+                  </TouchableOpacity>
+                </View>
               )}
-            </TouchableOpacity>
+
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
+                Okul / Kurum Adı *
+              </Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Örn: Atatürk Anadolu Lisesi"
+                value={editSchoolName}
+                onChangeText={setEditSchoolName}
+              />
+
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
+                İletişim Telefonu
+              </Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Örn: 0312 000 00 00"
+                value={editSchoolPhone}
+                onChangeText={setEditSchoolPhone}
+                keyboardType="phone-pad"
+              />
+
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
+                Okul Adresi
+              </Text>
+              <TextInput
+                style={[styles.modalInput, { minHeight: 60, textAlignVertical: 'top' }]}
+                placeholder="Okulun açık adresi (İsteğe bağlı)"
+                value={editSchoolAddress}
+                onChangeText={setEditSchoolAddress}
+                multiline
+              />
+
+              {!isStaff && (
+                <>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
+                    Kurumsal Gemini API Anahtarı
+                  </Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="AI API Key (İsteğe bağlı)"
+                    value={editSchoolApiKey}
+                    onChangeText={setEditSchoolApiKey}
+                    autoCapitalize="none"
+                  />
+                </>
+              )}
+
+              <TouchableOpacity
+                style={[styles.createSubmitButton, { marginTop: 8 }]}
+                onPress={handleUpdateSchool}
+                disabled={updatingSchool}
+              >
+                {updatingSchool ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.createSubmitText}>Değişiklikleri Kaydet</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Okul Silme Butonu */}
+              {!isStaff && (
+                <View style={{ marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}>
+                  {schools.length > 1 ? (
+                    <TouchableOpacity
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: '#FEE2E2',
+                        borderWidth: 1,
+                        borderColor: '#FECACA',
+                        borderRadius: 10,
+                        paddingVertical: 10,
+                        gap: 6,
+                      }}
+                      onPress={() => handleDeleteSchool(editingSchoolObj || selectedSchool)}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#DC2626' }}>
+                        Bu Okulu Sistemden Sil
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View style={{ backgroundColor: '#F8FAFC', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                      <Text style={{ fontSize: 11, color: '#94A3B8', textAlign: 'center' }}>
+                        ℹ️ Sistemde en az 1 okul kalmalıdır. Son kalan okul silinemez.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -7737,11 +7998,39 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         )}
                       </View>
                     </View>
-                    <Ionicons
-                      name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                      size={20}
-                      color={isSelected ? '#4F46E5' : '#CBD5E1'}
-                    />
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          setSchoolSelectModalVisible(false);
+                          handleOpenEditSchool(s);
+                        }}
+                        style={{ padding: 6, borderRadius: 8, backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE' }}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        accessibilityLabel={`${s.name} Düzenle`}
+                      >
+                        <Ionicons name="pencil" size={15} color="#4F46E5" />
+                      </TouchableOpacity>
+                      {schools.length > 1 && (
+                        <TouchableOpacity
+                          onPress={(e) => {
+                            e.stopPropagation?.();
+                            handleDeleteSchool(s);
+                          }}
+                          style={{ padding: 6, borderRadius: 8, backgroundColor: '#FEE2E2', borderWidth: 1, borderColor: '#FECACA' }}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                          accessibilityLabel={`${s.name} Sil`}
+                        >
+                          <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                        </TouchableOpacity>
+                      )}
+                      <Ionicons
+                        name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                        size={20}
+                        color={isSelected ? '#4F46E5' : '#CBD5E1'}
+                      />
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -10351,9 +10640,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 onPress={() => {
                   setMenuDrawerVisible(false);
                   if (selectedSchool) {
-                    setEditSchoolName(selectedSchool.name || '');
-                    setEditSchoolPhone(selectedSchool.phone || '');
-                    setEditModalVisible(true);
+                    handleOpenEditSchool(selectedSchool);
                   }
                 }}
               >
@@ -10362,7 +10649,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.hamburgerMenuLabel}>Okul Bilgilerini Düzenle</Text>
-                  <Text style={styles.hamburgerMenuSub}>Okul adı ve iletişim telefonunu güncelle</Text>
+                  <Text style={styles.hamburgerMenuSub}>Okul adı, adres ve iletişim bilgilerini güncelle</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
               </TouchableOpacity>
@@ -10382,6 +10669,28 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.hamburgerMenuLabel}>Yeni Okul Tanımla</Text>
                     <Text style={styles.hamburgerMenuSub}>Sisteme yeni bir okul kurumu ekleyin</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                </TouchableOpacity>
+              )}
+
+              {/* 2.1 Okulu Sil (Sadece yetkili ve birden fazla okul varsa) */}
+              {!isStaff && schools.length > 1 && (
+                <TouchableOpacity
+                  style={styles.hamburgerMenuItem}
+                  onPress={() => {
+                    setMenuDrawerVisible(false);
+                    if (selectedSchool) {
+                      handleDeleteSchool(selectedSchool);
+                    }
+                  }}
+                >
+                  <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                    <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.hamburgerMenuLabel, { color: '#DC2626' }]}>Okulu Sistemden Sil</Text>
+                    <Text style={styles.hamburgerMenuSub}>{selectedSchool?.name || 'Seçili okul'} kurumunu sil</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
                 </TouchableOpacity>
@@ -11069,6 +11378,38 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#166534',
+  },
+  editSchoolSmallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  editSchoolSmallBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  deleteSchoolSmallBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#FEE2E2',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  deleteSchoolSmallBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#DC2626',
   },
   schoolChipsScroll: {
     flexDirection: 'row',

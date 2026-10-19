@@ -95,6 +95,7 @@ namespace OgretmenAjanda.Api.DTOs
         public string? GeminiApiKey { get; set; }
     }
 
+
     public class ExtendLicenseRequest
     {
         public Guid TargetId { get; set; } // SchoolId veya UserId veya Customer Admin Id
