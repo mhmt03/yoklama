@@ -1,8 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as FileSystem from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiRequest } from './apiClient';
 import { slicePdfPages } from '../utils/pdfSliceService';
 
+export interface ScheduleBatchItem {
+  id: string;
+  name: string;
+  createdAt: number;
+  pageRangeText?: string;
+  data: ParsedScheduleResult;
+}
 
 export interface TeacherWorkloadItem {
   className: string; // "12-D", "11-C"
@@ -632,9 +640,9 @@ ${jsonSchema}
         maxOutputTokens: optScheduleItems ? 32768 : 8192,
         responseMimeType: 'application/json',
       };
-      // Lite olmayan modellerde varsayılan thinking token israfını engelle (0 bütçe = doğrudan saf JSON yanıtı)
+      // Modellerde düşünme bütçesi (akıl yürütme): Tablo hücrelerini doğru okumak için makul bütçe
       if (!currentModel.toLowerCase().includes('lite')) {
-        genConfig.thinkingConfig = { thinkingBudget: 0 };
+        genConfig.thinkingConfig = { thinkingBudget: 1024 };
       }
       let model = genAI.getGenerativeModel({
         model: currentModel,
@@ -1170,4 +1178,112 @@ export async function getCachedParsedSchedule(): Promise<ParsedScheduleResult | 
     console.warn('[Çarşaf AI Cache Okuma Hata]:', err);
   }
   return null;
+}
+
+/**
+ * Birden fazla parça halinde okunan çarşaf program sonuçlarını
+ * hiçbir veriyi ezmeden, uydurma yapmadan tek bir nihai sonuca birleştirir.
+ */
+export function mergeScheduleBatches(batches: ScheduleBatchItem[]): ParsedScheduleResult {
+  const mergedTeachers = new Set<string>();
+  const mergedClasses = new Set<string>();
+  const mergedLessons = new Set<string>();
+  const lessonDetailsMap = new Map<string, ParsedLessonItemDetail>();
+  let bellSchedule: Array<{ period: number; time: string }> = [];
+
+  // scheduleItems: key = `${teacherName.toLowerCase()}_${dayOfWeek}_${lessonHour}`
+  // Aynı öğretmenin aynı saati güncellenir, farklı öğretmenler veya paralel dersler asla ezilmez!
+  const scheduleItemsMap = new Map<string, ParsedScheduleResult['scheduleItems'][0]>();
+  const verificationsMap = new Map<string, TeacherScheduleVerification>();
+
+  for (const batch of batches) {
+    const data = batch.data;
+    if (!data) continue;
+
+    (data.teachers || []).forEach((t) => mergedTeachers.add(t));
+    (data.classes || []).forEach((c) => mergedClasses.add(c));
+    (data.lessons || []).forEach((l) => mergedLessons.add(l));
+
+    (data.lessonDetails || []).forEach((ld) => {
+      if (ld.name) lessonDetailsMap.set(ld.name.toLowerCase(), ld);
+    });
+
+    if (bellSchedule.length === 0 && (data.bellSchedule || []).length > 0) {
+      bellSchedule = data.bellSchedule!;
+    }
+
+    (data.scheduleItems || []).forEach((item) => {
+      if (!item || !item.teacherName) return;
+      const key = `${item.teacherName.trim().toLowerCase()}_${item.dayOfWeek}_${item.lessonHour}`;
+      scheduleItemsMap.set(key, item);
+    });
+
+    (data.teacherVerifications || []).forEach((tv) => {
+      if (!tv || !tv.teacherName) return;
+      const key = tv.teacherName.trim().toLowerCase();
+      verificationsMap.set(key, tv);
+    });
+  }
+
+  return {
+    teachers: Array.from(mergedTeachers).sort(),
+    classes: Array.from(mergedClasses).sort(),
+    lessons: Array.from(mergedLessons).sort(),
+    lessonDetails: Array.from(lessonDetailsMap.values()),
+    bellSchedule,
+    scheduleItems: Array.from(scheduleItemsMap.values()),
+    teacherVerifications: Array.from(verificationsMap.values()),
+  };
+}
+
+const BATCH_STORAGE_KEY_PREFIX = 'carsaf_schedule_batches_';
+
+/**
+ * Parça havuzunu yerel depolamada saklar
+ */
+export async function saveScheduleBatchesToStorage(
+  schoolId: string,
+  batches: ScheduleBatchItem[]
+): Promise<void> {
+  try {
+    const key = `${BATCH_STORAGE_KEY_PREFIX}${schoolId}`;
+    await AsyncStorage.setItem(key, JSON.stringify(batches));
+    console.log(`[Çarşaf Havuz] ${batches.length} parça yerel depolamaya saklandı.`);
+  } catch (e) {
+    console.warn('[Çarşaf Havuz Kayıt Hata]:', e);
+  }
+}
+
+/**
+ * Parça havuzunu yerel depolamadan getirir
+ */
+export async function loadScheduleBatchesFromStorage(
+  schoolId: string
+): Promise<ScheduleBatchItem[]> {
+  try {
+    const key = `${BATCH_STORAGE_KEY_PREFIX}${schoolId}`;
+    const raw = await AsyncStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('[Çarşaf Havuz Yükleme Hata]:', e);
+  }
+  return [];
+}
+
+/**
+ * Parça havuzunu temizler
+ */
+export async function clearScheduleBatchesFromStorage(schoolId: string): Promise<void> {
+  try {
+    const key = `${BATCH_STORAGE_KEY_PREFIX}${schoolId}`;
+    await AsyncStorage.removeItem(key);
+    console.log('[Çarşaf Havuz] Depolama temizlendi.');
+  } catch (e) {
+    console.warn('[Çarşaf Havuz Temizleme Hata]:', e);
+  }
 }

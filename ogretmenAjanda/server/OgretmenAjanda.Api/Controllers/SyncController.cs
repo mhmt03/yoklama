@@ -493,13 +493,12 @@ namespace OgretmenAjanda.Api.Controllers
 
                     foreach (var item in request.Schedules)
                     {
+                        // Sadece aynı öğretmenin aynı gün ve saatteki mevcut dersini güncelle (farklı öğretmen veya şube derslerini asla silme/ezme!)
                         var existing = existingList.FirstOrDefault(s =>
                             s.DayOfWeek == item.DayOfWeek &&
                             s.LessonHour == item.LessonHour &&
-                            (
-                                (!string.IsNullOrEmpty(s.TeacherName) && !string.IsNullOrEmpty(item.TeacherName) && string.Equals(s.TeacherName.Trim(), item.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase)) ||
-                                (!string.IsNullOrEmpty(s.Grade) && !string.IsNullOrEmpty(item.Grade) && s.Grade == item.Grade && s.Section == item.Section)
-                            )
+                            !string.IsNullOrEmpty(s.TeacherName) && !string.IsNullOrEmpty(item.TeacherName) &&
+                            string.Equals(s.TeacherName.Trim(), item.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase)
                         );
 
                         if (existing != null)
@@ -549,12 +548,8 @@ namespace OgretmenAjanda.Api.Controllers
             await _context.SaveChangesAsync();
             await LogActionAsync(request.SchoolId, "BATCH_SCHEDULE_SYNCED", "ScheduleItem", null, detailText);
             
-            // ⚡ Otomatik Dengeleyici: Yükleme biter bitmez çakışmaları şubelerin boş saatleriyle otomatik eşleştir
-            var (autoMovedCount, autoMovedDetails) = await RunAutoReconcileInternalAsync(request.SchoolId, 8);
-            if (autoMovedCount > 0)
-            {
-                detailText += $" | ⚡ Otomatik Dengeleme: {autoMovedCount} ders boş saatlere yerleştirildi!";
-            }
+            // Kullanıcı talebi doğrultusunda: Uydurma ders yerleşimi olmaması için çarşaf yükleme sonrasında otomatik saat kaydırma çalıştırılmaz.
+            int autoMovedCount = 0;
 
             return Ok(new
             {

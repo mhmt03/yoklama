@@ -23,7 +23,17 @@ import * as Sharing from 'expo-sharing';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Colors } from '../theme/colors';
 import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession, getAuthToken } from '../services/apiClient';
-import { parseMasterScheduleWithAi, saveMasterScheduleToServer, ParsedScheduleResult, readUriAsBase64 } from '../services/aiScheduleParser';
+import {
+  parseMasterScheduleWithAi,
+  saveMasterScheduleToServer,
+  ParsedScheduleResult,
+  readUriAsBase64,
+  ScheduleBatchItem,
+  mergeScheduleBatches,
+  saveScheduleBatchesToStorage,
+  loadScheduleBatchesFromStorage,
+  clearScheduleBatchesFromStorage,
+} from '../services/aiScheduleParser';
 import { countPdfPages } from '../utils/pdfSliceService';
 import { extractStudentPhotosWithAi } from '../services/aiStudentPhotoExtractor';
 import { parseStudentsFromExcel, saveParsedStudentsToServer, ParsedExcelStudent, generateStudentTemplateExcel } from '../services/excelStudentParser';
@@ -242,6 +252,88 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [excludedTeachers, setExcludedTeachers] = useState<string[]>([]);
   const [excludedClasses, setExcludedClasses] = useState<string[]>([]);
   const [excludedLessons, setExcludedLessons] = useState<string[]>([]);
+
+  // Çarşaf Parça Havuzu State (Büyük PDF'lerin parçalar halinde depolanması ve birleştirilmesi)
+  const [scheduleBatches, setScheduleBatches] = useState<ScheduleBatchItem[]>([]);
+  const [batchPoolModalVisible, setBatchPoolModalVisible] = useState(false);
+
+  const loadSchoolBatches = async (schoolId: string) => {
+    try {
+      const batches = await loadScheduleBatchesFromStorage(schoolId);
+      setScheduleBatches(batches);
+    } catch (e) {
+      console.warn('[Çarşaf Havuz] Yükleme hatası:', e);
+    }
+  };
+
+  const handleAddCurrentToBatches = async () => {
+    if (!parsedSchedule || !selectedSchool) return;
+
+    const pageRangeInfo = pageRange ? `Sayfa ${pageRange.start}-${pageRange.end}` : 'Tüm Belge';
+    const batchName = pendingScheduleFile?.name
+      ? `${pendingScheduleFile.name} (${pageRangeInfo})`
+      : `Parça ${scheduleBatches.length + 1} (${pageRangeInfo})`;
+
+    const newBatch: ScheduleBatchItem = {
+      id: `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: batchName,
+      createdAt: Date.now(),
+      pageRangeText: pageRange ? `${pageRange.start}-${pageRange.end}` : undefined,
+      data: parsedSchedule,
+    };
+
+    const updated = [...scheduleBatches, newBatch];
+    setScheduleBatches(updated);
+    await saveScheduleBatchesToStorage(selectedSchool.id, updated);
+    Alert.alert(
+      'Havuza Eklendi 📥',
+      `"${batchName}" başarıyla depolandı.\n\n` +
+      `Şu anda havuzda toplam ${updated.length} parça var (${updated.reduce((sum, b) => sum + (b.data?.teachers?.length || 0), 0)} öğretmen girdisi).\n\n` +
+      `İsterseniz diğer PDF parçasını da analiz edip ekleyebilir, ardından "Tüm Parçaları Birleştir" seçeneğiyle tek bir kurulum yapabilirsiniz.`
+    );
+  };
+
+  const handleMergeAllBatches = () => {
+    if (scheduleBatches.length === 0) {
+      Alert.alert('Havuz Boş', 'Henüz depolanmış bir çarşaf parça bulunmuyor.');
+      return;
+    }
+    const merged = mergeScheduleBatches(scheduleBatches);
+    setParsedSchedule(merged);
+    setAiModalVisible(true);
+    setBatchPoolModalVisible(false);
+    Alert.alert(
+      'Parçalar Birleştirildi 🧩',
+      `Havuzdaki ${scheduleBatches.length} parçanın tüm ham verileri birleştirildi:\n\n` +
+      `• Öğretmenler: ${merged.teachers.length}\n` +
+      `• Şubeler: ${merged.classes.length}\n` +
+      `• Dersler: ${merged.lessons.length}\n` +
+      `• Toplam Ders Saati: ${merged.scheduleItems.length}\n\n` +
+      `Verileri inceleyip tek seferde sisteme kaydedebilirsiniz.`
+    );
+  };
+
+  const handleRemoveBatch = async (batchId: string) => {
+    if (!selectedSchool) return;
+    const updated = scheduleBatches.filter(b => b.id !== batchId);
+    setScheduleBatches(updated);
+    await saveScheduleBatchesToStorage(selectedSchool.id, updated);
+  };
+
+  const handleClearAllBatches = async () => {
+    if (!selectedSchool) return;
+    Alert.alert('Havuzu Temizle', 'Depolanan tüm çarşaf parçaları silinsin mi?', [
+      { text: 'Vazgeç', style: 'cancel' },
+      {
+        text: 'Evet, Temizle',
+        style: 'destructive',
+        onPress: async () => {
+          setScheduleBatches([]);
+          await clearScheduleBatchesFromStorage(selectedSchool.id);
+        },
+      },
+    ]);
+  };
 
   const aiCancelledRef = useRef(false);
 
@@ -1287,6 +1379,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       loadLessons(schoolId),
       loadStudents(schoolId),
       loadAuditLogs(schoolId),
+      loadSchoolBatches(schoolId),
     ]);
   };
 
@@ -4347,6 +4440,38 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color="#6366F1" />
+                </TouchableOpacity>
+
+                {/* 1.1 ÇARŞAF PARÇA HAVUZU BANNERI */}
+                <TouchableOpacity
+                  style={[
+                    styles.batchPoolBanner,
+                    scheduleBatches.length > 0 && styles.batchPoolBannerActive,
+                  ]}
+                  onPress={() => setBatchPoolModalVisible(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.batchPoolIcon, scheduleBatches.length > 0 && { backgroundColor: '#DCFCE7' }]}>
+                    <Ionicons
+                      name="file-tray-full"
+                      size={22}
+                      color={scheduleBatches.length > 0 ? '#16A34A' : '#64748B'}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.batchPoolTitle}>Çarşaf Parça Havuzu & Yeniden Yerleştir</Text>
+                      <View style={[styles.batchPoolCountBadge, scheduleBatches.length > 0 && { backgroundColor: '#16A34A' }]}>
+                        <Text style={styles.batchPoolCountBadgeText}>{scheduleBatches.length} Parça</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.batchPoolDesc}>
+                      {scheduleBatches.length > 0
+                        ? `${scheduleBatches.length} parça depolandı. PDF okumaya gerek kalmadan tek tıkla birleştirip sıfırdan kurun.`
+                        : 'Büyük PDF’leri 2 veya daha fazla parça halinde yükleyip burada biriktirebilirsiniz.'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#64748B" />
                 </TouchableOpacity>
 
                 {/* 2. DOĞRULUK, DOLULUK VE SAĞLAMLIK DENETİM KARTI (Sanity Check) */}
@@ -9238,34 +9363,202 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 })()}
 
                 {/* Aksiyon Butonları */}
-                <View style={styles.scheduleActionButtonsRow}>
-                  <TouchableOpacity
-                    style={styles.cancelUploadButton}
-                    onPress={() => {
-                      setParsedSchedule(null);
-                      setAiModalVisible(false);
-                    }}
-                  >
-                    <Text style={styles.cancelUploadText}>Vazgeç</Text>
-                  </TouchableOpacity>
+                <View style={{ gap: 10, marginTop: 12 }}>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    {/* Havuza Ekle Butonu */}
+                    <TouchableOpacity
+                      style={[styles.batchSaveToPoolBtn, { flex: 1 }]}
+                      onPress={handleAddCurrentToBatches}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="archive-outline" size={17} color="#059669" />
+                      <Text style={styles.batchSaveToPoolBtnText}>📥 Havuza Ekle</Text>
+                    </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={[styles.confirmSaveButton, { flex: 2 }]}
-                    onPress={executeSaveSchedule}
-                    disabled={aiSaving}
-                  >
-                    {aiSaving ? (
-                      <ActivityIndicator size="small" color="#fff" />
-                    ) : (
-                      <>
-                        <Ionicons name="cloud-upload" size={18} color="#fff" />
-                        <Text style={styles.confirmSaveText}>Seçilenleri Kaydet</Text>
-                      </>
+                    {/* Havuzdaki Diğer Parçalarla Birleştir Butonu (Varsa) */}
+                    {scheduleBatches.length > 0 && (
+                      <TouchableOpacity
+                        style={[styles.batchMergeBtn, { flex: 1 }]}
+                        onPress={handleMergeAllBatches}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="git-merge-outline" size={17} color="#4F46E5" />
+                        <Text style={styles.batchMergeBtnText}>
+                          🧩 Havuzla Birleştir ({scheduleBatches.length})
+                        </Text>
+                      </TouchableOpacity>
                     )}
-                  </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.scheduleActionButtonsRow}>
+                    <TouchableOpacity
+                      style={styles.cancelUploadButton}
+                      onPress={() => {
+                        setParsedSchedule(null);
+                        setAiModalVisible(false);
+                      }}
+                    >
+                      <Text style={styles.cancelUploadText}>Vazgeç</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.confirmSaveButton, { flex: 2 }]}
+                      onPress={executeSaveSchedule}
+                      disabled={aiSaving}
+                    >
+                      {aiSaving ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="cloud-upload" size={18} color="#fff" />
+                          <Text style={styles.confirmSaveText}>Seçilenleri Sunucuya Kaydet</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </ScrollView>
             ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      {/* 5.1 Çarşaf Parça Havuzu Modalı */}
+      <Modal visible={batchPoolModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="file-tray-full" size={24} color="#059669" />
+                <View>
+                  <Text style={styles.modalTitle}>📦 Çarşaf Parça Havuzu</Text>
+                  <Text style={{ fontSize: 11, color: '#64748B' }}>
+                    Çok sayfalı PDF'leri parça parça biriktirin ve tek seferde kayıpsız kurun
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setBatchPoolModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10 }}>
+              {scheduleBatches.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40, paddingHorizontal: 20 }}>
+                  <Ionicons name="file-tray-outline" size={48} color="#94A3B8" />
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#475569', marginTop: 12 }}>
+                    Havuzda Henüz Parça Bulunmuyor
+                  </Text>
+                  <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginTop: 6, lineHeight: 18 }}>
+                    Büyük PDF'inizi 2 parça halinde (Örn: 1. Yarı ve 2. Yarı) yüklerken, her analiz sonrası "📥 Havuza Ekle" butonuna basarak verileri burada biriktirebilirsiniz.{'\n\n'}
+                    Tüm parçalar biriktiğinde PDF okutmaya gerek kalmadan tek tıkla birleştirip sıfırdan kurulum yapabilirsiniz.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.confirmSaveButton, { marginTop: 20, paddingHorizontal: 20 }]}
+                    onPress={() => {
+                      setBatchPoolModalVisible(false);
+                      handlePickAndAnalyzeSchedule();
+                    }}
+                  >
+                    <Ionicons name="add-circle-outline" size={18} color="#fff" />
+                    <Text style={styles.confirmSaveText}>İlk Parçayı Yükle</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View>
+                  <View style={{ backgroundColor: '#F0FDF4', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#BBF7D0', marginBottom: 14 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#166534' }}>
+                      💡 Bilgi: Havuzda {scheduleBatches.length} parça depolandı
+                    </Text>
+                    <Text style={{ fontSize: 12, color: '#15803D', marginTop: 3 }}>
+                      "Tüm Parçaları Birleştir" butonuna basarak tüm öğretmenleri ve ders saatlerini tek bir program halinde birleştirebilirsiniz.
+                    </Text>
+                  </View>
+
+                  {scheduleBatches.map((batch, index) => {
+                    const tCount = batch.data?.teachers?.length || 0;
+                    const cCount = batch.data?.classes?.length || 0;
+                    const lCount = batch.data?.lessons?.length || 0;
+                    const sCount = batch.data?.scheduleItems?.length || 0;
+                    const dateStr = new Date(batch.createdAt).toLocaleString('tr-TR', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    });
+
+                    return (
+                      <View key={batch.id} style={styles.batchCard}>
+                        <View style={styles.batchCardHeader}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.batchCardTitle}>{batch.name}</Text>
+                            <Text style={styles.batchCardDate}>Kayıt: {dateStr}</Text>
+                          </View>
+                          <TouchableOpacity
+                            onPress={() => handleRemoveBatch(batch.id)}
+                            style={{ padding: 6 }}
+                          >
+                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                          </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.batchCardStatsRow}>
+                          <View style={styles.batchCardStatBadge}>
+                            <Text style={styles.batchCardStatText}>👨‍🏫 {tCount} Öğretmen</Text>
+                          </View>
+                          <View style={styles.batchCardStatBadge}>
+                            <Text style={styles.batchCardStatText}>🏫 {cCount} Şube</Text>
+                          </View>
+                          <View style={styles.batchCardStatBadge}>
+                            <Text style={styles.batchCardStatText}>📚 {lCount} Ders</Text>
+                          </View>
+                          <View style={[styles.batchCardStatBadge, { backgroundColor: '#EEF2FF' }]}>
+                            <Text style={[styles.batchCardStatText, { color: '#4F46E5' }]}>
+                              📅 {sCount} Ders Saati
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </ScrollView>
+
+            {scheduleBatches.length > 0 && (
+              <View style={{ gap: 8, marginTop: 10 }}>
+                <TouchableOpacity
+                  style={[styles.confirmSaveButton, { backgroundColor: '#4F46E5', width: '100%' }]}
+                  onPress={handleMergeAllBatches}
+                >
+                  <Ionicons name="git-merge" size={18} color="#fff" />
+                  <Text style={styles.confirmSaveText}>
+                    🧩 Tüm Parçaları Birleştir ve İncele / Kur
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    style={[styles.cancelUploadButton, { flex: 1, backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}
+                    onPress={handleClearAllBatches}
+                  >
+                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                    <Text style={[styles.cancelUploadText, { color: '#DC2626' }]}>Havuzu Temizle</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.cancelUploadButton, { flex: 1 }]}
+                    onPress={() => {
+                      setBatchPoolModalVisible(false);
+                      handlePickAndAnalyzeSchedule();
+                    }}
+                  >
+                    <Ionicons name="add-circle-outline" size={16} color="#475569" />
+                    <Text style={styles.cancelUploadText}>➕ Yeni Parça Ekle</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -15630,5 +15923,124 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
+  batchPoolBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 10,
+    gap: 12,
+  },
+  batchPoolBannerActive: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  batchPoolIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  batchPoolTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  batchPoolDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  batchPoolCountBadge: {
+    backgroundColor: '#94A3B8',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  batchPoolCountBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  batchSaveToPoolBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 6,
+  },
+  batchSaveToPoolBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  batchMergeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 6,
+  },
+  batchMergeBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  batchCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+  batchCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  batchCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  batchCardDate: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  batchCardStatsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  batchCardStatBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  batchCardStatText: {
+    fontSize: 11,
+    color: '#475569',
+    fontWeight: '600',
+  },
 });
+
 
