@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -369,9 +369,51 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [scheduleEditorMode, setScheduleEditorMode] = useState<'class' | 'teacher'>('class');
   const [selectedClassForEditor, setSelectedClassForEditor] = useState<string>('');
   const [selectedTeacherForEditor, setSelectedTeacherForEditor] = useState<string>('');
+  const [teacherListBoxSearch, setTeacherListBoxSearch] = useState<string>('');
   const [allSchoolSchedules, setAllSchoolSchedules] = useState<any[]>([]);
   const [loadingAllSchedules, setLoadingAllSchedules] = useState(false);
   const [scheduleResetModalVisible, setScheduleResetModalVisible] = useState(false);
+
+  // Öğretmen Programı Düzenleyicisi için sıralı ve filtrelenmiş öğretmenler
+  const sortedTeachers = useMemo(() => {
+    return [...teachers].sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr'));
+  }, [teachers]);
+
+  const filteredTeachersForListBox = useMemo(() => {
+    if (!teacherListBoxSearch.trim()) return sortedTeachers;
+    const q = normalizeSearchStr(teacherListBoxSearch);
+    return sortedTeachers.filter((t: any) =>
+      normalizeSearchStr(t.fullName).includes(q) ||
+      normalizeSearchStr(t.branch).includes(q)
+    );
+  }, [sortedTeachers, teacherListBoxSearch]);
+
+  const currentActiveTeacher = useMemo(() => {
+    const activeName = selectedTeacherForEditor || (sortedTeachers[0] ? sortedTeachers[0].fullName : '');
+    return sortedTeachers.find((t: any) => t.fullName === activeName) || sortedTeachers[0] || null;
+  }, [sortedTeachers, selectedTeacherForEditor]);
+
+  const getTeacherTotalHours = useCallback((teacherFullName: string) => {
+    if (!teacherFullName || !allSchoolSchedules) return 0;
+    const norm = normalizeSearchStr(teacherFullName);
+    return allSchoolSchedules.filter((s: any) => normalizeSearchStr(s.teacherName) === norm).length;
+  }, [allSchoolSchedules]);
+
+  const handleSelectPrevTeacher = useCallback(() => {
+    if (!sortedTeachers.length) return;
+    const activeName = selectedTeacherForEditor || (sortedTeachers[0] ? sortedTeachers[0].fullName : '');
+    const currIdx = sortedTeachers.findIndex((t: any) => t.fullName === activeName);
+    const prevIdx = currIdx <= 0 ? sortedTeachers.length - 1 : currIdx - 1;
+    setSelectedTeacherForEditor(sortedTeachers[prevIdx].fullName);
+  }, [sortedTeachers, selectedTeacherForEditor]);
+
+  const handleSelectNextTeacher = useCallback(() => {
+    if (!sortedTeachers.length) return;
+    const activeName = selectedTeacherForEditor || (sortedTeachers[0] ? sortedTeachers[0].fullName : '');
+    const currIdx = sortedTeachers.findIndex((t: any) => t.fullName === activeName);
+    const nextIdx = currIdx < 0 || currIdx >= sortedTeachers.length - 1 ? 0 : currIdx + 1;
+    setSelectedTeacherForEditor(sortedTeachers[nextIdx].fullName);
+  }, [sortedTeachers, selectedTeacherForEditor]);
 
   // 1.6 Hücre Slot Düzenleme Modalı State
   const [slotModalVisible, setSlotModalVisible] = useState(false);
@@ -4496,24 +4538,182 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       </ScrollView>
                     </View>
                   ) : (
-                    <View style={{ marginBottom: 12 }}>
-                      <Text style={styles.editorSelectorLabel}>Düzenlenecek Öğretmeni Seçin:</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.editorChipsScroll}>
-                        {teachers.map((tch) => {
-                          const isSel = (selectedTeacherForEditor || (teachers[0] ? teachers[0].fullName : '')) === tch.fullName;
-                          return (
+                    <View style={styles.editorTeacherListBoxWrap}>
+                      {/* Üst Başlık & Aktif Öğretmen Özeti */}
+                      <View style={styles.editorTeacherHeaderRow}>
+                        <View style={{ flex: 1, minWidth: 200 }}>
+                          <Text style={styles.editorSelectorLabel}>Düzenlenecek Öğretmen (Listbox):</Text>
+                          {currentActiveTeacher && (
+                            <View style={styles.editorActiveTeacherBanner}>
+                              <View style={styles.editorActiveTeacherAvatar}>
+                                <Ionicons name="person" size={16} color="#4F46E5" />
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <Text style={styles.editorActiveTeacherName}>
+                                    {currentActiveTeacher.fullName}
+                                  </Text>
+                                  {currentActiveTeacher.branch && (
+                                    <View style={styles.editorTeacherBranchBadge}>
+                                      <Text style={styles.editorTeacherBranchBadgeText}>
+                                        {currentActiveTeacher.branch}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </View>
+                                <Text style={styles.editorActiveTeacherMeta}>
+                                  Haftalık Ders Yükü: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{getTeacherTotalHours(currentActiveTeacher.fullName)} Saat</Text>
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Hızlı Önceki / Sonraki Butonları */}
+                        <View style={styles.editorTeacherNavButtons}>
+                          <TouchableOpacity
+                            style={styles.editorTeacherNavBtn}
+                            onPress={handleSelectPrevTeacher}
+                            accessibilityLabel="Önceki Öğretmen"
+                          >
+                            <Ionicons name="chevron-back" size={16} color="#4F46E5" />
+                            <Text style={styles.editorTeacherNavBtnText}>Önceki</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={styles.editorTeacherNavBtn}
+                            onPress={handleSelectNextTeacher}
+                            accessibilityLabel="Sonraki Öğretmen"
+                          >
+                            <Text style={styles.editorTeacherNavBtnText}>Sonraki</Text>
+                            <Ionicons name="chevron-forward" size={16} color="#4F46E5" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      {/* Arama ve Dikey Listbox */}
+                      <View style={styles.editorListBoxContainer}>
+                        {/* Arama Çubuğu */}
+                        <View style={styles.editorListBoxSearchRow}>
+                          <Ionicons name="search" size={16} color="#64748B" style={{ marginLeft: 8 }} />
+                          <TextInput
+                            style={styles.editorListBoxSearchInput}
+                            placeholder="Öğretmen veya branş ara... (örn: Matematik, Ayşe)"
+                            placeholderTextColor="#94A3B8"
+                            value={teacherListBoxSearch}
+                            onChangeText={setTeacherListBoxSearch}
+                          />
+                          {teacherListBoxSearch.length > 0 && (
                             <TouchableOpacity
-                              key={tch.id}
-                              style={[styles.editorChip, isSel && styles.editorChipActive]}
-                              onPress={() => setSelectedTeacherForEditor(tch.fullName)}
+                              onPress={() => setTeacherListBoxSearch('')}
+                              style={{ padding: 6, marginRight: 4 }}
                             >
-                              <Text style={[styles.editorChipText, isSel && styles.editorChipTextActive]}>
-                                {tch.fullName} ({tch.branch || 'Öğretmen'})
-                              </Text>
+                              <Ionicons name="close-circle" size={16} color="#94A3B8" />
                             </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
+                          )}
+                          <View style={styles.editorListBoxCountBadge}>
+                            <Text style={styles.editorListBoxCountBadgeText}>
+                              {filteredTeachersForListBox.length} / {teachers.length}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Dikey Kaydırılabilir Öğretmen Listbox */}
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          style={styles.editorListBoxScrollView}
+                          contentContainerStyle={styles.editorListBoxScrollContent}
+                          showsVerticalScrollIndicator={true}
+                        >
+                          {filteredTeachersForListBox.length === 0 ? (
+                            <View style={styles.editorListBoxEmptyWrap}>
+                              <Ionicons name="search-outline" size={24} color="#94A3B8" />
+                              <Text style={styles.editorListBoxEmptyText}>
+                                "{teacherListBoxSearch}" aramasına uygun öğretmen bulunamadı.
+                              </Text>
+                            </View>
+                          ) : (
+                            filteredTeachersForListBox.map((tch: any, idx: number) => {
+                              const isSel = (currentActiveTeacher?.fullName || '') === tch.fullName;
+                              const tchHours = getTeacherTotalHours(tch.fullName);
+
+                              return (
+                                <TouchableOpacity
+                                  key={tch.id || tch.fullName || idx}
+                                  style={[
+                                    styles.editorListBoxItem,
+                                    isSel && styles.editorListBoxItemActive,
+                                  ]}
+                                  onPress={() => setSelectedTeacherForEditor(tch.fullName)}
+                                  activeOpacity={0.7}
+                                >
+                                  {/* Sol: İkon & İsim */}
+                                  <View style={styles.editorListBoxItemLeft}>
+                                    <View
+                                      style={[
+                                        styles.editorListBoxItemIcon,
+                                        isSel && styles.editorListBoxItemIconActive,
+                                      ]}
+                                    >
+                                      <Ionicons
+                                        name="person"
+                                        size={13}
+                                        color={isSel ? '#FFFFFF' : '#64748B'}
+                                      />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text
+                                        style={[
+                                          styles.editorListBoxItemName,
+                                          isSel && styles.editorListBoxItemNameActive,
+                                        ]}
+                                        numberOfLines={1}
+                                      >
+                                        {tch.fullName}
+                                      </Text>
+                                      {tch.branch && (
+                                        <Text
+                                          style={[
+                                            styles.editorListBoxItemBranch,
+                                            isSel && styles.editorListBoxItemBranchActive,
+                                          ]}
+                                          numberOfLines={1}
+                                        >
+                                          {tch.branch}
+                                        </Text>
+                                      )}
+                                    </View>
+                                  </View>
+
+                                  {/* Sağ: Ders Saati & Seçim Durumu */}
+                                  <View style={styles.editorListBoxItemRight}>
+                                    <View
+                                      style={[
+                                        styles.editorListBoxHourBadge,
+                                        isSel && styles.editorListBoxHourBadgeActive,
+                                      ]}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.editorListBoxHourBadgeText,
+                                          isSel && styles.editorListBoxHourBadgeTextActive,
+                                        ]}
+                                      >
+                                        {tchHours}s
+                                      </Text>
+                                    </View>
+                                    <Ionicons
+                                      name={isSel ? 'radio-button-on' : 'radio-button-off'}
+                                      size={18}
+                                      color={isSel ? '#4F46E5' : '#CBD5E1'}
+                                    />
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })
+                          )}
+                        </ScrollView>
+                      </View>
                     </View>
                   )}
 
@@ -13659,6 +13859,214 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#475569',
     marginBottom: 6,
+  },
+  // --- Öğretmen ListBox Seçici Stilleri ---
+  editorTeacherListBoxWrap: {
+    marginBottom: 14,
+    gap: 8,
+  },
+  editorTeacherHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  editorActiveTeacherBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    marginTop: 2,
+  },
+  editorActiveTeacherAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#E0E7FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editorActiveTeacherName: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E1B4B',
+  },
+  editorTeacherBranchBadge: {
+    backgroundColor: '#E0E7FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  editorTeacherBranchBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
+  editorActiveTeacherMeta: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  editorTeacherNavButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  editorTeacherNavBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  editorTeacherNavBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  editorListBoxContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#CBD5E1',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  editorListBoxSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  editorListBoxSearchInput: {
+    flex: 1,
+    height: 38,
+    fontSize: 12,
+    color: '#1E293B',
+    paddingHorizontal: 8,
+  },
+  editorListBoxCountBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  editorListBoxCountBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  editorListBoxScrollView: {
+    maxHeight: 180,
+  },
+  editorListBoxScrollContent: {
+    padding: 6,
+    gap: 4,
+  },
+  editorListBoxEmptyWrap: {
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  editorListBoxEmptyText: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  editorListBoxItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  editorListBoxItemActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#818CF8',
+    borderLeftWidth: 4,
+    borderLeftColor: '#4F46E5',
+  },
+  editorListBoxItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    marginRight: 8,
+  },
+  editorListBoxItemIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editorListBoxItemIconActive: {
+    backgroundColor: '#4F46E5',
+  },
+  editorListBoxItemName: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1E293B',
+  },
+  editorListBoxItemNameActive: {
+    color: '#4F46E5',
+    fontWeight: '800',
+  },
+  editorListBoxItemBranch: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  editorListBoxItemBranchActive: {
+    color: '#4338CA',
+    fontWeight: '600',
+  },
+  editorListBoxItemRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  editorListBoxHourBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  editorListBoxHourBadgeActive: {
+    backgroundColor: '#E0E7FF',
+  },
+  editorListBoxHourBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  editorListBoxHourBadgeTextActive: {
+    color: '#4F46E5',
+    fontWeight: '800',
   },
   editorChipsScroll: {
     gap: 6,
