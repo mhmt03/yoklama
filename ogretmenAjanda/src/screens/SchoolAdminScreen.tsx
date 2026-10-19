@@ -256,6 +256,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Çarşaf Parça Havuzu State (Büyük PDF'lerin parçalar halinde depolanması ve birleştirilmesi)
   const [scheduleBatches, setScheduleBatches] = useState<ScheduleBatchItem[]>([]);
   const [batchPoolModalVisible, setBatchPoolModalVisible] = useState(false);
+  const [lastAnalyzedPageRange, setLastAnalyzedPageRange] = useState<{ start: number; end: number } | undefined>(undefined);
 
   const loadSchoolBatches = async (schoolId: string) => {
     try {
@@ -269,7 +270,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const handleAddCurrentToBatches = async () => {
     if (!parsedSchedule || !selectedSchool) return;
 
-    const pageRangeInfo = pageRange ? `Sayfa ${pageRange.start}-${pageRange.end}` : 'Tüm Belge';
+    const pageRangeInfo = lastAnalyzedPageRange
+      ? `Sayfa ${lastAnalyzedPageRange.start}-${lastAnalyzedPageRange.end}`
+      : (pdfTotalPages > 1 && pdfPageRangeMode !== 'all' ? `Sayfa ${pdfStartPage}-${pdfEndPage}` : 'Tüm Belge');
     const batchName = pendingScheduleFile?.name
       ? `${pendingScheduleFile.name} (${pageRangeInfo})`
       : `Parça ${scheduleBatches.length + 1} (${pageRangeInfo})`;
@@ -278,7 +281,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       id: `batch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       name: batchName,
       createdAt: Date.now(),
-      pageRangeText: pageRange ? `${pageRange.start}-${pageRange.end}` : undefined,
+      pageRangeText: lastAnalyzedPageRange ? `${lastAnalyzedPageRange.start}-${lastAnalyzedPageRange.end}` : undefined,
       data: parsedSchedule,
     };
 
@@ -2281,6 +2284,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
 
     aiCancelledRef.current = false;
+    setLastAnalyzedPageRange(pageRange);
     setSchedulePreOptionsModalVisible(false);
     setAiModalVisible(true);
     setAiParsing(true);
