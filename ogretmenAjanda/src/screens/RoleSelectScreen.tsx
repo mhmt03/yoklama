@@ -18,6 +18,15 @@ import { UserRole, setActiveUserRole, setActiveTeacherName } from '../utils/role
 import { getActiveSchool, syncAffiliatedSchools } from '../database/operations/schoolOperations';
 import { apiRequest, saveAuthToken, getBaseApiUrl, setBaseApiUrl, DEFAULT_API_URL } from '../services/apiClient';
 import { DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL, setGeminiApiKey, setGeminiModel } from '../utils/geminiScheduleService';
+import {
+  getSavedInstitution,
+  saveInstitution,
+  clearSavedInstitution,
+  verifyInstitutionOnline,
+  getRememberMeSetting,
+  setRememberMeSetting,
+  InstitutionInfo,
+} from '../services/institutionService';
 
 interface RoleSelectScreenProps {
   onRoleSelected: (role: UserRole) => void;
@@ -26,6 +35,14 @@ interface RoleSelectScreenProps {
 
 export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelected, navigation }) => {
   const insets = useSafeAreaInsets();
+
+  // --- KURUM (INSTITUTION / TENANT) STATE ---
+  const [activeInstitution, setActiveInstitution] = useState<InstitutionInfo | null>(null);
+  const [institutionLoading, setInstitutionLoading] = useState(true);
+  const [kurumInput, setKurumInput] = useState('zafer-egitim');
+  const [verifyingKurum, setVerifyingKurum] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+
   // Okul Admini Modal & State
   const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
   const [adminUsername, setAdminUsername] = useState('mehmetadmin');
@@ -44,6 +61,53 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   const [superAdminUsername, setSuperAdminUsername] = useState('mehmetsuper');
   const [superAdminPassword, setSuperAdminPassword] = useState('1234');
   const [superAdminLoading, setSuperAdminLoading] = useState(false);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const saved = await getSavedInstitution();
+        if (saved) {
+          setActiveInstitution(saved);
+          setKurumInput(saved.code);
+        }
+        const rem = await getRememberMeSetting();
+        setRememberMe(rem);
+      } catch (e) {
+        console.warn('Kurum bilgisi yüklenemedi:', e);
+      } finally {
+        setInstitutionLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleVerifyKurum = async (customCode?: string) => {
+    const codeToTest = (customCode || kurumInput || '').trim();
+    if (!codeToTest) {
+      Alert.alert('Uyarı', 'Lütfen kurum adını veya kodunu giriniz.');
+      return;
+    }
+    setVerifyingKurum(true);
+    try {
+      const res = await verifyInstitutionOnline(codeToTest);
+      if (res.success && res.data) {
+        setActiveInstitution(res.data);
+        if (rememberMe) {
+          await saveInstitution(res.data);
+        }
+      } else {
+        Alert.alert('Kurum Bulunamadı', res.message || 'Geçerli bir kurum adı veya kodu bulunamadı.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setVerifyingKurum(false);
+    }
+  };
+
+  const handleSwitchInstitution = async () => {
+    await clearSavedInstitution();
+    setActiveInstitution(null);
+  };
 
   // Sunucu Bağlantı Ayarları Modalı
   const [serverSettingsModalVisible, setServerSettingsModalVisible] = useState(false);
@@ -112,9 +176,17 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       const res = await apiRequest('auth/login', 'POST', {
         username: adminUsername.trim(),
         password: adminPassword.trim(),
+        institutionCode: activeInstitution?.code,
       });
 
       if (res.success && res.data) {
+        if (rememberMe && activeInstitution) {
+          await saveInstitution(activeInstitution);
+        } else if (!rememberMe) {
+          await clearSavedInstitution();
+        }
+        await setRememberMeSetting(rememberMe);
+
         await saveAuthToken(res.data.token, res.data);
         setShowAdminLoginModal(false);
         const nextRole = res.data.role === 'STAFF' ? 'staff' : 'admin';
@@ -123,6 +195,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       } else {
         // Çevrimdışı / Yerel Test Modu Fallback (mehmetadmin / 1234)
         if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
+          if (rememberMe && activeInstitution) {
+            await saveInstitution(activeInstitution);
+          }
+          await setRememberMeSetting(rememberMe);
           setShowAdminLoginModal(false);
           await setActiveUserRole('admin');
           onRoleSelected('admin');
@@ -132,6 +208,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       }
     } catch (e: any) {
       if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
+        if (rememberMe && activeInstitution) {
+          await saveInstitution(activeInstitution);
+        }
+        await setRememberMeSetting(rememberMe);
         setShowAdminLoginModal(false);
         await setActiveUserRole('admin');
         onRoleSelected('admin');
@@ -165,9 +245,17 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           username: teacherUsername.trim(),
           password: teacherPassword.trim(),
           schoolCode: schoolCodeClean,
+          institutionCode: activeInstitution?.code,
         });
 
         if (res.success && res.data) {
+          if (rememberMe && activeInstitution) {
+            await saveInstitution(activeInstitution);
+          } else if (!rememberMe) {
+            await clearSavedInstitution();
+          }
+          await setRememberMeSetting(rememberMe);
+
           await saveAuthToken(res.data.token, res.data);
           const displayName = res.data.fullName || teacherUsername.trim();
           await setActiveTeacherName(displayName);
@@ -188,7 +276,6 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           }
 
           // OTOMATİK VERİ SENKRONİZASYONU:
-          // Öğretmen okul kodunu girip giriş yaptığı için program, sınıflar/öğrenciler ve yıllık planlar otomatik çekilir
           try {
             const { syncScheduleFromSchool } = await import('../services/scheduleSyncService');
             const { syncTeacherAssignedClassesAndStudents } = await import('../services/studentSyncService');
@@ -206,6 +293,11 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         } else {
           // Çevrimdışı test fallback: mehmetogretmen / 1234
           if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
+            if (rememberMe && activeInstitution) {
+              await saveInstitution(activeInstitution);
+            }
+            await setRememberMeSetting(rememberMe);
+
             const defaultSchools = [
               { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
               { name: 'Cumhuriyet Fen Lisesi', code: 'OKL-10002', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
@@ -234,7 +326,6 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         }
       } else {
         // 2. Bireysel Mod (Okul Kodu Boş)
-        // Kurum içi iletişim kapalıdır, plan ve programı öğretmen kendisi yönetir.
         const displayName = teacherUsername.trim() === 'mehmetogretmen' 
           ? 'Mehmet Öğretmen (Fizik)' 
           : teacherUsername.trim();
@@ -260,6 +351,11 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       }
     } catch (e: any) {
       if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
+        if (rememberMe && activeInstitution) {
+          await saveInstitution(activeInstitution);
+        }
+        await setRememberMeSetting(rememberMe);
+
         await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
         await setActiveUserRole('teacher');
         setShowTeacherLoginModal(false);
@@ -325,6 +421,14 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
     }
   };
 
+  if (institutionLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 16 }]}>
       <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent />
@@ -347,82 +451,199 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         </Text>
       </View>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionTitle}>Lütfen Rolünüzü Seçiniz:</Text>
-        <Text style={styles.sectionDesc}>
-          Seçiminiz cihazınızda hatırlanacak ve doğrudan ilgili panel açılacaktır.
-        </Text>
+      {!activeInstitution ? (
+        /* ADIM 1: KURUM ADI GİRME EKRANI */
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>
+          <View style={styles.instPromptCard}>
+            <View style={styles.instIconWrap}>
+              <Ionicons name="business" size={32} color="#4F46E5" />
+            </View>
+            <Text style={styles.instTitle}>Kurum Adını Giriniz</Text>
+            <Text style={styles.instDesc}>
+              Lisanslı kurumunuza ait benzersiz adı veya kodu yazarak sisteme bağlanın.
+            </Text>
 
-        {/* Rol Ayrımı Bilgilendirme Kutusu */}
-        <View style={styles.roleTipCard}>
-          <Ionicons name="information-circle" size={22} color="#4F46E5" />
-          <Text style={styles.roleTipText}>
-            <Text style={{ fontWeight: '700', color: '#1E1B4B' }}>Rol Ayrımı: </Text>
-            Bir kişi hem Fizik Öğretmeni hem de Okul Admini olabilir. Bu oturumda hangi işi yapacaksanız o rolü seçin. Paneller arasında dilediğiniz an tek tıkla geçiş yapabilirsiniz.
+            <View style={styles.instInputWrap}>
+              <Ionicons name="shield-checkmark-outline" size={20} color="#6366F1" style={{ marginRight: 8 }} />
+              <TextInput
+                style={styles.instTextInput}
+                placeholder="Kurum Adı / Kodu (örn: zafer-egitim)"
+                placeholderTextColor={Colors.textMuted}
+                value={kurumInput}
+                onChangeText={setKurumInput}
+                autoCapitalize="none"
+                autoCorrect={false}
+                onSubmitEditing={() => handleVerifyKurum()}
+              />
+            </View>
+
+            {/* Hızlı Test Çipi */}
+            <TouchableOpacity
+              style={styles.quickChip}
+              onPress={() => {
+                setKurumInput('zafer-egitim');
+                handleVerifyKurum('zafer-egitim');
+              }}
+            >
+              <Ionicons name="flask" size={14} color="#4F46E5" />
+              <Text style={styles.quickChipText}>
+                🧪 Deneme Kurumu: <Text style={{ fontWeight: '800' }}>zafer-egitim</Text> (Zafer Eğitim)
+              </Text>
+            </TouchableOpacity>
+
+            {/* Beni Hatırla Switch / Checkbox */}
+            <TouchableOpacity
+              style={styles.rememberRow}
+              activeOpacity={0.8}
+              onPress={() => setRememberMe(!rememberMe)}
+            >
+              <Ionicons
+                name={rememberMe ? 'checkbox' : 'square-outline'}
+                size={20}
+                color={rememberMe ? '#4F46E5' : Colors.textMuted}
+              />
+              <Text style={styles.rememberText}>Bu kurum adını bu cihazda hatırla</Text>
+            </TouchableOpacity>
+
+            {/* Devam Et Butonu */}
+            <TouchableOpacity
+              style={styles.instSubmitBtn}
+              onPress={() => handleVerifyKurum()}
+              disabled={verifyingKurum}
+            >
+              {verifyingKurum ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={styles.instSubmitBtnText}>Kuruma Bağlan ve Devam Et</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#fff" />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* Kurum Bilgilendirme Kutusu */}
+          <View style={styles.roleTipCard}>
+            <Ionicons name="information-circle" size={22} color="#4F46E5" />
+            <Text style={styles.roleTipText}>
+              <Text style={{ fontWeight: '700', color: '#1E1B4B' }}>Kurum Bazlı Lisans: </Text>
+              Bir kurum birden fazla okulu tek lisansla yönetebilir. Kurum kodu sayesinde farklı illerdeki öğretmenlerin kullanıcı adları çakışmaz ve verileriniz izole edilir.
+            </Text>
+          </View>
+
+          {/* Süper Admin Girişi */}
+          <TouchableOpacity
+            style={styles.superAdminTrigger}
+            onPress={() => setSuperAdminModalVisible(true)}
+          >
+            <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
+            <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans & Müşteri Yönetimi)</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        /* ADIM 2: ROL SEÇİM EKRANI (Kurum Doğrulandı) */
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>
+          {/* En Üstte Aktif Kurum Başlığı ve Değiştirme Butonu */}
+          <View style={styles.activeInstBanner}>
+            <View style={styles.activeInstIcon}>
+              <Ionicons name="business" size={22} color="#4F46E5" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={styles.activeInstName}>{activeInstitution.name}</Text>
+                <View style={styles.activeInstBadge}>
+                  <Text style={styles.activeInstBadgeText}>{activeInstitution.code}</Text>
+                </View>
+              </View>
+              <Text style={styles.activeInstQuota}>
+                Lisans Aktif • İzin Verilen: {activeInstitution.maxSchoolCount} Okul
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.switchInstBtn}
+              onPress={handleSwitchInstitution}
+            >
+              <Ionicons name="swap-horizontal" size={14} color="#4F46E5" />
+              <Text style={styles.switchInstBtnText}>Kurumu Değiştir</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.sectionTitle}>Lütfen Rolünüzü Seçiniz:</Text>
+          <Text style={styles.sectionDesc}>
+            Seçiminiz cihazınızda hatırlanacak ve doğrudan ilgili panel açılacaktır.
           </Text>
-        </View>
 
-        {/* 1. ÖĞRETMEN KARTI */}
-        <TouchableOpacity style={styles.roleCard} onPress={handleSelectTeacher} activeOpacity={0.85}>
-          <View style={[styles.roleIconWrap, { backgroundColor: '#EEF2FF' }]}>
-            <Ionicons name="person" size={28} color="#4F46E5" />
+          {/* Rol Ayrımı Bilgilendirme Kutusu */}
+          <View style={styles.roleTipCard}>
+            <Ionicons name="information-circle" size={22} color="#4F46E5" />
+            <Text style={styles.roleTipText}>
+              <Text style={{ fontWeight: '700', color: '#1E1B4B' }}>Rol Ayrımı: </Text>
+              Bir kişi hem Fizik Öğretmeni hem de Okul Admini olabilir. Bu oturumda hangi işi yapacaksanız o rolü seçin. Paneller arasında dilediğiniz an tek tıkla geçiş yapabilirsiniz.
+            </Text>
           </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.roleCardTitle}>Öğretmen (Branş / Sınıf)</Text>
-              <View style={styles.popBadge}>
-                <Text style={styles.popBadgeText}>Ders Modülü</Text>
-              </View>
+
+          {/* 1. ÖĞRETMEN KARTI */}
+          <TouchableOpacity style={styles.roleCard} onPress={handleSelectTeacher} activeOpacity={0.85}>
+            <View style={[styles.roleIconWrap, { backgroundColor: '#EEF2FF' }]}>
+              <Ionicons name="person" size={28} color="#4F46E5" />
             </View>
-            <Text style={styles.roleCardDesc}>
-              Fizik vb. branş dersleriniz, canlı ders kokpiti, yoklama, ödev kontrolü ve öğrenci 360° veli görüşmesi.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-        </TouchableOpacity>
-
-        {/* 2. OKUL ADMİNİ / İDARECİ KARTI */}
-        <TouchableOpacity style={styles.roleCard} onPress={handleSelectAdmin} activeOpacity={0.85}>
-          <View style={[styles.roleIconWrap, { backgroundColor: '#FEF3C7' }]}>
-            <Ionicons name="shield-checkmark" size={28} color="#D97706" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.roleCardTitle}>Okul Admini (İdareci)</Text>
-              <View style={[styles.popBadge, { backgroundColor: '#FEF3C7' }]}>
-                <Text style={[styles.popBadgeText, { color: '#B45309' }]}>Yönetim</Text>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.roleCardTitle}>Öğretmen (Branş / Sınıf)</Text>
+                <View style={styles.popBadge}>
+                  <Text style={styles.popBadgeText}>Ders Modülü</Text>
+                </View>
               </View>
+              <Text style={styles.roleCardDesc}>
+                Fizik vb. branş dersleriniz, canlı ders kokpiti, yoklama, ödev kontrolü ve öğrenci 360° veli görüşmesi.
+              </Text>
             </View>
-            <Text style={styles.roleCardDesc}>
-              Öğretmenlik dışı idari işlemler: Okul kodu yönetimi, AI ile çarşaf program analizi ve öğretmen onayları.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-        </TouchableOpacity>
+            <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+          </TouchableOpacity>
 
-        {/* 3. ÖĞRENCİ & VELİ KARTI */}
-        <TouchableOpacity style={styles.roleCard} onPress={handleSelectStudent} activeOpacity={0.85}>
-          <View style={[styles.roleIconWrap, { backgroundColor: '#ECFDF5' }]}>
-            <Ionicons name="school" size={28} color="#059669" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.roleCardTitle}>Öğrenci & Veli Paneli</Text>
-            <Text style={styles.roleCardDesc}>
-              Ödev bildirimleri, teslim durumları, ders programı ve öğretmen görüşleri.
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-        </TouchableOpacity>
+          {/* 2. OKUL ADMİNİ / İDARECİ KARTI */}
+          <TouchableOpacity style={styles.roleCard} onPress={handleSelectAdmin} activeOpacity={0.85}>
+            <View style={[styles.roleIconWrap, { backgroundColor: '#FEF3C7' }]}>
+              <Ionicons name="shield-checkmark" size={28} color="#D97706" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.roleCardTitle}>Okul Admini (İdareci)</Text>
+                <View style={[styles.popBadge, { backgroundColor: '#FEF3C7' }]}>
+                  <Text style={[styles.popBadgeText, { color: '#B45309' }]}>Yönetim</Text>
+                </View>
+              </View>
+              <Text style={styles.roleCardDesc}>
+                Öğretmenlik dışı idari işlemler: Okul kodu yönetimi, AI ile çarşaf program analizi ve öğretmen onayları.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+          </TouchableOpacity>
 
-        {/* 4. SÜPER ADMİN (GİZLİ SİSTEM SAHİBİ GİRİŞİ) */}
-        <TouchableOpacity
-          style={styles.superAdminTrigger}
-          onPress={() => setSuperAdminModalVisible(true)}
-        >
-          <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
-          <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans Yönetimi)</Text>
-        </TouchableOpacity>
-      </ScrollView>
+          {/* 3. ÖĞRENCİ & VELİ KARTI */}
+          <TouchableOpacity style={styles.roleCard} onPress={handleSelectStudent} activeOpacity={0.85}>
+            <View style={[styles.roleIconWrap, { backgroundColor: '#ECFDF5' }]}>
+              <Ionicons name="school" size={28} color="#059669" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.roleCardTitle}>Öğrenci & Veli Paneli</Text>
+              <Text style={styles.roleCardDesc}>
+                Ödev bildirimleri, teslim durumları, ders programı ve öğretmen görüşleri.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+          </TouchableOpacity>
+
+          {/* 4. SÜPER ADMİN (GİZLİ SİSTEM SAHİBİ GİRİŞİ) */}
+          <TouchableOpacity
+            style={styles.superAdminTrigger}
+            onPress={() => setSuperAdminModalVisible(true)}
+          >
+            <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
+            <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans Yönetimi)</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
 
       {/* Okul Admini Giriş Modalı */}
       <Modal visible={showAdminLoginModal} animationType="fade" transparent>
@@ -435,6 +656,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Text style={styles.promptDesc}>
               Okul tanımlama, öğretmen ekleme ve çarşaf program yönetimi için giriş yapınız.
             </Text>
+
+            {activeInstitution && (
+              <View style={styles.modalInstBadge}>
+                <Ionicons name="business" size={14} color="#4338CA" />
+                <Text style={styles.modalInstBadgeText}>
+                  Kurum: <Text style={{ fontWeight: '800' }}>{activeInstitution.name}</Text>
+                </Text>
+              </View>
+            )}
 
             <View style={styles.trialInfoBox}>
               <Ionicons name="information-circle" size={16} color="#D97706" />
@@ -460,6 +690,20 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               onChangeText={setAdminPassword}
               secureTextEntry
             />
+
+            {/* Beni Hatırla Checkbox */}
+            <TouchableOpacity
+              style={styles.modalRememberRow}
+              activeOpacity={0.8}
+              onPress={() => setRememberMe(!rememberMe)}
+            >
+              <Ionicons
+                name={rememberMe ? 'checkbox' : 'square-outline'}
+                size={18}
+                color={rememberMe ? '#4F46E5' : Colors.textMuted}
+              />
+              <Text style={styles.modalRememberText}>Beni Hatırla (Oturumu açık tut)</Text>
+            </TouchableOpacity>
 
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
               <TouchableOpacity
@@ -495,6 +739,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Text style={styles.promptDesc}>
               Kurumsal veya bireysel olarak derslerinizi yönetin.
             </Text>
+
+            {activeInstitution && (
+              <View style={styles.modalInstBadge}>
+                <Ionicons name="business" size={14} color="#4338CA" />
+                <Text style={styles.modalInstBadgeText}>
+                  Kurum: <Text style={{ fontWeight: '800' }}>{activeInstitution.name}</Text>
+                </Text>
+              </View>
+            )}
 
             <View style={styles.trialInfoBoxBlue}>
               <Ionicons name="information-circle" size={16} color="#4F46E5" />
@@ -535,6 +788,20 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               onChangeText={setTeacherPassword}
               secureTextEntry
             />
+
+            {/* Beni Hatırla Checkbox */}
+            <TouchableOpacity
+              style={styles.modalRememberRow}
+              activeOpacity={0.8}
+              onPress={() => setRememberMe(!rememberMe)}
+            >
+              <Ionicons
+                name={rememberMe ? 'checkbox' : 'square-outline'}
+                size={18}
+                color={rememberMe ? '#4F46E5' : Colors.textMuted}
+              />
+              <Text style={styles.modalRememberText}>Beni Hatırla (Oturumu açık tut)</Text>
+            </TouchableOpacity>
 
             <View style={{ flexDirection: 'row', gap: 10, marginTop: 16 }}>
               <TouchableOpacity
@@ -620,6 +887,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           </View>
         </View>
       </Modal>
+
       {/* Sunucu Bağlantı Ayarları Modalı */}
       <Modal visible={serverSettingsModalVisible} animationType="fade" transparent>
         <View style={styles.promptOverlay}>
@@ -1001,5 +1269,205 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     marginTop: 4,
     lineHeight: 15,
+  },
+  // Kurum Doğrulama & Multi-Tenant Stilleri
+  instPromptCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  instIconWrap: {
+    width: 68,
+    height: 68,
+    borderRadius: 22,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  instTitle: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: Colors.text,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  instDesc: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+    marginBottom: 18,
+    lineHeight: 18,
+    paddingHorizontal: 10,
+  },
+  instInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    height: 52,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    marginBottom: 10,
+  },
+  instTextInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  quickChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    marginBottom: 14,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+  },
+  quickChipText: {
+    fontSize: 12,
+    color: '#3730A3',
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 18,
+    alignSelf: 'flex-start',
+  },
+  rememberText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  instSubmitBtn: {
+    width: '100%',
+    height: 50,
+    backgroundColor: Colors.primary,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  instSubmitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  activeInstBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  activeInstIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  activeInstName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  activeInstBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  activeInstBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#4338CA',
+  },
+  activeInstQuota: {
+    fontSize: 11,
+    color: '#059669',
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  switchInstBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#F5F3FF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    marginLeft: 6,
+  },
+  switchInstBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6D28D9',
+  },
+  modalInstBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 12,
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  modalInstBadgeText: {
+    fontSize: 12,
+    color: '#3730A3',
+  },
+  modalRememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    marginTop: 12,
+  },
+  modalRememberText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.textSecondary,
   },
 });

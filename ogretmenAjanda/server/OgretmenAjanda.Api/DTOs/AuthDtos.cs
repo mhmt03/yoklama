@@ -8,6 +8,22 @@ namespace OgretmenAjanda.Api.DTOs
         public string Username { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
         public string? SchoolCode { get; set; }
+        public string? InstitutionCode { get; set; } // Benzersiz Kurum Adı veya Kodu (örn: zafer-egitim)
+    }
+
+    public class InstitutionDto
+    {
+        public Guid Id { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public int MaxSchoolCount { get; set; }
+        public int CurrentSchoolCount { get; set; }
+        public string? ContactName { get; set; }
+        public string? ContactPhone { get; set; }
+        public string? ContactEmail { get; set; }
+        public DateTime? LicenseExpiresAt { get; set; }
+        public bool IsActive { get; set; }
+        public List<string> SchoolNames { get; set; } = new();
     }
 
     public class StudentLoginRequest
@@ -103,5 +119,30 @@ namespace OgretmenAjanda.Api.DTOs
         public Guid TargetId { get; set; } // SchoolId veya UserId veya Customer Admin Id
         public int AdditionalYears { get; set; } = 1;
         public bool IsActive { get; set; } = true;
+    }
+
+    public class CreateInstitutionRequest
+    {
+        public string Code { get; set; } = string.Empty; // Benzersiz Kurum Adı/Kodu
+        public string Name { get; set; } = string.Empty; // Kurum Resmi/Görünen Adı
+        public int MaxSchoolCount { get; set; } = 2; // Lisanslanan Max Okul Sayısı
+        public int AdditionalYears { get; set; } = 1;
+        public string? ContactName { get; set; }
+        public string? ContactPhone { get; set; }
+        public string? ContactEmail { get; set; }
+        public string? AdminUsername { get; set; }
+        public string? AdminPassword { get; set; }
+        public string? AdminFullName { get; set; }
+    }
+
+    public class UpdateInstitutionRequest
+    {
+        public string? Name { get; set; }
+        public int? MaxSchoolCount { get; set; }
+        public int? AdditionalYears { get; set; }
+        public bool? IsActive { get; set; }
+        public string? ContactName { get; set; }
+        public string? ContactPhone { get; set; }
+        public string? ContactEmail { get; set; }
     }
 }

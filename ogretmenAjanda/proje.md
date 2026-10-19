@@ -287,3 +287,16 @@
   - Tüm sayfalar yüklendikten sonra Program Denetimi ekranından tek tıkla (`auto-reconcile`) tüm okul programının bütünsel olarak dengelenmesi sağlandı.
 - [x] **Okul Yönetim Paneli Kart Birleştirme:**
   - "Yönettiğiniz Okullar" ve "Öğretmen Bağlantı Kodu" kartları tek bir kompakt kart (`combinedSchoolCard`) olarak birleştirildi; ekran alanı optimize edildi.
+
+### 📍 FAZ 9: Çok Kurumlu (Multi-Tenant) Mimari, Kurum Adı İle Giriş, Lisans & Okul Kotası Yönetimi
+- [x] **Kurum Adı / Kodu İle Giriş (Multi-Tenancy & Tenant Isolation):**
+  - İlk karşılama ekranına rol seçiminden önce "Kurum Adını Giriniz" doğrulama adımı eklendi (`RoleSelectScreen.tsx`).
+  - Kurum doğrulandıktan sonra rol seçim ekranının en üstünde aktif kurum adı, kodu, lisans durumu ve "Kurumu Değiştir ↺" butonu yerleştirildi.
+  - "Beni Hatırla" (Remember Me) altyapısı kurularak sonraki açılışlarda doğrudan ilgili kurumun ve kullanıcının paneline girilmesi sağlandı.
+  - Farklı şehirlerdeki aynı kullanıcı isimlerinin (örn: Afyon'daki `ahmetsahin` ile Uşak'taki `ahmetsahin`) çakışması `Institution.Code` / `CustomerId` bazlı bileşik indeksleme (`{ CustomerId, Username }`) ile kökten engellendi.
+- [x] **Lisans & Okul Kotası Yönetimi (Multi-School per Tenant):**
+  - Bir kurumun birden fazla okulu tek bir lisans çatısı altında yönetmesi sağlandı (`Institution` modeli: `MaxSchoolCount`).
+  - Kurum admininin açabileceği okul sayısı SuperAdmin'in lisans aşamasında belirlediği kota (`maxSchoolCount`) ile dinamik sınırlandırıldı (`POST /api/schools`).
+- [x] **Süper Admin Tam Yetki & Yönetim Paneli:**
+  - Süper Admin'e sistemdeki tüm kurumları ve tüm okulları tek merkezden görüntüleme, yeni kurum ve admin hesabı tanımlama, okul kotasını dilediği zaman artırıp azaltma, lisans uzatma ve silme yetkileri kazandırıldı (`SuperAdminScreen.tsx` & `SuperAdminController.cs`).
+  - Süper Admin sistem sahibi olduğu için herhangi bir kurum koduna bağlı olmadan doğrudan global giriş yapabilmektedir.

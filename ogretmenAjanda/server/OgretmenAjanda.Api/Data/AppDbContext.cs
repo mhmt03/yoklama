@@ -9,6 +9,7 @@ namespace OgretmenAjanda.Api.Data
         {
         }
 
+        public DbSet<Institution> Institutions => Set<Institution>();
         public DbSet<School> Schools => Set<School>();
         public DbSet<User> Users => Set<User>();
         public DbSet<Student> Students => Set<Student>();
@@ -26,15 +27,19 @@ namespace OgretmenAjanda.Api.Data
         {
             base.OnModelCreating(modelBuilder);
 
+            // Kurum Kodu Benzersiz (Unique)
+            modelBuilder.Entity<Institution>()
+                .HasIndex(i => i.Code)
+                .IsUnique();
+
             // Okul Kodu Benzersiz (Unique)
             modelBuilder.Entity<School>()
                 .HasIndex(s => s.Code)
                 .IsUnique();
 
-            // Kullanıcı adı Okul bazında veya globalde benzersiz
+            // Kullanıcı adı Kurum (CustomerId) bazında indeks
             modelBuilder.Entity<User>()
-                .HasIndex(u => u.Username)
-                .IsUnique();
+                .HasIndex(u => new { u.CustomerId, u.Username });
 
             // Öğrenci numarası aynı okul içinde benzersiz
             modelBuilder.Entity<Student>()

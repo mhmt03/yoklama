@@ -260,5 +260,162 @@ namespace OgretmenAjanda.Api.Controllers
 
             return Ok(logs);
         }
+
+        // --- KURUMLAR (INSTITUTIONS / TENANTS) YÖNETİMİ ---
+        [HttpGet("institutions")]
+        public async Task<IActionResult> GetAllInstitutions()
+        {
+            var institutions = await _context.Institutions
+                .OrderByDescending(i => i.CreatedAt)
+                .ToListAsync();
+
+            var result = new System.Collections.Generic.List<InstitutionDto>();
+
+            foreach (var inst in institutions)
+            {
+                var cleanCode = inst.Code.ToLower();
+                var schools = await _context.Schools
+                    .Where(s => (s.CustomerId != null && s.CustomerId.ToLower() == cleanCode) ||
+                                (inst.AdminUserId.HasValue && s.AdminUserId == inst.AdminUserId.Value))
+                    .ToListAsync();
+
+                result.Add(new InstitutionDto
+                {
+                    Id = inst.Id,
+                    Code = inst.Code,
+                    Name = inst.Name,
+                    MaxSchoolCount = inst.MaxSchoolCount,
+                    CurrentSchoolCount = schools.Count,
+                    ContactName = inst.ContactName,
+                    ContactPhone = inst.ContactPhone,
+                    ContactEmail = inst.ContactEmail,
+                    LicenseExpiresAt = inst.LicenseExpiresAt,
+                    IsActive = inst.IsActive,
+                    SchoolNames = schools.Select(s => $"{s.Name} ({s.Code})").ToList()
+                });
+            }
+
+            return Ok(result);
+        }
+
+        [HttpPost("institutions")]
+        public async Task<IActionResult> CreateInstitution([FromBody] CreateInstitutionRequest request)
+        {
+            var cleanCode = request.Code.Trim().ToLower();
+            if (string.IsNullOrEmpty(cleanCode) || string.IsNullOrEmpty(request.Name))
+            {
+                return BadRequest(new { message = "Kurum kodu ve kurum adı zorunludur." });
+            }
+
+            var exists = await _context.Institutions.AnyAsync(i => i.Code.ToLower() == cleanCode);
+            if (exists)
+            {
+                return BadRequest(new { message = "Bu kurum adı/kodu zaten sistemde kayıtlı. Lütfen benzersiz bir ad giriniz." });
+            }
+
+            var inst = new Institution
+            {
+                Id = Guid.NewGuid(),
+                Code = cleanCode,
+                Name = request.Name.Trim(),
+                MaxSchoolCount = request.MaxSchoolCount > 0 ? request.MaxSchoolCount : 1,
+                ContactName = request.ContactName,
+                ContactPhone = request.ContactPhone,
+                ContactEmail = request.ContactEmail,
+                CreatedAt = DateTime.UtcNow,
+                LicenseExpiresAt = DateTime.UtcNow.AddYears(request.AdditionalYears > 0 ? request.AdditionalYears : 1),
+                IsActive = true
+            };
+
+            // Eğer yönetici hesabı bilgisi verilmişse otomatik SchoolAdmin oluştur
+            if (!string.IsNullOrEmpty(request.AdminUsername) && !string.IsNullOrEmpty(request.AdminPassword))
+            {
+                var cleanAdminUser = request.AdminUsername.Trim().ToLower();
+                var adminUser = await _context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == cleanAdminUser);
+                if (adminUser == null)
+                {
+                    adminUser = new User
+                    {
+                        Id = Guid.NewGuid(),
+                        Username = cleanAdminUser,
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.AdminPassword),
+                        FullName = request.AdminFullName ?? $"{request.Name} Yöneticisi",
+                        Role = UserRoles.SchoolAdmin,
+                        CustomerId = cleanCode,
+                        RelationId = $"ILK-{Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper()}",
+                        CreatedAt = DateTime.UtcNow,
+                        LicenseExpiresAt = inst.LicenseExpiresAt,
+                        IsActive = true
+                    };
+                    await _context.Users.AddAsync(adminUser);
+                    inst.AdminUserId = adminUser.Id;
+                }
+                else
+                {
+                    adminUser.CustomerId = cleanCode;
+                    inst.AdminUserId = adminUser.Id;
+                }
+            }
+
+            await _context.Institutions.AddAsync(inst);
+            await _context.SaveChangesAsync();
+
+            return Ok(inst);
+        }
+
+        [HttpPut("institutions/{id}")]
+        public async Task<IActionResult> UpdateInstitution(Guid id, [FromBody] UpdateInstitutionRequest request)
+        {
+            var inst = await _context.Institutions.FindAsync(id);
+            if (inst == null)
+            {
+                return NotFound(new { message = "Kurum bulunamadı." });
+            }
+
+            if (!string.IsNullOrEmpty(request.Name)) inst.Name = request.Name.Trim();
+            if (request.MaxSchoolCount.HasValue && request.MaxSchoolCount.Value > 0) inst.MaxSchoolCount = request.MaxSchoolCount.Value;
+            if (request.IsActive.HasValue) inst.IsActive = request.IsActive.Value;
+            if (request.ContactName != null) inst.ContactName = request.ContactName;
+            if (request.ContactPhone != null) inst.ContactPhone = request.ContactPhone;
+            if (request.ContactEmail != null) inst.ContactEmail = request.ContactEmail;
+            if (request.AdditionalYears.HasValue && request.AdditionalYears.Value > 0)
+            {
+                var baseDate = (inst.LicenseExpiresAt.HasValue && inst.LicenseExpiresAt.Value > DateTime.UtcNow)
+                    ? inst.LicenseExpiresAt.Value
+                    : DateTime.UtcNow;
+                inst.LicenseExpiresAt = baseDate.AddYears(request.AdditionalYears.Value);
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(inst);
+        }
+
+        [HttpDelete("institutions/{id}")]
+        public async Task<IActionResult> DeleteInstitution(Guid id)
+        {
+            var inst = await _context.Institutions.FindAsync(id);
+            if (inst == null)
+            {
+                return NotFound(new { message = "Kurum bulunamadı." });
+            }
+
+            _context.Institutions.Remove(inst);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"Kurum ({inst.Name}) sistemden silindi." });
+        }
+
+        [HttpDelete("schools/{id}")]
+        public async Task<IActionResult> DeleteSchool(Guid id)
+        {
+            var school = await _context.Schools.FindAsync(id);
+            if (school == null)
+            {
+                return NotFound(new { message = "Okul bulunamadı." });
+            }
+
+            _context.Schools.Remove(school);
+            await _context.SaveChangesAsync();
+            return Ok(new { message = $"Okul ({school.Name}) sistemden silindi." });
+        }
     }
 }

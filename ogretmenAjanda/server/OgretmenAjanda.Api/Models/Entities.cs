@@ -14,6 +14,35 @@ namespace OgretmenAjanda.Api.Models
         public const string Student = "STUDENT";
     }
 
+    public class Institution
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required, MaxLength(100)]
+        public string Code { get; set; } = string.Empty; // Benzersiz Kurum Adı/Kodu (örn: zafer-egitim, MST-10001, afyonkoleji)
+
+        [Required, MaxLength(200)]
+        public string Name { get; set; } = string.Empty; // Kurum Resmi / Görünen Adı (örn: Zafer Eğitim Kurumları)
+
+        public int MaxSchoolCount { get; set; } = 2; // Superadmin tarafından lisanslanan açabileceği max okul sayısı
+
+        [MaxLength(100)]
+        public string? ContactName { get; set; }
+
+        [MaxLength(30)]
+        public string? ContactPhone { get; set; }
+
+        [MaxLength(150)]
+        public string? ContactEmail { get; set; }
+
+        public Guid? AdminUserId { get; set; } // Kurumun ana yönetici hesabı (Okul Admini)
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? LicenseExpiresAt { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
+
     public class School
     {
         [Key]

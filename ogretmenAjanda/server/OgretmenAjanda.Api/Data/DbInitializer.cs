@@ -66,6 +66,26 @@ namespace OgretmenAjanda.Api.Data
             }
             catch { }
 
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""Institutions"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""Code"" TEXT NOT NULL,
+                        ""Name"" TEXT NOT NULL,
+                        ""MaxSchoolCount"" INTEGER NOT NULL DEFAULT 2,
+                        ""ContactName"" TEXT,
+                        ""ContactPhone"" TEXT,
+                        ""ContactEmail"" TEXT,
+                        ""AdminUserId"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL,
+                        ""LicenseExpiresAt"" TEXT,
+                        ""IsActive"" INTEGER NOT NULL DEFAULT 1
+                    );
+                ");
+            }
+            catch { }
+
             // 1. Süper Admin: mehmetsuper / 1234 (veya mehmet / 123456)
             var superAdmin = await context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == "mehmetsuper");
             if (superAdmin == null)
@@ -84,6 +104,26 @@ namespace OgretmenAjanda.Api.Data
                 await context.Users.AddAsync(newSuperAdmin);
             }
 
+            // 1.1. Varsayılan Kurum (Müşteri): Zafer Eğitim Kurumları (zafer-egitim)
+            var defaultInst = await context.Institutions.FirstOrDefaultAsync(i => i.Code.ToLower() == "zafer-egitim" || i.Code == "MST-10001");
+            if (defaultInst == null)
+            {
+                defaultInst = new Institution
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "zafer-egitim",
+                    Name = "Zafer Eğitim Kurumları",
+                    MaxSchoolCount = 2, // Lisanslanan okul hakkı
+                    ContactName = "Mehmet Yönetici",
+                    ContactPhone = "0555 123 4567",
+                    ContactEmail = "info@zaferegitim.k12.tr",
+                    CreatedAt = DateTime.UtcNow,
+                    LicenseExpiresAt = DateTime.UtcNow.AddYears(1),
+                    IsActive = true
+                };
+                await context.Institutions.AddAsync(defaultInst);
+            }
+
             // 2. Okul Admini (Müşteri): mehmetadmin / 1234 (1 Yıllık Deneme Lisansı)
             var schoolAdmin = await context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == "mehmetadmin");
             if (schoolAdmin == null)
@@ -95,19 +135,21 @@ namespace OgretmenAjanda.Api.Data
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword("1234"),
                     FullName = "Mehmet (Okul Müdürü & Müşteri)",
                     Role = UserRoles.SchoolAdmin,
-                    CustomerId = "MST-10001",
+                    CustomerId = "zafer-egitim",
                     RelationId = "ILK-10001",
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow,
                     LicenseExpiresAt = DateTime.UtcNow.AddYears(1) // Deneme sürecinde 1 yıllık süre
                 };
                 await context.Users.AddAsync(schoolAdmin);
+                defaultInst.AdminUserId = schoolAdmin.Id;
             }
             else
             {
-                if (string.IsNullOrEmpty(schoolAdmin.CustomerId)) schoolAdmin.CustomerId = "MST-10001";
+                if (string.IsNullOrEmpty(schoolAdmin.CustomerId) || schoolAdmin.CustomerId == "MST-10001") schoolAdmin.CustomerId = "zafer-egitim";
                 if (string.IsNullOrEmpty(schoolAdmin.RelationId)) schoolAdmin.RelationId = "ILK-10001";
                 if (!schoolAdmin.LicenseExpiresAt.HasValue) schoolAdmin.LicenseExpiresAt = DateTime.UtcNow.AddYears(1);
+                defaultInst.AdminUserId = schoolAdmin.Id;
             }
 
             // 3. Varsayılan Deneme Okulu 1: Atatürk Anadolu Lisesi (OKL-10001)
@@ -120,7 +162,7 @@ namespace OgretmenAjanda.Api.Data
                     Name = "Atatürk Anadolu Lisesi",
                     Code = "OKL-10001",
                     AdminUserId = schoolAdmin.Id,
-                    CustomerId = "MST-10001",
+                    CustomerId = "zafer-egitim",
                     RelationId = "ILK-10001",
                     Address = "Merkez Mah. Okul Cad. No:1",
                     Phone = "0212 555 0101",
@@ -132,7 +174,7 @@ namespace OgretmenAjanda.Api.Data
             }
             else
             {
-                if (string.IsNullOrEmpty(testSchool.CustomerId)) testSchool.CustomerId = "MST-10001";
+                testSchool.CustomerId = "zafer-egitim";
                 if (string.IsNullOrEmpty(testSchool.RelationId)) testSchool.RelationId = "ILK-10001";
                 testSchool.AdminUserId = schoolAdmin.Id;
             }
@@ -147,7 +189,7 @@ namespace OgretmenAjanda.Api.Data
                     Name = "Cumhuriyet Fen Lisesi",
                     Code = "OKL-10002",
                     AdminUserId = schoolAdmin.Id,
-                    CustomerId = "MST-10001",
+                    CustomerId = "zafer-egitim",
                     RelationId = "ILK-10001",
                     Address = "Gazi Cad. No:45",
                     Phone = "0212 555 0202",
@@ -159,7 +201,7 @@ namespace OgretmenAjanda.Api.Data
             }
             else
             {
-                if (string.IsNullOrEmpty(testSchool2.CustomerId)) testSchool2.CustomerId = "MST-10001";
+                testSchool2.CustomerId = "zafer-egitim";
                 if (string.IsNullOrEmpty(testSchool2.RelationId)) testSchool2.RelationId = "ILK-10001";
                 testSchool2.AdminUserId = schoolAdmin.Id;
             }
@@ -176,6 +218,7 @@ namespace OgretmenAjanda.Api.Data
                     FullName = "Mehmet Öğretmen (Fizik)",
                     Role = UserRoles.Teacher,
                     SchoolId = testSchool.Id,
+                    CustomerId = "zafer-egitim",
                     RelationId = "ILK-10001",
                     IsActive = true,
                     CreatedAt = DateTime.UtcNow,
@@ -185,6 +228,7 @@ namespace OgretmenAjanda.Api.Data
             }
             else
             {
+                teacher.CustomerId = "zafer-egitim";
                 if (string.IsNullOrEmpty(teacher.RelationId)) teacher.RelationId = "ILK-10001";
                 teacher.SchoolId = testSchool.Id;
             }

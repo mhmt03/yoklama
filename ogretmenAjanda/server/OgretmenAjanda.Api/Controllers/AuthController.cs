@@ -25,11 +25,93 @@ namespace OgretmenAjanda.Api.Controllers
             _tokenService = tokenService;
         }
 
+        [AllowAnonymous]
+        [HttpGet("lookup-institution/{code}")]
+        public async Task<IActionResult> LookupInstitution(string code)
+        {
+            var clean = (code ?? string.Empty).Trim().ToLower();
+            if (string.IsNullOrEmpty(clean))
+            {
+                return BadRequest(new { success = false, message = "Lütfen bir kurum kodu veya adı giriniz." });
+            }
+
+            var inst = await _context.Institutions
+                .FirstOrDefaultAsync(i => i.Code.ToLower() == clean || i.Name.ToLower() == clean);
+
+            if (inst == null)
+            {
+                // Fallback: Belki CustomerId olarak okullarda kayıtlıdır
+                var schoolMatch = await _context.Schools
+                    .FirstOrDefaultAsync(s => s.CustomerId != null && s.CustomerId.ToLower() == clean);
+                if (schoolMatch != null)
+                {
+                    return Ok(new
+                    {
+                        success = true,
+                        data = new
+                        {
+                            code = schoolMatch.CustomerId,
+                            name = schoolMatch.Name,
+                            maxSchoolCount = 2,
+                            isActive = schoolMatch.IsActive,
+                            isExpired = schoolMatch.LicenseExpiresAt.HasValue && schoolMatch.LicenseExpiresAt.Value < DateTime.UtcNow
+                        }
+                    });
+                }
+
+                return NotFound(new { success = false, message = "Belirtilen ada veya koda sahip bir kurum bulunamadı. Lütfen kontrol ediniz." });
+            }
+
+            var isExpired = inst.LicenseExpiresAt.HasValue && inst.LicenseExpiresAt.Value < DateTime.UtcNow;
+
+            return Ok(new
+            {
+                success = true,
+                data = new
+                {
+                    code = inst.Code,
+                    name = inst.Name,
+                    maxSchoolCount = inst.MaxSchoolCount,
+                    isActive = inst.IsActive,
+                    isExpired
+                }
+            });
+        }
+
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.Username.ToLower() == request.Username.Trim().ToLower());
+            var cleanUsername = request.Username.Trim().ToLower();
+            var cleanInst = request.InstitutionCode?.Trim().ToLower();
+
+            User? user = null;
+
+            if (!string.IsNullOrEmpty(cleanInst))
+            {
+                // Kurum Kodu ile eşleşen kullanıcı (SuperAdmin hariç kullanıcı adı çakışmalarını önler)
+                user = await _context.Users.FirstOrDefaultAsync(u =>
+                    u.Username.ToLower() == cleanUsername &&
+                    (u.Role == UserRoles.SuperAdmin ||
+                     (u.CustomerId != null && u.CustomerId.ToLower() == cleanInst) ||
+                     (u.RelationId != null && u.RelationId.ToLower() == cleanInst)));
+
+                if (user == null)
+                {
+                    // Okulun CustomerId'si üzerinden kontrol
+                    var matchingSchoolIds = await _context.Schools
+                        .Where(s => s.CustomerId != null && s.CustomerId.ToLower() == cleanInst)
+                        .Select(s => s.Id)
+                        .ToListAsync();
+
+                    user = await _context.Users.FirstOrDefaultAsync(u =>
+                        u.Username.ToLower() == cleanUsername &&
+                        ((u.SchoolId.HasValue && matchingSchoolIds.Contains(u.SchoolId.Value)) || u.Role == UserRoles.SuperAdmin));
+                }
+            }
+            else
+            {
+                user = await _context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == cleanUsername);
+            }
 
             if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             {

@@ -153,25 +153,34 @@ namespace OgretmenAjanda.Api.Controllers
                 return Forbid();
             }
 
-            var count = await _context.Schools.CountAsync(s => s.AdminUserId == CurrentUserId);
-            if (count >= 3 && CurrentUserRole != UserRoles.SuperAdmin)
+            var adminUser = await _context.Users.FindAsync(CurrentUserId);
+            var customerId = adminUser?.CustomerId ?? $"MST-{Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper()}";
+            var relationId = adminUser?.RelationId ?? $"ILK-{Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper()}";
+
+            // Kurum Lisansı ve Max Okul Sayısı Kontrolü
+            var institution = await _context.Institutions
+                .FirstOrDefaultAsync(i => (!string.IsNullOrEmpty(customerId) && i.Code.ToLower() == customerId.ToLower()) || (adminUser != null && i.AdminUserId == adminUser.Id));
+
+            int maxAllowed = institution?.MaxSchoolCount ?? 2;
+            var count = await _context.Schools.CountAsync(s => 
+                s.AdminUserId == CurrentUserId || 
+                (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId)
+            );
+
+            if (count >= maxAllowed && CurrentUserRole != UserRoles.SuperAdmin)
             {
-                return BadRequest(new { message = "Bir hesapla en fazla 3 okul yönetebilirsiniz." });
+                return BadRequest(new { message = $"Kurumunuzun lisansı en fazla {maxAllowed} okul açmaya izin vermektedir. Lisans sınırına ulaştınız ({count}/{maxAllowed}). Daha fazla okul açmak için sistem yöneticisi (SuperAdmin) ile iletişime geçiniz." });
             }
 
             // Rastgele 8 haneli benzersiz okul kodu oluştur: Örn: OKL-8F3A2
             var randomPart = Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper();
             var schoolCode = $"OKL-{randomPart}";
 
-            var adminUser = await _context.Users.FindAsync(CurrentUserId);
-            var customerId = adminUser?.CustomerId ?? $"MST-{Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper()}";
-            var relationId = adminUser?.RelationId ?? $"ILK-{Guid.NewGuid().ToString("N").Substring(0, 5).ToUpper()}";
-
             if (adminUser != null)
             {
                 if (string.IsNullOrEmpty(adminUser.CustomerId)) adminUser.CustomerId = customerId;
                 if (string.IsNullOrEmpty(adminUser.RelationId)) adminUser.RelationId = relationId;
-                if (!adminUser.LicenseExpiresAt.HasValue) adminUser.LicenseExpiresAt = DateTime.UtcNow.AddYears(1);
+                if (!adminUser.LicenseExpiresAt.HasValue) adminUser.LicenseExpiresAt = institution?.LicenseExpiresAt ?? DateTime.UtcNow.AddYears(1);
             }
 
             var school = new School
