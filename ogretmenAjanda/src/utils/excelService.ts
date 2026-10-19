@@ -1426,32 +1426,55 @@ export const generateYearlyPlanTemplateExcel = async (
 };
 
 /**
+ * Verilen Excel belgesindeki tüm çalışma sayfalarının (Sheet) adlarını döndürür.
+ */
+export const getWorkbookSheetNames = async (
+  asset: DocumentPicker.DocumentPickerAsset
+): Promise<string[]> => {
+  try {
+    const workbook = await readWorkbookFromAsset(asset);
+    return workbook.SheetNames || [];
+  } catch (err) {
+    console.warn('getWorkbookSheetNames hatası:', err);
+    return [];
+  }
+};
+
+/**
  * Kullanıcının seçtiği Excel dosyasından yıllık plan satırlarını okur,
  * hücrelerdeki kodlu cümleleri ayıklar ve haftalık ders saatine göre homojen dağıtır.
  */
-export const pickAndParseYearlyPlanExcel = async (): Promise<ParsedYearlyPlanRow[]> => {
-  const result = await DocumentPicker.getDocumentAsync({
-    type: [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-      'application/octet-stream',
-      '*/*',
-    ],
-    copyToCacheDirectory: true,
-  });
+export const pickAndParseYearlyPlanExcel = async (
+  selectedSheetName?: string,
+  providedAsset?: DocumentPicker.DocumentPickerAsset
+): Promise<ParsedYearlyPlanRow[]> => {
+  let asset = providedAsset;
+  if (!asset) {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/octet-stream',
+        '*/*',
+      ],
+      copyToCacheDirectory: true,
+    });
 
-  if (result.canceled || !result.assets || result.assets.length === 0) {
-    return [];
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      return [];
+    }
+    asset = result.assets[0];
   }
 
-  const asset = result.assets[0];
   const workbook = await readWorkbookFromAsset(asset);
 
-  // İlk çalışma sayfasını al
-  const sheetName = workbook.SheetNames[0];
+  const sheetName = (selectedSheetName && workbook.SheetNames.includes(selectedSheetName))
+    ? selectedSheetName
+    : workbook.SheetNames[0];
+
   const worksheet = workbook.Sheets[sheetName];
   if (!worksheet) {
-    throw new Error('Excel dosyasında geçerli bir sayfa bulunamadı.');
+    throw new Error(`Excel dosyasında "${sheetName}" geçerli bir sayfa bulunamadı.`);
   }
 
   const rawRows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
@@ -1559,25 +1582,30 @@ export const pickAndParseYearlyPlanExcel = async (): Promise<ParsedYearlyPlanRow
  * ParsedYearlyPlanRow[] formatına uyarlar.
  */
 export const pickAndAdaptYearlyPlanExcelWithAi = async (
-  weeklyHours: number = 4
+  weeklyHours: number = 4,
+  selectedSheetName?: string,
+  providedAsset?: DocumentPicker.DocumentPickerAsset
 ): Promise<ParsedYearlyPlanRow[]> => {
-  const result = await DocumentPicker.getDocumentAsync({
-    type: [
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/msword',
-      'application/octet-stream',
-      '*/*',
-    ],
-    copyToCacheDirectory: true,
-  });
+  let asset = providedAsset;
+  if (!asset) {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: [
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/msword',
+        'application/octet-stream',
+        '*/*',
+      ],
+      copyToCacheDirectory: true,
+    });
 
-  if (result.canceled || !result.assets || result.assets.length === 0) {
-    return [];
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      return [];
+    }
+    asset = result.assets[0];
   }
 
-  const asset = result.assets[0];
   const fileName = (asset.name || '').toLowerCase();
 
   // Word (.docx) dosyası seçilmişse:
@@ -1600,15 +1628,18 @@ export const pickAndAdaptYearlyPlanExcelWithAi = async (
   // Excel dosyası seçilmişse:
   const workbook = await readWorkbookFromAsset(asset);
 
-  const sheetName = workbook.SheetNames[0];
+  const sheetName = (selectedSheetName && workbook.SheetNames.includes(selectedSheetName))
+    ? selectedSheetName
+    : workbook.SheetNames[0];
+
   const worksheet = workbook.Sheets[sheetName];
   if (!worksheet) {
-    throw new Error('Excel dosyasında geçerli bir sayfa bulunamadı.');
+    throw new Error(`Excel dosyasında "${sheetName}" geçerli bir sayfa bulunamadı.`);
   }
 
   const rawRows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
   if (rawRows.length < 2) {
-    throw new Error('Excel dosyasında veri satırı bulunamadı.');
+    throw new Error(`Excel dosyasının "${sheetName}" sayfasında veri satırı bulunamadı.`);
   }
 
   const { adaptYearlyPlanExcelWithGemini } = await import('./geminiScheduleService');

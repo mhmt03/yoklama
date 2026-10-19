@@ -2964,10 +2964,39 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       if (fileRes.canceled || !fileRes.assets?.[0]) return;
 
       const asset = fileRes.assets[0];
+      const fileName = (asset.name || '').toLowerCase();
+
+      let targetSheet: string | undefined = undefined;
+      if (!fileName.endsWith('.docx') && !fileName.endsWith('.doc')) {
+        const { getWorkbookSheetNames } = await import('../utils/excelService');
+        const sheetNames = await getWorkbookSheetNames(asset as any);
+        if (sheetNames.length > 1) {
+          const selected = await new Promise<string | null>((resolve) => {
+            const buttons: any[] = sheetNames.slice(0, 5).map((s) => ({
+              text: s,
+              onPress: () => resolve(s),
+            }));
+            buttons.push({
+              text: 'Vazgeç',
+              style: 'cancel',
+              onPress: () => resolve(null),
+            });
+            Alert.alert(
+              'Çalışma Sayfası (Sheet) Seçin 📑',
+              `"${asset.name}" dosyasında birden fazla sayfa bulundu. Hangi sayfadaki planı aktarmak istiyorsunuz?`,
+              buttons
+            );
+          });
+
+          if (!selected) return;
+          targetSheet = selected;
+        }
+      }
+
       setAnalyzingPlanFile(true);
       setYearlyPlanModalVisible(true);
 
-      const analysis = await analyzeUploadedDocument(asset as any);
+      const analysis = await analyzeUploadedDocument(asset as any, targetSheet);
       setDocAnalysis(analysis);
       setSelectedMapping(analysis.suggestedMapping);
     } catch (e: any) {

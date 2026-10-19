@@ -26,6 +26,8 @@ export interface DocumentAnalysisResult {
   columns: RawColumnInfo[];
   suggestedMapping: ColumnMappingSelection;
   aiReason?: string;
+  sheetName?: string;
+  availableSheets?: string[];
 }
 
 /**
@@ -278,11 +280,14 @@ Yanıtını SADECE şu JSON şemasında döndür:
  * Yüklenen Word veya Excel dosyasını tarar, başlık satırını bulur ve sütunları hazırlar.
  */
 export const analyzeUploadedDocument = async (
-  asset: DocumentPickerAsset
+  asset: DocumentPickerAsset,
+  selectedSheetName?: string
 ): Promise<DocumentAnalysisResult> => {
   const fileName = asset.name || 'Belge';
   const isDocx = fileName.toLowerCase().endsWith('.docx');
   let rawRows: any[][] = [];
+  let availableSheets: string[] = [];
+  let currentSheetName: string | undefined;
 
   if (isDocx) {
     rawRows = await extractTableRowsFromDocx(asset.uri);
@@ -290,10 +295,14 @@ export const analyzeUploadedDocument = async (
     // Excel okuma
     const { readWorkbookFromAsset } = await import('./excelService');
     const workbook = await readWorkbookFromAsset(asset);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+    availableSheets = workbook.SheetNames || [];
+    currentSheetName = selectedSheetName && availableSheets.includes(selectedSheetName)
+      ? selectedSheetName
+      : availableSheets[0];
+
+    const worksheet = workbook.Sheets[currentSheetName];
     if (!worksheet) {
-      throw new Error('Excel dosyasında geçerli bir sayfa bulunamadı.');
+      throw new Error(`Excel dosyasında "${currentSheetName}" geçerli bir sayfa bulunamadı.`);
     }
     rawRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
   }
@@ -388,6 +397,8 @@ export const analyzeUploadedDocument = async (
     columns,
     suggestedMapping: mapping,
     aiReason: reason,
+    sheetName: currentSheetName,
+    availableSheets,
   };
 };
 

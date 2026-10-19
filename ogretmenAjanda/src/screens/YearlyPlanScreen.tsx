@@ -40,6 +40,7 @@ import {
   pickAndAdaptYearlyPlanExcelWithAi,
   exportYearlyPlanToExcel,
   ParsedYearlyPlanRow,
+  getWorkbookSheetNames,
 } from '../utils/excelService';
 import * as DocumentPicker from 'expo-document-picker';
 import {
@@ -105,6 +106,12 @@ export const YearlyPlanScreen: React.FC = () => {
   const [activePickerField, setActivePickerField] = useState<
     'topic' | 'outcomes' | 'date' | 'week' | 'hours' | null
   >(null);
+
+  // Excel Sheet (Çalışma Sayfası) Seçim State
+  const [sheetPickerVisible, setSheetPickerVisible] = useState(false);
+  const [sheetPickerSheets, setSheetPickerSheets] = useState<string[]>([]);
+  const [pendingExcelAsset, setPendingExcelAsset] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+  const [pendingImportType, setPendingImportType] = useState<'mapping' | 'ai' | 'standard'>('mapping');
 
   // PDF Document State
   const [pdfDoc, setPdfDoc] = useState<YearlyPlanDocument | null>(null);
@@ -499,6 +506,46 @@ export const YearlyPlanScreen: React.FC = () => {
     setBulkModalVisible(true);
   };
 
+  const handleSheetSelected = async (selectedSheet: string) => {
+    setSheetPickerVisible(false);
+    if (!pendingExcelAsset) return;
+
+    try {
+      setLoadingExcel(true);
+      if (pendingImportType === 'mapping') {
+        setExcelLoadingMsg(`"${selectedSheet}" sayfası ve yapay zeka önerileri taranıyor...`);
+        const analysis = await analyzeUploadedDocument(pendingExcelAsset, selectedSheet);
+        setDocAnalysis(analysis);
+        setUserMapping(analysis.suggestedMapping);
+        setParsedRows([]);
+        setIsAiPlanMode(true);
+        setBulkModalVisible(true);
+      } else if (pendingImportType === 'ai') {
+        const weeklyHours = scheduleInfo?.totalWeeklyHours || 4;
+        setExcelLoadingMsg(`"${selectedSheet}" sayfası yapay zeka (Gemini AI) ile taranıyor...`);
+        const rows = await pickAndAdaptYearlyPlanExcelWithAi(weeklyHours, selectedSheet, pendingExcelAsset);
+        if (rows.length > 0) {
+          setIsAiPlanMode(true);
+          setParsedRows(rows);
+          setBulkModalVisible(true);
+        }
+      } else {
+        setExcelLoadingMsg(`"${selectedSheet}" sayfası okunuyor...`);
+        const rows = await pickAndParseYearlyPlanExcel(selectedSheet, pendingExcelAsset);
+        if (rows.length > 0) {
+          setIsAiPlanMode(false);
+          setParsedRows(rows);
+          setBulkModalVisible(true);
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Sayfa Okuma Hatası', err?.message || 'Seçilen sayfa okunamadı.');
+    } finally {
+      setLoadingExcel(false);
+      setPendingExcelAsset(null);
+    }
+  };
+
   // Dinamik Sütun Eşleştirme için Belge (Word / Excel) Seçimi
   const handlePickDocumentForMapping = async () => {
     try {
@@ -530,6 +577,19 @@ export const YearlyPlanScreen: React.FC = () => {
           'Seçtiğiniz dosya eski Word (.doc) formatındadır. Tablo analizi için lütfen dosyayı Word programında "Farklı Kaydet" yaparak .docx formatında kaydedip tekrar seçiniz.'
         );
         return;
+      }
+
+      // Eğer Excel dosyasıysa birden fazla sheet olup olmadığını kontrol et
+      if (!fileName.endsWith('.docx')) {
+        const sheetNames = await getWorkbookSheetNames(asset);
+        if (sheetNames.length > 1) {
+          setPendingExcelAsset(asset);
+          setPendingImportType('mapping');
+          setSheetPickerSheets(sheetNames);
+          setLoadingExcel(false);
+          setSheetPickerVisible(true);
+          return;
+        }
       }
 
       setExcelLoadingMsg('Tablo sütunları ve yapay zeka önerileri taranıyor...');
@@ -631,9 +691,37 @@ export const YearlyPlanScreen: React.FC = () => {
 
   const handlePickExcel = async () => {
     try {
-      setExcelLoadingMsg('Excel dosyası okunuyor...');
+      setExcelLoadingMsg('Excel dosyası seçiliyor...');
       setLoadingExcel(true);
-      const rows = await pickAndParseYearlyPlanExcel();
+
+      const fileRes = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'application/octet-stream',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (fileRes.canceled || !fileRes.assets?.[0]) {
+        setLoadingExcel(false);
+        return;
+      }
+
+      const asset = fileRes.assets[0];
+      const sheetNames = await getWorkbookSheetNames(asset);
+      if (sheetNames.length > 1) {
+        setPendingExcelAsset(asset);
+        setPendingImportType('standard');
+        setSheetPickerSheets(sheetNames);
+        setLoadingExcel(false);
+        setSheetPickerVisible(true);
+        return;
+      }
+
+      setExcelLoadingMsg('Excel dosyası okunuyor...');
+      const rows = await pickAndParseYearlyPlanExcel(undefined, asset);
       if (rows.length === 0) {
         setLoadingExcel(false);
         return;
@@ -682,11 +770,46 @@ export const YearlyPlanScreen: React.FC = () => {
     const weeklyHours = scheduleInfo?.totalWeeklyHours || 4;
 
     try {
+      setExcelLoadingMsg('Yıllık plan belgesi seçiliyor...');
+      setLoadingExcel(true);
+
+      const fileRes = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/msword',
+          'application/octet-stream',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (fileRes.canceled || !fileRes.assets?.[0]) {
+        setLoadingExcel(false);
+        return;
+      }
+
+      const asset = fileRes.assets[0];
+      const fileName = (asset.name || '').toLowerCase();
+
+      // Excel ise birden fazla sheet olup olmadığına bak
+      if (!fileName.endsWith('.docx') && !fileName.endsWith('.doc')) {
+        const sheetNames = await getWorkbookSheetNames(asset);
+        if (sheetNames.length > 1) {
+          setPendingExcelAsset(asset);
+          setPendingImportType('ai');
+          setSheetPickerSheets(sheetNames);
+          setLoadingExcel(false);
+          setSheetPickerVisible(true);
+          return;
+        }
+      }
+
       setExcelLoadingMsg(
         'Yıllık plan belgesi (Excel / Word) yapay zeka (Gemini AI) ile taranıyor...\nFarklı sütun ve tablo başlıkları sınıf defterine uygun hale getiriliyor.'
       );
-      setLoadingExcel(true);
-      const rows = await pickAndAdaptYearlyPlanExcelWithAi(weeklyHours);
+      const rows = await pickAndAdaptYearlyPlanExcelWithAi(weeklyHours, undefined, asset);
       if (rows.length === 0) {
         setLoadingExcel(false);
         return;
@@ -1189,6 +1312,7 @@ export const YearlyPlanScreen: React.FC = () => {
                         {docAnalysis.fileName}
                       </Text>
                       <Text style={styles.mappingDocStats}>
+                        {docAnalysis.sheetName ? `📑 Sayfa: ${docAnalysis.sheetName} • ` : ''}
                         {docAnalysis.columns.length} Sütun Tespit Edildi • {docAnalysis.rawRows.length} Satır
                       </Text>
                     </View>
@@ -1576,6 +1700,73 @@ export const YearlyPlanScreen: React.FC = () => {
                   loading={loadingExcel}
                 />
               ) : null}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* EXCEL SHEET (ÇALIŞMA SAYFASI) SEÇİM MODALI */}
+      <Modal visible={sheetPickerVisible} animationType="fade" transparent onRequestClose={() => setSheetPickerVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContainer, { maxWidth: 460 }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="layers" size={24} color="#7C3AED" />
+                <View>
+                  <Text style={styles.modalTitle}>Çalışma Sayfası (Sheet) Seçin</Text>
+                  <Text style={styles.modalSub}>
+                    {pendingExcelAsset?.name || 'Excel Belgesi'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setSheetPickerVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ paddingVertical: 12 }}>
+              <View style={{ backgroundColor: '#EEF2FF', padding: 10, borderRadius: 8, marginBottom: 12 }}>
+                <Text style={{ fontSize: 12, color: '#4338CA', lineHeight: 17 }}>
+                  💡 Bu Excel dosyasında birden fazla sayfa bulundu. Yıllık plan verilerini almak istediğiniz sayfaya dokununuz:
+                </Text>
+              </View>
+
+              <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+                {sheetPickerSheets.map((sheet, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: '#F8FAFC',
+                      borderWidth: 1,
+                      borderColor: '#E2E8F0',
+                      borderRadius: 10,
+                      padding: 14,
+                      marginBottom: 8,
+                    }}
+                    onPress={() => handleSheetSelected(sheet)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <Ionicons name="document-text-outline" size={20} color="#7C3AED" />
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E293B' }}>
+                        {sheet}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={{ marginTop: 8 }}>
+              <Button
+                title="Vazgeç"
+                variant="outline"
+                onPress={() => setSheetPickerVisible(false)}
+              />
             </View>
           </View>
         </View>
