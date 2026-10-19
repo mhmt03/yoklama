@@ -27,9 +27,17 @@ namespace OgretmenAjanda.Api.Controllers
             _context = context;
         }
 
+        private string CurrentUserRole => User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? string.Empty;
+        private bool IsTeacher => string.Equals(CurrentUserRole, UserRoles.Teacher, StringComparison.OrdinalIgnoreCase);
+
         [HttpPost("student-photo")]
         public async Task<IActionResult> UploadStudentPhoto([FromForm] IFormFile file, [FromForm] string schoolCode, [FromForm] string studentNumber)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler öğrenci fotoğrafı yükleme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             if (file == null || file.Length == 0)
             {
                 return BadRequest(new { message = "Geçersiz dosya." });
@@ -72,6 +80,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPost("student-photo-base64")]
         public async Task<IActionResult> UploadStudentPhotoBase64([FromBody] Base64PhotoUploadRequest request)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler öğrenci fotoğrafı yükleme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             if (string.IsNullOrWhiteSpace(request.Base64Data))
             {
                 return BadRequest(new { message = "Görsel verisi boş." });
@@ -121,6 +134,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPost("batch-student-photos")]
         public async Task<IActionResult> BatchUploadStudentPhotos([FromBody] BatchStudentPhotoUploadRequest request)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler öğrenci fotoğrafı yükleme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             if (request.Photos == null || !request.Photos.Any())
             {
                 return BadRequest(new { message = "Yüklenecek fotoğraf listesi boş." });

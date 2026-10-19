@@ -614,6 +614,10 @@ export const ClassDetailScreen: React.FC = () => {
   };
 
   const handleOpenEdit = (s: Student) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Öğrenci bilgileri ve fotoğrafı yalnızca okul idaresi tarafından düzenlenebilir.');
+      return;
+    }
     setEditingStudent(s);
     setStudentNoInput(s.student_number);
     setFirstNameInput(s.first_name);

@@ -20,6 +20,8 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { getClasses, createClass } from '../database/operations/classOperations';
+import { getActiveSchool } from '../database/operations/schoolOperations';
+import { getActiveUserRole } from '../utils/roleService';
 import {
   getAllStudentsWithClass,
   StudentWithClass,
@@ -94,18 +96,23 @@ export const ReportsScreen: React.FC = () => {
   const [pdfExtractItems, setPdfExtractItems] = useState<PdfExtractedStudentPhoto[]>([]);
   const [pdfExtracting, setPdfExtracting] = useState(false);
   const [savingPdfPhotos, setSavingPdfPhotos] = useState(false);
+  const [isSchoolTeacher, setIsSchoolTeacher] = useState(false);
 
   // Load Data
   const loadData = async () => {
     try {
-      const [fetchedClasses, fetchedStudents, fetchedGradeLevels] = await Promise.all([
+      const [fetchedClasses, fetchedStudents, fetchedGradeLevels, activeSchoolObj, userRole] = await Promise.all([
         getClasses(),
         getAllStudentsWithClass(),
         getGradeLevels(),
+        getActiveSchool(),
+        getActiveUserRole(),
       ]);
       setClasses(fetchedClasses);
       setAllStudents(fetchedStudents);
       setSystemGradeLevels(fetchedGradeLevels);
+      const teacherInSchool = userRole === 'teacher' && !!activeSchoolObj;
+      setIsSchoolTeacher(teacherInSchool);
     } catch (e) {
       console.warn('Error loading reporting data:', e);
     }
@@ -403,6 +410,10 @@ export const ReportsScreen: React.FC = () => {
 
   // Template Download
   const handleDownloadTemplate = async () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Öğrenci şablonu indirme ve yükleme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     try {
       setLoading(true);
       await generateStudentTemplateExcel();
@@ -414,6 +425,10 @@ export const ReportsScreen: React.FC = () => {
   };
   // AI All-School Bulk Student Import (Filters only active teacher classes)
   const handleAllSchoolAiImport = async () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Şube ve öğrenci listesi yükleme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     try {
       if (classes.length === 0) {
         Alert.alert(
@@ -574,6 +589,10 @@ export const ReportsScreen: React.FC = () => {
 
   // Bulk Student Import
   const handleBulkImportStudents = async () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Excel ile öğrenci yükleme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     try {
       setLoading(true);
       const parsed = await pickAndParseStudentsExcel();
@@ -650,6 +669,10 @@ export const ReportsScreen: React.FC = () => {
 
   // Manual Student Add Handlers
   const handleOpenManualAddStudent = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Öğrenci ekleme yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     if (classes.length === 0) {
       Alert.alert(
         'Kayıtlı Şube Yok',
@@ -704,6 +727,10 @@ export const ReportsScreen: React.FC = () => {
 
   // PDF Photo Handlers
   const handleStartPdfPhoto = () => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Öğrenci fotoğrafı aktarma yetkisi yalnızca okul idaresindedir.');
+      return;
+    }
     if (allStudents.length === 0) {
       Alert.alert('Bilgi', 'Sistemde kayıtlı öğrenci bulunmuyor. Önce öğrencileri sisteme yükleyiniz.');
       return;
@@ -1009,143 +1036,145 @@ export const ReportsScreen: React.FC = () => {
           </Card>
         </TouchableOpacity>
 
-        {/* 6. ŞUBE & ÖĞRENCİ İŞLEMLERİ */}
-        <View style={styles.templateSection}>
-          <Text style={styles.sectionHeader}>Şube & Öğrenci İşlemleri</Text>
+        {/* 6. ŞUBE & ÖĞRENCİ İŞLEMLERİ (Okula bağlı öğretmenler için gizlenir) */}
+        {!isSchoolTeacher && (
+          <View style={styles.templateSection}>
+            <Text style={styles.sectionHeader}>Şube & Öğrenci İşlemleri</Text>
 
-          {/* 1. TÜM OKUL LİSTESİ - YAPAY ZEKA DESTEKLİ VE ŞUBE FİLTRELİ */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={handleAllSchoolAiImport}
-            disabled={loading}
-          >
-            <Card style={[styles.reportCard, { backgroundColor: '#FAF5FF', borderColor: '#D8B4FE', borderWidth: 1.5 }]}>
-              <View style={styles.cardRow}>
-                <View style={[styles.iconWrap, { backgroundColor: '#F3E8FF' }]}>
-                  <Ionicons name="sparkles" size={24} color="#7C3AED" />
-                </View>
-                <View style={styles.cardTextWrap}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <Text style={[styles.reportTitle, { color: '#6B21A8' }]}>Tüm Okul Excel Listesi</Text>
-                    <View style={[styles.subActionBadgeSuccess, { backgroundColor: '#E9D5FF' }]}>
-                      <Text style={[styles.subActionBadgeSuccessText, { color: '#6B21A8' }]}>✨ AI Şube Filtreli</Text>
-                    </View>
+            {/* 1. TÜM OKUL LİSTESİ - YAPAY ZEKA DESTEKLİ VE ŞUBE FİLTRELİ */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleAllSchoolAiImport}
+              disabled={loading}
+            >
+              <Card style={[styles.reportCard, { backgroundColor: '#FAF5FF', borderColor: '#D8B4FE', borderWidth: 1.5 }]}>
+                <View style={styles.cardRow}>
+                  <View style={[styles.iconWrap, { backgroundColor: '#F3E8FF' }]}>
+                    <Ionicons name="sparkles" size={24} color="#7C3AED" />
                   </View>
-                  <Text style={styles.reportDesc}>
-                    Tüm okul e-Okul listesini yükleyin; yapay zeka sadece ders programınızdaki şubelerin öğrencilerini ayıklayıp kaydetsin.
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#7C3AED" />
-              </View>
-            </Card>
-          </TouchableOpacity>
-
-          {/* 2. Manuel Öğrenci Ekle */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={handleOpenManualAddStudent}
-            disabled={loading}
-            style={{ marginTop: 10 }}
-          >
-            <Card style={[styles.reportCard, { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0', borderWidth: 1 }]}>
-              <View style={styles.cardRow}>
-                <View style={[styles.iconWrap, { backgroundColor: '#EEF2FF' }]}>
-                  <Ionicons name="person-add" size={24} color={Colors.primary} />
-                </View>
-                <View style={styles.cardTextWrap}>
-                  <Text style={[styles.reportTitle, { color: Colors.primary }]}>Manuel Öğrenci Ekle</Text>
-                  <Text style={styles.reportDesc}>
-                    Numara, ad soyad ve şube seçerek tek tek öğrenci kaydı oluşturun.
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={Colors.primary} />
-              </View>
-            </Card>
-          </TouchableOpacity>
-
-          {/* 2. Excel'den Öğrenci Yükle */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={handleBulkImportStudents}
-            disabled={loading}
-            style={{ marginTop: 10 }}
-          >
-            <Card style={[styles.reportCard, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0', borderWidth: 1 }]}>
-              <View style={styles.cardRow}>
-                <View style={[styles.iconWrap, { backgroundColor: '#DCFCE7' }]}>
-                  <Ionicons name="document-text" size={24} color="#16A34A" />
-                </View>
-                <View style={styles.cardTextWrap}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <Text style={[styles.reportTitle, { color: '#15803D' }]}>Excel'den Öğrenci Yükle</Text>
-                    <View style={styles.subActionBadgeSuccess}>
-                      <Text style={styles.subActionBadgeSuccessText}>Toplu Ekle</Text>
+                  <View style={styles.cardTextWrap}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Text style={[styles.reportTitle, { color: '#6B21A8' }]}>Tüm Okul Excel Listesi</Text>
+                      <View style={[styles.subActionBadgeSuccess, { backgroundColor: '#E9D5FF' }]}>
+                        <Text style={[styles.subActionBadgeSuccessText, { color: '#6B21A8' }]}>✨ AI Şube Filtreli</Text>
+                      </View>
                     </View>
+                    <Text style={styles.reportDesc}>
+                      Tüm okul e-Okul listesini yükleyin; yapay zeka sadece ders programınızdaki şubelerin öğrencilerini ayıklayıp kaydetsin.
+                    </Text>
                   </View>
-                  <Text style={styles.reportDesc}>
-                    e-Okul veya hazır Excel listesindeki öğrencileri topluca şubelere aktarın.
-                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#7C3AED" />
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#16A34A" />
-              </View>
-            </Card>
-          </TouchableOpacity>
+              </Card>
+            </TouchableOpacity>
 
-          {/* 3. Örnek Excel Şablonu İndir */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={handleDownloadTemplate}
-            disabled={loading}
-            style={{ marginTop: 10 }}
-          >
-            <Card style={[styles.reportCard, styles.templateCard]}>
-              <View style={styles.cardRow}>
-                <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
-                  <Ionicons name="download-outline" size={24} color="#7C3AED" />
+            {/* 2. Manuel Öğrenci Ekle */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleOpenManualAddStudent}
+              disabled={loading}
+              style={{ marginTop: 10 }}
+            >
+              <Card style={[styles.reportCard, { backgroundColor: '#F8FAFC', borderColor: '#E2E8F0', borderWidth: 1 }]}>
+                <View style={styles.cardRow}>
+                  <View style={[styles.iconWrap, { backgroundColor: '#EEF2FF' }]}>
+                    <Ionicons name="person-add" size={24} color={Colors.primary} />
+                  </View>
+                  <View style={styles.cardTextWrap}>
+                    <Text style={[styles.reportTitle, { color: Colors.primary }]}>Manuel Öğrenci Ekle</Text>
+                    <Text style={styles.reportDesc}>
+                      Numara, ad soyad ve şube seçerek tek tek öğrenci kaydı oluşturun.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={Colors.primary} />
                 </View>
-                <View style={styles.cardTextWrap}>
-                  <Text style={styles.reportTitle}>Örnek Excel Şablonu İndir</Text>
-                  <Text style={styles.reportDesc}>
-                    Öğrenci yüklemesi için sınıf düzeyi ve şube sütunları hazırlanmış örnek şablonu indirin.
-                  </Text>
-                </View>
-                <Ionicons name="share-social-outline" size={22} color="#7C3AED" />
-              </View>
-            </Card>
-          </TouchableOpacity>
+              </Card>
+            </TouchableOpacity>
 
-          {/* 4. PDF'ten Fotoğraf Aktar */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={handleStartPdfPhoto}
-            disabled={loading || pdfExtracting}
-            style={{ marginTop: 10 }}
-          >
-            <Card style={[styles.reportCard, { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 }]}>
-              <View style={styles.cardRow}>
-                <View style={[styles.iconWrap, { backgroundColor: '#FEE2E2' }]}>
-                  {pdfExtracting ? (
-                    <ActivityIndicator size="small" color="#DC2626" />
-                  ) : (
-                    <Ionicons name="camera" size={24} color="#DC2626" />
-                  )}
-                </View>
-                <View style={styles.cardTextWrap}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <Text style={[styles.reportTitle, { color: '#B91C1C' }]}>PDF'ten Fotoğraf Aktar</Text>
-                    <View style={styles.subActionBadgeRed}>
-                      <Text style={styles.subActionBadgeRedText}>Akıllı OCR</Text>
+            {/* 2. Excel'den Öğrenci Yükle */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleBulkImportStudents}
+              disabled={loading}
+              style={{ marginTop: 10 }}
+            >
+              <Card style={[styles.reportCard, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0', borderWidth: 1 }]}>
+                <View style={styles.cardRow}>
+                  <View style={[styles.iconWrap, { backgroundColor: '#DCFCE7' }]}>
+                    <Ionicons name="document-text" size={24} color="#16A34A" />
+                  </View>
+                  <View style={styles.cardTextWrap}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Text style={[styles.reportTitle, { color: '#15803D' }]}>Excel'den Öğrenci Yükle</Text>
+                      <View style={styles.subActionBadgeSuccess}>
+                        <Text style={styles.subActionBadgeSuccessText}>Toplu Ekle</Text>
+                      </View>
                     </View>
+                    <Text style={styles.reportDesc}>
+                      e-Okul veya hazır Excel listesindeki öğrencileri topluca şubelere aktarın.
+                    </Text>
                   </View>
-                  <Text style={styles.reportDesc}>
-                    e-Okul fotoğraflı sınıf listesi PDF'inden resimleri otomatik kesip öğrencilere ata.
-                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#16A34A" />
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#DC2626" />
-              </View>
-            </Card>
-          </TouchableOpacity>
-        </View>
+              </Card>
+            </TouchableOpacity>
+
+            {/* 3. Örnek Excel Şablonu İndir */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleDownloadTemplate}
+              disabled={loading}
+              style={{ marginTop: 10 }}
+            >
+              <Card style={[styles.reportCard, styles.templateCard]}>
+                <View style={styles.cardRow}>
+                  <View style={[styles.iconWrap, { backgroundColor: '#EDE9FE' }]}>
+                    <Ionicons name="download-outline" size={24} color="#7C3AED" />
+                  </View>
+                  <View style={styles.cardTextWrap}>
+                    <Text style={styles.reportTitle}>Örnek Excel Şablonu İndir</Text>
+                    <Text style={styles.reportDesc}>
+                      Öğrenci yüklemesi için sınıf düzeyi ve şube sütunları hazırlanmış örnek şablonu indirin.
+                    </Text>
+                  </View>
+                  <Ionicons name="share-social-outline" size={22} color="#7C3AED" />
+                </View>
+              </Card>
+            </TouchableOpacity>
+
+            {/* 4. PDF'ten Fotoğraf Aktar */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={handleStartPdfPhoto}
+              disabled={loading || pdfExtracting}
+              style={{ marginTop: 10 }}
+            >
+              <Card style={[styles.reportCard, { backgroundColor: '#FEF2F2', borderColor: '#FECACA', borderWidth: 1 }]}>
+                <View style={styles.cardRow}>
+                  <View style={[styles.iconWrap, { backgroundColor: '#FEE2E2' }]}>
+                    {pdfExtracting ? (
+                      <ActivityIndicator size="small" color="#DC2626" />
+                    ) : (
+                      <Ionicons name="camera" size={24} color="#DC2626" />
+                    )}
+                  </View>
+                  <View style={styles.cardTextWrap}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <Text style={[styles.reportTitle, { color: '#B91C1C' }]}>PDF'ten Fotoğraf Aktar</Text>
+                      <View style={styles.subActionBadgeRed}>
+                        <Text style={styles.subActionBadgeRedText}>Akıllı OCR</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.reportDesc}>
+                      e-Okul fotoğraflı sınıf listesi PDF'inden resimleri otomatik kesip öğrencilere ata.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#DC2626" />
+                </View>
+              </Card>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
       {/* FILTER & EXPORT MODAL */}

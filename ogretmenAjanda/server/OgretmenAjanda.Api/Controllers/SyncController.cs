@@ -29,6 +29,7 @@ namespace OgretmenAjanda.Api.Controllers
         private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         private string CurrentUserRole => User.FindFirstValue(ClaimTypes.Role)!;
         private string? CurrentUserName => User.FindFirstValue(ClaimTypes.Name) ?? User.Identity?.Name;
+        private bool IsTeacher => string.Equals(CurrentUserRole, UserRoles.Teacher, StringComparison.OrdinalIgnoreCase);
 
         private async Task LogActionAsync(Guid? schoolId, string actionType, string entityName, string? entityId, string description, string? detailsJson = null)
         {
@@ -57,6 +58,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPost("students/batch")]
         public async Task<IActionResult> BatchSyncStudents([FromBody] BatchStudentSyncRequest request)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler toplu öğrenci yükleme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             if (request.Students == null || !request.Students.Any())
             {
                 return BadRequest(new { message = "Yüklenecek öğrenci listesi boş." });
@@ -121,6 +127,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPost("students/single")]
         public async Task<IActionResult> CreateSingleStudent([FromBody] CreateSingleStudentRequest request)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler öğrenci ekleme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             var school = await _context.Schools.FindAsync(request.SchoolId);
             if (school == null) return NotFound(new { message = "Okul bulunamadı." });
 
@@ -170,6 +181,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPut("students/{studentId}")]
         public async Task<IActionResult> UpdateStudent(Guid studentId, [FromBody] UpdateStudentRequest request)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler öğrenci düzenleme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             var student = await _context.Students.FindAsync(studentId);
             if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
 
@@ -191,6 +207,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpDelete("students/{studentId}")]
         public async Task<IActionResult> DeleteStudent(Guid studentId)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler öğrenci silme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             var student = await _context.Students.FindAsync(studentId);
             if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
 
@@ -216,6 +237,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPut("students/{studentId}/photo")]
         public async Task<IActionResult> UpdateStudentPhoto(Guid studentId, [FromBody] UpdatePhotoRequest request)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler öğrenci fotoğrafı güncelleme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             var student = await _context.Students.FindAsync(studentId);
             if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
 

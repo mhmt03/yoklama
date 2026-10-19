@@ -29,6 +29,7 @@ namespace OgretmenAjanda.Api.Controllers
         private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
         private string CurrentUserRole => User.FindFirstValue(ClaimTypes.Role)!;
         private string? CurrentUserName => User.FindFirstValue(ClaimTypes.Name) ?? User.Identity?.Name;
+        private bool IsTeacher => string.Equals(CurrentUserRole, UserRoles.Teacher, StringComparison.OrdinalIgnoreCase);
 
         private async Task LogActionAsync(Guid? schoolId, string actionType, string entityName, string? entityId, string description, string? detailsJson = null)
         {
@@ -712,6 +713,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpPost("{schoolId}/classes")]
         public async Task<IActionResult> CreateClass(Guid schoolId, [FromBody] CreateClassRequest request)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler şube oluşturma yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             if (string.IsNullOrWhiteSpace(request.Grade) || string.IsNullOrWhiteSpace(request.Section))
             {
                 return BadRequest(new { message = "Kademe (Grade) ve Şube (Section) zorunludur." });
@@ -755,6 +761,11 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpDelete("classes/{classId}")]
         public async Task<IActionResult> DeleteClass(Guid classId)
         {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler şube silme yetkisine sahip değildir. Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
             var item = await _context.SchoolClasses.FindAsync(classId);
             if (item == null) return NotFound(new { message = "Sınıf bulunamadı." });
 

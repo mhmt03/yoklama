@@ -46,7 +46,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web",
-    "build:all": "cmd /c web_ve_server_paketle.bat"
+    "build:all": "cmd /c web_ve_server_paketle.bat",
+    "postinstall": "node scripts/patch-tslib.js"
   },
   "private": true
 }
