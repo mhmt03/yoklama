@@ -479,8 +479,9 @@ Her öğretmen için:
 1. "teacher": Öğretmenin Adı Soyadı (Örn: "Ahmet KARAAĞAÇ").
 2. "lessonDictionary": Sayfa altındaki özet tablodan ders kodlarının açık adları sözlüğü:
    Örnek: { "S.2YDL": "SEÇMELİ ALMANCA", "S.ADB": "ADABI MUAŞERET", "BDN": "Beden Eğitimi" }
-3. "totalWeeklyHours": Sayfa altındaki "Toplamlar" satırının en sağındaki "HS" (Haftalık Toplam Ders Saati) sayısı (Örn: 8, 24, 6).
-4. "workloadSummary": Sayfa altındaki "Ders Dağılım ve Saat Çizelgesi" tablosundaki satırlar:
+3. "totalWeeklyHours": Sayfa altındaki "Toplamlar" satırının en sağındaki nihai genel toplam "HS" (Haftalık Toplam Ders Saati) sayısı.
+   KRİTİK UYARI: Rehberlik (REH, RHBYN), Destek Eğitimi / Hedef Temelli Destek Eğitimi (HEDEF, S.HEDEF, DESTEK), Sosyal Etkinlik, Proje gibi tüm dersler ve seçmeliler öğretmenin resmî haftalık ders saatidir ve toplama KESİNLİKLE DAHİLDİR! Örneğin bir öğretmenin 24 saat Fizik ve 3 saat Destek Eğitimi varsa "totalWeeklyHours" KESİNLİKLE 27'dir; asla sadece ana branşını sayarak 24 yazma!
+4. "workloadSummary": Sayfa altındaki "Ders Dağılım ve Saat Çizelgesi" tablosundaki TÜM satırlar (Destek Eğitimi, Rehberlik ve Seçmeli dersler dahil!):
    - "className": Sınıf (Örn: "11/C" -> "11-C", "12/D" -> "12-D")
    - "lessonCode": Ders kodu (Örn: "BDN", "KLSAHL", "S.KMY")
    - "lessonName": Açık ders adı (Örn: "Beden Eğitimi", "Seçmeli Kimya")
@@ -734,7 +735,8 @@ ${jsonSchema}
           const dict: Record<string, string> = tSched?.lessonDictionary || {};
           const grid: Record<string, any[]> = tSched?.grid || {};
           const workloadSummary: TeacherWorkloadItem[] = Array.isArray(tSched?.workloadSummary) ? tSched.workloadSummary : [];
-          const expectedTotalWeeklyHours = Number(tSched?.totalWeeklyHours) || 0;
+          const workloadSum = workloadSummary.reduce((sum, item) => sum + (Number(item.weeklyHours) || 0), 0);
+          const expectedTotalWeeklyHours = Math.max(Number(tSched?.totalWeeklyHours) || 0, workloadSum);
 
           // Derslerin gerçek haftalık saatlerini topla (HS sütunundan)
           for (const wl of workloadSummary) {

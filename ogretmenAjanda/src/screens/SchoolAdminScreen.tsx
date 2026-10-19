@@ -4394,11 +4394,52 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       );
                     })()
                   ) : (
-                    <View style={styles.conflictClearBanner}>
-                      <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
-                      <Text style={styles.conflictClearText}>
-                        Harika! Ders saatlerinde veya öğretmen çizelgelerinde hiçbir çakışma bulunmuyor.
-                      </Text>
+                    <View style={[{ gap: 8 }] as any}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#F0FDF4', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#BBF7D0' } as any}>
+                        <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#166534', flex: 1 } as any}>
+                          Harika! Ders saatlerinde veya öğretmen çizelgelerinde hiçbir çakışma bulunmuyor.
+                        </Text>
+                      </View>
+
+                      {/* Çakışma yoksa ama sınıflarda boş ders saati varsa Boşlukları Doldur butonu */}
+                      {scheduleStats && scheduleStats.totalActualSlots < scheduleStats.totalExpectedSlots && (
+                        <View style={[{ backgroundColor: '#EFF6FF', borderRadius: 12, borderWidth: 1, borderColor: '#BFDBFE', padding: 12 }] as any}>
+                          <View style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }] as any}>
+                            <View style={[{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }] as any}>
+                              <Ionicons name="sparkles" size={17} color="#2563EB" />
+                              <Text style={[{ fontSize: 13, fontWeight: '800', color: '#1E3A8A' }] as any}>
+                                🧩 Şubelerde {scheduleStats.totalExpectedSlots - scheduleStats.totalActualSlots} Boş Ders Saati Tespit Edildi
+                              </Text>
+                            </View>
+                            <View style={[{ backgroundColor: '#DBEAFE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }] as any}>
+                              <Text style={[{ fontSize: 10, fontWeight: '800', color: '#1D4ED8' }] as any}>
+                                %{scheduleStats.overallFillPercent} Doluluk
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={[{ fontSize: 11, color: '#475569', marginBottom: 8, lineHeight: 16 }] as any}>
+                            Çakışmalar tamamen çözüldü ancak şubelerin haftalık 40 saatlik programında boşluklar bulunuyor. Müfredattaki eksik dersleri öğretmenlerin müsait saatlerine otomatik yerleştirebilirsiniz.
+                          </Text>
+                          <TouchableOpacity
+                            style={styles.autoFillGapsBtn}
+                            activeOpacity={0.8}
+                            onPress={handleAutoFillGapsSchedule}
+                            disabled={autoFillingGaps || autoReconciling}
+                          >
+                            {autoFillingGaps ? (
+                              <ActivityIndicator size="small" color="#FFFFFF" />
+                            ) : (
+                              <>
+                                <Ionicons name="grid" size={15} color="#FFFFFF" />
+                                <Text style={styles.autoFillGapsBtnText}>
+                                  🧩 Boşlukları Doldur (Eksik Öğretmen & Müfredat Saatlerini Tamamla)
+                                </Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   )}
 

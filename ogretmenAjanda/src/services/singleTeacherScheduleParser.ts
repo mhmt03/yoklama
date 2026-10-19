@@ -78,7 +78,7 @@ TABLO VE HÜCRE YAPISI (ÇOK ÖNEMLİ):
 3. ÇİFT KONTROL MEKANİZMASI:
    - Bir hücre doluysa hem Sınıf (9/E) hem Ders Kodu (MTMTK) birlikte yer alır. Her ikisini de oku.
    - Boş hücreler öğretmenin dersinin olmadığı saatlerdir; boş hücreler için kayıt oluşturma.
-   - Öğretmenin haftalık toplam ders saati, alttaki tablodaki saatlerin toplamıyla birebir eşit olmalıdır.
+   - Öğretmenin haftalık toplam ders saati (totalHours), alttaki tablodaki saatlerin toplamıyla birebir eşit olmalıdır. Destek Eğitimi, Rehberlik gibi dersler de toplama dahildir (Örn: 24 saat Fizik + 3 saat Destek = 27 saat).
 
 DİKKAT EDİLECEK KURALLAR:
 1. "dayOfWeek" değerleri: 1 (Pazartesi), 2 (Salı), 3 (Çarşamba), 4 (Perşembe), 5 (Cuma). Hafta sonu varsa 6 (Cumartesi), 7 (Pazar).

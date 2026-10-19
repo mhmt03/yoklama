@@ -879,10 +879,10 @@ namespace OgretmenAjanda.Api.Controllers
             // 3. Öğretmen Bazlı Ders Dağılımı ve Haftalık Toplam Saatleri
             var teacherWorkloads = schedules
                 .Where(s => !string.IsNullOrWhiteSpace(s.TeacherName))
-                .GroupBy(s => s.TeacherName!.Trim())
+                .GroupBy(s => s.TeacherName!.Trim(), StringComparer.OrdinalIgnoreCase)
                 .Select(g => new
                 {
-                    teacherName = g.Key,
+                    teacherName = g.First().TeacherName!.Trim(),
                     totalHours = g.Count(),
                     classes = g.Select(s => $"{s.Grade}-{s.Section}").Distinct().OrderBy(c => c).ToList(),
                     lessons = g.Select(s => s.LessonName).Where(l => !string.IsNullOrEmpty(l)).Distinct().OrderBy(l => l).ToList()
@@ -1286,6 +1286,39 @@ namespace OgretmenAjanda.Api.Controllers
             return (movedCount, movedDescriptions);
         }
 
+        private static string CleanLessonName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+            var s = name.Trim().ToUpperInvariant()
+                .Replace("SEÇMELİ", "SEC")
+                .Replace("SEÇ.", "SEC")
+                .Replace("SEÇ", "SEC")
+                .Replace("S.", "SEC")
+                .Replace(" VE SPOR", "")
+                .Replace(" VE AHLAK BİLGİSİ", "")
+                .Replace(" VE YÖNLENDİRME", "")
+                .Replace(" VE UYGULAMALARI", "")
+                .Replace(" VE ATATÜRKÇÜLÜK", "")
+                .Replace("_", " ")
+                .Replace("-", " ");
+            s = s.Replace("İ", "I").Replace("Ş", "S").Replace("Ğ", "G").Replace("Ü", "U").Replace("Ö", "O").Replace("Ç", "C");
+            return System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+        }
+
+        private static bool AreLessonNamesEquivalent(string? nameA, string? nameB)
+        {
+            if (string.Equals(nameA?.Trim(), nameB?.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+            var cA = CleanLessonName(nameA);
+            var cB = CleanLessonName(nameB);
+            if (string.IsNullOrEmpty(cA) || string.IsNullOrEmpty(cB)) return false;
+            if (cA == cB) return true;
+            if (cA.Length >= 4 && cB.Length >= 4)
+            {
+                if (cA.Contains(cB) || cB.Contains(cA)) return true;
+            }
+            return false;
+        }
+
         private async Task<(int placedCount, List<string> placedDescriptions)> RunAutoFillMissingLessonsAsync(Guid schoolId, int dailyHours = 8)
         {
             var schedules = await _context.ScheduleItems
@@ -1339,13 +1372,13 @@ namespace OgretmenAjanda.Api.Controllers
                     .Where(g => !string.IsNullOrEmpty(g.Key.Lesson))
                     .Select(g =>
                     {
-                        // Müfredat tablosunda bu derse karşılık gelen haftalık ders saatini bul
+                        // Müfredat tablosunda bu derse karşılık gelen haftalık ders saatini bul (Eşdeğerlik kontrolüyle)
                         var curr = curriculumLessons.FirstOrDefault(cl =>
-                            string.Equals(cl.Name.Trim(), g.Key.Lesson, StringComparison.OrdinalIgnoreCase) &&
+                            AreLessonNamesEquivalent(cl.Name, g.Key.Lesson) &&
                             (string.Equals(cl.Grade?.Trim(), "Tüm Kademeler", StringComparison.OrdinalIgnoreCase) ||
                              (cl.Grade != null && cl.Grade.Contains(classSlots.First().Grade.Trim()))))
                             ?? curriculumLessons.FirstOrDefault(cl =>
-                            string.Equals(cl.Name.Trim(), g.Key.Lesson, StringComparison.OrdinalIgnoreCase));
+                            AreLessonNamesEquivalent(cl.Name, g.Key.Lesson));
 
                         int expected = curr != null && curr.WeeklyHours > 0 ? curr.WeeklyHours : 0;
                         int actual = g.Count();
@@ -1384,7 +1417,7 @@ namespace OgretmenAjanda.Api.Controllers
                                 (s.LessonHour == emp.hour - 1 || s.LessonHour == emp.hour + 1) &&
                                 !string.IsNullOrEmpty(s.TeacherName) &&
                                 string.Equals(s.TeacherName.Trim(), lt.Teacher, StringComparison.OrdinalIgnoreCase) &&
-                                string.Equals(s.LessonName?.Trim(), lt.Lesson, StringComparison.OrdinalIgnoreCase));
+                                AreLessonNamesEquivalent(s.LessonName, lt.Lesson));
 
                             if (completesBlock)
                             {
@@ -1474,6 +1507,106 @@ namespace OgretmenAjanda.Api.Controllers
 
                             placedCount++;
                             placedDescriptions.Add($"{cg.Key} {lt.Lesson} ({lt.Teacher}): {bestSlot.Value.day}. Gün {bestSlot.Value.hour}. Saate eklendi (Müfredata göre eksik saat tamamlandı)");
+                        }
+                    }
+                }
+
+                // FAZ 2: Sınıfta HİÇ BULUNMAYAN veya EKSİK KALAN Müfredat Derslerini Okuldaki Branş Öğretmenleriyle Boşluklara Yerleştirme
+                if (emptySlots.Any())
+                {
+                    var classGrade = classSlots.FirstOrDefault()?.Grade?.Trim() ?? "";
+                    var applicableCurriculum = curriculumLessons
+                        .Where(cl => string.Equals(cl.Grade?.Trim(), "Tüm Kademeler", StringComparison.OrdinalIgnoreCase) ||
+                                     (cl.Grade != null && cl.Grade.Contains(classGrade)))
+                        .OrderByDescending(cl => cl.WeeklyHours)
+                        .ToList();
+
+                    foreach (var curr in applicableCurriculum)
+                    {
+                        if (!emptySlots.Any()) break;
+
+                        int expected = curr.WeeklyHours > 0 ? curr.WeeklyHours : 0;
+                        int currentInClass = classSlots.Count(s => AreLessonNamesEquivalent(s.LessonName, curr.Name));
+                        int missing = expected > currentInClass ? expected - currentInClass : 0;
+                        if (missing <= 0) continue;
+
+                        // Okulda bu dersi okutan uygun branş öğretmenlerini bul (önce aynı kademede okutanlar)
+                        var candidateTeachers = schedules
+                            .Where(s => AreLessonNamesEquivalent(s.LessonName, curr.Name) && !string.IsNullOrWhiteSpace(s.TeacherName))
+                            .GroupBy(s => s.TeacherName!.Trim(), StringComparer.OrdinalIgnoreCase)
+                            .Select(g => new
+                            {
+                                TeacherName = g.First().TeacherName!.Trim(),
+                                TeacherId = g.First().TeacherId,
+                                TeachesInSameGrade = g.Any(s => s.Grade.Trim() == classGrade),
+                                TotalHours = schedules.Count(s => string.Equals(s.TeacherName?.Trim(), g.First().TeacherName!.Trim(), StringComparison.OrdinalIgnoreCase)),
+                                Sample = g.First()
+                            })
+                            .OrderByDescending(t => t.TeachesInSameGrade)
+                            .ThenBy(t => t.TotalHours)
+                            .ToList();
+
+                        if (!candidateTeachers.Any()) continue;
+
+                        for (int m = 0; m < missing; m++)
+                        {
+                            if (!emptySlots.Any()) break;
+
+                            (int day, int hour)? placedSlot = null;
+                            string? chosenTeacher = null;
+                            Guid? chosenTeacherId = null;
+                            string? chosenCode = null;
+
+                            foreach (var cand in candidateTeachers)
+                            {
+                                var availableSlots = emptySlots
+                                    .Where(emp => !schedules.Any(s =>
+                                        !string.IsNullOrEmpty(s.TeacherName) &&
+                                        string.Equals(s.TeacherName.Trim(), cand.TeacherName, StringComparison.OrdinalIgnoreCase) &&
+                                        s.DayOfWeek == emp.day &&
+                                        s.LessonHour == emp.hour))
+                                    .ToList();
+
+                                if (!availableSlots.Any()) continue;
+
+                                var blockSlot = availableSlots.FirstOrDefault(emp => classSlots.Any(s =>
+                                    s.DayOfWeek == emp.day &&
+                                    (s.LessonHour == emp.hour - 1 || s.LessonHour == emp.hour + 1) &&
+                                    string.Equals(s.TeacherName?.Trim(), cand.TeacherName, StringComparison.OrdinalIgnoreCase)));
+
+                                placedSlot = blockSlot != default ? blockSlot : availableSlots.First();
+                                chosenTeacher = cand.TeacherName;
+                                chosenTeacherId = cand.TeacherId;
+                                chosenCode = cand.Sample.LessonCode;
+                                break;
+                            }
+
+                            if (placedSlot.HasValue && !string.IsNullOrEmpty(chosenTeacher))
+                            {
+                                var sample = classSlots.First();
+                                var newItem = new ScheduleItem
+                                {
+                                    Id = Guid.NewGuid(),
+                                    SchoolId = schoolId,
+                                    Grade = sample.Grade,
+                                    Section = sample.Section,
+                                    LessonName = curr.Name,
+                                    TeacherName = chosenTeacher,
+                                    TeacherId = chosenTeacherId,
+                                    LessonCode = chosenCode,
+                                    Classroom = sample.Classroom,
+                                    DayOfWeek = placedSlot.Value.day,
+                                    LessonHour = placedSlot.Value.hour
+                                };
+
+                                _context.ScheduleItems.Add(newItem);
+                                schedules.Add(newItem);
+                                classSlots.Add(newItem);
+                                emptySlots.Remove(placedSlot.Value);
+
+                                placedCount++;
+                                placedDescriptions.Add($"{cg.Key} {curr.Name} ({chosenTeacher}): {placedSlot.Value.day}. Gün {placedSlot.Value.hour}. Saate eklendi (Müfredat dersi tamamlandı)");
+                            }
                         }
                     }
                 }
