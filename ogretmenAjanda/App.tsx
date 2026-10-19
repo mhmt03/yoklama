@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, StatusBar, Platform, TouchableOpacity } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet, StatusBar, Platform, TouchableOpacity, LogBox } from 'react-native';
+
+LogBox.ignoreLogs([
+  '[Çarşaf AI',
+  '503',
+  '429',
+  'overloaded',
+  'Google sunucuları',
+  'thinkingConfig',
+]);
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';

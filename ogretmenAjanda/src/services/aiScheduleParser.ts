@@ -666,16 +666,21 @@ ${jsonSchema}
         if (options?.isCancelled?.()) throw genErr;
         const genMsg = String(genErr?.message || '');
         if (genConfig.thinkingConfig && (genMsg.includes('thinkingConfig') || genMsg.includes('invalid argument') || genErr.status === 400)) {
-          console.warn(`[Çarşaf AI] ${currentModel} thinkingConfig parametresini desteklemedi, parametresiz yeniden deneniyor...`);
+          console.log(`[Çarşaf AI] ${currentModel} thinkingConfig parametresini desteklemedi, parametresiz yeniden deneniyor...`);
           delete genConfig.thinkingConfig;
           model = genAI.getGenerativeModel({ model: currentModel, generationConfig: genConfig });
           result = await Promise.race([model.generateContent([prompt, imagePart]), timeoutPromise]);
         } else if (genMsg.includes('503') || genMsg.includes('overloaded') || genMsg.includes('429')) {
-          console.warn(`[Çarşaf AI 503/429] ${currentModel} aşırı yoğunluk verdi, 3 sn sonra tekrar deneniyor...`);
-          onProgress?.(`⚠️ Google sunucuları anlık yoğun (${currentModel}), 3 saniye içinde tekrar deneniyor...`);
-          await new Promise((resolve) => setTimeout(resolve, 3000));
+          console.log(`[Çarşaf AI 503/429] ${currentModel} aşırı yoğunluk verdi, 2 sn sonra tekrar deneniyor...`);
+          onProgress?.(`⚠️ Google sunucuları anlık yoğun (${currentModel}), tekrar deneniyor...`);
+          await new Promise((resolve) => setTimeout(resolve, 2000));
           if (options?.isCancelled?.()) throw new Error('Analiz kullanıcı tarafından iptal edildi.');
-          result = await Promise.race([model.generateContent([prompt, imagePart]), timeoutPromise]);
+          try {
+            result = await Promise.race([model.generateContent([prompt, imagePart]), timeoutPromise]);
+          } catch (retryErr: any) {
+            console.log(`[Çarşaf AI 503/429] ${currentModel} tekrar yoğunluk verdi, sıradaki yedek modele geçiliyor...`);
+            throw retryErr;
+          }
         } else {
           throw genErr;
         }
