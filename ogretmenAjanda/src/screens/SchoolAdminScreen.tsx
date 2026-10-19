@@ -2211,6 +2211,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         apiKey = DEFAULT_GEMINI_API_KEY;
       }
       if (!apiKey) {
+        console.warn('[Çarşaf UI] ❌ Gemini API anahtarı bulunamadı (okul ayarları, yerel ayarlar ve varsayılan anahtar boş). Analiz durduruldu.');
         setAiParsing(false);
         setAiModalVisible(false);
         Alert.alert(
