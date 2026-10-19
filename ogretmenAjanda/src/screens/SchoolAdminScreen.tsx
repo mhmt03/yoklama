@@ -27,6 +27,7 @@ import {
   parseMasterScheduleWithAi,
   saveMasterScheduleToServer,
   ParsedScheduleResult,
+  TeacherScheduleVerification,
   readUriAsBase64,
   ScheduleBatchItem,
   mergeScheduleBatches,
@@ -336,6 +337,179 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         },
       },
     ]);
+  };
+
+  // Çarşaf AI Öğretmen Programı İnceleme & Elle Tamamlama Modalı State & Handlers
+  const [inspectTeacherModalVisible, setInspectTeacherModalVisible] = useState(false);
+  const [inspectingTeacher, setInspectingTeacher] = useState<string>('');
+  const [inspectingVerification, setInspectingVerification] = useState<TeacherScheduleVerification | null>(null);
+  const [inspectingItems, setInspectingItems] = useState<Array<{
+    teacherName: string;
+    grade: string;
+    section: string;
+    lessonName: string;
+    lessonCode?: string;
+    dayOfWeek: number;
+    lessonHour: number;
+    classroom?: string;
+  }>>([]);
+  const [inspectDayTab, setInspectDayTab] = useState<number>(1); // 1: Pazartesi ... 5: Cuma
+  const [editingExpectedHours, setEditingExpectedHours] = useState(false);
+  const [tempExpectedHours, setTempExpectedHours] = useState('');
+  const [editingCellSlot, setEditingCellSlot] = useState<{
+    dayOfWeek: number;
+    lessonHour: number;
+    grade: string;
+    section: string;
+    lessonName: string;
+  } | null>(null);
+
+  const handleOpenTeacherScheduleInspector = (teacherName: string) => {
+    if (!parsedSchedule) return;
+    const norm = (s?: string) => (s || '').trim().toLowerCase();
+    const verif = (parsedSchedule.teacherVerifications || []).find(v => norm(v.teacherName) === norm(teacherName)) || null;
+    const items = (parsedSchedule.scheduleItems || [])
+      .filter(it => norm(it.teacherName) === norm(teacherName))
+      .map(it => ({ ...it }));
+
+    setInspectingTeacher(teacherName);
+    setInspectingVerification(verif);
+    setTempExpectedHours(verif?.expectedWeeklyHours != null ? String(verif.expectedWeeklyHours) : String(items.length));
+    setEditingExpectedHours(false);
+    setInspectingItems(items);
+    setInspectDayTab(1);
+    setEditingCellSlot(null);
+    setInspectTeacherModalVisible(true);
+  };
+
+  const handleStartEditCell = (dayOfWeek: number, lessonHour: number) => {
+    const existing = inspectingItems.find(it => it.dayOfWeek === dayOfWeek && it.lessonHour === lessonHour);
+    if (existing) {
+      setEditingCellSlot({
+        dayOfWeek,
+        lessonHour,
+        grade: existing.grade,
+        section: existing.section,
+        lessonName: existing.lessonName,
+      });
+    } else {
+      const defaultClass = parsedSchedule?.classes?.[0] || '9-A';
+      const parts = defaultClass.split('-');
+      setEditingCellSlot({
+        dayOfWeek,
+        lessonHour,
+        grade: parts[0] || '9',
+        section: parts[1] || 'A',
+        lessonName: parsedSchedule?.lessons?.[0] || '',
+      });
+    }
+  };
+
+  const handleSaveCellSlot = () => {
+    if (!editingCellSlot) return;
+    const { dayOfWeek, lessonHour, grade, section, lessonName } = editingCellSlot;
+    if (!grade.trim() || !section.trim() || !lessonName.trim()) {
+      Alert.alert('Eksik Bilgi', 'Lütfen sınıf, şube ve ders adını doldurunuz.');
+      return;
+    }
+
+    const updated = inspectingItems.filter(it => !(it.dayOfWeek === dayOfWeek && it.lessonHour === lessonHour));
+    updated.push({
+      teacherName: inspectingTeacher,
+      grade: grade.trim(),
+      section: section.trim().toUpperCase(),
+      lessonName: lessonName.trim(),
+      dayOfWeek,
+      lessonHour,
+    });
+    setInspectingItems(updated);
+    setEditingCellSlot(null);
+  };
+
+  const handleDeleteCellSlot = (dayOfWeek: number, lessonHour: number) => {
+    const updated = inspectingItems.filter(it => !(it.dayOfWeek === dayOfWeek && it.lessonHour === lessonHour));
+    setInspectingItems(updated);
+  };
+
+  const handleSaveExpectedHours = () => {
+    const parsedNum = parseInt(tempExpectedHours, 10);
+    if (!isNaN(parsedNum) && parsedNum >= 0) {
+      setInspectingVerification(prev => {
+        if (prev) {
+          return {
+            ...prev,
+            expectedWeeklyHours: parsedNum,
+            isConsistent: parsedNum === inspectingItems.length,
+          };
+        }
+        return {
+          teacherName: inspectingTeacher,
+          expectedWeeklyHours: parsedNum,
+          extractedWeeklyHours: inspectingItems.length,
+          isConsistent: parsedNum === inspectingItems.length,
+        };
+      });
+      setEditingExpectedHours(false);
+    } else {
+      Alert.alert('Geçersiz Değer', 'Lütfen geçerli bir ders saati giriniz.');
+    }
+  };
+
+  const handleApplyTeacherInspectorChanges = () => {
+    if (!parsedSchedule) return;
+
+    const norm = (s?: string) => (s || '').trim().toLowerCase();
+    const otherItems = (parsedSchedule.scheduleItems || []).filter(it => norm(it.teacherName) !== norm(inspectingTeacher));
+    const newScheduleItems = [...otherItems, ...inspectingItems];
+
+    const expHours = inspectingVerification?.expectedWeeklyHours ?? inspectingItems.length;
+
+    let foundVerif = false;
+    const newVerifications = (parsedSchedule.teacherVerifications || []).map(v => {
+      if (norm(v.teacherName) === norm(inspectingTeacher)) {
+        foundVerif = true;
+        return {
+          ...v,
+          expectedWeeklyHours: expHours,
+          extractedWeeklyHours: inspectingItems.length,
+          isConsistent: expHours === inspectingItems.length,
+        };
+      }
+      return v;
+    });
+
+    if (!foundVerif) {
+      newVerifications.push({
+        teacherName: inspectingTeacher,
+        expectedWeeklyHours: expHours,
+        extractedWeeklyHours: inspectingItems.length,
+        isConsistent: expHours === inspectingItems.length,
+      });
+    }
+
+    const classesSet = new Set(parsedSchedule.classes || []);
+    const lessonsSet = new Set(parsedSchedule.lessons || []);
+    inspectingItems.forEach(it => {
+      const cls = `${it.grade}-${it.section}`.toUpperCase();
+      classesSet.add(cls);
+      if (it.lessonName) lessonsSet.add(it.lessonName);
+    });
+
+    const updatedParsedSchedule: ParsedScheduleResult = {
+      ...parsedSchedule,
+      classes: Array.from(classesSet),
+      lessons: Array.from(lessonsSet),
+      scheduleItems: newScheduleItems,
+      teacherVerifications: newVerifications,
+    };
+
+    setParsedSchedule(updatedParsedSchedule);
+    setInspectTeacherModalVisible(false);
+
+    Alert.alert(
+      'Öğretmen Programı Güncellendi ✅',
+      `"${inspectingTeacher}" için ${inspectingItems.length} ders saati programa başarıyla aktarıldı.`
+    );
   };
 
   const aiCancelledRef = useRef(false);
@@ -8990,45 +9164,58 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           </View>
 
                           <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
-                            Çarşafın altındaki resmî ders dağılım çizelgesindeki toplam saat (HS) ile ızgaradan çıkarılan dersler karşılaştırıldı:
+                            Çarşafın altındaki resmî ders dağılım çizelgesindeki toplam saat (HS) ile ızgaradan çıkarılan dersler karşılaştırıldı (Bir öğretmene dokunarak programını inceleyebilir ve kağıda bakarak eksik saatleri elle düzeltebilirsiniz):
                           </Text>
 
-                          <ScrollView nestedScrollEnabled style={{ maxHeight: 180 }} contentContainerStyle={{ gap: 6 }}>
+                          <ScrollView nestedScrollEnabled style={{ maxHeight: 200 }} contentContainerStyle={{ gap: 6 }}>
                             {parsedSchedule.teacherVerifications.map((v, vIdx) => (
-                              <View key={vIdx} style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                backgroundColor: v.isConsistent ? '#FFFFFF' : '#FFFBEB',
-                                paddingHorizontal: 10,
-                                paddingVertical: 7,
-                                borderRadius: 8,
-                                borderWidth: 1,
-                                borderColor: v.isConsistent ? '#E2E8F0' : '#FCD34D'
-                              }}>
-                                <View style={{ flex: 1 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>{v.teacherName}</Text>
-                                  <Text style={{ fontSize: 10, color: '#64748B' }}>
+                              <TouchableOpacity
+                                key={vIdx}
+                                activeOpacity={0.7}
+                                onPress={() => handleOpenTeacherScheduleInspector(v.teacherName)}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  backgroundColor: v.isConsistent ? '#FFFFFF' : '#FFFBEB',
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 8,
+                                  borderRadius: 8,
+                                  borderWidth: 1,
+                                  borderColor: v.isConsistent ? '#E2E8F0' : '#FCD34D'
+                                }}
+                              >
+                                <View style={{ flex: 1, marginRight: 8 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>{v.teacherName}</Text>
+                                    <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                                      <Text style={{ fontSize: 10, color: '#4F46E5', fontWeight: '700' }}>✏️ İncele & Düzenle</Text>
+                                    </View>
+                                  </View>
+                                  <Text style={{ fontSize: 10, color: '#64748B', marginTop: 2 }}>
                                     Çizelgedeki Saat: {v.expectedWeeklyHours != null ? `${v.expectedWeeklyHours} Saat` : '—'} • Çıkarılan: {v.extractedWeeklyHours} Saat
                                   </Text>
                                 </View>
-                                <View style={{
-                                  backgroundColor: v.isConsistent ? '#F0FDF4' : '#FEF2F2',
-                                  paddingHorizontal: 8,
-                                  paddingVertical: 3,
-                                  borderRadius: 6,
-                                  borderWidth: 1,
-                                  borderColor: v.isConsistent ? '#BBF7D0' : '#FECACA'
-                                }}>
-                                  <Text style={{
-                                    fontSize: 10,
-                                    fontWeight: '800',
-                                    color: v.isConsistent ? '#166534' : '#DC2626'
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <View style={{
+                                    backgroundColor: v.isConsistent ? '#F0FDF4' : '#FEF2F2',
+                                    paddingHorizontal: 8,
+                                    paddingVertical: 3,
+                                    borderRadius: 6,
+                                    borderWidth: 1,
+                                    borderColor: v.isConsistent ? '#BBF7D0' : '#FECACA'
                                   }}>
-                                    {v.isConsistent ? `✅ ${v.extractedWeeklyHours}/${v.expectedWeeklyHours || v.extractedWeeklyHours} Saat` : `⚠️ ${v.extractedWeeklyHours}/${v.expectedWeeklyHours} Saat`}
-                                  </Text>
+                                    <Text style={{
+                                      fontSize: 10,
+                                      fontWeight: '800',
+                                      color: v.isConsistent ? '#166534' : '#DC2626'
+                                    }}>
+                                      {v.isConsistent ? `✅ ${v.extractedWeeklyHours}/${v.expectedWeeklyHours || v.extractedWeeklyHours} Saat` : `⚠️ ${v.extractedWeeklyHours}/${v.expectedWeeklyHours} Saat`}
+                                    </Text>
+                                  </View>
+                                  <Ionicons name="chevron-forward" size={14} color="#94A3B8" />
                                 </View>
-                              </View>
+                              </TouchableOpacity>
                             ))}
                           </ScrollView>
                         </View>
@@ -9167,22 +9354,33 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 {teachersList.map((t, idx) => {
                                   const isExcluded = excludedTeachers.includes(t);
                                   return (
-                                    <TouchableOpacity
+                                    <View
                                       key={idx}
-                                      style={[styles.itemChip, isExcluded && styles.itemChipExcluded]}
-                                      onPress={() => toggleExcludeTeacher(t)}
-                                      activeOpacity={0.7}
+                                      style={[styles.itemChip, isExcluded && styles.itemChipExcluded, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}
                                     >
-                                      <Ionicons
-                                        name={isExcluded ? 'close-circle' : 'checkmark-circle'}
-                                        size={14}
-                                        color={isExcluded ? '#EF4444' : '#16A34A'}
-                                      />
-                                      <Text style={[styles.itemChipText, isExcluded && styles.itemChipTextExcluded]}>
-                                        {t}
-                                      </Text>
-                                      {isExcluded && <Text style={styles.excludedBadgeText}>(Pasif)</Text>}
-                                    </TouchableOpacity>
+                                      <TouchableOpacity
+                                        onPress={() => toggleExcludeTeacher(t)}
+                                        activeOpacity={0.7}
+                                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                      >
+                                        <Ionicons
+                                          name={isExcluded ? 'close-circle' : 'checkmark-circle'}
+                                          size={14}
+                                          color={isExcluded ? '#EF4444' : '#16A34A'}
+                                        />
+                                        <Text style={[styles.itemChipText, isExcluded && styles.itemChipTextExcluded]}>
+                                          {t}
+                                        </Text>
+                                        {isExcluded && <Text style={styles.excludedBadgeText}>(Pasif)</Text>}
+                                      </TouchableOpacity>
+                                      <TouchableOpacity
+                                        onPress={() => handleOpenTeacherScheduleInspector(t)}
+                                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                        style={{ paddingLeft: 3 }}
+                                      >
+                                        <Ionicons name="create-outline" size={13} color={isExcluded ? '#94A3B8' : '#4F46E5'} />
+                                      </TouchableOpacity>
+                                    </View>
                                   );
                                 })}
                               </View>
@@ -9452,6 +9650,478 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </View>
               </ScrollView>
             ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      {/* 5.1.5 Çarşaf AI Öğretmen Programı İnceleme & Elle Düzenleme Modalı */}
+      <Modal visible={inspectTeacherModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '92%', paddingBottom: 16 }]}>
+            {/* Modal Başlığı */}
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <Ionicons name="person-circle" size={26} color="#4F46E5" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle} numberOfLines={1}>{inspectingTeacher}</Text>
+                  <Text style={{ fontSize: 11, color: '#64748B' }}>
+                    Çarşaf Program İnceleme & Eksik Saat Tamamlama
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setInspectTeacherModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 10 }}>
+              {/* Durum / Sağlama Kartı */}
+              {(() => {
+                const expectedHours = inspectingVerification?.expectedWeeklyHours;
+                const currentHours = inspectingItems.length;
+                const diff = expectedHours != null ? expectedHours - currentHours : 0;
+                const isMatched = expectedHours != null && diff === 0;
+
+                return (
+                  <View style={{
+                    backgroundColor: isMatched ? '#F0FDF4' : diff > 0 ? '#FFFBEB' : '#FEF2F2',
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: isMatched ? '#BBF7D0' : diff > 0 ? '#FCD34D' : '#FECACA',
+                    padding: 12,
+                    marginBottom: 12,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#1E293B' }}>
+                        ⚖️ Haftalık Ders Yükü Durumu
+                      </Text>
+                      <View style={{
+                        backgroundColor: isMatched ? '#DCFCE7' : diff > 0 ? '#FEF3C7' : '#FEE2E2',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 6,
+                      }}>
+                        <Text style={{
+                          fontSize: 11,
+                          fontWeight: '800',
+                          color: isMatched ? '#15803D' : diff > 0 ? '#B45309' : '#DC2626',
+                        }}>
+                          {expectedHours == null
+                            ? `${currentHours} Saat Yerleşti`
+                            : isMatched
+                            ? `✅ Tam Tutarlı (${currentHours}/${expectedHours} Saat)`
+                            : diff > 0
+                            ? `⚠️ ${diff} Saat Eksik (${currentHours}/${expectedHours} Saat)`
+                            : `⚠️ ${Math.abs(diff)} Saat Fazla (${currentHours}/${expectedHours} Saat)`}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Kağıttaki Beklenen Saat Ayarı (Gerekirse düzeltme) */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, marginTop: 4, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                        <Ionicons name="document-text-outline" size={15} color="#4F46E5" />
+                        <Text style={{ fontSize: 11, color: '#475569' }}>
+                          Kağıttaki Resmi Saat (HS): <Text style={{ fontWeight: '800', color: '#1E293B' }}>{expectedHours ?? 'Belirtilmemiş'} Saat</Text>
+                        </Text>
+                      </View>
+                      {editingExpectedHours ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <TextInput
+                            style={{
+                              borderWidth: 1,
+                              borderColor: '#4F46E5',
+                              borderRadius: 6,
+                              paddingHorizontal: 6,
+                              paddingVertical: 2,
+                              fontSize: 11,
+                              fontWeight: '700',
+                              width: 44,
+                              textAlign: 'center',
+                              backgroundColor: '#fff',
+                            }}
+                            keyboardType="numeric"
+                            value={tempExpectedHours}
+                            onChangeText={setTempExpectedHours}
+                          />
+                          <TouchableOpacity onPress={handleSaveExpectedHours} style={{ backgroundColor: '#4F46E5', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6 }}>
+                            <Ionicons name="checkmark" size={12} color="#fff" />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => setEditingExpectedHours(false)} style={{ backgroundColor: '#94A3B8', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 6 }}>
+                            <Ionicons name="close" size={12} color="#fff" />
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity onPress={() => setEditingExpectedHours(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#EEF2FF', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6 }}>
+                          <Ionicons name="pencil" size={11} color="#4F46E5" />
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#4F46E5' }}>Düzelt</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    <Text style={{ fontSize: 10, color: '#64748B', marginTop: 6, lineHeight: 14 }}>
+                      {diff > 0
+                        ? '💡 Kağıttaki programa göre eksik kalan dersler var. Aşağıdan ilgili güne gidip boş saatlere ders ekleyebilirsiniz.'
+                        : diff < 0
+                        ? '⚠️ Kağıttan fazla ders girilmiş görünüyor. Mükerrer dersleri çöp kutusu simgesine basarak silebilirsiniz.'
+                        : '🎉 Bu öğretmenin haftalık ders programı kağıttaki çizelgeyle tam olarak örtüşüyor.'}
+                    </Text>
+                  </View>
+                );
+              })()}
+
+              {/* Alt tablodan okunan ders yükü dökümü (Varsa) */}
+              {inspectingVerification?.workloadItems && inspectingVerification.workloadItems.length > 0 && (
+                <View style={{ backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 10, marginBottom: 12 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', marginBottom: 6 }}>
+                    📄 Kağıdın Alt Tablosundaki Ders Dağılımı:
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {inspectingVerification.workloadItems.map((wi, wIdx) => (
+                      <View key={wIdx} style={{ backgroundColor: '#fff', borderRadius: 6, borderWidth: 1, borderColor: '#CBD5E1', paddingHorizontal: 8, paddingVertical: 4 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
+                          {wi.className} {wi.lessonCode || wi.lessonName}: <Text style={{ color: '#4F46E5', fontWeight: '800' }}>{wi.weeklyHours} Saat</Text>
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Gün Seçici Sekmeler (Pazartesi .. Cuma) */}
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+                {[
+                  { id: 1, name: 'Pazartesi', short: 'Pzt' },
+                  { id: 2, name: 'Salı', short: 'Sal' },
+                  { id: 3, name: 'Çarşamba', short: 'Çar' },
+                  { id: 4, name: 'Perşembe', short: 'Per' },
+                  { id: 5, name: 'Cuma', short: 'Cum' },
+                ].map((d) => {
+                  const dayCount = inspectingItems.filter(it => it.dayOfWeek === d.id).length;
+                  const isActive = inspectDayTab === d.id;
+                  return (
+                    <TouchableOpacity
+                      key={d.id}
+                      onPress={() => {
+                        setInspectDayTab(d.id);
+                        setEditingCellSlot(null);
+                      }}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                        alignItems: 'center',
+                        backgroundColor: isActive ? '#4F46E5' : '#F1F5F9',
+                        borderWidth: 1,
+                        borderColor: isActive ? '#4F46E5' : '#CBD5E1',
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: isActive ? '#fff' : '#475569' }}>
+                        {d.short}
+                      </Text>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: isActive ? '#C7D2FE' : '#94A3B8', marginTop: 2 }}>
+                        {dayCount} Saat
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              {/* Hücre Düzenleme / Ekleme Kartı (Varsa Açık) */}
+              {editingCellSlot && (
+                <View style={{
+                  backgroundColor: '#EEF2FF',
+                  borderRadius: 12,
+                  borderWidth: 1.5,
+                  borderColor: '#818CF8',
+                  padding: 12,
+                  marginBottom: 12,
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#312E81' }}>
+                      ✏️ {['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'][editingCellSlot.dayOfWeek - 1]} - {editingCellSlot.lessonHour}. Ders Saati
+                    </Text>
+                    <TouchableOpacity onPress={() => setEditingCellSlot(null)}>
+                      <Ionicons name="close-circle" size={18} color="#6366F1" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Sınıf / Şube Girişi & Hızlı Çipler */}
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338CA', marginBottom: 4 }}>
+                    Sınıf / Şube:
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
+                    <TextInput
+                      style={{
+                        flex: 1,
+                        backgroundColor: '#fff',
+                        borderWidth: 1,
+                        borderColor: '#C7D2FE',
+                        borderRadius: 6,
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        fontSize: 12,
+                        fontWeight: '700',
+                      }}
+                      placeholder="Kademe (örn: 9)"
+                      value={editingCellSlot.grade}
+                      onChangeText={(val) => setEditingCellSlot({ ...editingCellSlot, grade: val })}
+                    />
+                    <TextInput
+                      style={{
+                        flex: 1,
+                        backgroundColor: '#fff',
+                        borderWidth: 1,
+                        borderColor: '#C7D2FE',
+                        borderRadius: 6,
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        fontSize: 12,
+                        fontWeight: '700',
+                      }}
+                      placeholder="Şube (örn: A)"
+                      value={editingCellSlot.section}
+                      onChangeText={(val) => setEditingCellSlot({ ...editingCellSlot, section: val })}
+                    />
+                  </View>
+
+                  {/* Sınıf Hızlı Seçim Çipleri */}
+                  {parsedSchedule && parsedSchedule.classes && parsedSchedule.classes.length > 0 && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
+                      <View style={{ flexDirection: 'row', gap: 4 }}>
+                        {parsedSchedule.classes.slice(0, 15).map((cls, cIdx) => {
+                          const parts = cls.split('-');
+                          return (
+                            <TouchableOpacity
+                              key={cIdx}
+                              onPress={() => setEditingCellSlot({
+                                ...editingCellSlot,
+                                grade: parts[0] || editingCellSlot.grade,
+                                section: parts[1] || editingCellSlot.section,
+                              })}
+                              style={{
+                                backgroundColor: '#fff',
+                                paddingHorizontal: 7,
+                                paddingVertical: 3,
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                borderColor: '#C7D2FE',
+                              }}
+                            >
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#4F46E5' }}>{cls}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
+                  )}
+
+                  {/* Ders Adı Girişi & Hızlı Çipler */}
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338CA', marginBottom: 4 }}>
+                    Ders Adı:
+                  </Text>
+                  <TextInput
+                    style={{
+                      backgroundColor: '#fff',
+                      borderWidth: 1,
+                      borderColor: '#C7D2FE',
+                      borderRadius: 6,
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      fontSize: 12,
+                      fontWeight: '700',
+                      marginBottom: 6,
+                    }}
+                    placeholder="Ders adı (örn: Matematik, MAT, Beden)"
+                    value={editingCellSlot.lessonName}
+                    onChangeText={(val) => setEditingCellSlot({ ...editingCellSlot, lessonName: val })}
+                  />
+
+                  {/* Ders Hızlı Seçim Çipleri */}
+                  {parsedSchedule && parsedSchedule.lessons && parsedSchedule.lessons.length > 0 && (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                      <View style={{ flexDirection: 'row', gap: 4 }}>
+                        {parsedSchedule.lessons.slice(0, 15).map((lsn, lIdx) => (
+                          <TouchableOpacity
+                            key={lIdx}
+                            onPress={() => setEditingCellSlot({ ...editingCellSlot, lessonName: lsn })}
+                            style={{
+                              backgroundColor: '#fff',
+                              paddingHorizontal: 7,
+                              paddingVertical: 3,
+                              borderRadius: 6,
+                              borderWidth: 1,
+                              borderColor: '#C7D2FE',
+                            }}
+                          >
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#4F46E5' }}>{lsn}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  )}
+
+                  {/* Ekle / Vazgeç Butonları */}
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      onPress={() => setEditingCellSlot(null)}
+                      style={{ flex: 1, paddingVertical: 6, borderRadius: 6, backgroundColor: '#E2E8F0', alignItems: 'center' }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>Vazgeç</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={handleSaveCellSlot}
+                      style={{ flex: 2, paddingVertical: 6, borderRadius: 6, backgroundColor: '#4F46E5', alignItems: 'center' }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>💾 Saate Yerleştir</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+
+              {/* Seçili Günün Saatleri (1 .. maxPeriod) */}
+              {(() => {
+                const maxPeriod = Math.max(8, ...inspectingItems.map(it => it.lessonHour));
+                const hoursList = Array.from({ length: maxPeriod }, (_, i) => i + 1);
+
+                return (
+                  <View style={{ gap: 6 }}>
+                    {hoursList.map((period) => {
+                      const item = inspectingItems.find(it => it.dayOfWeek === inspectDayTab && it.lessonHour === period);
+
+                      if (item) {
+                        return (
+                          <View
+                            key={period}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              backgroundColor: '#FFFFFF',
+                              borderRadius: 10,
+                              padding: 10,
+                              borderWidth: 1,
+                              borderColor: '#CBD5E1',
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                              <View style={{
+                                width: 28,
+                                height: 28,
+                                borderRadius: 7,
+                                backgroundColor: '#4F46E5',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}>
+                                <Text style={{ fontSize: 12, fontWeight: '900', color: '#fff' }}>{period}</Text>
+                              </View>
+                              <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
+                                  {item.grade}-{item.section}
+                                </Text>
+                                <Text style={{ fontSize: 11, color: '#64748B' }} numberOfLines={1}>
+                                  {item.lessonName}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <TouchableOpacity
+                                onPress={() => handleStartEditCell(inspectDayTab, period)}
+                                style={{ backgroundColor: '#EEF2FF', padding: 6, borderRadius: 6 }}
+                              >
+                                <Ionicons name="pencil" size={15} color="#4F46E5" />
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={() => handleDeleteCellSlot(inspectDayTab, period)}
+                                style={{ backgroundColor: '#FEF2F2', padding: 6, borderRadius: 6 }}
+                              >
+                                <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        );
+                      }
+
+                      return (
+                        <TouchableOpacity
+                          key={period}
+                          onPress={() => handleStartEditCell(inspectDayTab, period)}
+                          activeOpacity={0.7}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: '#F8FAFC',
+                            borderRadius: 10,
+                            padding: 10,
+                            borderWidth: 1,
+                            borderStyle: 'dashed',
+                            borderColor: '#CBD5E1',
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <View style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 7,
+                              backgroundColor: '#E2E8F0',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}>
+                              <Text style={{ fontSize: 12, fontWeight: '800', color: '#64748B' }}>{period}</Text>
+                            </View>
+                            <Text style={{ fontSize: 12, color: '#94A3B8', fontWeight: '600' }}>
+                              Boş Ders Saati
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ECFDF5', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                            <Ionicons name="add" size={14} color="#059669" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#059669' }}>+ Ders Ekle</Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
+            </ScrollView>
+
+            {/* Modal Alt Aksiyon Butonları */}
+            <View style={{ flexDirection: 'row', gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}>
+              <TouchableOpacity
+                onPress={() => setInspectTeacherModalVisible(false)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                  backgroundColor: '#F1F5F9',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#64748B' }}>Vazgeç</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleApplyTeacherInspectorChanges}
+                style={{
+                  flex: 2,
+                  flexDirection: 'row',
+                  gap: 6,
+                  paddingVertical: 10,
+                  borderRadius: 10,
+                  backgroundColor: '#059669',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Ionicons name="checkmark-done" size={17} color="#fff" />
+                <Text style={{ fontSize: 12, fontWeight: '800', color: '#fff' }}>
+                  Değişiklikleri Programa Aktar ({inspectingItems.length} Saat)
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
