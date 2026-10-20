@@ -407,14 +407,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         lessonName: existing.lessonName,
       });
     } else {
-      const defaultClass = parsedSchedule?.classes?.[0] || '9-A';
-      const parts = defaultClass.split('-');
+      // Öğretmenin alt tablosundaki resmî ders yükünden veya mevcut derslerinden varsayılan seç:
+      const firstWl = inspectingVerification?.workloadItems?.[0];
+      const defaultCls = firstWl?.className?.replace('/', '-') || (inspectingItems[0] ? `${inspectingItems[0].grade}-${inspectingItems[0].section}` : (parsedSchedule?.classes?.[0] || '9-A'));
+      const parts = defaultCls.split('-');
+      const defaultLsn = firstWl?.lessonName || firstWl?.lessonCode || inspectingItems[0]?.lessonName || parsedSchedule?.lessons?.[0] || '';
       setEditingCellSlot({
         dayOfWeek,
         lessonHour,
         grade: parts[0] || '9',
         section: parts[1] || 'A',
-        lessonName: parsedSchedule?.lessons?.[0] || '',
+        lessonName: defaultLsn,
       });
     }
   };
@@ -10143,120 +10146,302 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     </TouchableOpacity>
                   </View>
 
-                  {/* Sınıf / Şube Girişi & Hızlı Çipler */}
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338CA', marginBottom: 4 }}>
-                    Sınıf / Şube:
-                  </Text>
-                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 6 }}>
-                    <TextInput
-                      style={{
-                        flex: 1,
-                        backgroundColor: '#fff',
-                        borderWidth: 1,
-                        borderColor: '#C7D2FE',
-                        borderRadius: 6,
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        fontSize: 12,
-                        fontWeight: '700',
-                      }}
-                      placeholder="Kademe (örn: 9)"
-                      value={editingCellSlot.grade}
-                      onChangeText={(val) => setEditingCellSlot({ ...editingCellSlot, grade: val })}
-                    />
-                    <TextInput
-                      style={{
-                        flex: 1,
-                        backgroundColor: '#fff',
-                        borderWidth: 1,
-                        borderColor: '#C7D2FE',
-                        borderRadius: 6,
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        fontSize: 12,
-                        fontWeight: '700',
-                      }}
-                      placeholder="Şube (örn: A)"
-                      value={editingCellSlot.section}
-                      onChangeText={(val) => setEditingCellSlot({ ...editingCellSlot, section: val })}
-                    />
-                  </View>
+                  {/* Listbox Seçim Alanı: Öğretmenin Kendi Dersleri ve Sınıfları */}
+                  {(() => {
+                    // 1. Öğretmenin Kendi Ders Listesi:
+                    const teacherLessonsMap = new Map<string, { name: string; code?: string; weeklyHours?: number }>();
+                    (inspectingVerification?.workloadItems || []).forEach(wi => {
+                      const key = (wi.lessonName || wi.lessonCode || '').trim();
+                      if (key) {
+                        teacherLessonsMap.set(key.toUpperCase(), {
+                          name: wi.lessonName || wi.lessonCode || key,
+                          code: wi.lessonCode,
+                          weeklyHours: wi.weeklyHours,
+                        });
+                      }
+                      if (wi.lessonCode && wi.lessonName && wi.lessonCode !== wi.lessonName) {
+                        teacherLessonsMap.set(wi.lessonCode.toUpperCase(), {
+                          name: wi.lessonName,
+                          code: wi.lessonCode,
+                          weeklyHours: wi.weeklyHours,
+                        });
+                      }
+                    });
 
-                  {/* Sınıf Hızlı Seçim Çipleri */}
-                  {parsedSchedule && parsedSchedule.classes && parsedSchedule.classes.length > 0 && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
-                      <View style={{ flexDirection: 'row', gap: 4 }}>
-                        {parsedSchedule.classes.slice(0, 15).map((cls, cIdx) => {
-                          const parts = cls.split('-');
-                          return (
-                            <TouchableOpacity
-                              key={cIdx}
-                              onPress={() => setEditingCellSlot({
-                                ...editingCellSlot,
-                                grade: parts[0] || editingCellSlot.grade,
-                                section: parts[1] || editingCellSlot.section,
-                              })}
-                              style={{
-                                backgroundColor: '#fff',
-                                paddingHorizontal: 7,
-                                paddingVertical: 3,
-                                borderRadius: 6,
-                                borderWidth: 1,
-                                borderColor: '#C7D2FE',
-                              }}
-                            >
-                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#4F46E5' }}>{cls}</Text>
-                            </TouchableOpacity>
-                          );
-                        })}
+                    inspectingItems.forEach(it => {
+                      if (it.lessonName) {
+                        const key = it.lessonName.trim().toUpperCase();
+                        if (!teacherLessonsMap.has(key)) {
+                          teacherLessonsMap.set(key, {
+                            name: it.lessonName,
+                            code: it.lessonCode,
+                          });
+                        }
+                      }
+                    });
+
+                    const teacherLessons = Array.from(teacherLessonsMap.values());
+
+                    // Diğer Okul Dersleri:
+                    const otherLessons = (parsedSchedule?.lessons || []).filter(lsn => {
+                      const upper = lsn.trim().toUpperCase();
+                      return !teacherLessonsMap.has(upper) && !Array.from(teacherLessonsMap.values()).some(tl => tl.name.toUpperCase() === upper || tl.code?.toUpperCase() === upper);
+                    });
+
+                    // 2. Öğretmenin Kendi Sınıfları:
+                    const teacherClassesSet = new Set<string>();
+                    (inspectingVerification?.workloadItems || []).forEach(wi => {
+                      if (wi.className) teacherClassesSet.add(wi.className.replace('/', '-').toUpperCase().trim());
+                    });
+                    inspectingItems.forEach(it => {
+                      teacherClassesSet.add(`${it.grade}-${it.section}`.toUpperCase().trim());
+                    });
+                    const teacherClasses = Array.from(teacherClassesSet);
+
+                    // Diğer Okul Şubeleri:
+                    const otherClasses = (parsedSchedule?.classes || []).filter(cls => !teacherClassesSet.has(cls.toUpperCase().trim()));
+
+                    const currentClass = `${editingCellSlot.grade}-${editingCellSlot.section}`.toUpperCase();
+
+                    return (
+                      <View style={{ gap: 10 }}>
+                        {/* ⚡ Hızlı Paket Seçimi: Kağıdın Alt Tablosundaki Dağılım Çipleri */}
+                        {inspectingVerification?.workloadItems && inspectingVerification.workloadItems.length > 0 && (
+                          <View style={{ backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#C7D2FE' }}>
+                            <Text style={{ fontSize: 10, fontWeight: '800', color: '#4338CA', marginBottom: 5 }}>
+                              ⚡ Kağıttaki Ders Paketiyle 1-Tıkla Doldur:
+                            </Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                              <View style={{ flexDirection: 'row', gap: 6 }}>
+                                {inspectingVerification.workloadItems.map((wi, wIdx) => {
+                                  const cleanCls = wi.className.replace('/', '-').toUpperCase();
+                                  const parts = cleanCls.split('-');
+                                  const lName = wi.lessonName || wi.lessonCode || 'Ders';
+                                  const isSelected = currentClass === cleanCls && (editingCellSlot.lessonName.toUpperCase() === lName.toUpperCase() || editingCellSlot.lessonName.toUpperCase() === (wi.lessonCode || '').toUpperCase());
+
+                                  return (
+                                    <TouchableOpacity
+                                      key={wIdx}
+                                      onPress={() => {
+                                        setEditingCellSlot({
+                                          ...editingCellSlot,
+                                          grade: parts[0] || '9',
+                                          section: parts[1] || 'A',
+                                          lessonName: lName,
+                                        });
+                                      }}
+                                      style={{
+                                        backgroundColor: isSelected ? '#4F46E5' : '#F1F5F9',
+                                        borderRadius: 6,
+                                        borderWidth: 1,
+                                        borderColor: isSelected ? '#4338CA' : '#CBD5E1',
+                                        paddingHorizontal: 8,
+                                        paddingVertical: 5,
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                      }}
+                                    >
+                                      {isSelected && <Ionicons name="checkmark-circle" size={12} color="#fff" />}
+                                      <Text style={{ fontSize: 11, fontWeight: '800', color: isSelected ? '#fff' : '#1E293B' }}>
+                                        {cleanCls} • {wi.lessonCode || wi.lessonName}
+                                      </Text>
+                                      <View style={{ backgroundColor: isSelected ? '#3730A3' : '#E2E8F0', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4 }}>
+                                        <Text style={{ fontSize: 9, fontWeight: '800', color: isSelected ? '#C7D2FE' : '#475569' }}>
+                                          {wi.weeklyHours}s
+                                        </Text>
+                                      </View>
+                                    </TouchableOpacity>
+                                  );
+                                })}
+                              </View>
+                            </ScrollView>
+                          </View>
+                        )}
+
+                        {/* 1. ŞUBE SEÇİM LİSTBOX'I (Elle yazma kaldırıldı) */}
+                        <View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#312E81' }}>
+                              🏫 Şube Seçimi:
+                            </Text>
+                            <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '900', color: '#1E40AF' }}>
+                                Seçili: {currentClass}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Öğretmenin Şubeleri */}
+                          <Text style={{ fontSize: 10, color: '#6366F1', fontWeight: '700', marginBottom: 3 }}>
+                            Öğretmenin Girdiği Sınıflar:
+                          </Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                            {teacherClasses.map((cls, cIdx) => {
+                              const isSel = currentClass === cls;
+                              const parts = cls.split('-');
+                              return (
+                                <TouchableOpacity
+                                  key={cIdx}
+                                  onPress={() => setEditingCellSlot({
+                                    ...editingCellSlot,
+                                    grade: parts[0] || '9',
+                                    section: parts[1] || 'A',
+                                  })}
+                                  style={{
+                                    backgroundColor: isSel ? '#4F46E5' : '#FFFFFF',
+                                    paddingHorizontal: 12,
+                                    paddingVertical: 6,
+                                    borderRadius: 8,
+                                    borderWidth: 1.5,
+                                    borderColor: isSel ? '#4338CA' : '#CBD5E1',
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 12, fontWeight: '800', color: isSel ? '#fff' : '#1E293B' }}>
+                                    {cls}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+
+                          {/* Diğer Okul Şubeleri (Gerekirse) */}
+                          {otherClasses.length > 0 && (
+                            <>
+                              <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '700', marginBottom: 3 }}>
+                                Diğer Okul Şubeleri:
+                              </Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                <View style={{ flexDirection: 'row', gap: 4 }}>
+                                  {otherClasses.map((cls, cIdx) => {
+                                    const isSel = currentClass === cls;
+                                    const parts = cls.split('-');
+                                    return (
+                                      <TouchableOpacity
+                                        key={cIdx}
+                                        onPress={() => setEditingCellSlot({
+                                          ...editingCellSlot,
+                                          grade: parts[0] || '9',
+                                          section: parts[1] || 'A',
+                                        })}
+                                        style={{
+                                          backgroundColor: isSel ? '#4F46E5' : '#FFFFFF',
+                                          paddingHorizontal: 8,
+                                          paddingVertical: 4,
+                                          borderRadius: 6,
+                                          borderWidth: 1,
+                                          borderColor: isSel ? '#4338CA' : '#E2E8F0',
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 11, fontWeight: '700', color: isSel ? '#fff' : '#64748B' }}>
+                                          {cls}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </ScrollView>
+                            </>
+                          )}
+                        </View>
+
+                        {/* 2. DERS ADI SEÇİM LİSTBOX'I (Elle yazma kaldırıldı) */}
+                        <View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#312E81' }}>
+                              📚 Ders Seçimi:
+                            </Text>
+                            <View style={{ backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, maxWidth: '65%' }}>
+                              <Text style={{ fontSize: 11, fontWeight: '900', color: '#92400E' }} numberOfLines={1}>
+                                Seçili: {editingCellSlot.lessonName || 'Seçilmedi'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Öğretmenin Resmî Dersleri */}
+                          <Text style={{ fontSize: 10, color: '#6366F1', fontWeight: '700', marginBottom: 4 }}>
+                            Öğretmenin Resmî Dersleri:
+                          </Text>
+                          <View style={{ gap: 5, marginBottom: 6 }}>
+                            {teacherLessons.map((tl, lIdx) => {
+                              const isSel = editingCellSlot.lessonName.toUpperCase() === tl.name.toUpperCase() ||
+                                            (tl.code && editingCellSlot.lessonName.toUpperCase() === tl.code.toUpperCase());
+
+                              return (
+                                <TouchableOpacity
+                                  key={lIdx}
+                                  onPress={() => setEditingCellSlot({ ...editingCellSlot, lessonName: tl.name })}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    backgroundColor: isSel ? '#4F46E5' : '#FFFFFF',
+                                    borderRadius: 8,
+                                    borderWidth: 1.5,
+                                    borderColor: isSel ? '#4338CA' : '#CBD5E1',
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 7,
+                                  }}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                                    <Ionicons
+                                      name={isSel ? "radio-button-on" : "radio-button-off"}
+                                      size={16}
+                                      color={isSel ? "#fff" : "#94A3B8"}
+                                    />
+                                    <Text style={{ fontSize: 12, fontWeight: '800', color: isSel ? '#fff' : '#1E293B', flex: 1 }} numberOfLines={1}>
+                                      {tl.name}
+                                    </Text>
+                                  </View>
+                                  {tl.code && (
+                                    <View style={{ backgroundColor: isSel ? '#3730A3' : '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                      <Text style={{ fontSize: 10, fontWeight: '800', color: isSel ? '#C7D2FE' : '#475569' }}>
+                                        {tl.code}
+                                      </Text>
+                                    </View>
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+
+                          {/* Diğer Okul Dersleri (Gerekirse) */}
+                          {otherLessons.length > 0 && (
+                            <>
+                              <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '700', marginBottom: 3 }}>
+                                Diğer Okul Dersleri ({otherLessons.length}):
+                              </Text>
+                              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                <View style={{ flexDirection: 'row', gap: 4 }}>
+                                  {otherLessons.map((lsn, lIdx) => {
+                                    const isSel = editingCellSlot.lessonName.toUpperCase() === lsn.toUpperCase();
+                                    return (
+                                      <TouchableOpacity
+                                        key={lIdx}
+                                        onPress={() => setEditingCellSlot({ ...editingCellSlot, lessonName: lsn })}
+                                        style={{
+                                          backgroundColor: isSel ? '#4F46E5' : '#FFFFFF',
+                                          paddingHorizontal: 8,
+                                          paddingVertical: 4,
+                                          borderRadius: 6,
+                                          borderWidth: 1,
+                                          borderColor: isSel ? '#4338CA' : '#E2E8F0',
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 11, fontWeight: '700', color: isSel ? '#fff' : '#64748B' }}>
+                                          {lsn}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                </View>
+                              </ScrollView>
+                            </>
+                          )}
+                        </View>
                       </View>
-                    </ScrollView>
-                  )}
-
-                  {/* Ders Adı Girişi & Hızlı Çipler */}
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338CA', marginBottom: 4 }}>
-                    Ders Adı:
-                  </Text>
-                  <TextInput
-                    style={{
-                      backgroundColor: '#fff',
-                      borderWidth: 1,
-                      borderColor: '#C7D2FE',
-                      borderRadius: 6,
-                      paddingHorizontal: 8,
-                      paddingVertical: 4,
-                      fontSize: 12,
-                      fontWeight: '700',
-                      marginBottom: 6,
-                    }}
-                    placeholder="Ders adı (örn: Matematik, MAT, Beden)"
-                    value={editingCellSlot.lessonName}
-                    onChangeText={(val) => setEditingCellSlot({ ...editingCellSlot, lessonName: val })}
-                  />
-
-                  {/* Ders Hızlı Seçim Çipleri */}
-                  {parsedSchedule && parsedSchedule.lessons && parsedSchedule.lessons.length > 0 && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
-                      <View style={{ flexDirection: 'row', gap: 4 }}>
-                        {parsedSchedule.lessons.slice(0, 15).map((lsn, lIdx) => (
-                          <TouchableOpacity
-                            key={lIdx}
-                            onPress={() => setEditingCellSlot({ ...editingCellSlot, lessonName: lsn })}
-                            style={{
-                              backgroundColor: '#fff',
-                              paddingHorizontal: 7,
-                              paddingVertical: 3,
-                              borderRadius: 6,
-                              borderWidth: 1,
-                              borderColor: '#C7D2FE',
-                            }}
-                          >
-                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#4F46E5' }}>{lsn}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-                  )}
+                    );
+                  })()}
 
                   {/* Ekle / Vazgeç Butonları */}
                   <View style={{ flexDirection: 'row', gap: 8 }}>
