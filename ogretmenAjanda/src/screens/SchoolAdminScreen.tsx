@@ -34,6 +34,13 @@ import {
   saveScheduleBatchesToStorage,
   loadScheduleBatchesFromStorage,
   clearScheduleBatchesFromStorage,
+  saveCachedScheduleFile,
+  loadCachedScheduleFile,
+  clearCachedScheduleFile,
+  saveParsedScheduleDraft,
+  loadParsedScheduleDraft,
+  clearParsedScheduleDraft,
+  CachedScheduleDocInfo,
 } from '../services/aiScheduleParser';
 import { countPdfPages } from '../utils/pdfSliceService';
 import { extractStudentPhotosWithAi } from '../services/aiStudentPhotoExtractor';
@@ -258,11 +265,18 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [scheduleBatches, setScheduleBatches] = useState<ScheduleBatchItem[]>([]);
   const [batchPoolModalVisible, setBatchPoolModalVisible] = useState(false);
   const [lastAnalyzedPageRange, setLastAnalyzedPageRange] = useState<{ start: number; end: number } | undefined>(undefined);
+  const [cachedScheduleDoc, setCachedScheduleDoc] = useState<CachedScheduleDocInfo | null>(null);
+  const [cachedScheduleDraft, setCachedScheduleDraft] = useState<ParsedScheduleResult | null>(null);
+  const [reScanningTeacher, setReScanningTeacher] = useState(false);
 
   const loadSchoolBatches = async (schoolId: string) => {
     try {
       const batches = await loadScheduleBatchesFromStorage(schoolId);
       setScheduleBatches(batches);
+      const cachedDoc = await loadCachedScheduleFile(schoolId);
+      setCachedScheduleDoc(cachedDoc);
+      const draft = await loadParsedScheduleDraft(schoolId);
+      setCachedScheduleDraft(draft);
     } catch (e) {
       console.warn('[Çarşaf Havuz] Yükleme hatası:', e);
     }
@@ -504,12 +518,101 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     };
 
     setParsedSchedule(updatedParsedSchedule);
+    if (selectedSchool) {
+      saveParsedScheduleDraft(selectedSchool.id, updatedParsedSchedule);
+      setCachedScheduleDraft(updatedParsedSchedule);
+    }
     setInspectTeacherModalVisible(false);
 
-    Alert.alert(
-      'Öğretmen Programı Güncellendi ✅',
-      `"${inspectingTeacher}" için ${inspectingItems.length} ders saati programa başarıyla aktarıldı.`
-    );
+    // 🛡️ Çapraz Çakışma Denetim Motoru:
+    // Bu öğretmenin güncellenen saatleri diğer öğretmenlerle aynı sınıfta çakışıyor mu?
+    const dayNames = ['', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+    const conflictsDetected: Array<{
+      dayOfWeek: number;
+      lessonHour: number;
+      className: string;
+      otherTeacher: string;
+      lessonName?: string;
+    }> = [];
+
+    for (const myItem of inspectingItems) {
+      const myClass = `${myItem.grade}-${myItem.section}`.toUpperCase().trim();
+      const conflictWith = otherItems.find(ot => {
+        const otClass = `${ot.grade}-${ot.section}`.toUpperCase().trim();
+        return ot.dayOfWeek === myItem.dayOfWeek &&
+               ot.lessonHour === myItem.lessonHour &&
+               otClass === myClass;
+      });
+
+      if (conflictWith) {
+        conflictsDetected.push({
+          dayOfWeek: myItem.dayOfWeek,
+          lessonHour: myItem.lessonHour,
+          className: myClass,
+          otherTeacher: conflictWith.teacherName || 'Bilinmeyen Öğretmen',
+          lessonName: conflictWith.lessonName,
+        });
+      }
+    }
+
+    if (conflictsDetected.length === 0) {
+      Alert.alert(
+        'Öğretmen Programı Güncellendi ✅',
+        `"${inspectingTeacher}" için ${inspectingItems.length} ders saati programa aktarıldı.\n\n` +
+        `🛡️ Çapraz Kontrol: Diğer tüm öğretmenlerle kontrol edildi, HİÇBİR ÇAKIŞMA YOK (0 Çakışma, Kusursuz Uyum)!\n\n` +
+        `💾 Değişiklikler yerel taslak olarak belleğe kaydedildi.`
+      );
+    } else {
+      const conflictSummary = conflictsDetected.slice(0, 3).map(c =>
+        `• ${dayNames[c.dayOfWeek] || c.dayOfWeek}. Gün ${c.lessonHour}. Ders (${c.className}): ${c.otherTeacher}`
+      ).join('\n');
+      const extra = conflictsDetected.length > 3 ? `\n... ve ${conflictsDetected.length - 3} çakışma daha.` : '';
+
+      Alert.alert(
+        'Öğretmen Güncellendi ⚠️ Çakışma Uyarısı',
+        `"${inspectingTeacher}" için ${inspectingItems.length} saat programa aktarıldı ancak ${conflictsDetected.length} derste başka öğretmenlerle ÇAKIŞMA tespit edildi:\n\n` +
+        `${conflictSummary}${extra}\n\n` +
+        `İlgili saatlerde aynı şubede iki öğretmen görünmektedir. Lütfen diğer öğretmenin programını da kâğıda göre kontrol ediniz.\n\n` +
+        `💾 Değişiklikler yerel taslak olarak belleğe kaydedildi.`
+      );
+    }
+  };
+
+  const handleRescanTeacherFromDocument = async () => {
+    const targetFile = pendingScheduleFile || cachedScheduleDoc;
+    if (!targetFile?.uri) {
+      Alert.alert('Belge Bulunamadı', 'Hafızada kayıtlı bir çarşaf belgesi bulunamadı. Lütfen önce bir çarşaf dosyası yükleyin.');
+      return;
+    }
+
+    try {
+      setReScanningTeacher(true);
+      const res = await parseSingleTeacherScheduleWithAi(
+        targetFile.uri,
+        targetFile.mimeType || 'application/pdf',
+        inspectingTeacher,
+        geminiApiKeyInput,
+        selectedGeminiModel
+      );
+
+      if (res && Array.isArray(res.items) && res.items.length > 0) {
+        setInspectingItems(res.items);
+        if (res.totalHours) {
+          setTempExpectedHours(String(res.totalHours));
+        }
+        Alert.alert(
+          'Yeniden Okuma Başarılı 🎉',
+          `"${inspectingTeacher}" için belgeden ${res.items.length} ders saati başarıyla yeniden çıkarıldı ve tabloya aktarıldı.`
+        );
+      } else {
+        Alert.alert('Ders Bulunamadı', `Belgede "${inspectingTeacher}" için ders saati tespit edilemedi.`);
+      }
+    } catch (err: any) {
+      console.warn('Tek öğretmen okuma hatası:', err);
+      Alert.alert('Okuma Hatası', err.message || 'Öğretmen belgeden taranamadı.');
+    } finally {
+      setReScanningTeacher(false);
+    }
   };
 
   const aiCancelledRef = useRef(false);
@@ -2371,6 +2474,18 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
       const file = pickerResult.assets[0];
       setPendingScheduleFile(file);
+      if (selectedSchool) {
+        const docInfo: CachedScheduleDocInfo = {
+          name: file.name || 'carsaf.pdf',
+          uri: file.uri,
+          mimeType: file.mimeType || (file.name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+          size: file.size,
+          totalPages: 0,
+          updatedAt: Date.now(),
+        };
+        saveCachedScheduleFile(selectedSchool.id, docInfo);
+        setCachedScheduleDoc(docInfo);
+      }
 
       // PDF ise sayfa sayısını otomatik tara
       if (file.name?.toLowerCase().endsWith('.pdf') || file.mimeType?.includes('pdf')) {
@@ -2558,6 +2673,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       });
 
       setParsedSchedule(parsed);
+      if (selectedSchool) {
+        saveParsedScheduleDraft(selectedSchool.id, parsed);
+        setCachedScheduleDraft(parsed);
+      }
       setSaveTeachersChecked(optExtractTeachers);
       setSaveClassesChecked(optExtractClasses);
       setSaveLessonsChecked(optExtractLessons);
@@ -2687,6 +2806,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         Alert.alert('Başarılı 🎉', result.message);
         setAiModalVisible(false);
         setParsedSchedule(null);
+        if (selectedSchool) {
+          clearParsedScheduleDraft(selectedSchool.id);
+          setCachedScheduleDraft(null);
+        }
         setExcludedTeachers([]);
         setExcludedClasses([]);
         setExcludedLessons([]);
@@ -4635,6 +4758,108 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             {/* 5. ÇARŞAF, PROGRAM DENETİMİ VE CANLI DÜZENLEYİCİ SEKMESİ */}
             {activeTab === 'schedule' && (
               <View>
+                {/* 0.1 KAYDEDİLMEMİŞ SON ÇARŞAF ANALİZİ TASLAĞI (VARSA) */}
+                {cachedScheduleDraft && (
+                  <View style={{
+                    backgroundColor: '#F0FDF4',
+                    borderWidth: 1.5,
+                    borderColor: '#86EFAC',
+                    borderRadius: 14,
+                    padding: 12,
+                    marginBottom: 10,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}>
+                    <View style={{ flex: 1, paddingRight: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <Ionicons name="document-text" size={18} color="#16A34A" />
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#166534' }}>
+                          💾 Kaydedilmemiş Son Çarşaf Analizi
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: '#15803D' }}>
+                        {(cachedScheduleDraft.teachers || []).length} Öğretmen, {(cachedScheduleDraft.scheduleItems || []).length} Ders Saati hafızada hazır.
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setParsedSchedule(cachedScheduleDraft);
+                          setAiModalVisible(true);
+                        }}
+                        style={{
+                          backgroundColor: '#16A34A',
+                          paddingHorizontal: 10,
+                          paddingVertical: 7,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>Taslağı Aç ➔</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={async () => {
+                          if (selectedSchool) await clearParsedScheduleDraft(selectedSchool.id);
+                          setCachedScheduleDraft(null);
+                        }}
+                        style={{
+                          backgroundColor: '#FEE2E2',
+                          paddingHorizontal: 8,
+                          paddingVertical: 7,
+                          borderRadius: 8,
+                        }}
+                      >
+                        <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+
+                {/* 0.2 SON YÜKLENEN BELGE İLE HIZLI TEKRAR TARA (VARSA) */}
+                {cachedScheduleDoc && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setPendingScheduleFile({
+                        name: cachedScheduleDoc.name,
+                        uri: cachedScheduleDoc.uri,
+                        mimeType: cachedScheduleDoc.mimeType,
+                        size: cachedScheduleDoc.size,
+                      });
+                      setPdfTotalPages(cachedScheduleDoc.totalPages || 0);
+                      setPdfPageRangeMode('all');
+                      setPdfStartPage('1');
+                      setPdfEndPage(String(cachedScheduleDoc.totalPages || 1));
+                      setSchedulePreOptionsModalVisible(true);
+                    }}
+                    style={{
+                      backgroundColor: '#EEF2FF',
+                      borderWidth: 1,
+                      borderColor: '#C7D2FE',
+                      borderRadius: 12,
+                      padding: 10,
+                      marginBottom: 10,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <Ionicons name="document-attach" size={20} color="#4F46E5" />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: '#312E81' }} numberOfLines={1}>
+                          📄 Son Belge: {cachedScheduleDoc.name}
+                        </Text>
+                        <Text style={{ fontSize: 10, color: '#6366F1' }}>
+                          {cachedScheduleDoc.totalPages ? `${cachedScheduleDoc.totalPages} Sayfa • ` : ''}Dosya seçmeden hızlıca tekrar tara
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={{ backgroundColor: '#4F46E5', paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Hızlı Tara ➔</Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+
                 {/* 1. AI ile Çarşaf Yükleme Butonu */}
                 <TouchableOpacity style={styles.aiBanner} onPress={handlePickAndAnalyzeSchedule}>
                   <View style={styles.aiBannerIcon}>
@@ -9638,6 +9863,34 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         </Text>
                       </View>
                     </View>
+
+                    {(pendingScheduleFile || cachedScheduleDoc) && (
+                      <TouchableOpacity
+                        disabled={reScanningTeacher}
+                        onPress={handleRescanTeacherFromDocument}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          backgroundColor: '#EEF2FF',
+                          borderWidth: 1,
+                          borderColor: '#C7D2FE',
+                          borderRadius: 8,
+                          paddingVertical: 7,
+                          marginBottom: 8,
+                        }}
+                      >
+                        {reScanningTeacher ? (
+                          <ActivityIndicator size="small" color="#4F46E5" />
+                        ) : (
+                          <Ionicons name="flash" size={14} color="#4F46E5" />
+                        )}
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338CA' }}>
+                          {reScanningTeacher ? 'Öğretmen Belgeden Taranıyor...' : '⚡ Bu Öğretmeni Belgeden Yeniden Oku'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
 
                     {/* Kağıttaki Beklenen Saat Ayarı (Gerekirse düzeltme) */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, marginTop: 4, borderWidth: 1, borderColor: '#E2E8F0' }}>

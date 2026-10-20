@@ -1390,3 +1390,98 @@ export async function clearScheduleBatchesFromStorage(schoolId: string): Promise
     console.warn('[Çarşaf Havuz Temizleme Hata]:', e);
   }
 }
+
+const CACHED_FILE_KEY_PREFIX = 'carsaf_cached_doc_';
+const DRAFT_SCHEDULE_KEY_PREFIX = 'carsaf_parsed_draft_';
+
+export interface CachedScheduleDocInfo {
+  name: string;
+  uri: string;
+  mimeType?: string;
+  size?: number;
+  totalPages?: number;
+  updatedAt: number;
+}
+
+/**
+ * Son yüklenen çarşaf belgesini (PDF/Görsel) okul bazında önbelleğe saklar
+ */
+export async function saveCachedScheduleFile(schoolId: string, docInfo: CachedScheduleDocInfo): Promise<void> {
+  try {
+    const key = `${CACHED_FILE_KEY_PREFIX}${schoolId}`;
+    await AsyncStorage.setItem(key, JSON.stringify(docInfo));
+    console.log(`[Çarşaf Önbellek] Belge saklandı: ${docInfo.name}`);
+  } catch (e) {
+    console.warn('[Çarşaf Belge Saklama Hata]:', e);
+  }
+}
+
+/**
+ * Son yüklenen çarşaf belgesi meta verisini getirir
+ */
+export async function loadCachedScheduleFile(schoolId: string): Promise<CachedScheduleDocInfo | null> {
+  try {
+    const key = `${CACHED_FILE_KEY_PREFIX}${schoolId}`;
+    const raw = await AsyncStorage.getItem(key);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn('[Çarşaf Belge Yükleme Hata]:', e);
+  }
+  return null;
+}
+
+/**
+ * Önbellekteki belge kaydını temizler
+ */
+export async function clearCachedScheduleFile(schoolId: string): Promise<void> {
+  try {
+    const key = `${CACHED_FILE_KEY_PREFIX}${schoolId}`;
+    await AsyncStorage.removeItem(key);
+  } catch (e) {
+    console.warn('[Çarşaf Belge Temizleme Hata]:', e);
+  }
+}
+
+/**
+ * Son ayrıştırılan çarşaf program taslağını yerel hafızaya saklar
+ */
+export async function saveParsedScheduleDraft(schoolId: string, draft: ParsedScheduleResult): Promise<void> {
+  try {
+    const key = `${DRAFT_SCHEDULE_KEY_PREFIX}${schoolId}`;
+    await AsyncStorage.setItem(key, JSON.stringify(draft));
+    console.log('[Çarşaf Taslak] Ayrıştırılan son program taslak olarak saklandı.');
+  } catch (e) {
+    console.warn('[Çarşaf Taslak Saklama Hata]:', e);
+  }
+}
+
+/**
+ * Son ayrıştırılan çarşaf program taslağını hafızadan getirir
+ */
+export async function loadParsedScheduleDraft(schoolId: string): Promise<ParsedScheduleResult | null> {
+  try {
+    const key = `${DRAFT_SCHEDULE_KEY_PREFIX}${schoolId}`;
+    const raw = await AsyncStorage.getItem(key);
+    if (raw) {
+      return JSON.parse(raw);
+    }
+  } catch (e) {
+    console.warn('[Çarşaf Taslak Yükleme Hata]:', e);
+  }
+  return null;
+}
+
+/**
+ * Çarşaf program taslağını temizler
+ */
+export async function clearParsedScheduleDraft(schoolId: string): Promise<void> {
+  try {
+    const key = `${DRAFT_SCHEDULE_KEY_PREFIX}${schoolId}`;
+    await AsyncStorage.removeItem(key);
+    console.log('[Çarşaf Taslak] Taslak temizlendi.');
+  } catch (e) {
+    console.warn('[Çarşaf Taslak Temizleme Hata]:', e);
+  }
+}
