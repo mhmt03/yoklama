@@ -568,12 +568,24 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       ).join('\n');
       const extra = conflictsDetected.length > 3 ? `\n... ve ${conflictsDetected.length - 3} çakışma daha.` : '';
 
+      const firstConflictTeacher = conflictsDetected[0]?.otherTeacher;
+      const alertButtons: any[] = [{ text: 'Tamam', style: 'cancel' }];
+      if (firstConflictTeacher && firstConflictTeacher !== 'Bilinmeyen Öğretmen') {
+        alertButtons.push({
+          text: `🔍 ${firstConflictTeacher}'ı İncele`,
+          onPress: () => {
+            handleOpenTeacherScheduleInspector(firstConflictTeacher);
+          },
+        });
+      }
+
       Alert.alert(
         'Öğretmen Güncellendi ⚠️ Çakışma Uyarısı',
         `"${inspectingTeacher}" için ${inspectingItems.length} saat programa aktarıldı ancak ${conflictsDetected.length} derste başka öğretmenlerle ÇAKIŞMA tespit edildi:\n\n` +
         `${conflictSummary}${extra}\n\n` +
-        `İlgili saatlerde aynı şubede iki öğretmen görünmektedir. Lütfen diğer öğretmenin programını da kâğıda göre kontrol ediniz.\n\n` +
-        `💾 Değişiklikler yerel taslak olarak belleğe kaydedildi.`
+        `İlgili saatlerde aynı şubede iki öğretmen görünmektedir.\n\n` +
+        `💾 Değişiklikler yerel taslak olarak belleğe kaydedildi.`,
+        alertButtons
       );
     }
   };
