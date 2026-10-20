@@ -9749,6 +9749,116 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 })}
               </View>
 
+              {/* Aktif Gün Hızlı İşlemler (Boşalt veya Başka Güne Taşı) */}
+              {(() => {
+                const currentDayLessons = inspectingItems.filter(it => it.dayOfWeek === inspectDayTab);
+                const dayNames = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'];
+                const currentDayName = dayNames[inspectDayTab - 1] || 'Gün';
+
+                if (currentDayLessons.length === 0) return null;
+
+                return (
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: '#FEF2F2',
+                    borderWidth: 1,
+                    borderColor: '#FECACA',
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    marginBottom: 10,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                      <Ionicons name="information-circle" size={16} color="#DC2626" />
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#991B1B' }}>
+                        {currentDayName}: {currentDayLessons.length} ders
+                      </Text>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const otherDays = [
+                            { id: 1, name: 'Pazartesi' },
+                            { id: 2, name: 'Salı' },
+                            { id: 3, name: 'Çarşamba' },
+                            { id: 4, name: 'Perşembe' },
+                            { id: 5, name: 'Cuma' },
+                          ].filter(d => d.id !== inspectDayTab);
+
+                          Alert.alert(
+                            'Dersleri Başka Güne Taşı',
+                            `${currentDayName} günündeki ${currentDayLessons.length} dersi hangi güne aktarmak istiyorsunuz?`,
+                            [
+                              ...otherDays.map(d => ({
+                                text: d.name,
+                                onPress: () => {
+                                  setInspectingItems(prev => {
+                                    return prev.map(it => {
+                                      if (it.dayOfWeek === inspectDayTab) {
+                                        return { ...it, dayOfWeek: d.id };
+                                      }
+                                      return it;
+                                    });
+                                  });
+                                  setInspectDayTab(d.id);
+                                }
+                              })),
+                              { text: 'Vazgeç', style: 'cancel' }
+                            ]
+                          );
+                        }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: '#4F46E5',
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <Ionicons name="arrow-forward-circle-outline" size={13} color="#fff" />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Güne Taşı</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => {
+                          Alert.alert(
+                            'Günü Boşalt',
+                            `${currentDayName} günündeki ${currentDayLessons.length} dersi silip günü tamamen boşaltmak istiyor musunuz?`,
+                            [
+                              { text: 'Vazgeç', style: 'cancel' },
+                              {
+                                text: 'Günü Boşalt',
+                                style: 'destructive',
+                                onPress: () => {
+                                  setInspectingItems(prev => prev.filter(it => it.dayOfWeek !== inspectDayTab));
+                                }
+                              }
+                            ]
+                          );
+                        }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: '#DC2626',
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <Ionicons name="trash-bin-outline" size={13} color="#fff" />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#fff' }}>Günü Boşalt</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })()}
+
               {/* Hücre Düzenleme / Ekleme Kartı (Varsa Açık) */}
               {editingCellSlot && (
                 <View style={{

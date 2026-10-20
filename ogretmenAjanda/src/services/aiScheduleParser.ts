@@ -506,6 +506,17 @@ Her öğretmen için:
    - 6. indeks = 7. Ders Saati (14:30)
    - 7. indeks = 8. Ders Saati (15:20)
    - Eğer bir saatte ders yoksa KESİNLİKLE boş metin "" koy! ASLA boş saatleri atlayıp diziyi 8'den kısa yapma!
+    - 🚨 ÇOK ÖNEMLİ: KOMPLE BOŞ GÜN KURALI (BOŞ GÜNLERİ ASLA ATLAYIP KAYDIRMA!):
+      * Bir öğretmenin bir veya birden fazla günü TAMAMEN BOŞ OLABİLİR (Örneğin Salı günü hiç dersi olmayabilir).
+      * Tablonun solundaki gün etiketine bak: "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma".
+      * Eğer bir günün satırındaki hücreler tamamen boşsa, o günün grid dizisi KESİNLİKLE 8 elemanlı boş dizi olmalıdır: ["", "", "", "", "", "", "", ""].
+      * KESİNLİKLE boş günü görmezden gelip sonraki günün (örn: Çarşamba'nın) derslerini boş güne (Salı'ya) KAYDIRMA!
+    - 🚨 CUMA ÖNCESİ İKİNCİ "Saat" SATIRI UYARISI:
+      * Tablolarda Perşembe ile Cuma arasında Cuma ders saatleri farklı olduğu için araya tekrar "Saat" başlık satırı girer ("Saat 08:30 09:20...").
+      * Bu satır bir ders veya gün DEĞİLDİR! Bu ara satırı atla; onun altındaki satır "Cuma" günüdür.
+    - 🚨 ALT TABLO (workloadSummary.dailyHours) İLE ÇAPRAZ SAĞLAMA:
+      * Sayfa altındaki "Ders Dağılım ve Saat Çizelgesi" tablosundaki gün sütunlarında öğretmenin hangi gün kaç saat dersi olduğu yazar.
+      * Eğer alt tabloda o gün için toplam 0 saat yazıyorsa (örn: Salı sütunu boşsa), grid'deki o gün KESİNLİKLE ["", "", "", "", "", "", "", ""] olmalıdır.
    - Dolu saat için "Şube DersKodu" yaz (Örn: "9/D S.2YDL", "10/A CĞRFY", "12/F S.COĞ").
    - KRİTİK BLOK DERS KURALI: Eğer alt tablodaki "dailyHours" alanında o gün 2 saat yazıyorsa (örn: Salı 11/C için 2 saat Beden), grid'e KESİNLİKLE 2 SAAT peş peşe yazılmalıdır (Örn: 3. ve 4. saat)! Asla 1 saat yazıp sonraki öğretmeni erken saate kaydırma!
    - DİKKAT (SÜTUN HİZALAMASI): Tablonun en sağındaki son 2 sütunda bulunan dersler KESİNLİKLE 6. ve 7. indekse (7. ve 8. saat) denk gelir! Asla sabaha veya sola kaydırma!
@@ -815,6 +826,98 @@ ${jsonSchema}
                     }
                   }
                 }
+              }
+            }
+          }
+
+          // 🛡️ Çapraz Kontrol: Alt Resmi Çizelgedeki Günlük Saatler (dailyHours) ile Grid Doğrulaması
+          // MEB çizelgelerinde bir öğretmenin bir günü (örn: Salı) tamamen boş olabilir.
+          // Eğer alt çizelgedeki gün sütununda hiç saat yoksa (0 saat ise), ancak model üst ızgaradaki
+          // bir sonraki günün (Çarşamba) derslerini bu boş güne kaydırdıysa, bu kaymayı tespit edip düzelt:
+          const dayConfigs = [
+            { dayNum: 1, name: 'Pazartesi', aliases: ['pazartesi', 'pzt', 'mon', '1'] },
+            { dayNum: 2, name: 'Salı', aliases: ['salı', 'sali', 'tue', '2'] },
+            { dayNum: 3, name: 'Çarşamba', aliases: ['çarşamba', 'carsamba', 'çar', 'car', 'wed', '3'] },
+            { dayNum: 4, name: 'Perşembe', aliases: ['perşembe', 'persembe', 'prş', 'prs', 'thu', '4'] },
+            { dayNum: 5, name: 'Cuma', aliases: ['cuma', 'cum', 'fri', '5'] },
+          ];
+
+          let hasSummaryDailyData = false;
+          const expectedHoursPerDay: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+
+          for (const wl of workloadSummary) {
+            if (wl.dailyHours && typeof wl.dailyHours === 'object') {
+              for (const dCfg of dayConfigs) {
+                const matchKey = Object.keys(wl.dailyHours).find(k =>
+                  dCfg.aliases.some(a => k.toLowerCase().trim() === a || k.toLowerCase().trim().startsWith(a))
+                );
+                if (matchKey) {
+                  const val = Number(wl.dailyHours[matchKey]) || 0;
+                  if (val > 0) {
+                    hasSummaryDailyData = true;
+                    expectedHoursPerDay[dCfg.dayNum] += val;
+                  }
+                }
+              }
+            }
+          }
+
+          if (hasSummaryDailyData) {
+            for (const dCfg of dayConfigs) {
+              const matchingGridKey = Object.keys(grid).find(k =>
+                dCfg.aliases.some(a => k.toLowerCase().trim() === a || k.toLowerCase().trim().startsWith(a))
+              );
+              if (!matchingGridKey || !Array.isArray(grid[matchingGridKey])) continue;
+
+              const periods = grid[matchingGridKey];
+              const filledLessons = periods.filter(p => String(p || '').trim() !== '');
+              const expHours = expectedHoursPerDay[dCfg.dayNum];
+
+              // Eğer bu gün alt çizelgede 0 saat ise ama grid'e ders yazılmışsa (örneğin Salı günü boşken Çarşamba dersleri yazılmışsa):
+              if (expHours === 0 && filledLessons.length > 0) {
+                console.warn(`[Çarşaf Sağlama] ⚠️ ${teacherName} | ${dCfg.name} günü alt çizelgede 0 SAAT (KOMPLE BOŞ) ancak ızgarada ${filledLessons.length} ders bulundu.`);
+
+                // Bu derslerin asıl ait olduğu eksik günü (genellikle sonraki gün, örn: Çarşamba) bul:
+                const deficientDay = dayConfigs.find(other => {
+                  if (other.dayNum <= dCfg.dayNum) return false;
+                  const otherKey = Object.keys(grid).find(k =>
+                    other.aliases.some(a => k.toLowerCase().trim() === a || k.toLowerCase().trim().startsWith(a))
+                  );
+                  const otherPeriods = otherKey && Array.isArray(grid[otherKey]) ? grid[otherKey] : [];
+                  const otherFilled = otherPeriods.filter(p => String(p || '').trim() !== '').length;
+                  const otherExp = expectedHoursPerDay[other.dayNum];
+                  return otherExp > otherFilled;
+                });
+
+                if (deficientDay) {
+                  const defKey = Object.keys(grid).find(k =>
+                    deficientDay.aliases.some(a => k.toLowerCase().trim() === a || k.toLowerCase().trim().startsWith(a))
+                  ) || deficientDay.name;
+
+                  if (!grid[defKey] || !Array.isArray(grid[defKey])) {
+                    grid[defKey] = ['', '', '', '', '', '', '', ''];
+                  }
+
+                  console.log(`[Çarşaf Düzeltme] 🔄 ${teacherName} | Boş gün ${dCfg.name} üzerindeki ${filledLessons.length} ders, eksik olan ${deficientDay.name} gününe aktarılıyor.`);
+
+                  // Boş olan deficientDay hücrelerine aktar
+                  for (let h = 0; h < periods.length && h < 8; h++) {
+                    const token = String(periods[h] || '').trim();
+                    if (token) {
+                      if (!grid[defKey][h] || String(grid[defKey][h]).trim() === '') {
+                        grid[defKey][h] = token;
+                      } else {
+                        const emptyIdx = grid[defKey].findIndex((p: any) => String(p || '').trim() === '');
+                        if (emptyIdx !== -1) {
+                          grid[defKey][emptyIdx] = token;
+                        }
+                      }
+                    }
+                  }
+                }
+
+                // Boş olan günün tüm hücrelerini kesin olarak boşalt
+                grid[matchingGridKey] = ['', '', '', '', '', '', '', ''];
               }
             }
           }
