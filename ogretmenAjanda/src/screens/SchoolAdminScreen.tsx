@@ -9960,20 +9960,88 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 );
               })()}
 
-              {/* Alt tablodan okunan ders yükü dökümü (Varsa) */}
+              {/* Alt tablodan okunan ders yükü dökümü - TIKLANABİLİR HIZLI DOLDURMA KARTLARI */}
               {inspectingVerification?.workloadItems && inspectingVerification.workloadItems.length > 0 && (
-                <View style={{ backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 10, marginBottom: 12 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', marginBottom: 6 }}>
-                    📄 Kağıdın Alt Tablosundaki Ders Dağılımı:
-                  </Text>
+                <View style={{ backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1.5, borderColor: '#CBD5E1', padding: 10, marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155' }}>
+                      📄 Kağıdın Alt Tablosundaki Ders Dağılımı:
+                    </Text>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#6366F1' }}>
+                      ⚡ Dokunarak Saate Otomatik Doldur
+                    </Text>
+                  </View>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    {inspectingVerification.workloadItems.map((wi, wIdx) => (
-                      <View key={wIdx} style={{ backgroundColor: '#fff', borderRadius: 6, borderWidth: 1, borderColor: '#CBD5E1', paddingHorizontal: 8, paddingVertical: 4 }}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
-                          {wi.className} {wi.lessonCode || wi.lessonName}: <Text style={{ color: '#4F46E5', fontWeight: '800' }}>{wi.weeklyHours} Saat</Text>
-                        </Text>
-                      </View>
-                    ))}
+                    {inspectingVerification.workloadItems.map((wi, wIdx) => {
+                      const cleanCls = wi.className.replace('/', '-').trim().toUpperCase();
+                      const parts = cleanCls.split('-');
+                      const lName = wi.lessonName || wi.lessonCode || 'Ders';
+                      const currentEditCls = editingCellSlot ? `${editingCellSlot.grade}-${editingCellSlot.section}`.toUpperCase() : '';
+                      const isSelected = editingCellSlot && currentEditCls === cleanCls && (
+                        editingCellSlot.lessonName.toUpperCase() === lName.toUpperCase() ||
+                        editingCellSlot.lessonName.toUpperCase() === (wi.lessonCode || '').toUpperCase()
+                      );
+
+                      return (
+                        <TouchableOpacity
+                          key={wIdx}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            if (editingCellSlot) {
+                              setEditingCellSlot({
+                                ...editingCellSlot,
+                                grade: parts[0] || '9',
+                                section: parts[1] || 'A',
+                                lessonName: lName,
+                              });
+                            } else {
+                              // Aktif gündeki ilk boş saati bulup otomatik düzenlemeye al
+                              const maxH = Math.max(8, ...inspectingItems.map(it => it.lessonHour));
+                              const allHours = Array.from({ length: maxH }, (_, i) => i + 1);
+                              const firstEmpty = allHours.find(h => !inspectingItems.some(it => it.dayOfWeek === inspectDayTab && it.lessonHour === h)) || 1;
+                              setEditingCellSlot({
+                                dayOfWeek: inspectDayTab,
+                                lessonHour: firstEmpty,
+                                grade: parts[0] || '9',
+                                section: parts[1] || 'A',
+                                lessonName: lName,
+                              });
+                            }
+                          }}
+                          style={{
+                            backgroundColor: isSelected ? '#4F46E5' : '#FFFFFF',
+                            borderRadius: 8,
+                            borderWidth: 1.5,
+                            borderColor: isSelected ? '#3730A3' : '#94A3B8',
+                            paddingHorizontal: 10,
+                            paddingVertical: 6,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 5,
+                            shadowColor: isSelected ? '#4F46E5' : '#000',
+                            shadowOffset: { width: 0, height: 1 },
+                            shadowOpacity: isSelected ? 0.2 : 0.05,
+                            shadowRadius: 2,
+                            elevation: isSelected ? 2 : 1,
+                          }}
+                        >
+                          {isSelected && <Ionicons name="checkmark-circle" size={13} color="#fff" />}
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: isSelected ? '#fff' : '#1E293B' }}>
+                            {cleanCls} {wi.lessonCode || wi.lessonName}
+                          </Text>
+                          <View style={{
+                            backgroundColor: isSelected ? '#3730A3' : '#EEF2FF',
+                            borderRadius: 5,
+                            paddingHorizontal: 5,
+                            paddingVertical: 1,
+                          }}>
+                            <Text style={{ fontSize: 10, fontWeight: '800', color: isSelected ? '#C7D2FE' : '#4F46E5' }}>
+                              {wi.weeklyHours} Saat
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 </View>
               )}
