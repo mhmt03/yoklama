@@ -109,7 +109,8 @@ export async function apiRequest<T = any>(
   endpoint: string,
   method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
   body?: any,
-  isFormData = false
+  isFormData = false,
+  silent = false
 ): Promise<{ success: boolean; data?: T; error?: string }> {
   try {
     const baseUrl = await getBaseApiUrl();
@@ -141,7 +142,9 @@ export async function apiRequest<T = any>(
     }
 
     if (!response.ok) {
-      console.error(`[API HATA ${response.status}] ${method} ${url}:`, data?.message || data?.rawText || 'Detaysız yanıt');
+      if (!silent && !endpoint.includes('ai-usage')) {
+        console.error(`[API HATA ${response.status}] ${method} ${url}:`, data?.message || data?.rawText || 'Detaysız yanıt');
+      }
       if (response.status === 401) {
         return {
           success: false,

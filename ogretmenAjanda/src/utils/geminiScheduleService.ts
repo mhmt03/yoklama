@@ -109,10 +109,16 @@ export const recordGeminiApiUsage = async (
       targetSchoolId = active?.id ? String(active.id) : undefined;
     }
     if (targetSchoolId) {
-      await apiRequest(`schools/${targetSchoolId}/ai-usage`, 'POST', {
-        tokens: addedTokens,
-        model,
-      });
+      await apiRequest(
+        `schools/${targetSchoolId}/ai-usage`,
+        'POST',
+        {
+          tokens: addedTokens,
+          model,
+        },
+        false,
+        true
+      );
     }
   } catch (serverErr) {
     // Sunucu çevrimdışıysa sessizce yerel DB'ye devam et

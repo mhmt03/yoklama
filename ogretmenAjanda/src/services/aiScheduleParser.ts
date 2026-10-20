@@ -875,7 +875,7 @@ ${jsonSchema}
 
               // Eğer bu gün alt çizelgede 0 saat ise ama grid'e ders yazılmışsa (örneğin Salı günü boşken Çarşamba dersleri yazılmışsa):
               if (expHours === 0 && filledLessons.length > 0) {
-                console.warn(`[Çarşaf Sağlama] ⚠️ ${teacherName} | ${dCfg.name} günü alt çizelgede 0 SAAT (KOMPLE BOŞ) ancak ızgarada ${filledLessons.length} ders bulundu.`);
+                console.log(`[Çarşaf Sağlama] ⚠️ ${teacherName} | ${dCfg.name} günü alt çizelgede 0 SAAT (KOMPLE BOŞ) ancak ızgarada ${filledLessons.length} ders bulundu. Otomatik düzeltiliyor...`);
 
                 // Bu derslerin asıl ait olduğu eksik günü (genellikle sonraki gün, örn: Çarşamba) bul:
                 const deficientDay = dayConfigs.find(other => {

@@ -268,6 +268,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [cachedScheduleDoc, setCachedScheduleDoc] = useState<CachedScheduleDocInfo | null>(null);
   const [cachedScheduleDraft, setCachedScheduleDraft] = useState<ParsedScheduleResult | null>(null);
   const [reScanningTeacher, setReScanningTeacher] = useState(false);
+  const [teacherRescanHint, setTeacherRescanHint] = useState('');
 
   const loadSchoolBatches = async (schoolId: string) => {
     try {
@@ -393,6 +394,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setInspectingItems(items);
     setInspectDayTab(1);
     setEditingCellSlot(null);
+    setTeacherRescanHint('');
     setInspectTeacherModalVisible(true);
   };
 
@@ -446,6 +448,49 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const handleDeleteCellSlot = (dayOfWeek: number, lessonHour: number) => {
     const updated = inspectingItems.filter(it => !(it.dayOfWeek === dayOfWeek && it.lessonHour === lessonHour));
     setInspectingItems(updated);
+  };
+
+  const handleShiftLessonHour = (dayOfWeek: number, fromHour: number, toHour: number) => {
+    setInspectingItems(prev => {
+      const fromItem = prev.find(it => it.dayOfWeek === dayOfWeek && it.lessonHour === fromHour);
+      if (!fromItem) return prev;
+      const toItem = prev.find(it => it.dayOfWeek === dayOfWeek && it.lessonHour === toHour);
+
+      return prev.map(it => {
+        if (it.dayOfWeek === dayOfWeek && it.lessonHour === fromHour) {
+          return { ...it, lessonHour: toHour };
+        }
+        if (toItem && it.dayOfWeek === dayOfWeek && it.lessonHour === toHour) {
+          return { ...it, lessonHour: fromHour };
+        }
+        return it;
+      });
+    });
+  };
+
+  const handlePromptMoveLessonHour = (dayOfWeek: number, fromHour: number, maxPeriod: number) => {
+    const fromItem = inspectingItems.find(it => it.dayOfWeek === dayOfWeek && it.lessonHour === fromHour);
+    if (!fromItem) return;
+
+    const options: any[] = [];
+    for (let h = 1; h <= maxPeriod; h++) {
+      if (h === fromHour) continue;
+      const targetItem = inspectingItems.find(it => it.dayOfWeek === dayOfWeek && it.lessonHour === h);
+      const label = targetItem
+        ? `${h}. Saat (${targetItem.grade}-${targetItem.section} ile Değiş Tokuş 🔄)`
+        : `${h}. Saat (Boş Saat ➔)`;
+      options.push({
+        text: label,
+        onPress: () => handleShiftLessonHour(dayOfWeek, fromHour, h),
+      });
+    }
+    options.push({ text: 'Vazgeç', style: 'cancel' });
+
+    Alert.alert(
+      'Dersi Saate Taşı / Kaydır',
+      `${fromHour}. Ders (${fromItem.grade}-${fromItem.section} - ${fromItem.lessonName}) hangi saate aktarılsın?`,
+      options
+    );
   };
 
   const handleSaveExpectedHours = () => {
@@ -571,29 +616,183 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       ).join('\n');
       const extra = conflictsDetected.length > 3 ? `\n... ve ${conflictsDetected.length - 3} çakışma daha.` : '';
 
-      const firstConflictTeacher = conflictsDetected[0]?.otherTeacher;
-      const alertButtons: any[] = [{ text: 'Tamam', style: 'cancel' }];
-      if (firstConflictTeacher && firstConflictTeacher !== 'Bilinmeyen Öğretmen') {
+      const distinctConflictTeachers = Array.from(
+        new Set(conflictsDetected.map(c => c.otherTeacher).filter(t => t && t !== 'Bilinmeyen Öğretmen' && t !== inspectingTeacher))
+      );
+      const firstConflictTeacher = distinctConflictTeachers[0];
+      const alertButtons: any[] = [];
+      if (firstConflictTeacher) {
         alertButtons.push({
-          text: `🔍 ${firstConflictTeacher}'ı İncele`,
+          text: `🔍 ${firstConflictTeacher}'ı İncele & Düzenle`,
           onPress: () => {
             handleOpenTeacherScheduleInspector(firstConflictTeacher);
           },
         });
+        alertButtons.push({
+          text: `⚡ ${firstConflictTeacher}'ı Belgeden Sıfırla`,
+          onPress: () => {
+            handleOpenTeacherScheduleInspector(firstConflictTeacher);
+            handleRescanTeacherFromDocument(firstConflictTeacher);
+          },
+        });
       }
+      alertButtons.push({ text: 'Tamam', style: 'cancel' });
 
       Alert.alert(
         'Öğretmen Güncellendi ⚠️ Çakışma Uyarısı',
         `"${inspectingTeacher}" için ${inspectingItems.length} saat programa aktarıldı ancak ${conflictsDetected.length} derste başka öğretmenlerle ÇAKIŞMA tespit edildi:\n\n` +
         `${conflictSummary}${extra}\n\n` +
         `İlgili saatlerde aynı şubede iki öğretmen görünmektedir.\n\n` +
-        `💾 Değişiklikler yerel taslak olarak belleğe kaydedildi.`,
+        `💡 "Zinciri Otomatik Çöz" derseniz yapay zeka sırayla tüm çakışan öğretmenleri belgeden tarayarak zinciri kendi kendine çözer.`,
         alertButtons
       );
     }
   };
 
-  const handleRescanTeacherFromDocument = async () => {
+  const handleAutoResolveConflictChain = async (initialTeachers: string[]) => {
+    const targetFile = pendingScheduleFile || cachedScheduleDoc;
+    if (!targetFile?.uri) {
+      Alert.alert('Belge Bulunamadı', 'Hafızada kayıtlı bir çarşaf belgesi bulunamadı. Lütfen önce bir çarşaf yükleyin.');
+      return;
+    }
+
+    if (!parsedSchedule) return;
+
+    const queue: string[] = [...initialTeachers];
+    const visited = new Set<string>();
+    const resolvedTeachers: string[] = [];
+    let currentParsed: ParsedScheduleResult = { ...parsedSchedule };
+    const maxIterations = 8;
+    let iterationCount = 0;
+
+    setAiParsing(true);
+    setAiModalVisible(true);
+    setAiStageText(`🔄 Zincirleme Çözüm Başlatılıyor (${queue.length} öğretmen sırada)...`);
+
+    try {
+      while (queue.length > 0 && iterationCount < maxIterations) {
+        iterationCount++;
+        const currentTeacher = queue.shift()!;
+        const normName = currentTeacher.trim().toLowerCase();
+        if (visited.has(normName)) continue;
+        visited.add(normName);
+
+        setAiStageText(`🔄 [${iterationCount}] "${currentTeacher}" belgeden taranıyor ve programı yenileniyor...`);
+
+        try {
+          const res = await parseSingleTeacherScheduleWithAi(
+            targetFile.uri,
+            targetFile.mimeType || 'application/pdf',
+            currentTeacher,
+            geminiApiKeyInput,
+            selectedGeminiModel
+          );
+
+          if (res && Array.isArray(res.items) && res.items.length > 0) {
+            resolvedTeachers.push(currentTeacher);
+
+            // Mevcut scheduleItems içinden bu öğretmeni çıkar, yenileri ekle
+            const otherItems = (currentParsed.scheduleItems || []).filter(
+              it => (it.teacherName || '').trim().toLowerCase() !== normName
+            );
+            const updatedItems = [...otherItems, ...res.items];
+
+            // Teacher verifications güncelle
+            const otherVerifs = (currentParsed.teacherVerifications || []).filter(
+              v => (v.teacherName || '').trim().toLowerCase() !== normName
+            );
+            const expHours = res.totalHours || res.items.length;
+            const updatedVerifs = [
+              ...otherVerifs,
+              {
+                teacherName: currentTeacher,
+                expectedWeeklyHours: expHours,
+                extractedWeeklyHours: res.items.length,
+                isConsistent: expHours === res.items.length,
+              }
+            ];
+
+            currentParsed = {
+              ...currentParsed,
+              scheduleItems: updatedItems,
+              teacherVerifications: updatedVerifs,
+            };
+
+            // Şimdi bu öğretmenin yeni saatleri başka BİRİYLE çakışıyor mu kontrol et:
+            for (const myItem of res.items) {
+              const myClass = `${myItem.grade}-${myItem.section}`.toUpperCase().trim();
+              const conflict = otherItems.find(ot => {
+                const otClass = `${ot.grade}-${ot.section}`.toUpperCase().trim();
+                return ot.dayOfWeek === myItem.dayOfWeek &&
+                       ot.lessonHour === myItem.lessonHour &&
+                       otClass === myClass;
+              });
+
+              if (conflict && conflict.teacherName) {
+                const confNorm = conflict.teacherName.trim().toLowerCase();
+                if (!visited.has(confNorm) && !queue.includes(conflict.teacherName)) {
+                  queue.push(conflict.teacherName);
+                  setAiStageText(`🔍 Yeni çakışma tespit edildi: "${conflict.teacherName}" zincire eklendi.`);
+                }
+              }
+            }
+          }
+        } catch (tErr: any) {
+          console.warn(`[Zincir Çözüm] "${currentTeacher}" okuma hatası:`, tErr);
+        }
+      }
+
+      // Son durumu state'e ve taslağa kaydet
+      setParsedSchedule(currentParsed);
+      if (selectedSchool) {
+        saveParsedScheduleDraft(selectedSchool.id, currentParsed);
+        setCachedScheduleDraft(currentParsed);
+      }
+
+      // Kalan çakışma var mı son bir kez tüm okul çapında hesapla:
+      const remainingConflicts: string[] = [];
+      const allItems = currentParsed.scheduleItems || [];
+      for (let i = 0; i < allItems.length; i++) {
+        const it1 = allItems[i];
+        const cls1 = `${it1.grade}-${it1.section}`.toUpperCase().trim();
+        for (let j = i + 1; j < allItems.length; j++) {
+          const it2 = allItems[j];
+          if ((it1.teacherName || '').trim().toLowerCase() === (it2.teacherName || '').trim().toLowerCase()) continue;
+          const cls2 = `${it2.grade}-${it2.section}`.toUpperCase().trim();
+          if (it1.dayOfWeek === it2.dayOfWeek && it1.lessonHour === it2.lessonHour && cls1 === cls2) {
+            remainingConflicts.push(`${cls1}: ${it1.teacherName} & ${it2.teacherName}`);
+            break;
+          }
+        }
+      }
+
+      setAiModalVisible(false);
+      setAiParsing(false);
+
+      if (remainingConflicts.length === 0) {
+        Alert.alert(
+          'Zincir Başarıyla Çözüldü 🎉',
+          `Toplam ${resolvedTeachers.length} öğretmen (${resolvedTeachers.join(', ')}) belgeden taranıp programları yenilendi.\n\n` +
+          `🛡️ Çapraz Kontrol: Okul genelinde 0 ÇAKIŞMA! Tüm program kusursuz birbiriyle uyumlu hale geldi.`
+        );
+      } else {
+        Alert.alert(
+          'Zincir Tamamlandı ⚠️',
+          `${resolvedTeachers.length} öğretmen yenilendi (${resolvedTeachers.join(', ')}).\n\n` +
+          `Hala ${remainingConflicts.length} çakışma mevcut:\n` +
+          remainingConflicts.slice(0, 3).map(c => `• ${c}`).join('\n') +
+          (remainingConflicts.length > 3 ? `\n... ve fazlası.` : '')
+        );
+      }
+    } catch (chainErr: any) {
+      setAiModalVisible(false);
+      setAiParsing(false);
+      Alert.alert('Zincir Hatası', chainErr.message || 'Zincir çözülürken hata oluştu.');
+    }
+  };
+
+  const handleRescanTeacherFromDocument = async (customTeacherName?: string, customHint?: string) => {
+    const teacherToScan = customTeacherName || inspectingTeacher;
     const targetFile = pendingScheduleFile || cachedScheduleDoc;
     if (!targetFile?.uri) {
       Alert.alert('Belge Bulunamadı', 'Hafızada kayıtlı bir çarşaf belgesi bulunamadı. Lütfen önce bir çarşaf dosyası yükleyin.');
@@ -602,12 +801,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
     try {
       setReScanningTeacher(true);
+      if (customTeacherName) {
+        setInspectingTeacher(customTeacherName);
+      }
+      const hint = customHint !== undefined ? customHint : teacherRescanHint;
       const res = await parseSingleTeacherScheduleWithAi(
         targetFile.uri,
         targetFile.mimeType || 'application/pdf',
-        inspectingTeacher,
+        teacherToScan,
         geminiApiKeyInput,
-        selectedGeminiModel
+        selectedGeminiModel,
+        hint
       );
 
       if (res && Array.isArray(res.items) && res.items.length > 0) {
@@ -617,16 +821,93 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         }
         Alert.alert(
           'Yeniden Okuma Başarılı 🎉',
-          `"${inspectingTeacher}" için belgeden ${res.items.length} ders saati başarıyla yeniden çıkarıldı ve tabloya aktarıldı.`
+          `"${teacherToScan}" için belgeden ${res.items.length} ders saati başarıyla yeniden çıkarıldı ve tabloya aktarıldı.` +
+          (hint && hint.trim() ? `\n\n🎯 Uygulanan İpucu: "${hint.trim()}"` : '')
         );
       } else {
-        Alert.alert('Ders Bulunamadı', `Belgede "${inspectingTeacher}" için ders saati tespit edilemedi.`);
+        Alert.alert('Ders Bulunamadı', `Belgede "${teacherToScan}" için ders saati tespit edilemedi.`);
       }
     } catch (err: any) {
       console.warn('Tek öğretmen okuma hatası:', err);
       Alert.alert('Okuma Hatası', err.message || 'Öğretmen belgeden taranamadı.');
     } finally {
       setReScanningTeacher(false);
+    }
+  };
+
+  const handleLoadActiveScheduleToDraft = async () => {
+    if (!selectedSchool) {
+      Alert.alert('Okul Seçilmedi', 'Lütfen önce aktif bir okul seçin.');
+      return;
+    }
+
+    try {
+      setAiParsing(true);
+      setAiStageText('Sistemde kayıtlı aktif ders programı getiriliyor...');
+      setAiModalVisible(true);
+
+      const res = await apiRequest<any[]>(`sync/schedules?schoolId=${selectedSchool.id}`);
+      if (!res.success || !res.data || res.data.length === 0) {
+        setAiModalVisible(false);
+        setAiParsing(false);
+        Alert.alert('Kayıtlı Program Bulunamadı', 'Sistemde kayıtlı herhangi bir ders programı verisi bulunamadı.');
+        return;
+      }
+
+      const activeItems = res.data;
+      const teachersSet = new Set<string>();
+      const classesSet = new Set<string>();
+      const lessonsSet = new Set<string>();
+      const teacherItemsCountMap: Record<string, number> = {};
+
+      const formattedItems = activeItems.map((item: any) => {
+        const tName = item.teacherName || item.teacher?.fullName || 'Bilinmeyen Öğretmen';
+        teachersSet.add(tName);
+        teacherItemsCountMap[tName] = (teacherItemsCountMap[tName] || 0) + 1;
+
+        const grade = String(item.grade || item.class?.grade || '');
+        const section = String(item.section || item.class?.section || '');
+        const clsName = grade && section ? `${grade}-${section}` : (item.className || 'Genel');
+        classesSet.add(clsName);
+
+        const lName = item.lessonName || item.lesson?.name || 'Ders';
+        lessonsSet.add(lName);
+
+        return {
+          teacherName: tName,
+          dayOfWeek: Number(item.dayOfWeek),
+          lessonHour: Number(item.lessonHour),
+          grade,
+          section,
+          lessonName: lName,
+          lessonCode: item.lessonCode || item.lesson?.code,
+          classroom: item.classroom,
+        };
+      });
+
+      const verifications: TeacherScheduleVerification[] = Array.from(teachersSet).map(tName => ({
+        teacherName: tName,
+        expectedWeeklyHours: teacherItemsCountMap[tName],
+        extractedWeeklyHours: teacherItemsCountMap[tName],
+        isConsistent: true,
+      }));
+
+      const draftResult: ParsedScheduleResult = {
+        teachers: Array.from(teachersSet).sort(),
+        classes: Array.from(classesSet).sort(),
+        lessons: Array.from(lessonsSet).sort(),
+        scheduleItems: formattedItems,
+        teacherVerifications: verifications,
+      };
+
+      setParsedSchedule(draftResult);
+      await saveParsedScheduleDraft(selectedSchool.id, draftResult);
+      setCachedScheduleDraft(draftResult);
+      setAiParsing(false);
+    } catch (err: any) {
+      setAiModalVisible(false);
+      setAiParsing(false);
+      Alert.alert('Yükleme Hatası', err.message || 'Aktif program taslağa yüklenemedi.');
     }
   };
 
@@ -4919,6 +5200,38 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     </Text>
                   </View>
                   <Ionicons name="chevron-forward" size={18} color="#64748B" />
+                </TouchableOpacity>
+
+                {/* 1.2 AKTİF PROGRAMI İNCELEME & DÜZENLEME TASLAĞINA AL */}
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderWidth: 1.5,
+                    borderColor: '#CBD5E1',
+                    borderRadius: 14,
+                    padding: 12,
+                    marginBottom: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                  onPress={handleLoadActiveScheduleToDraft}
+                  activeOpacity={0.8}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <View style={{ backgroundColor: '#EEF2FF', padding: 10, borderRadius: 12 }}>
+                      <Ionicons name="clipboard" size={22} color="#4F46E5" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#1E293B' }}>
+                        📋 Kayıtlı Programı Taslak Olarak Aç & Canlı Düzenle
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                        Sistemdeki tüm kayıtlı programı görsel inceleme ekranına geri yükler; çakışmaları elle veya tek tek AI ile düzeltebilirsiniz.
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
                 </TouchableOpacity>
 
                 {/* 2. DOĞRULUK, DOLULUK VE SAĞLAMLIK DENETİM KARTI (Sanity Check) */}
@@ -9226,6 +9539,53 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     return true;
                   }).length;
 
+                  // 🛡️ Çapraz Çakışmaları Hesapla:
+                  const slotMap = new Map<string, Array<{ teacherName: string; lessonName: string }>>();
+                  for (const item of scheduleItemsList) {
+                    if (!item || !item.teacherName) return null;
+                    const grade = item.grade ? String(item.grade).trim() : '';
+                    const section = item.section ? String(item.section).trim().toUpperCase() : '';
+                    if (!grade || !section) continue;
+                    const clsKey = `${grade}-${section}`;
+                    const slotKey = `${item.dayOfWeek}_${item.lessonHour}_${clsKey}`;
+                    if (!slotMap.has(slotKey)) {
+                      slotMap.set(slotKey, []);
+                    }
+                    slotMap.get(slotKey)!.push({
+                      teacherName: item.teacherName.trim(),
+                      lessonName: item.lessonName || item.lessonCode || 'Ders',
+                    });
+                  }
+
+                  const dayNames = ['', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+                  const conflictsList: Array<{
+                    dayOfWeek: number;
+                    lessonHour: number;
+                    className: string;
+                    teachers: Array<{ teacherName: string; lessonName: string }>;
+                  }> = [];
+                  const teacherConflictsCountMap: Record<string, number> = {};
+
+                  for (const [slotKey, items] of slotMap.entries()) {
+                    const distinctTeachers = Array.from(new Set(items.map(it => it.teacherName.toLowerCase())));
+                    if (distinctTeachers.length > 1) {
+                      const parts = slotKey.split('_');
+                      const dayOfWeek = parseInt(parts[0], 10);
+                      const lessonHour = parseInt(parts[1], 10);
+                      const className = parts[2];
+                      conflictsList.push({
+                        dayOfWeek,
+                        lessonHour,
+                        className,
+                        teachers: items,
+                      });
+                      for (const it of items) {
+                        const tNorm = it.teacherName.toLowerCase();
+                        teacherConflictsCountMap[tNorm] = (teacherConflictsCountMap[tNorm] || 0) + 1;
+                      }
+                    }
+                  }
+
                   return (
                     <>
                       <Text style={styles.previewSuccessTitle}>🎉 Çarşaf Program Ayrıştırıldı!</Text>
@@ -9275,6 +9635,94 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           <Text style={styles.previewLbl}>Ders Saati</Text>
                         </View>
                       </View>
+
+                      {/* 🚨 ÇAKIŞMA UYARI KARTI VE İNTERAKTİF ÇAKIŞMA LİSTESİ */}
+                      {conflictsList.length > 0 ? (
+                        <View style={{
+                          backgroundColor: '#FEF2F2',
+                          borderRadius: 12,
+                          borderWidth: 1.5,
+                          borderColor: '#FECACA',
+                          padding: 12,
+                          marginBottom: 14,
+                        }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                              <Ionicons name="alert-circle" size={20} color="#DC2626" />
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#991B1B' }}>
+                                ⚠️ Tespit Edilen Çakışmalar ({conflictsList.length} Saat)
+                              </Text>
+                            </View>
+                            <View style={{ backgroundColor: '#DC2626', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>
+                                {Object.keys(teacherConflictsCountMap).length} Öğretmen Etkileniyor
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={{ fontSize: 11, color: '#B91C1C', marginBottom: 10 }}>
+                            Aynı şubede aynı gün ve saatte birden fazla öğretmenin dersi görünmektedir. Düzeltmek istediğiniz öğretmenin yanındaki butona basarak doğrudan çizelgesini açabilir, "Güne Taşı" ile tüm günü aktarabilir veya elle düzenleyebilirsiniz:
+                          </Text>
+
+                          <ScrollView nestedScrollEnabled style={{ maxHeight: 200 }} contentContainerStyle={{ gap: 6 }}>
+                            {conflictsList.map((c, cIdx) => (
+                              <View
+                                key={cIdx}
+                                style={{
+                                  backgroundColor: '#FFFFFF',
+                                  borderRadius: 8,
+                                  padding: 8,
+                                  borderWidth: 1,
+                                  borderColor: '#FCA5A5',
+                                }}
+                              >
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>{c.className}</Text>
+                                    </View>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                                      {dayNames[c.dayOfWeek] || `${c.dayOfWeek}. Gün`}, {c.lessonHour}. Ders
+                                    </Text>
+                                  </View>
+                                </View>
+
+                                <View style={{ gap: 4 }}>
+                                  {c.teachers.map((t, tIdx) => (
+                                    <View key={tIdx} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F8FAFC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                                      <Text style={{ fontSize: 11, color: '#334155', flex: 1, marginRight: 6 }} numberOfLines={1}>
+                                        <Text style={{ fontWeight: '700', color: '#0F172A' }}>{t.teacherName}</Text> ({t.lessonName})
+                                      </Text>
+                                      <TouchableOpacity
+                                        onPress={() => handleOpenTeacherScheduleInspector(t.teacherName)}
+                                        style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}
+                                      >
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#4F46E5' }}>✏️ İncele & Taşı</Text>
+                                      </TouchableOpacity>
+                                    </View>
+                                  ))}
+                                </View>
+                              </View>
+                            ))}
+                          </ScrollView>
+                        </View>
+                      ) : (
+                        <View style={{
+                          backgroundColor: '#F0FDF4',
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: '#BBF7D0',
+                          padding: 10,
+                          marginBottom: 14,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 8,
+                        }}>
+                          <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#166534' }}>
+                            🛡️ 0 Çakışma: Tüm sınıfların ve öğretmenlerin ders saatleri kusursuz şekilde uyumlu!
+                          </Text>
+                        </View>
+                      )}
 
                       {/* Okul Ders & Giriş-Çıkış Saatleri (Varsa) */}
                       {bellScheduleList && bellScheduleList.length > 0 && (
@@ -9339,17 +9787,28 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                   flexDirection: 'row',
                                   alignItems: 'center',
                                   justifyContent: 'space-between',
-                                  backgroundColor: v.isConsistent ? '#FFFFFF' : '#FFFBEB',
+                                  backgroundColor: teacherConflictsCountMap[v.teacherName.toLowerCase()]
+                                    ? '#FFF5F5'
+                                    : v.isConsistent ? '#FFFFFF' : '#FFFBEB',
                                   paddingHorizontal: 10,
                                   paddingVertical: 8,
                                   borderRadius: 8,
                                   borderWidth: 1,
-                                  borderColor: v.isConsistent ? '#E2E8F0' : '#FCD34D'
+                                  borderColor: teacherConflictsCountMap[v.teacherName.toLowerCase()]
+                                    ? '#FCA5A5'
+                                    : v.isConsistent ? '#E2E8F0' : '#FCD34D'
                                 }}
                               >
                                 <View style={{ flex: 1, marginRight: 8 }}>
                                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                     <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>{v.teacherName}</Text>
+                                    {teacherConflictsCountMap[v.teacherName.toLowerCase()] ? (
+                                      <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#FECACA' }}>
+                                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626' }}>
+                                          ⚠️ {teacherConflictsCountMap[v.teacherName.toLowerCase()]} Çakışma
+                                        </Text>
+                                      </View>
+                                    ) : null}
                                     <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
                                       <Text style={{ fontSize: 10, color: '#4F46E5', fontWeight: '700' }}>✏️ İncele & Düzenle</Text>
                                     </View>
@@ -9880,31 +10339,76 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     </View>
 
                     {(pendingScheduleFile || cachedScheduleDoc) && (
-                      <TouchableOpacity
-                        disabled={reScanningTeacher}
-                        onPress={handleRescanTeacherFromDocument}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: 6,
-                          backgroundColor: '#EEF2FF',
+                      <View style={{ marginBottom: 8 }}>
+                        {/* İPUCU / DÜZELTME GİRDİ ALANI */}
+                        <View style={{
+                          backgroundColor: '#F8FAFC',
                           borderWidth: 1,
-                          borderColor: '#C7D2FE',
+                          borderColor: '#E2E8F0',
                           borderRadius: 8,
-                          paddingVertical: 7,
-                          marginBottom: 8,
-                        }}
-                      >
-                        {reScanningTeacher ? (
-                          <ActivityIndicator size="small" color="#4F46E5" />
-                        ) : (
-                          <Ionicons name="flash" size={14} color="#4F46E5" />
-                        )}
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#4338CA' }}>
-                          {reScanningTeacher ? 'Öğretmen Belgeden Taranıyor...' : '⚡ Bu Öğretmeni Belgeden Yeniden Oku'}
-                        </Text>
-                      </TouchableOpacity>
+                          padding: 8,
+                          marginBottom: 6,
+                        }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Ionicons name="bulb-outline" size={13} color="#D97706" />
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309' }}>
+                                AI İpucu / Düzeltme Notu (İsteğe Bağlı)
+                              </Text>
+                            </View>
+                            {teacherRescanHint.length > 0 && (
+                              <TouchableOpacity onPress={() => setTeacherRescanHint('')}>
+                                <Text style={{ fontSize: 10, color: '#94A3B8' }}>Temizle</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                          <TextInput
+                            placeholder="Örn: Salı günü tamamen boş, dersler Çarşamba günüdür..."
+                            placeholderTextColor="#94A3B8"
+                            value={teacherRescanHint}
+                            onChangeText={setTeacherRescanHint}
+                            style={{
+                              backgroundColor: '#FFFFFF',
+                              borderWidth: 1,
+                              borderColor: '#CBD5E1',
+                              borderRadius: 6,
+                              paddingHorizontal: 8,
+                              paddingVertical: 5,
+                              fontSize: 11,
+                              color: '#1E293B',
+                            }}
+                          />
+                        </View>
+
+                        <TouchableOpacity
+                          disabled={reScanningTeacher}
+                          onPress={() => handleRescanTeacherFromDocument()}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 6,
+                            backgroundColor: teacherRescanHint.trim() ? '#4338CA' : '#EEF2FF',
+                            borderWidth: 1,
+                            borderColor: teacherRescanHint.trim() ? '#3730A3' : '#C7D2FE',
+                            borderRadius: 8,
+                            paddingVertical: 8,
+                          }}
+                        >
+                          {reScanningTeacher ? (
+                            <ActivityIndicator size="small" color={teacherRescanHint.trim() ? '#fff' : '#4F46E5'} />
+                          ) : (
+                            <Ionicons name="flash" size={14} color={teacherRescanHint.trim() ? '#fff' : '#4F46E5'} />
+                          )}
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: teacherRescanHint.trim() ? '#fff' : '#4338CA' }}>
+                            {reScanningTeacher
+                              ? 'Öğretmen Belgeden Taranıyor...'
+                              : teacherRescanHint.trim()
+                              ? '⚡ İpucuyla Belgeden Yeniden Oku'
+                              : '⚡ Bu Öğretmeni Belgeden Yeniden Oku'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
                     )}
 
                     {/* Kağıttaki Beklenen Saat Ayarı (Gerekirse düzeltme) */}
@@ -10540,6 +11044,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       const item = inspectingItems.find(it => it.dayOfWeek === inspectDayTab && it.lessonHour === period);
 
                       if (item) {
+                        const itemClass = `${item.grade}-${item.section}`.toUpperCase().trim();
+                        const conflictItem = (parsedSchedule?.scheduleItems || []).find(ot =>
+                          (ot.teacherName || '').trim().toLowerCase() !== inspectingTeacher.trim().toLowerCase() &&
+                          ot.dayOfWeek === inspectDayTab &&
+                          ot.lessonHour === period &&
+                          `${ot.grade}-${ot.section}`.toUpperCase().trim() === itemClass
+                        );
+
                         return (
                           <View
                             key={period}
@@ -10547,11 +11059,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               flexDirection: 'row',
                               alignItems: 'center',
                               justifyContent: 'space-between',
-                              backgroundColor: '#FFFFFF',
+                              backgroundColor: conflictItem ? '#FEF2F2' : '#FFFFFF',
                               borderRadius: 10,
                               padding: 10,
                               borderWidth: 1,
-                              borderColor: '#CBD5E1',
+                              borderColor: conflictItem ? '#FCA5A5' : '#CBD5E1',
                             }}
                           >
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
@@ -10559,34 +11071,99 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 width: 28,
                                 height: 28,
                                 borderRadius: 7,
-                                backgroundColor: '#4F46E5',
+                                backgroundColor: conflictItem ? '#DC2626' : '#4F46E5',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                               }}>
                                 <Text style={{ fontSize: 12, fontWeight: '900', color: '#fff' }}>{period}</Text>
                               </View>
                               <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
-                                  {item.grade}-{item.section}
-                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
+                                    {item.grade}-{item.section}
+                                  </Text>
+                                  {conflictItem && (
+                                    <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626' }}>⚠️ ÇAKIŞMA</Text>
+                                    </View>
+                                  )}
+                                </View>
                                 <Text style={{ fontSize: 11, color: '#64748B' }} numberOfLines={1}>
                                   {item.lessonName}
                                 </Text>
+                                {conflictItem && (
+                                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#B91C1C', marginTop: 2 }}>
+                                    ⚠️ {conflictItem.teacherName} da bu saatte {item.grade}-{item.section}'de!
+                                  </Text>
+                                )}
                               </View>
                             </View>
 
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              {/* 🔼 Yukarı Kaydır Butonu */}
+                              <TouchableOpacity
+                                onPress={() => handleShiftLessonHour(inspectDayTab, period, period - 1)}
+                                disabled={period <= 1}
+                                style={{
+                                  backgroundColor: period <= 1 ? '#F1F5F9' : '#EEF2FF',
+                                  padding: 5,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  borderColor: period <= 1 ? '#E2E8F0' : '#C7D2FE',
+                                }}
+                              >
+                                <Ionicons name="chevron-up" size={13} color={period <= 1 ? '#CBD5E1' : '#4F46E5'} />
+                              </TouchableOpacity>
+
+                              {/* 🔽 Aşağı Kaydır Butonu */}
+                              <TouchableOpacity
+                                onPress={() => handleShiftLessonHour(inspectDayTab, period, period + 1)}
+                                disabled={period >= maxPeriod}
+                                style={{
+                                  backgroundColor: period >= maxPeriod ? '#F1F5F9' : '#EEF2FF',
+                                  padding: 5,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  borderColor: period >= maxPeriod ? '#E2E8F0' : '#C7D2FE',
+                                }}
+                              >
+                                <Ionicons name="chevron-down" size={13} color={period >= maxPeriod ? '#CBD5E1' : '#4F46E5'} />
+                              </TouchableOpacity>
+
+                              {/* 🔀 Saate Taşı / Değiş Tokuş Butonu */}
+                              <TouchableOpacity
+                                onPress={() => handlePromptMoveLessonHour(inspectDayTab, period, maxPeriod)}
+                                style={{
+                                  backgroundColor: '#F0FDF4',
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 5,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  borderColor: '#BBF7D0',
+                                }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '800', color: '#16A34A' }}>Taşı ➔</Text>
+                              </TouchableOpacity>
+
+                              {conflictItem && (
+                                <TouchableOpacity
+                                  onPress={() => handleOpenTeacherScheduleInspector(conflictItem.teacherName)}
+                                  style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 6, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}
+                                >
+                                  <Text style={{ fontSize: 9, fontWeight: '700', color: '#4F46E5' }}>Diğerini Aç ➔</Text>
+                                </TouchableOpacity>
+                              )}
                               <TouchableOpacity
                                 onPress={() => handleStartEditCell(inspectDayTab, period)}
                                 style={{ backgroundColor: '#EEF2FF', padding: 6, borderRadius: 6 }}
                               >
-                                <Ionicons name="pencil" size={15} color="#4F46E5" />
+                                <Ionicons name="pencil" size={14} color="#4F46E5" />
                               </TouchableOpacity>
                               <TouchableOpacity
                                 onPress={() => handleDeleteCellSlot(inspectDayTab, period)}
                                 style={{ backgroundColor: '#FEF2F2', padding: 6, borderRadius: 6 }}
                               >
-                                <Ionicons name="trash-outline" size={15} color="#DC2626" />
+                                <Ionicons name="trash-outline" size={14} color="#DC2626" />
                               </TouchableOpacity>
                             </View>
                           </View>

@@ -38,7 +38,8 @@ export async function parseSingleTeacherScheduleWithAi(
   mimeType: string,
   teacherName: string,
   customApiKey?: string,
-  customModel?: string
+  customModel?: string,
+  userCorrectionHint?: string
 ): Promise<SingleTeacherParseResult> {
   const activeKey = customApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY;
   const activeModelName = customModel || (await getGeminiModel()) || DEFAULT_GEMINI_MODEL;
@@ -59,10 +60,21 @@ export async function parseSingleTeacherScheduleWithAi(
     },
   });
 
+  const hintRule = userCorrectionHint && userCorrectionHint.trim()
+    ? `
+════════════════════════════════════════════════════════════════════════
+🚨🚨🚨 KULLANICI DÜZELTME VE ÖNCELİKLİ İPUCU KURALI: 🚨🚨🚨
+Kullanıcı bu öğretmen ("${teacherName}") için şu özel düzeltme/ipucu talimatını verdi:
+"${userCorrectionHint.trim()}"
+Bu talimatı EN BİRİNCİ ÖNCELİKLE DİKKATE AL! Hücreleri yerleştirirken ve günleri doğrularırken bu kurala yüzde yüz uy!
+════════════════════════════════════════════════════════════════════════
+`
+    : '';
+
   const prompt = `
 Sen bir MEB okul ders programı ve çizelge OCR uzmanısın.
 Ekteki görsel/belge "${teacherName}" adlı öğretmenin bireysel haftalık ders programıdır.
-
+${hintRule}
 GÖREVİN:
 Bu öğretmenin Pazartesi, Salı, Çarşamba, Perşembe ve Cuma günlerine ait ders saatlerini eksiksiz oku.
 
