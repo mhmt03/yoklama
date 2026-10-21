@@ -24,6 +24,12 @@ namespace OgretmenAjanda.Api.DTOs
         public DateTime? LicenseExpiresAt { get; set; }
         public bool IsActive { get; set; }
         public List<string> SchoolNames { get; set; } = new();
+        public Guid? AdminUserId { get; set; }
+        public string? AdminUsername { get; set; }
+        public string? AdminFullName { get; set; }
+        public string? AdminPassword { get; set; }
+        public int TotalTeachers { get; set; }
+        public int TotalStudents { get; set; }
     }
 
     public class StudentLoginRequest
@@ -138,11 +144,15 @@ namespace OgretmenAjanda.Api.DTOs
     public class UpdateInstitutionRequest
     {
         public string? Name { get; set; }
+        public string? Code { get; set; }
         public int? MaxSchoolCount { get; set; }
         public int? AdditionalYears { get; set; }
+        public DateTime? LicenseExpiresAt { get; set; }
         public bool? IsActive { get; set; }
         public string? ContactName { get; set; }
         public string? ContactPhone { get; set; }
         public string? ContactEmail { get; set; }
+        public string? AdminUsername { get; set; }
+        public string? AdminPassword { get; set; }
     }
 }

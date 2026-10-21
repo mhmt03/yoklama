@@ -42,43 +42,52 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
 }
 
 // ---------------------------------------------------------------------------
-// Read PDF bytes with Android Scoped Storage fallbacks
+// Read PDF bytes with Android Scoped Storage fallbacks & detailed logging
 // ---------------------------------------------------------------------------
 
-async function readPdfBytes(asset: DocumentPicker.DocumentPickerAsset): Promise<Uint8Array> {
-  const uri = asset.uri;
+async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | string): Promise<Uint8Array> {
+  const uri = typeof assetOrUri === 'string' ? assetOrUri : assetOrUri.uri;
+  console.log('[PDF Fotoğraf] PDF Baytları okunuyor:', uri);
 
-  // On Android, DocumentPicker URIs in the Expo cache are not directly accessible
-  // via expo-file-system due to Scoped Storage restrictions.
-  // Skip straight to fetch which works reliably on all platforms.
+  // 1. FileSystem ile base64 oku
   if (Platform.OS !== 'android') {
     try {
       const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-      if (b64) return base64ToUint8Array(b64);
+      if (b64 && b64.length > 0) {
+        console.log(`[PDF Fotoğraf] FileSystem ile ${b64.length} karakter base64 okundu.`);
+        return base64ToUint8Array(b64);
+      }
     } catch (e) {
-      console.warn('readAsStringAsync failed, trying fetch fallback:', e);
+      console.warn('[PDF Fotoğraf] readAsStringAsync uyarısı, fetch deneniyor:', e);
     }
   }
 
-  // Fetch with ArrayBuffer — avoids the slow base64 blob round-trip
+  // 2. Fetch ArrayBuffer — avoids the slow base64 blob round-trip
   try {
     const res = await fetch(uri);
     const arrayBuffer = await res.arrayBuffer();
-    return new Uint8Array(arrayBuffer);
+    if (arrayBuffer && arrayBuffer.byteLength > 0) {
+      console.log(`[PDF Fotoğraf] Fetch ArrayBuffer ile ${arrayBuffer.byteLength} bayt okundu.`);
+      return new Uint8Array(arrayBuffer);
+    }
   } catch (e) {
-    console.warn('fetch arrayBuffer failed, trying blob fallback:', e);
+    console.warn('[PDF Fotoğraf] fetch arrayBuffer uyarısı, blob deneniyor:', e);
   }
 
-  // Final fallback: blob (slower, but most compatible)
+  // 3. Final fallback: blob
   const res = await fetch(uri);
   const blob = await res.blob();
   return new Promise<Uint8Array>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       try {
-        if (reader.result instanceof ArrayBuffer) return resolve(new Uint8Array(reader.result));
+        if (reader.result instanceof ArrayBuffer) {
+          console.log(`[PDF Fotoğraf] FileReader ile ${reader.result.byteLength} bayt okundu.`);
+          return resolve(new Uint8Array(reader.result));
+        }
         const str = reader.result as string;
         const clean = str.includes(',') ? str.split(',')[1] : str;
+        console.log(`[PDF Fotoğraf] FileReader dataURL ile ${clean.length} karakter base64 okundu.`);
         resolve(base64ToUint8Array(clean));
       } catch (e) { reject(e); }
     };
@@ -503,13 +512,68 @@ function getPageXObjectMap(pageObjNum: number, pageDictText: string, text: strin
   return map;
 }
 
+function decodeHexPdfString(hex: string): string {
+  if (!hex || hex.length < 2) return '';
+  if (hex.length % 2 !== 0) hex += '0';
+  let result = '';
+  // Check if UTF-16BE (starts with 00 or FEFF)
+  if (hex.length >= 4 && hex.length % 4 === 0 && (hex.toLowerCase().startsWith('feff') || hex.startsWith('00'))) {
+    for (let i = 0; i < hex.length; i += 4) {
+      const code = parseInt(hex.substring(i, i + 4), 16);
+      if (code > 0 && code !== 0xfeff) result += String.fromCharCode(code);
+    }
+    return result.trim();
+  }
+  // Standard ASCII/Latin-1
+  for (let i = 0; i < hex.length; i += 2) {
+    const code = parseInt(hex.substring(i, i + 2), 16);
+    if (code >= 32 && code <= 255) result += String.fromCharCode(code);
+  }
+  return result.trim();
+}
+
 function extractStringsFromContext(ctx: string): string[] {
   const list: string[] = [];
   const parseStr = (s: string) => {
     return s.replace(/\\([()\\])/g, '$1').trim();
   };
 
-  // Match text inside BT ... ET blocks
+  // 1. Array TJ operator: [ (1) 20 (2) ] TJ or [ <0031> 10 <0032> ] TJ (e-Okul kerning)
+  const tjRe = /\[([\s\S]*?)\]\s*TJ/gi;
+  let tjM: RegExpExecArray | null;
+  while ((tjM = tjRe.exec(ctx)) !== null) {
+    const arrContent = tjM[1];
+    let assembled = '';
+    const tokenRe = /\(((\\.|[^)])*)\)|<([0-9a-fA-F]+)>/g;
+    let tokM: RegExpExecArray | null;
+    while ((tokM = tokenRe.exec(arrContent)) !== null) {
+      if (tokM[1] !== undefined) {
+        assembled += parseStr(tokM[1]);
+      } else if (tokM[3] !== undefined) {
+        assembled += decodeHexPdfString(tokM[3]);
+      }
+    }
+    const clean = assembled.trim();
+    if (clean && !list.includes(clean)) list.push(clean);
+  }
+
+  // 2. Direct string operator: (text) Tj
+  const singleTjRe = /\(((\\.|[^)])*)\)\s*Tj/gi;
+  let stM: RegExpExecArray | null;
+  while ((stM = singleTjRe.exec(ctx)) !== null) {
+    const s = parseStr(stM[1]);
+    if (s && !list.includes(s)) list.push(s);
+  }
+
+  // 3. Hex string operator: <00310032> Tj
+  const hexTjRe = /<([0-9a-fA-F]+)>\s*Tj/gi;
+  let htM: RegExpExecArray | null;
+  while ((htM = hexTjRe.exec(ctx)) !== null) {
+    const s = decodeHexPdfString(htM[1]);
+    if (s && !list.includes(s)) list.push(s);
+  }
+
+  // 4. Match inside BT ... ET blocks
   const btEtRe = /BT([\s\S]*?)ET/g;
   let bm: RegExpExecArray | null;
   while ((bm = btEtRe.exec(ctx)) !== null) {
@@ -518,16 +582,23 @@ function extractStringsFromContext(ctx: string): string[] {
     let sm: RegExpExecArray | null;
     while ((sm = strRe.exec(block)) !== null) {
       const s = parseStr(sm[1]);
-      if (s) list.push(s);
+      if (s && !list.includes(s)) list.push(s);
+    }
+    const hexRe = /<([0-9a-fA-F]+)>/g;
+    let hm: RegExpExecArray | null;
+    while ((hm = hexRe.exec(block)) !== null) {
+      const s = decodeHexPdfString(hm[1]);
+      if (s && !list.includes(s)) list.push(s);
     }
   }
-  // Fallback to literal strings outside BT...ET
+
+  // 5. Fallback to literal strings outside BT...ET
   if (list.length === 0) {
     const directRe = /\(((\\.|[^)])*)\)/g;
     let dm: RegExpExecArray | null;
     while ((dm = directRe.exec(ctx)) !== null) {
       const s = parseStr(dm[1]);
-      if (s) list.push(s);
+      if (s && !list.includes(s)) list.push(s);
     }
   }
   return list;
@@ -537,19 +608,37 @@ function extractStringsFromContext(ctx: string): string[] {
 // Main export
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Main export
+// ---------------------------------------------------------------------------
+
 export const extractPhotosFromPdf = async (
-  students: Student[]
+  students: Student[],
+  assetOrUri?: DocumentPicker.DocumentPickerAsset | string
 ): Promise<PdfPhotoExtractResult> => {
+  console.log('\n══════════════════ [PDF Fotoğraf Çıkarıcı] BAŞLADI ══════════════════');
+  console.log('[PDF Fotoğraf] Eşleştirilecek Öğrenci Sayısı:', students.length);
+
   try {
-    const pick = await DocumentPicker.getDocumentAsync({ type: ['application/pdf'], copyToCacheDirectory: true });
-    if (pick.canceled || !pick.assets?.length) {
-      return { success: false, totalImages: 0, extractedPhotos: [], error: 'Dosya seçilmedi.' };
+    let targetAsset: DocumentPicker.DocumentPickerAsset | string | undefined = assetOrUri;
+
+    if (!targetAsset) {
+      console.log('[PDF Fotoğraf] Belge seçici açılıyor...');
+      const pick = await DocumentPicker.getDocumentAsync({ type: ['application/pdf'], copyToCacheDirectory: true });
+      if (pick.canceled || !pick.assets?.length) {
+        console.log('[PDF Fotoğraf] Kullanıcı belge seçimini iptal etti.');
+        return { success: false, totalImages: 0, extractedPhotos: [], error: 'Dosya seçilmedi.' };
+      }
+      targetAsset = pick.assets[0];
     }
 
-    const buf = await readPdfBytes(pick.assets[0]);
+    const buf = await readPdfBytes(targetAsset);
     if (!buf?.length) {
+      console.error('[PDF Fotoğraf] PDF dosyası okunamadı veya boş (0 bayt).');
       return { success: false, totalImages: 0, extractedPhotos: [], error: 'PDF dosyası okunamadı.' };
     }
+
+    console.log(`[PDF Fotoğraf] PDF baytları hafızaya alındı (${(buf.length / 1024).toFixed(1)} KB). Resim nesneleri taranıyor...`);
 
     // Latin-1 string for text scanning (binary-safe)
     const text = Array.from(buf).map(b => String.fromCharCode(b)).join('');
@@ -558,9 +647,14 @@ export const extractPhotosFromPdf = async (
     const allImgs = parsePdfImageObjs(text, buf);
     const photoObjs = allImgs.filter(img => img.height >= 50 && img.width >= 40 && img.height / img.width >= 0.8);
 
+    console.log(`[PDF Fotoğraf] Toplam Resim Objesi: ${allImgs.length} adet | Vesikalık Kriterine Uyan: ${photoObjs.length} adet`);
+
     if (!photoObjs.length) {
+      console.warn('[PDF Fotoğraf] PDF içinde vesikalık boyutuna (>= 40x50) uygun fotoğraf nesnesi bulunamadı.');
       return {
-        success: false, totalImages: 0, extractedPhotos: [],
+        success: false,
+        totalImages: allImgs.length,
+        extractedPhotos: [],
         error: 'PDF dosyasında öğrenci fotoğrafı bulunamadı. Okul tarafından sağlanan orijinal fotoğraf listesi PDF\'ini seçin.',
       };
     }
@@ -571,7 +665,18 @@ export const extractPhotosFromPdf = async (
       await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
     }
 
-    const numSet = new Set(students.map(s => s.student_number));
+    // Öğrenci numaralarını ve başındaki sıfırlar atılmış hallerini hazırla
+    const numSet = new Set<string>();
+    const normalizedNumMap = new Map<string, Student>();
+    for (const s of students) {
+      if (s.student_number) {
+        const raw = s.student_number.trim();
+        numSet.add(raw);
+        const clean = raw.replace(/^0+/, '');
+        if (clean) normalizedNumMap.set(clean, s);
+        normalizedNumMap.set(raw, s);
+      }
+    }
 
     // ── Per-page algorithm ──────────────────────────────────────────────────
     interface PagePair {
@@ -677,6 +782,8 @@ export const extractPhotosFromPdf = async (
         }
       }
 
+      console.log(`[PDF Fotoğraf] Sayfa ${pageNumber}: ${photoPlacements.length} resim yerleşimi bulundu.`);
+
       if (photoPlacements.length === 0) continue;
 
       // ── 4. Determine whether text is drawn before or after photo on this page ──
@@ -685,8 +792,6 @@ export const extractPhotosFromPdf = async (
       const region0Strings = extractStringsFromContext(region0Text);
       const region0Numbers = region0Strings.filter(s => /^\d{1,6}$/.test(s));
 
-      // Does the region before the first photo contain a student number?
-      // (either in numSet, or 3+ digits like 1465)
       const hasStudentNumBeforeFirstPhoto = region0Numbers.some(n => numSet.has(n) || n.length >= 3);
       const textOrder: 'before' | 'after' = hasStudentNumBeforeFirstPhoto ? 'before' : 'after';
 
@@ -703,11 +808,9 @@ export const extractPhotosFromPdf = async (
         let ctx = '';
 
         if (textOrder === 'before') {
-          // Context is strictly between previous photo and current photo
           const prevIdx = k > 0 ? photoPlacements[k - 1].index : 0;
           ctx = pageContent.substring(Math.max(prevIdx, cur.index - 1200), cur.index);
         } else {
-          // Context is strictly between current photo and next photo
           const nextIdx = k + 1 < photoPlacements.length ? photoPlacements[k + 1].index : pageContent.length;
           ctx = pageContent.substring(cur.index, Math.min(nextIdx, cur.index + 1200));
         }
@@ -733,14 +836,14 @@ export const extractPhotosFromPdf = async (
 
         let detNum = '';
         // 1. Look for numbers that actually belong to the students in the class/system
-        const matchingKnown = candidateNumbers.filter(n => numSet.has(n) && !usedNumbersOnPage.has(n));
+        const matchingKnown = candidateNumbers.filter(
+          n => (numSet.has(n) || normalizedNumMap.has(n.replace(/^0+/, ''))) && !usedNumbersOnPage.has(n)
+        );
         if (matchingKnown.length > 0) {
-          // If multiple match, prefer longer number (e.g. 1465 > 2)
           matchingKnown.sort((a, b) => b.length - a.length);
           detNum = matchingKnown[0];
         } else {
-          // 2. If not in known numbers, only accept 3+ digit numbers
-          // (eliminates stray page numbers like "2" or row counters)
+          // 2. If not in known numbers, accept 3+ digit numbers
           const validCandidates = candidateNumbers.filter(n => n.length >= 3 && !usedNumbersOnPage.has(n));
           if (validCandidates.length > 0) {
             validCandidates.sort((a, b) => b.length - a.length);
@@ -761,7 +864,6 @@ export const extractPhotosFromPdf = async (
           orderedPairs.push({ photo, info, pageNumber });
           usedObjNums.add(photo.objNum);
         } else {
-          // Positional fallback if direct alias photo was not found or already used
           while (positionalCursor < photoObjs.length && usedObjNums.has(photoObjs[positionalCursor].objNum)) {
             positionalCursor++;
           }
@@ -775,9 +877,10 @@ export const extractPhotosFromPdf = async (
       }
     }
 
+    console.log(`[PDF Fotoğraf] Sayfalardan toplam ${orderedPairs.length} adet resim-metin eşleşme adayı çıkarıldı.`);
+
     // ── Convert matched image objects to files and resolve students ─────────
     const extractedPhotos: PdfExtractedStudentPhoto[] = [];
-    // Her öğrenci yalnızca bir kez eşleştirilebilir
     const usedStudentIds = new Set<number>();
 
     for (let i = 0; i < orderedPairs.length; i++) {
@@ -788,9 +891,22 @@ export const extractPhotosFromPdf = async (
         let fileSize = 0;
 
         if (img.filter === 'DCTDecode') {
+          // JPEG SOI (FF D8) ve EOI (FF D9) sınırlarını temizle
+          let start = 0;
+          while (start < Math.min(rawStream.length - 1, 10)) {
+            if (rawStream[start] === 0xff && rawStream[start + 1] === 0xd8) break;
+            start++;
+          }
+          let end = rawStream.length;
+          while (end > start + 2) {
+            if (rawStream[end - 2] === 0xff && rawStream[end - 1] === 0xd9) break;
+            end--;
+          }
+          const jpegBytes = rawStream.subarray(start, end);
+
           tempPath = `${cacheDir}pdf_${Date.now()}_${i}.jpg`;
-          await FileSystem.writeAsStringAsync(tempPath, uint8ArrayToBase64(rawStream), { encoding: 'base64' });
-          fileSize = rawStream.length;
+          await FileSystem.writeAsStringAsync(tempPath, uint8ArrayToBase64(jpegBytes), { encoding: 'base64' });
+          fileSize = jpegBytes.length;
         } else if (img.filter === 'FlateDecode') {
           const pixels = await inflateAsync(rawStream);
           let pngBytes: Uint8Array | null = null;
@@ -821,19 +937,42 @@ export const extractPhotosFromPdf = async (
         const detNum = info.number;
         let matched: Student | null = null;
 
-        // ── Öğrenci eşleştirme kuralları ────────────────────────────────────
-        // 1. Sadece numara ile eşleştir (isim tahmini yapma).
-        //    Numara sistemde yoksa matched = null kalır; kullanıcı manuel atar.
-        // 2. Aynı öğrenci birden fazla fotoğrafa atanamaz (usedStudentIds).
-        // ────────────────────────────────────────────────────────────────────
-        if (detNum && numSet.has(detNum)) {
-          const candidate = students.find(s => s.student_number === detNum) || null;
+        // ── 1. Numara Eşleştirme (Tam eşleşme veya başındaki sıfırlar göz ardı edilmiş) ──
+        if (detNum) {
+          const cleanDet = detNum.trim().replace(/^0+/, '');
+          const candidate =
+            students.find(
+              s =>
+                s.student_number?.trim() === detNum.trim() ||
+                (cleanDet.length > 0 && s.student_number?.trim().replace(/^0+/, '') === cleanDet)
+            ) || null;
+
           if (candidate && !usedStudentIds.has(candidate.id)) {
             matched = candidate;
           }
         }
 
+        // ── 2. İsim ile Destekleme (Numara bulunamadıysa tam isimden ara) ──
+        if (!matched && info.name && info.name.length >= 4) {
+          const normInfoName = info.name.toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+          const candidate = students.find(s => {
+            const fName = `${s.first_name || ''} ${s.last_name || ''}`.toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+            const fullName = (s.full_name || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+            return fName === normInfoName || fullName === normInfoName;
+          });
+          if (candidate && !usedStudentIds.has(candidate.id)) {
+            matched = candidate;
+            console.log(`[PDF Fotoğraf] İsimden tam eşleşme sağlandı: "${info.name}" -> ${candidate.first_name} ${candidate.last_name} (${candidate.student_number})`);
+          }
+        }
+
         if (matched) usedStudentIds.add(matched.id);
+
+        console.log(
+          `[PDF Fotoğraf] Foto #${i + 1} (Sayfa ${pageNumber}): No=${detNum || 'YOK'} | İsim="${info.name}" -> ${
+            matched ? `✅ EŞLEŞTİ (${matched.full_name || `${matched.first_name} ${matched.last_name}`})` : '⚠️ EŞLEŞMEDİ (Manuel Atama)'
+          }`
+        );
 
         extractedPhotos.push({
           id: `pdf-${i}-${Date.now()}`,
@@ -846,9 +985,18 @@ export const extractPhotosFromPdf = async (
           pageNumber,
         });
       } catch (e) {
-        console.warn(`Photo ${i} error:`, e);
+        console.warn(`[PDF Fotoğraf] Fotoğraf ${i} dönüştürme hatası:`, e);
       }
     }
+
+    const matchedCount = extractedPhotos.filter(p => p.matchedStudent !== null).length;
+    const unmatchedCount = extractedPhotos.length - matchedCount;
+
+    console.log(`\n══════════════════ [PDF Fotoğraf Çıkarıcı] ÖZET ══════════════════`);
+    console.log(`[PDF Fotoğraf] Toplam Çıkarılan Fotoğraf: ${extractedPhotos.length}`);
+    console.log(`[PDF Fotoğraf] Otomatik Eşleşen: ${matchedCount} adet`);
+    console.log(`[PDF Fotoğraf] Eşleşmeyen (Manuel Bekleyen): ${unmatchedCount} adet`);
+    console.log(`═══════════════════════════════════════════════════════════════════\n`);
 
     if (!extractedPhotos.length) {
       return {
@@ -861,7 +1009,7 @@ export const extractPhotosFromPdf = async (
 
     return { success: true, totalImages: extractedPhotos.length, extractedPhotos };
   } catch (err: any) {
-    console.error('extractPhotosFromPdf error:', err);
+    console.error('[PDF Fotoğraf] Genel Hata:', err);
     return { success: false, totalImages: 0, extractedPhotos: [], error: err?.message || 'PDF işlenirken bir hata oluştu.' };
   }
 };

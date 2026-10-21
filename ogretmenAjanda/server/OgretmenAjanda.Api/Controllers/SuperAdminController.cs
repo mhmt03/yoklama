@@ -279,6 +279,19 @@ namespace OgretmenAjanda.Api.Controllers
                                 (inst.AdminUserId.HasValue && s.AdminUserId == inst.AdminUserId.Value))
                     .ToListAsync();
 
+                var schoolIds = schools.Select(s => s.Id).ToList();
+
+                var teacherCount = await _context.Users
+                    .CountAsync(u => ((u.SchoolId.HasValue && schoolIds.Contains(u.SchoolId.Value)) ||
+                                      (u.CustomerId != null && u.CustomerId.ToLower() == cleanCode)) && u.Role == UserRoles.Teacher);
+
+                var studentCount = await _context.Students
+                    .CountAsync(st => schoolIds.Contains(st.SchoolId));
+
+                var adminUser = inst.AdminUserId.HasValue
+                    ? await _context.Users.FirstOrDefaultAsync(u => u.Id == inst.AdminUserId.Value)
+                    : await _context.Users.FirstOrDefaultAsync(u => u.Role == UserRoles.SchoolAdmin && u.CustomerId != null && u.CustomerId.ToLower() == cleanCode);
+
                 result.Add(new InstitutionDto
                 {
                     Id = inst.Id,
@@ -291,11 +304,137 @@ namespace OgretmenAjanda.Api.Controllers
                     ContactEmail = inst.ContactEmail,
                     LicenseExpiresAt = inst.LicenseExpiresAt,
                     IsActive = inst.IsActive,
-                    SchoolNames = schools.Select(s => $"{s.Name} ({s.Code})").ToList()
+                    SchoolNames = schools.Select(s => $"{s.Name} ({s.Code})").ToList(),
+                    AdminUserId = adminUser?.Id ?? inst.AdminUserId,
+                    AdminUsername = adminUser?.Username ?? "admin",
+                    AdminFullName = adminUser?.FullName ?? $"{inst.Name} Yöneticisi",
+                    AdminPassword = inst.AdminPassword ?? (adminUser?.Username == "admin" ? "admin123" : "1234"),
+                    TotalTeachers = teacherCount,
+                    TotalStudents = studentCount
                 });
             }
 
             return Ok(result);
+        }
+
+        [HttpGet("institutions/{id}/details")]
+        public async Task<IActionResult> GetInstitutionDetails(Guid id)
+        {
+            var inst = await _context.Institutions.FindAsync(id);
+            if (inst == null) return NotFound(new { message = "Kurum bulunamadı." });
+
+            var cleanCode = inst.Code.ToLower();
+
+            // 1. Kurum Admini
+            var adminUser = inst.AdminUserId.HasValue 
+                ? await _context.Users.FirstOrDefaultAsync(u => u.Id == inst.AdminUserId.Value)
+                : await _context.Users.FirstOrDefaultAsync(u => u.Role == UserRoles.SchoolAdmin && u.CustomerId != null && u.CustomerId.ToLower() == cleanCode);
+
+            // 2. Okullar
+            var schools = await _context.Schools
+                .Where(s => (s.CustomerId != null && s.CustomerId.ToLower() == cleanCode) ||
+                            (inst.AdminUserId.HasValue && s.AdminUserId == inst.AdminUserId.Value))
+                .OrderByDescending(s => s.CreatedAt)
+                .ToListAsync();
+
+            var schoolIds = schools.Select(s => s.Id).ToList();
+
+            // 3. Öğretmenler
+            var teachers = await _context.Users
+                .Where(u => (u.SchoolId.HasValue && schoolIds.Contains(u.SchoolId.Value)) ||
+                            (u.CustomerId != null && u.CustomerId.ToLower() == cleanCode && u.Role == UserRoles.Teacher))
+                .Select(u => new
+                {
+                    u.Id,
+                    u.FullName,
+                    u.Username,
+                    u.Role,
+                    u.Phone,
+                    u.Email,
+                    u.Branch,
+                    u.LastLoginAt,
+                    u.SchoolId,
+                    SchoolName = _context.Schools.Where(s => s.Id == u.SchoolId).Select(s => s.Name).FirstOrDefault() ?? "Genel"
+                })
+                .OrderBy(u => u.FullName)
+                .ToListAsync();
+
+            // 4. Öğrenciler (Önizleme listesi ve toplam sayı)
+            var students = await _context.Students
+                .Where(st => schoolIds.Contains(st.SchoolId))
+                .Select(st => new
+                {
+                    st.Id,
+                    st.FullName,
+                    st.StudentNumber,
+                    st.Grade,
+                    st.Section,
+                    st.SchoolId,
+                    SchoolName = _context.Schools.Where(s => s.Id == st.SchoolId).Select(s => s.Name).FirstOrDefault() ?? "Okul"
+                })
+                .OrderBy(st => st.Grade).ThenBy(st => st.Section).ThenBy(st => st.StudentNumber)
+                .Take(200)
+                .ToListAsync();
+
+            var totalStudentsCount = await _context.Students.CountAsync(st => schoolIds.Contains(st.SchoolId));
+
+            // 5. Günlük Loglar
+            var recentLogs = await _context.AuditLogs
+                .Where(l => l.SchoolId.HasValue && schoolIds.Contains(l.SchoolId.Value))
+                .OrderByDescending(l => l.Timestamp)
+                .Take(40)
+                .ToListAsync();
+
+            return Ok(new
+            {
+                institution = new
+                {
+                    inst.Id,
+                    inst.Code,
+                    inst.Name,
+                    inst.MaxSchoolCount,
+                    CurrentSchoolCount = schools.Count,
+                    inst.ContactName,
+                    inst.ContactPhone,
+                    inst.ContactEmail,
+                    inst.LicenseExpiresAt,
+                    inst.IsActive,
+                    inst.CreatedAt
+                },
+                admin = new
+                {
+                    userId = adminUser?.Id,
+                    username = adminUser?.Username ?? "admin",
+                    fullName = adminUser?.FullName ?? $"{inst.Name} Yöneticisi",
+                    password = inst.AdminPassword ?? (adminUser?.Username == "admin" ? "admin123" : "1234"),
+                    lastLoginAt = adminUser?.LastLoginAt
+                },
+                schools = schools.Select(s => new
+                {
+                    s.Id,
+                    s.Name,
+                    s.Code,
+                    s.Phone,
+                    s.Address,
+                    s.DailyLessonHours,
+                    s.LicenseExpiresAt,
+                    s.IsActive,
+                    s.CreatedAt,
+                    TeacherCount = teachers.Count(t => t.SchoolId == s.Id),
+                    StudentCount = _context.Students.Count(st => st.SchoolId == s.Id)
+                }).ToList(),
+                teachers,
+                students,
+                totalStudentsCount,
+                stats = new
+                {
+                    schoolCount = schools.Count,
+                    teacherCount = teachers.Count,
+                    studentCount = totalStudentsCount,
+                    logCount = recentLogs.Count
+                },
+                recentLogs
+            });
         }
 
         [HttpPost("institutions")]
@@ -322,6 +461,7 @@ namespace OgretmenAjanda.Api.Controllers
                 ContactName = request.ContactName,
                 ContactPhone = request.ContactPhone,
                 ContactEmail = request.ContactEmail,
+                AdminPassword = request.AdminPassword?.Trim(),
                 CreatedAt = DateTime.UtcNow,
                 LicenseExpiresAt = DateTime.UtcNow.AddYears(request.AdditionalYears > 0 ? request.AdditionalYears : 1),
                 IsActive = true
@@ -372,18 +512,102 @@ namespace OgretmenAjanda.Api.Controllers
                 return NotFound(new { message = "Kurum bulunamadı." });
             }
 
+            var oldCode = inst.Code;
+
+            // Kurum Kodu Güncelleme (Benzersizlik ve İlişkili Veri Güncellemesi)
+            if (!string.IsNullOrWhiteSpace(request.Code))
+            {
+                var cleanCode = request.Code.Trim().ToLowerInvariant();
+                if (cleanCode != oldCode.ToLowerInvariant())
+                {
+                    var exists = await _context.Institutions.AnyAsync(i => i.Id != id && i.Code.ToLower() == cleanCode);
+                    if (exists)
+                    {
+                        return BadRequest(new { message = $"'{cleanCode}' kurum kodu zaten başka bir kurum tarafından kullanılmaktadır." });
+                    }
+
+                    inst.Code = cleanCode;
+
+                    // Bu kuruma bağlı okulların CustomerId kodlarını da senkronize et
+                    var schools = await _context.Schools
+                        .Where(s => s.CustomerId != null && s.CustomerId.ToLower() == oldCode.ToLower())
+                        .ToListAsync();
+                    foreach (var s in schools)
+                    {
+                        s.CustomerId = cleanCode;
+                    }
+
+                    // Bu kuruma bağlı kullanıcıların CustomerId kodlarını da senkronize et
+                    var users = await _context.Users
+                        .Where(u => u.CustomerId != null && u.CustomerId.ToLower() == oldCode.ToLower())
+                        .ToListAsync();
+                    foreach (var u in users)
+                    {
+                        u.CustomerId = cleanCode;
+                    }
+                }
+            }
+
             if (!string.IsNullOrEmpty(request.Name)) inst.Name = request.Name.Trim();
             if (request.MaxSchoolCount.HasValue && request.MaxSchoolCount.Value > 0) inst.MaxSchoolCount = request.MaxSchoolCount.Value;
             if (request.IsActive.HasValue) inst.IsActive = request.IsActive.Value;
             if (request.ContactName != null) inst.ContactName = request.ContactName;
             if (request.ContactPhone != null) inst.ContactPhone = request.ContactPhone;
             if (request.ContactEmail != null) inst.ContactEmail = request.ContactEmail;
-            if (request.AdditionalYears.HasValue && request.AdditionalYears.Value > 0)
+
+            // Manuel Lisans Bitiş Tarihi veya Ek Yıl
+            if (request.LicenseExpiresAt.HasValue)
+            {
+                inst.LicenseExpiresAt = request.LicenseExpiresAt.Value;
+            }
+            else if (request.AdditionalYears.HasValue && request.AdditionalYears.Value > 0)
             {
                 var baseDate = (inst.LicenseExpiresAt.HasValue && inst.LicenseExpiresAt.Value > DateTime.UtcNow)
                     ? inst.LicenseExpiresAt.Value
                     : DateTime.UtcNow;
                 inst.LicenseExpiresAt = baseDate.AddYears(request.AdditionalYears.Value);
+            }
+
+            // Lisans süresi değiştiyse bağlı okulları ve öğretmenleri de senkronize et
+            if (request.LicenseExpiresAt.HasValue || (request.AdditionalYears.HasValue && request.AdditionalYears.Value > 0))
+            {
+                var syncCode = inst.Code.ToLower();
+                var schoolsToSync = await _context.Schools
+                    .Where(s => s.CustomerId != null && s.CustomerId.ToLower() == syncCode)
+                    .ToListAsync();
+                foreach (var s in schoolsToSync)
+                {
+                    s.LicenseExpiresAt = inst.LicenseExpiresAt;
+                    if (request.IsActive.HasValue) s.IsActive = request.IsActive.Value;
+                }
+
+                var usersToSync = await _context.Users
+                    .Where(u => u.CustomerId != null && u.CustomerId.ToLower() == syncCode)
+                    .ToListAsync();
+                foreach (var u in usersToSync)
+                {
+                    u.LicenseExpiresAt = inst.LicenseExpiresAt;
+                    if (request.IsActive.HasValue) u.IsActive = request.IsActive.Value;
+                }
+            }
+
+            // Yönetici Şifresi ve Kullanıcı Adı Güncellemesi
+            var adminUser = inst.AdminUserId.HasValue
+                ? await _context.Users.FirstOrDefaultAsync(u => u.Id == inst.AdminUserId.Value)
+                : await _context.Users.FirstOrDefaultAsync(u => u.Role == UserRoles.SchoolAdmin && u.CustomerId != null && u.CustomerId.ToLower() == inst.Code.ToLower());
+
+            if (!string.IsNullOrWhiteSpace(request.AdminPassword))
+            {
+                inst.AdminPassword = request.AdminPassword.Trim();
+                if (adminUser != null)
+                {
+                    adminUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.AdminPassword.Trim());
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.AdminUsername) && adminUser != null)
+            {
+                adminUser.Username = request.AdminUsername.Trim().ToLower();
             }
 
             await _context.SaveChangesAsync();

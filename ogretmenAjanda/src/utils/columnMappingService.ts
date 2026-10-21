@@ -28,14 +28,20 @@ export interface DocumentAnalysisResult {
   aiReason?: string;
   sheetName?: string;
   availableSheets?: string[];
+  detectedWeeklyHours?: number;
+  detectedTotalHours?: number;
+  calculatedWeeks?: number;
+  detectedHolidays?: string[];
+  detectedSchoolYear?: number;
 }
 
 /**
- * Türkçe tarih aralıklarını (örn: "09.09.2024 - 13.09.2024" veya "16-20 Eylül 2024") YYYY-AA-GG formatına çevirir.
+ * Türkçe tarih aralıklarını (örn: "09.09.2024 - 13.09.2024", "16-20 Eylül 2024", "28 Eylül - 2 Ekim" veya "28 Aralık - 1 Ocak")
+ * YYYY-AA-GG formatına çevirir. MEB eğitim yılı takvimine göre Eylül-Aralık (Yıl 1) ve Ocak-Haziran (Yıl 2) geçişini doğru hesaplar.
  */
 export const parseTurkishDateRange = (
   rawDateStr: string,
-  defaultYear: number = new Date().getFullYear()
+  schoolStartYear: number = new Date().getFullYear()
 ): { dateStart?: string; dateEnd?: string } => {
   if (!rawDateStr || typeof rawDateStr !== 'string') return {};
 
@@ -51,7 +57,7 @@ export const parseTurkishDateRange = (
       ? fullMatch[3].length === 2
         ? '20' + fullMatch[3]
         : fullMatch[3]
-      : String(defaultYear);
+      : String(schoolStartYear);
     const y2 = fullMatch[6]
       ? fullMatch[6].length === 2
         ? '20' + fullMatch[6]
@@ -63,7 +69,6 @@ export const parseTurkishDateRange = (
     };
   }
 
-  // 2. GG - GG Ay YYYY (Örn: "09 - 13 Eylül 2024" veya "16-20 Eylül")
   const turkishMonths: Record<string, number> = {
     ocak: 1,
     subat: 2,
@@ -85,17 +90,43 @@ export const parseTurkishDateRange = (
     aralık: 12,
   };
 
-  const monthRegex =
-    /(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([a-zA-ZçğıöşüÇĞİÖŞÜ]+)(?:\s+(\d{4}))?/i;
-  const mMatch = clean.match(monthRegex);
-  if (mMatch) {
-    const mName = mMatch[3].toLowerCase();
-    const monthNum = turkishMonths[mName];
-    if (monthNum) {
-      const year = mMatch[4] || String(defaultYear);
+  const getYearForMonth = (mNum: number) => {
+    return mNum >= 9 ? schoolStartYear : schoolStartYear + 1;
+  };
+
+  // 2. Ay Geçişli Tarihler: GG Ay1 - GG Ay2 (Örn: "28 Eylül - 2 Ekim", "30 Kasım - 4 Aralık", "28 Aralık - 1 Ocak", "31 Mayıs - 4 Haziran")
+  const crossMonthRegex =
+    /(\d{1,2})\s*([a-zA-ZçğıöşüÇĞİÖŞÜ]+)\s*[-–]\s*(\d{1,2})\s*([a-zA-ZçğıöşüÇĞİÖŞÜ]+)(?:\s+(\d{4}))?/i;
+  const cmMatch = clean.match(crossMonthRegex);
+  if (cmMatch) {
+    const m1Name = cmMatch[2].toLocaleLowerCase('tr-TR');
+    const m2Name = cmMatch[4].toLocaleLowerCase('tr-TR');
+    const m1 = turkishMonths[m1Name];
+    const m2 = turkishMonths[m2Name];
+    if (m1 && m2) {
+      const explicitYear = cmMatch[5] ? parseInt(cmMatch[5], 10) : null;
+      const y1 = explicitYear || getYearForMonth(m1);
+      const y2 = explicitYear || getYearForMonth(m2);
       return {
-        dateStart: `${year}-${pad(monthNum)}-${pad(mMatch[1])}`,
-        dateEnd: `${year}-${pad(monthNum)}-${pad(mMatch[2])}`,
+        dateStart: `${y1}-${pad(m1)}-${pad(cmMatch[1])}`,
+        dateEnd: `${y2}-${pad(m2)}-${pad(cmMatch[3])}`,
+      };
+    }
+  }
+
+  // 3. Aynı Ay İçi: GG - GG Ay YYYY (Örn: "09 - 13 Eylül 2026" veya "16-20 Eylül")
+  const sameMonthRegex =
+    /(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([a-zA-ZçğıöşüÇĞİÖŞÜ]+)(?:\s+(\d{4}))?/i;
+  const smMatch = clean.match(sameMonthRegex);
+  if (smMatch) {
+    const mName = smMatch[3].toLocaleLowerCase('tr-TR');
+    const mNum = turkishMonths[mName];
+    if (mNum) {
+      const explicitYear = smMatch[4] ? parseInt(smMatch[4], 10) : null;
+      const year = explicitYear || getYearForMonth(mNum);
+      return {
+        dateStart: `${year}-${pad(mNum)}-${pad(smMatch[1])}`,
+        dateEnd: `${year}-${pad(mNum)}-${pad(smMatch[2])}`,
       };
     }
   }
@@ -116,7 +147,7 @@ export const detectSuggestedMappingWithHeuristics = (
   let hoursColIndex: number | null = null;
 
   for (const col of columns) {
-    const h = col.headerName.toLowerCase();
+    const h = col.headerName.toLocaleLowerCase('tr-TR');
 
     // Hafta
     if (weekColIndex === null && (h.includes('hafta') || h === 'no' || h.includes('hafta no') || h.includes('dönem'))) {
@@ -133,30 +164,42 @@ export const detectSuggestedMappingWithHeuristics = (
       hoursColIndex = col.index;
     }
 
-    // Konu
+    // Konu: 'konu' veya 'içerik' varsa önceliklidir (ünite tek başına daha geneldir)
     if (
       topicColIndex === null &&
       (h.includes('konu') ||
+        h.includes('içerik') ||
+        h.includes('alt öğrenme') ||
         h.includes('ünite') ||
         h.includes('öğrenme alanı') ||
-        h.includes('alt öğrenme') ||
-        h.includes('içerik') ||
         h.includes('tema') ||
         h.includes('etkinlik'))
     ) {
       topicColIndex = col.index;
     }
 
-    // Kazanım
+    // Kazanım: 'kazanım', 'öğrenme çıktıları', 'açıklama'
     if (
       outcomesColIndex === null &&
       (h.includes('kazanım') ||
+        h.includes('kazanim') ||
+        h.includes('öğrenme çıktı') ||
+        h.includes('çıktı') ||
+        h.includes('süreç bileşen') ||
         h.includes('açıklama') ||
         h.includes('beceri') ||
-        h.includes('hedef') ||
-        h.includes('kazanim'))
+        h.includes('hedef'))
     ) {
       outcomesColIndex = col.index;
+    }
+  }
+
+  // Eğer hem Ünite hem Konu sütunları varsa, daha spesifik olan 'konu' sütununu topicColIndex yap
+  for (const col of columns) {
+    const h = col.headerName.toLocaleLowerCase('tr-TR');
+    if (h.includes('konu') || h.includes('içerik çerçevesi')) {
+      topicColIndex = col.index;
+      break;
     }
   }
 
@@ -188,7 +231,13 @@ export const detectSuggestedMappingWithHeuristics = (
  * Gemini AI ile sütun başlıklarını ve örnek verileri analiz ederek en iyi eşleşmeyi önerir.
  */
 export const detectSuggestedMappingWithAi = async (
-  columns: RawColumnInfo[]
+  columns: RawColumnInfo[],
+  contextInfo?: {
+    detectedWeeklyHours?: number;
+    detectedTotalHours?: number;
+    calculatedWeeks?: number;
+    lessonName?: string;
+  }
 ): Promise<{ mapping: ColumnMappingSelection; reason?: string }> => {
   const fallback = detectSuggestedMappingWithHeuristics(columns);
   const apiKey = (await getGeminiApiKey()).trim();
@@ -203,18 +252,40 @@ export const detectSuggestedMappingWithAi = async (
     sampleValues: c.sampleValues.slice(0, 2),
   }));
 
+  let contextExtra = '';
+  if (contextInfo?.detectedTotalHours && contextInfo?.detectedWeeklyHours) {
+    contextExtra = `\nBELGEDEN OKUNAN EK BİLGİLER:
+- Yıllık Toplam Ders Saati: ${contextInfo.detectedTotalHours} Saat
+- Haftalık Ders Saati: ${contextInfo.detectedWeeklyHours} Saat
+- Hesaplanan Beklenen Hafta Sayısı: ${contextInfo.calculatedWeeks || Math.round(contextInfo.detectedTotalHours / contextInfo.detectedWeeklyHours)} Hafta (${contextInfo.detectedTotalHours} / ${contextInfo.detectedWeeklyHours})`;
+  } else if (contextInfo?.detectedWeeklyHours) {
+    contextExtra = `\nBELGEDEN OKUNAN HAFTALIK DERS SAATİ: ${contextInfo.detectedWeeklyHours} Saat`;
+  }
+
   const prompt = `Türkiye MEB yıllık müfredat planı tablosu sütun eşleştirme uzmanısın.
 Aşağıda Word veya Excel tablosundan çıkarılan sütun indeksleri, başlıkları ve ilk 2 satır örnek verileri verilmiştir:
 
 ${JSON.stringify(columnsSummary, null, 2)}
+${contextExtra}
+
+ÖNEMLİ MEB DERS SAATİ & HAFTA MATEMATİĞİ KURALLARI:
+1. MEB'de bir eğitim öğretim yılı net olarak 36 veya 37 ders haftasıdır.
+2. Matematiksel İlişki: 1 Yıllık Toplam Ders Saati / Haftalık Ders Saati = Toplam Hafta Sayısıdır.
+   - Örn: 72 saat / 2 saat = 36 Hafta
+   - Örn: 144 saat / 4 saat = 36-37 Hafta
+3. Kümülatif / Toplam Saat Tuzağı: Bazı plan tablolarında hem haftalık ders saati (örn: 2, 4) hem de kümülatif toplam saat (4, 8, 12... 144) bulunur.
+   - 'hoursColIndex' için haftalık ders saatini (2 veya 4) seçmelisin, kümülatif toplamı değil!
+4. Birleşik (Compound) Hafta ve Tarih Sütunu: MEB planlarında 'HAFTA' sütununda genellikle hem hafta numarası ("1. Hafta:") hem de tarih aralığı ("14-18 Eylül") birlikte yer alır. weekColIndex olarak bu sütunu seçmelisin.
+5. Konu ve Ünite Ayrımı: Tabloda hem 'ÜNİTE/TEMA' hem de 'KONU' / 'İÇERİK ÇERÇEVESİ' sütunları varsa, öğretmenin deftere yazacağı konuyu gösteren 'KONU' sütununu topicColIndex olarak seç!
+6. Çok Haftalı Konular ve Dönem Arası Tatilleri: Bazı haftalarda konu hücresi birleştirilmiş veya boş olabilir (detaylar kazanım sütununda yer alır); aralarda ise '1. Dönem Ara Tatili', 'Yarıyıl Tatili' gibi tatil satırları bulunabilir.
 
 GÖREVİN:
 Aşağıdaki 5 alan için en uygun sütun indekslerini (0, 1, 2...) tespit et:
 1. topicColIndex (ZORUNLU): Öğretmenin sınıf defterine yazacağı ana ders konusu / ünite / öğrenme alanı sütunu.
 2. outcomesColIndex (OPSİYONEL): Kazanımlar veya açıklamalar sütunu (yoksa null).
 3. dateColIndex (OPSİYONEL): Hafta başlangıç-bitiş tarih aralığı sütunu (yoksa null).
-4. weekColIndex (OPSİYONEL): Hafta numarası sütunu (yoksa null).
-5. hoursColIndex (OPSİYONEL): Haftalık ders saati sütunu (yoksa null).
+4. weekColIndex (OPSİYONEL): Hafta numarası sütunu (1..37) (yoksa null).
+5. hoursColIndex (OPSİYONEL): Haftalık ders saati sütunu (örn: 2, 4) (yoksa null).
 
 Yanıtını SADECE şu JSON şemasında döndür:
 {
@@ -223,7 +294,7 @@ Yanıtını SADECE şu JSON şemasında döndür:
   "dateColIndex": number | null,
   "weekColIndex": number | null,
   "hoursColIndex": number | null,
-  "reason": "Kısa Türkçe açıklama (örn: Sütun 3 konu başlıklarını, Sütun 4 kazanımları temsil ediyor.)"
+  "reason": "Kısa Türkçe açıklama (örn: Sütun 4 deftere yazılacak alt konuları, Sütun 5 kazanımları, Sütun 1 hafta ve tarihleri temsil ediyor.)"
 }`;
 
   const selectedModel = await getGeminiModel();
@@ -311,7 +382,7 @@ export const analyzeUploadedDocument = async (
     throw new Error('Dosyada analiz edilecek tablo veya satır verisi bulunamadı.');
   }
 
-  // 1. Başlık satırını bul (İlk 12 satırı tara)
+  // 1. Başlık satırını bul (İlk 15 satırı tara)
   const headerKeywords = [
     'hafta',
     'tarih',
@@ -330,22 +401,59 @@ export const analyzeUploadedDocument = async (
   ];
 
   let bestHeaderRowIdx = 0;
-  let bestScore = -1;
+  let bestScore = -999;
 
-  const maxScan = Math.min(rawRows.length, 12);
+  const maxScan = Math.min(rawRows.length, 15);
   for (let i = 0; i < maxScan; i++) {
     const row = rawRows[i];
     if (!Array.isArray(row) || row.length < 2) continue;
 
-    let score = 0;
     const nonEmptyCells = row.filter((c) => c !== null && c !== undefined && String(c).trim().length > 0);
     if (nonEmptyCells.length < 2) continue;
 
-    const rowText = row.map((c) => String(c || '').toLowerCase()).join(' ');
-    for (const kw of headerKeywords) {
-      if (rowText.includes(kw)) score += 2;
+    let score = 0;
+    const rowTextLower = row.map((c) => String(c || '')).join(' ').toLocaleLowerCase('tr-TR');
+
+    // Veri satırı cezaları: "1. Hafta", tarih aralığı, ara tatil veya uzun metin içeren satırlar başlık satırı OLAMAZ
+    if (/\b\d{1,2}\.\s*hafta\b/i.test(rowTextLower)) score -= 25;
+    if (/\d{1,2}\s*[-–]\s*\d{1,2}\s*(eylül|ekim|kasım|aralık|ocak|şubat|mart|nisan|mayıs|haziran)/i.test(rowTextLower)) score -= 25;
+    if (/(?:ara\s*tatil|yar[ıi]y[ıi]l\s*tatil|s[öo]mestr)/i.test(rowTextLower)) score -= 30;
+
+    let hasVeryLongCell = false;
+    let totalLen = 0;
+    for (const c of nonEmptyCells) {
+      const s = String(c).trim();
+      totalLen += s.length;
+      if (s.length > 70) hasVeryLongCell = true;
+      const lower = s.toLocaleLowerCase('tr-TR');
+      if (
+        [
+          'ay',
+          'hafta',
+          'hafta no',
+          'tarih',
+          'ders saati',
+          'saat',
+          'ünite',
+          'unite',
+          'konu',
+          'kazanım',
+          'kazanim',
+          'öğrenme çıktıları',
+          'içerik çerçevesi',
+          'tema',
+        ].includes(lower)
+      ) {
+        score += 6;
+      }
     }
-    // Sütun sayısı fazlalığı bonusu
+    if (hasVeryLongCell) score -= 15;
+    const avgLen = totalLen / nonEmptyCells.length;
+    if (avgLen > 40) score -= 10;
+
+    for (const kw of headerKeywords) {
+      if (rowTextLower.includes(kw)) score += 2;
+    }
     score += Math.min(nonEmptyCells.length, 6);
 
     if (score > bestScore) {
@@ -366,9 +474,12 @@ export const analyzeUploadedDocument = async (
         ? String(rawHead).trim()
         : `Sütun ${c + 1}`;
 
-    // Örnek değerleri topla
+    // Örnek değerleri topla (tatil satırlarını atla)
     const samples: string[] = [];
-    for (let r = bestHeaderRowIdx + 1; r < Math.min(rawRows.length, bestHeaderRowIdx + 8); r++) {
+    for (let r = bestHeaderRowIdx + 1; r < Math.min(rawRows.length, bestHeaderRowIdx + 10); r++) {
+      const rowText = (rawRows[r] || []).join(' ').toLocaleLowerCase('tr-TR');
+      if (/(?:ara\s*tatil|yar[ıi]y[ıi]l\s*tatil|s[öo]mestr)/i.test(rowText)) continue;
+
       const val = rawRows[r]?.[c];
       if (val !== null && val !== undefined) {
         const s = String(val).trim();
@@ -386,8 +497,63 @@ export const analyzeUploadedDocument = async (
     });
   }
 
-  // 2. Yapay Zeka veya Kural Tabanlı Eşleştirme Önerisi Al
-  const { mapping, reason } = await detectSuggestedMappingWithAi(columns);
+  // 1.5 Üst satırlardan veya tablodan Eğitim Yılı, Haftalık Ders Saati ve Yıllık Toplam Saati tara
+  let detectedSchoolYear: number | undefined;
+  let detectedWeeklyHours: number | undefined;
+  let detectedTotalHours: number | undefined;
+  const detectedHolidays: string[] = [];
+
+  const preScanLimit = Math.min(rawRows.length, Math.max(bestHeaderRowIdx + 1, 10));
+  for (let i = 0; i < preScanLimit; i++) {
+    const row = rawRows[i];
+    if (!Array.isArray(row)) continue;
+    const rowText = row.map((c) => String(c || '').trim()).join(' ');
+
+    if (!detectedSchoolYear) {
+      const yMatch = rowText.match(/(\d{4})\s*[-–]\s*(\d{4})\s*(?:eğitim|öğretim)/i);
+      if (yMatch) {
+        detectedSchoolYear = parseInt(yMatch[1], 10);
+      }
+    }
+
+    if (!detectedWeeklyHours) {
+      const wm = rowText.match(/(?:haftal[ıi]k\s*(?:ders)?\s*saat[ıi]?)\s*[:=\-]?\s*(\d{1,2})/i);
+      if (wm) detectedWeeklyHours = parseInt(wm[1], 10);
+    }
+
+    if (!detectedTotalHours) {
+      const tm = rowText.match(/(?:y[ıi]ll[ıi]k\s*(?:toplam)?\s*(?:ders)?\s*saat[ıi]?|toplam\s*ders\s*saat[ıi]?)\s*[:=\-]?\s*(\d{2,3})/i);
+      if (tm) detectedTotalHours = parseInt(tm[1], 10);
+    }
+  }
+
+  // Tablo satırlarından ara tatilleri ve yarıyıl tatillerini tespit et
+  for (let i = bestHeaderRowIdx + 1; i < rawRows.length; i++) {
+    const row = rawRows[i];
+    if (!Array.isArray(row)) continue;
+    const rowText = row.map((c) => String(c || '')).join(' ').toLocaleLowerCase('tr-TR');
+    if (/(?:ara\s*tatil|yar[ıi]y[ıi]l\s*tatil|s[öo]mestr|bayram\s*tatil)/i.test(rowText)) {
+      const holidayCell = row.find((c) => c && /(?:tatil|s[öo]mestr)/i.test(String(c).toLocaleLowerCase('tr-TR')));
+      if (holidayCell) {
+        const cleanName = String(holidayCell).replace(/\s+/g, ' ').trim();
+        if (!detectedHolidays.includes(cleanName)) {
+          detectedHolidays.push(cleanName);
+        }
+      }
+    }
+  }
+
+  let calculatedWeeks: number | undefined;
+  if (detectedTotalHours && detectedWeeklyHours && detectedWeeklyHours > 0) {
+    calculatedWeeks = Math.round(detectedTotalHours / detectedWeeklyHours);
+  }
+
+  // 2. Yapay Zeka veya Kural Tabanlı Eşleştirme Önerisi Al (MEB Saat Matematiği ile)
+  const { mapping, reason } = await detectSuggestedMappingWithAi(columns, {
+    detectedWeeklyHours,
+    detectedTotalHours,
+    calculatedWeeks,
+  });
 
   return {
     fileName,
@@ -399,37 +565,63 @@ export const analyzeUploadedDocument = async (
     aiReason: reason,
     sheetName: currentSheetName,
     availableSheets,
+    detectedWeeklyHours,
+    detectedTotalHours,
+    calculatedWeeks,
+    detectedHolidays,
+    detectedSchoolYear,
   };
 };
 
 /**
  * Kullanıcının onayladığı sütun eşlemesine göre satırları dönüştürür.
+ * Dönem arası tatilleri otomatik tanır, hafta atlamalarını korur ve MEB 36-37 haftalık tutarlılığı sağlar.
  */
 export const convertRowsWithMapping = (
   rawRows: any[][],
   headerRowIndex: number,
   mapping: ColumnMappingSelection,
-  weeklyHours: number = 4
+  weeklyHours: number = 4,
+  schoolYear: number = 2026
 ): ParsedYearlyPlanRow[] => {
-  if (mapping.topicColIndex === null) {
-    throw new Error('Lütfen "Deftere Yazılacak Konu" sütununu seçiniz.');
+  if (mapping.topicColIndex === null && mapping.outcomesColIndex === null) {
+    throw new Error('Lütfen "Deftere Yazılacak Konu" veya "Kazanım" sütununu seçiniz.');
   }
 
-  const result: ParsedYearlyPlanRow[] = [];
+  const rawResult: ParsedYearlyPlanRow[] = [];
   let autoWeek = 1;
+  let lastTopic = '';
 
   for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
     const row = rawRows[r];
     if (!Array.isArray(row) || row.length === 0) continue;
 
-    // Konu hücresini al
-    const rawTopic = row[mapping.topicColIndex];
-    if (rawTopic === null || rawTopic === undefined) continue;
-    let topicStr = String(rawTopic).trim();
+    const rowTextLower = row.map((c) => String(c || '')).join(' ').toLocaleLowerCase('tr-TR');
+    if (!rowTextLower.trim()) continue;
 
-    // Boşsa veya tekrarlanan başlık satırıysa atla
-    if (!topicStr || topicStr.toLowerCase() === 'konu' || topicStr.toLowerCase() === 'öğrenme alanı') {
+    // 1. Ara Tatil / Yarıyıl Tatili / Tatil Satırı Kontrolü
+    const isHoliday = /(?:ara\s*tatil|yar[ıi]y[ıi]l\s*tatil|s[öo]mestr|bayram\s*tatil|resmi\s*tatil)/i.test(rowTextLower);
+    if (isHoliday) {
+      // Tatil satırı eğitim haftası DEĞİLDİR -> autoWeek artırılmaz, atlanır!
       continue;
+    }
+
+    // 2. Hafta Numarası
+    let weekNumber: number | null = null;
+    let weekRawStr = '';
+    if (mapping.weekColIndex !== null && row[mapping.weekColIndex] !== undefined && row[mapping.weekColIndex] !== null) {
+      weekRawStr = String(row[mapping.weekColIndex]);
+      const wMatch = weekRawStr.match(/(\d{1,2})\.\s*hafta/i) || weekRawStr.match(/\b(\d{1,2})\b/);
+      if (wMatch) {
+        const p = parseInt(wMatch[1], 10);
+        if (p >= 1 && p <= 52) weekNumber = p;
+      }
+    }
+
+    // 3. Konu Çıkarımı
+    let topicStr = '';
+    if (mapping.topicColIndex !== null && row[mapping.topicColIndex] !== undefined && row[mapping.topicColIndex] !== null) {
+      topicStr = String(row[mapping.topicColIndex]).trim();
     }
 
     // Bürokratik kodları temizle (Örn: "11.1.2. Vektörler" -> "Vektörler" veya "FİZ.11.1 Vektörler")
@@ -439,79 +631,124 @@ export const convertRowsWithMapping = (
       .replace(/\s+/g, ' ')
       .trim();
 
-    if (!topicStr) continue;
+    // Kazanım Çıkarımı
+    let outcomesStr = '';
+    if (mapping.outcomesColIndex !== null && row[mapping.outcomesColIndex] !== undefined && row[mapping.outcomesColIndex] !== null) {
+      outcomesStr = String(row[mapping.outcomesColIndex]).trim();
+    }
 
-    // Hafta
-    let weekNumber = autoWeek;
-    if (mapping.weekColIndex !== null) {
-      const rawW = row[mapping.weekColIndex];
-      if (rawW !== null && rawW !== undefined) {
-        const numMatch = String(rawW).match(/\d+/);
-        if (numMatch) {
-          const parsedWeek = parseInt(numMatch[0], 10);
-          if (parsedWeek > 0 && parsedWeek <= 52) {
-            weekNumber = parsedWeek;
+    // Çok haftalı birleşik konularda Konu hücresi boş kalmışsa kazanım veya önceki konudan türet
+    if (!topicStr || topicStr.toLocaleLowerCase('tr-TR') === 'konu') {
+      if (outcomesStr) {
+        const cleanedOutcome = outcomesStr
+          .replace(/^\[?[a-zA-ZçğıöşüÇĞİÖŞÜ0-9\.\-_]{2,15}\]?\s*[:\.\-]\s*/g, '')
+          .replace(/^\d+\.\d+(?:\.\d+)*\.?\s*/g, '')
+          .split(/[\r\n]+/)[0]
+          .trim();
+        topicStr = lastTopic ? `${lastTopic}: ${cleanedOutcome}`.substring(0, 100) : cleanedOutcome;
+      } else {
+        // Satırdaki diğer hücreleri tara (Örn: "Sosyal Etkinlik", "Okul Temelli Planlama")
+        for (let colIdx = 0; colIdx < row.length; colIdx++) {
+          if (colIdx === mapping.weekColIndex || colIdx === mapping.hoursColIndex) continue;
+          const val = row[colIdx];
+          if (val && typeof val === 'string' && /(?:etkinlik|planlama|tekrar|sınav|değerlendirme)/i.test(val)) {
+            topicStr = val.trim();
+            break;
           }
+        }
+        if (!topicStr && lastTopic && weekNumber !== null) {
+          topicStr = `${lastTopic} (Uygulama ve Pekiştirme)`;
         }
       }
     }
 
-    // Saat
+    // Konu hâlâ yoksa ve hafta numarası da yoksa satırı atla
+    if (!topicStr && weekNumber === null) continue;
+
+    if (weekNumber === null) {
+      weekNumber = autoWeek;
+    }
+
+    if (topicStr) lastTopic = topicStr;
+
+    // 4. Tarih Aralığı
+    let dateStart = '';
+    let dateEnd = '';
+    if (mapping.dateColIndex !== null && row[mapping.dateColIndex] && mapping.dateColIndex !== mapping.weekColIndex) {
+      const parsed = parseTurkishDateRange(String(row[mapping.dateColIndex]), schoolYear);
+      dateStart = parsed.dateStart || '';
+      dateEnd = parsed.dateEnd || '';
+    }
+    // Eğer tarih bulunamadıysa hafta sütunundaki compound metinden ("1. Hafta: 14-18 Eylül") çıkar
+    if (!dateStart && weekRawStr) {
+      const parsed = parseTurkishDateRange(weekRawStr, schoolYear);
+      dateStart = parsed.dateStart || '';
+      dateEnd = parsed.dateEnd || '';
+    }
+
+    // 5. Ders Saati
     let lessonHours = weeklyHours;
-    if (mapping.hoursColIndex !== null) {
-      const rawH = row[mapping.hoursColIndex];
-      if (rawH !== null && rawH !== undefined) {
-        const hMatch = String(rawH).match(/\d+/);
-        if (hMatch) {
-          const parsedH = parseInt(hMatch[0], 10);
-          if (parsedH > 0 && parsedH <= 20) {
-            lessonHours = parsedH;
+    if (mapping.hoursColIndex !== null && row[mapping.hoursColIndex] !== undefined && row[mapping.hoursColIndex] !== null) {
+      const hStr = String(row[mapping.hoursColIndex]);
+      const hMatch = hStr.match(/\d+/);
+      if (hMatch) {
+        const parsedH = parseInt(hMatch[0], 10);
+        if (parsedH > 0 && parsedH <= 20) {
+          lessonHours = parsedH;
+        } else if (parsedH > 20 && weeklyHours > 0 && mapping.weekColIndex === null) {
+          // Kümülatif toplam ders saati sütunu seçilmişse hafta türet
+          const derivedWeek = Math.round(parsedH / weeklyHours);
+          if (derivedWeek >= 1 && derivedWeek <= 45) {
+            weekNumber = derivedWeek;
           }
         }
       }
     }
 
-    // Tarih
-    let dateStart: string | undefined;
-    let dateEnd: string | undefined;
-    if (mapping.dateColIndex !== null) {
-      const rawDate = row[mapping.dateColIndex];
-      if (rawDate !== null && rawDate !== undefined) {
-        const parsedDates = parseTurkishDateRange(String(rawDate));
-        dateStart = parsedDates.dateStart;
-        dateEnd = parsedDates.dateEnd;
-      }
-    }
-
-    // Kazanım
-    let learningOutcomes: string | undefined;
-    if (mapping.outcomesColIndex !== null) {
-      const rawOut = row[mapping.outcomesColIndex];
-      if (rawOut !== null && rawOut !== undefined) {
-        const s = String(rawOut).trim();
-        if (s.length > 0) {
-          learningOutcomes = s;
-        }
-      }
-    }
-
-    result.push({
+    rawResult.push({
       weekNumber,
-      dateStart: dateStart || '',
-      dateEnd: dateEnd || '',
+      dateStart,
+      dateEnd,
       lessonHours,
-      subjectTopic: topicStr,
-      learningOutcomes: learningOutcomes || '',
+      subjectTopic: topicStr || `Hafta ${weekNumber} Konusu`,
+      learningOutcomes: outcomesStr,
     });
 
     autoWeek = Math.max(autoWeek, weekNumber + 1);
   }
 
-  if (result.length === 0) {
+  if (rawResult.length === 0) {
     throw new Error('Seçilen sütun eşleşmesine göre herhangi bir plan satırı çıkarılamadı.');
   }
 
-  return result;
+  // 6. Aynı haftaya ait çoklu satırları (örn: 2 saat Konu 1 + 2 saat Konu 2) tek bir haftalık kayıtta birleştir
+  const consolidated: ParsedYearlyPlanRow[] = [];
+  const byWeek = new Map<number, ParsedYearlyPlanRow>();
+
+  for (const item of rawResult) {
+    if (!byWeek.has(item.weekNumber)) {
+      const entry = { ...item };
+      byWeek.set(item.weekNumber, entry);
+      consolidated.push(entry);
+    } else {
+      const existing = byWeek.get(item.weekNumber)!;
+      existing.lessonHours += item.lessonHours;
+      if (item.subjectTopic && !existing.subjectTopic.includes(item.subjectTopic)) {
+        existing.subjectTopic = `${existing.subjectTopic} / ${item.subjectTopic}`.substring(0, 180);
+      }
+      if (item.learningOutcomes) {
+        if (!existing.learningOutcomes) {
+          existing.learningOutcomes = item.learningOutcomes;
+        } else if (!existing.learningOutcomes.includes(item.learningOutcomes)) {
+          existing.learningOutcomes = `${existing.learningOutcomes}\n${item.learningOutcomes}`;
+        }
+      }
+      if (!existing.dateStart && item.dateStart) existing.dateStart = item.dateStart;
+      if (!existing.dateEnd && item.dateEnd) existing.dateEnd = item.dateEnd;
+    }
+  }
+
+  return consolidated;
 };
 
 /**

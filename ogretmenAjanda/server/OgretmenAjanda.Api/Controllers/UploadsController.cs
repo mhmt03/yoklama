@@ -132,7 +132,7 @@ namespace OgretmenAjanda.Api.Controllers
         }
 
         [HttpPost("batch-student-photos")]
-        public async Task<IActionResult> BatchUploadStudentPhotos([FromBody] BatchStudentPhotoUploadRequest request)
+        public async Task<IActionResult> BatchUploadStudentPhotos([FromBody] BatchStudentPhotoUploadRequest request, [FromQuery] Guid? schoolId)
         {
             if (IsTeacher)
             {
@@ -144,8 +144,23 @@ namespace OgretmenAjanda.Api.Controllers
                 return BadRequest(new { message = "Yüklenecek fotoğraf listesi boş." });
             }
 
+            // schoolId query parametresinden veya body'den alınabilir
+            var effectiveSchoolId = request.SchoolId != Guid.Empty ? request.SchoolId : (schoolId ?? Guid.Empty);
+            if (effectiveSchoolId == Guid.Empty)
+            {
+                return BadRequest(new { message = "Okul ID belirtilmedi." });
+            }
+
+            // Okul kodunu tespit et
+            var cleanSchoolCode = request.SchoolCode;
+            if (string.IsNullOrWhiteSpace(cleanSchoolCode))
+            {
+                var school = await _context.Schools.FirstOrDefaultAsync(s => s.Id == effectiveSchoolId);
+                cleanSchoolCode = school?.Code ?? "OKL";
+            }
+            cleanSchoolCode = string.Join("_", cleanSchoolCode.Split(Path.GetInvalidFileNameChars())).ToUpper();
+
             var webRoot = _env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-            var cleanSchoolCode = string.Join("_", (request.SchoolCode ?? "OKL").Split(Path.GetInvalidFileNameChars())).ToUpper();
             var targetDir = Path.Combine(webRoot, "uploads", "schools", cleanSchoolCode, "students");
 
             if (!Directory.Exists(targetDir))
@@ -160,13 +175,15 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 try
                 {
-                    if (string.IsNullOrWhiteSpace(item.StudentNumber) || string.IsNullOrWhiteSpace(item.Base64Data))
+                    // Hem Base64Data hem PhotoBase64 kabul et
+                    var rawBase64 = !string.IsNullOrWhiteSpace(item.Base64Data) ? item.Base64Data : item.PhotoBase64;
+                    if (string.IsNullOrWhiteSpace(item.StudentNumber) || string.IsNullOrWhiteSpace(rawBase64))
                     {
                         failedCount++;
                         continue;
                     }
 
-                    var cleanBase64 = item.Base64Data;
+                    var cleanBase64 = rawBase64;
                     var ext = ".jpg";
                     if (cleanBase64.Contains(","))
                     {
@@ -186,7 +203,7 @@ namespace OgretmenAjanda.Api.Controllers
 
                     // Öğrenci kaydını güncelle
                     var student = await _context.Students
-                        .FirstOrDefaultAsync(s => s.SchoolId == request.SchoolId && s.StudentNumber == item.StudentNumber.Trim());
+                        .FirstOrDefaultAsync(s => s.SchoolId == effectiveSchoolId && s.StudentNumber == item.StudentNumber.Trim());
 
                     if (student != null)
                     {
@@ -208,6 +225,7 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 message = $"{successCount} öğrencinin fotoğrafı başarıyla yüklendi.",
                 successCount,
+                updatedCount = successCount,
                 failedCount
             });
         }
@@ -231,5 +249,7 @@ namespace OgretmenAjanda.Api.Controllers
     {
         public string StudentNumber { get; set; } = string.Empty;
         public string Base64Data { get; set; } = string.Empty;
+        public string? PhotoBase64 { get; set; }
+        public string? FileName { get; set; }
     }
 }

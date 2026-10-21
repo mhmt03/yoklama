@@ -37,6 +37,9 @@ namespace OgretmenAjanda.Api.Models
         public string? ContactEmail { get; set; }
 
         public Guid? AdminUserId { get; set; } // Kurumun ana yönetici hesabı (Okul Admini)
+        
+        [MaxLength(100)]
+        public string? AdminPassword { get; set; } // Yönetici şifresi (Süperadmin paneli için)
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LicenseExpiresAt { get; set; }

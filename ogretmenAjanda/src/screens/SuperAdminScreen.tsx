@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Switch,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,10 +42,53 @@ interface InstitutionItem {
   contactName?: string;
   contactPhone?: string;
   contactEmail?: string;
+  adminUserId?: string;
   adminUsername?: string;
+  adminFullName?: string;
+  adminPassword?: string;
+  totalTeachers?: number;
+  totalStudents?: number;
   createdAt: string;
   licenseExpiresAt?: string;
   isActive: boolean;
+}
+
+interface InstitutionDetails {
+  institution: InstitutionItem;
+  adminUser?: {
+    id: string;
+    username: string;
+    fullName: string;
+    email?: string;
+    phone?: string;
+    role: string;
+    rawPassword?: string;
+  };
+  schools: SchoolItem[];
+  teachers: Array<{
+    id: string;
+    fullName: string;
+    username: string;
+    branch?: string;
+    schoolName?: string;
+    lastLoginAt?: string;
+    isActive: boolean;
+  }>;
+  students: Array<{
+    id: string;
+    fullName: string;
+    studentNumber?: string;
+    gradeSection?: string;
+    schoolName?: string;
+  }>;
+  auditLogs: Array<any>;
+  stats: {
+    totalSchools: number;
+    maxSchools: number;
+    totalTeachers: number;
+    totalStudents: number;
+    totalLogs: number;
+  };
 }
 
 interface SystemStats {
@@ -62,10 +106,17 @@ export function SuperAdminScreen({ navigation }: any) {
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([]);
   const [schools, setSchools] = useState<SchoolItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'institutions' | 'schools' | 'logs'>('institutions');
+  const [activeTab, setActiveTab] = useState<'institutions' | 'logs'>('institutions');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Hiyerarşik Seçili Kurum Detayları
+  const [expandedInstId, setExpandedInstId] = useState<string | null>(null);
+  const [instDetails, setInstDetails] = useState<Record<string, InstitutionDetails>>({});
+  const [loadingDetailsId, setLoadingDetailsId] = useState<string | null>(null);
+  const [instSubTab, setInstSubTab] = useState<'schools' | 'teachers' | 'students' | 'logs'>('schools');
+  const [showAdminPassMap, setShowAdminPassMap] = useState<Record<string, boolean>>({});
 
   // Yeni Kurum Modalı
   const [showAddModal, setShowAddModal] = useState(false);
@@ -84,10 +135,15 @@ export function SuperAdminScreen({ navigation }: any) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingInst, setEditingInst] = useState<InstitutionItem | null>(null);
   const [editName, setEditName] = useState('');
+  const [editCode, setEditCode] = useState('');
   const [editMaxSchool, setEditMaxSchool] = useState('2');
   const [editContactName, setEditContactName] = useState('');
   const [editContactPhone, setEditContactPhone] = useState('');
   const [editContactEmail, setEditContactEmail] = useState('');
+  const [editExpiresDate, setEditExpiresDate] = useState('');
+  const [editAdminUsername, setEditAdminUsername] = useState('');
+  const [editAdminPassword, setEditAdminPassword] = useState('');
+  const [showEditAdminPass, setShowEditAdminPass] = useState(false);
   const [editIsActive, setEditIsActive] = useState(true);
   const [updatingInst, setUpdatingInst] = useState(false);
 
@@ -104,6 +160,11 @@ export function SuperAdminScreen({ navigation }: any) {
       if (instRes.success && instRes.data) setInstitutions(instRes.data);
       if (schoolsRes.success && schoolsRes.data) setSchools(schoolsRes.data);
       if (logsRes.success && logsRes.data) setAuditLogs(logsRes.data);
+
+      // Eğer şu an genişletilmiş bir kurum varsa detayını da yenile
+      if (expandedInstId) {
+        fetchInstitutionDetails(expandedInstId);
+      }
     } catch (e: any) {
       Alert.alert('Hata', e.message || 'Veriler yüklenemedi.');
     } finally {
@@ -115,6 +176,35 @@ export function SuperAdminScreen({ navigation }: any) {
   useEffect(() => {
     loadData();
   }, []);
+
+  // Kurum Detayı Çekme
+  const fetchInstitutionDetails = async (instId: string) => {
+    setLoadingDetailsId(instId);
+    try {
+      const res = await apiRequest<InstitutionDetails>(`superadmin/institutions/${instId}/details`);
+      if (res.success && res.data) {
+        setInstDetails((prev) => ({ ...prev, [instId]: res.data! }));
+      } else {
+        Alert.alert('Hata', res.error || 'Kurum detayları yüklenemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message || 'Detaylar alınırken hata oluştu.');
+    } finally {
+      setLoadingDetailsId(null);
+    }
+  };
+
+  // Kurum Kartına Tıklanması (Genişlet / Kapat)
+  const handleToggleInstitution = (instId: string) => {
+    if (expandedInstId === instId) {
+      setExpandedInstId(null);
+    } else {
+      setExpandedInstId(instId);
+      if (!instDetails[instId]) {
+        fetchInstitutionDetails(instId);
+      }
+    }
+  };
 
   // Yeni Kurum Oluşturma
   const handleCreateInstitution = async () => {
@@ -163,12 +253,42 @@ export function SuperAdminScreen({ navigation }: any) {
   const handleOpenEdit = (inst: InstitutionItem) => {
     setEditingInst(inst);
     setEditName(inst.name);
+    setEditCode(inst.code);
     setEditMaxSchool(String(inst.maxSchoolCount));
     setEditContactName(inst.contactName || '');
     setEditContactPhone(inst.contactPhone || '');
     setEditContactEmail(inst.contactEmail || '');
     setEditIsActive(inst.isActive);
+    setEditAdminUsername(inst.adminUsername || '');
+    setEditAdminPassword(inst.adminPassword || '');
+    setShowEditAdminPass(false);
+
+    if (inst.licenseExpiresAt) {
+      try {
+        const d = new Date(inst.licenseExpiresAt);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        setEditExpiresDate(`${yyyy}-${mm}-${dd}`);
+      } catch {
+        setEditExpiresDate('');
+      }
+    } else {
+      setEditExpiresDate('');
+    }
+
     setShowEditModal(true);
+  };
+
+  // Tarih Ekleme Yardımcısı (Presetler için)
+  const addMonthsToDate = (months: number) => {
+    let base = editExpiresDate ? new Date(editExpiresDate) : new Date();
+    if (isNaN(base.getTime())) base = new Date();
+    base.setMonth(base.getMonth() + months);
+    const yyyy = base.getFullYear();
+    const mm = String(base.getMonth() + 1).padStart(2, '0');
+    const dd = String(base.getDate()).padStart(2, '0');
+    setEditExpiresDate(`${yyyy}-${mm}-${dd}`);
   };
 
   // Kurum Güncelleme
@@ -178,20 +298,28 @@ export function SuperAdminScreen({ navigation }: any) {
       Alert.alert('Uyarı', 'Lütfen kurum adını giriniz.');
       return;
     }
+    if (!editCode.trim()) {
+      Alert.alert('Uyarı', 'Lütfen kurum kodunu giriniz.');
+      return;
+    }
 
     setUpdatingInst(true);
     try {
       const res = await apiRequest(`superadmin/institutions/${editingInst.id}`, 'PUT', {
         name: editName.trim(),
+        code: editCode.trim().toLowerCase(),
         maxSchoolCount: parseInt(editMaxSchool, 10) || 1,
         contactName: editContactName.trim(),
         contactPhone: editContactPhone.trim(),
         contactEmail: editContactEmail.trim(),
+        licenseExpiresAt: editExpiresDate ? editExpiresDate.trim() : null,
+        adminUsername: editAdminUsername ? editAdminUsername.trim() : undefined,
+        adminPassword: editAdminPassword ? editAdminPassword.trim() : undefined,
         isActive: editIsActive,
       });
 
       if (res.success) {
-        Alert.alert('Başarılı', 'Kurum bilgileri ve okul kotası güncellendi.');
+        Alert.alert('Başarılı', 'Kurum bilgileri, lisans tarihi ve yönetici güncellendi.');
         setShowEditModal(false);
         loadData();
       } else {
@@ -367,22 +495,14 @@ export function SuperAdminScreen({ navigation }: any) {
           </View>
         )}
 
-        {/* Tab Seçimi */}
+        {/* Tab Seçimi (Üst sekmelerde ayrı okullar sekmesi kaldırıldı, kurum detayına taşındı) */}
         <View style={styles.tabContainer}>
           <TouchableOpacity
             style={[styles.tabButton, activeTab === 'institutions' && styles.tabButtonActive]}
             onPress={() => setActiveTab('institutions')}
           >
             <Text style={[styles.tabText, activeTab === 'institutions' && styles.tabTextActive]}>
-              🏛️ Kurumlar ({institutions.length})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'schools' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('schools')}
-          >
-            <Text style={[styles.tabText, activeTab === 'schools' && styles.tabTextActive]}>
-              🏫 Okullar ({schools.length})
+              🏛️ Kurumlar & Okullar ({institutions.length})
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -390,7 +510,7 @@ export function SuperAdminScreen({ navigation }: any) {
             onPress={() => setActiveTab('logs')}
           >
             <Text style={[styles.tabText, activeTab === 'logs' && styles.tabTextActive]}>
-              📜 Günlük ({auditLogs.length})
+              📜 Sistem Günlüğü ({auditLogs.length})
             </Text>
           </TouchableOpacity>
         </View>
@@ -426,64 +546,95 @@ export function SuperAdminScreen({ navigation }: any) {
               const expiresDate = inst.licenseExpiresAt ? new Date(inst.licenseExpiresAt) : null;
               const isExpired = expiresDate ? expiresDate < new Date() : false;
               const isFullQuota = inst.currentSchoolCount >= inst.maxSchoolCount;
+              const isExpanded = expandedInstId === inst.id;
+              const details = instDetails[inst.id];
+              const isLoadingDetails = loadingDetailsId === inst.id;
+              const showPassword = !!showAdminPassMap[inst.id];
+              const adminPass = inst.adminPassword || details?.institution?.adminPassword || details?.adminUser?.rawPassword || '1234';
 
               return (
-                <View key={inst.id} style={styles.customerCard}>
-                  {/* Üst Kimlik Rozetleri */}
-                  <View style={styles.badgeRow}>
-                    <View style={styles.customerIdBadge}>
-                      <Ionicons name="business" size={12} color="#4338CA" />
-                      <Text style={styles.customerIdText}>Kod: {inst.code}</Text>
-                    </View>
-                    <View
-                      style={[
-                        styles.quotaBadge,
-                        isFullQuota ? styles.quotaBadgeFull : styles.quotaBadgeOpen,
-                      ]}
-                    >
-                      <Ionicons
-                        name="layers-outline"
-                        size={12}
-                        color={isFullQuota ? '#B45309' : '#047857'}
-                      />
-                      <Text
+                <View
+                  key={inst.id}
+                  style={[
+                    styles.customerCard,
+                    isExpanded && styles.customerCardExpanded,
+                  ]}
+                >
+                  {/* Tıklanabilir Üst Alan */}
+                  <TouchableOpacity
+                    onPress={() => handleToggleInstitution(inst.id)}
+                    activeOpacity={0.7}
+                  >
+                    {/* Üst Kimlik Rozetleri */}
+                    <View style={styles.badgeRow}>
+                      <View style={styles.customerIdBadge}>
+                        <Ionicons name="business" size={12} color="#4338CA" />
+                        <Text style={styles.customerIdText}>Kod: {inst.code}</Text>
+                      </View>
+                      <View
                         style={[
-                          styles.quotaBadgeText,
-                          { color: isFullQuota ? '#B45309' : '#047857' },
+                          styles.quotaBadge,
+                          isFullQuota ? styles.quotaBadgeFull : styles.quotaBadgeOpen,
                         ]}
                       >
-                        Okul Kotası: {inst.currentSchoolCount} / {inst.maxSchoolCount}
+                        <Ionicons
+                          name="layers-outline"
+                          size={12}
+                          color={isFullQuota ? '#B45309' : '#047857'}
+                        />
+                        <Text
+                          style={[
+                            styles.quotaBadgeText,
+                            { color: isFullQuota ? '#B45309' : '#047857' },
+                          ]}
+                        >
+                          Okul Kotası: {inst.currentSchoolCount} / {inst.maxSchoolCount}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.statusBadge,
+                          isExpired || !inst.isActive ? styles.statusExpired : styles.statusActive,
+                          { marginLeft: 'auto' },
+                        ]}
+                      >
+                        <Text style={styles.statusText}>
+                          {!inst.isActive ? 'Pasif' : isExpired ? 'Süresi Doldu' : 'Lisans Aktif'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text style={styles.customerName}>{inst.name}</Text>
+                      <Ionicons
+                        name={isExpanded ? 'chevron-up-circle' : 'chevron-down-circle'}
+                        size={22}
+                        color={isExpanded ? Colors.primary : Colors.textMuted}
+                      />
+                    </View>
+
+                    <Text style={styles.customerUser}>
+                      Yönetici: @{inst.adminUsername || 'atanmamış'} • İletişim:{' '}
+                      {inst.contactName || 'Belirtilmedi'}{' '}
+                      {inst.contactPhone ? `(${inst.contactPhone})` : ''}
+                    </Text>
+
+                    {/* Alt Meta Bilgisi */}
+                    <View style={styles.schoolMetaRow}>
+                      <Text style={styles.metaItem}>
+                        🏫 Okul: {inst.currentSchoolCount} / {inst.maxSchoolCount}
+                      </Text>
+                      <Text style={styles.metaItem}>
+                        👨‍🏫 Öğretmen: {inst.totalTeachers ?? details?.stats.totalTeachers ?? 0}
+                      </Text>
+                      <Text style={styles.metaItem}>
+                        🎓 Öğrenci: {inst.totalStudents ?? details?.stats.totalStudents ?? 0}
+                      </Text>
+                      <Text style={styles.metaItem}>
+                        📅 Bitiş: {expiresDate ? expiresDate.toLocaleDateString('tr-TR') : 'Süresiz'}
                       </Text>
                     </View>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        isExpired || !inst.isActive ? styles.statusExpired : styles.statusActive,
-                        { marginLeft: 'auto' },
-                      ]}
-                    >
-                      <Text style={styles.statusText}>
-                        {!inst.isActive ? 'Pasif' : isExpired ? 'Süresi Doldu' : 'Lisans Aktif'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <Text style={styles.customerName}>{inst.name}</Text>
-                  <Text style={styles.customerUser}>
-                    Yönetici: @{inst.adminUsername || 'atanmamış'} • İletişim:{' '}
-                    {inst.contactName || 'Belirtilmedi'}{' '}
-                    {inst.contactPhone ? `(${inst.contactPhone})` : ''}
-                  </Text>
-
-                  {/* Alt Meta Bilgisi */}
-                  <View style={styles.schoolMetaRow}>
-                    <Text style={styles.metaItem}>
-                      🏫 Açılan Okul: {inst.currentSchoolCount} / {inst.maxSchoolCount}
-                    </Text>
-                    <Text style={styles.metaItem}>
-                      📅 Bitiş: {expiresDate ? expiresDate.toLocaleDateString('tr-TR') : 'Süresiz'}
-                    </Text>
-                  </View>
+                  </TouchableOpacity>
 
                   {/* Aksiyon Butonları */}
                   <View style={styles.instActionRow}>
@@ -492,7 +643,7 @@ export function SuperAdminScreen({ navigation }: any) {
                       onPress={() => handleOpenEdit(inst)}
                     >
                       <Ionicons name="settings-outline" size={15} color="#4338CA" />
-                      <Text style={[styles.smallBtnText, { color: '#4338CA' }]}>Kotayı & Bilgileri Düzenle</Text>
+                      <Text style={[styles.smallBtnText, { color: '#4338CA' }]}>Kota, Tarih & Admin Düzenle</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -504,96 +655,379 @@ export function SuperAdminScreen({ navigation }: any) {
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={[styles.smallBtn, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}
+                      style={[
+                        styles.smallBtn,
+                        {
+                          backgroundColor: isExpanded ? '#F1F5F9' : '#EDE9FE',
+                          borderColor: isExpanded ? '#CBD5E1' : '#DDD6FE',
+                        },
+                      ]}
+                      onPress={() => handleToggleInstitution(inst.id)}
+                    >
+                      <Ionicons
+                        name={isExpanded ? 'contract-outline' : 'expand-outline'}
+                        size={15}
+                        color={isExpanded ? '#475569' : '#6D28D9'}
+                      />
+                      <Text
+                        style={[
+                          styles.smallBtnText,
+                          { color: isExpanded ? '#475569' : '#6D28D9' },
+                        ]}
+                      >
+                        {isExpanded ? 'Detayları Kapat' : 'Alt Detaylar & Okullar'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.smallBtn, { backgroundColor: '#FEF2F2', borderColor: '#FECACA', marginLeft: 'auto' }]}
                       onPress={() => handleDeleteInstitution(inst)}
                     >
                       <Ionicons name="trash-outline" size={15} color="#DC2626" />
                       <Text style={[styles.smallBtnText, { color: '#DC2626' }]}>Sil</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
-              );
-            })}
-          </View>
-        ) : activeTab === 'schools' ? (
-          <View>
-            {/* Arama */}
-            <View style={styles.searchBar}>
-              <Ionicons name="search" size={20} color={Colors.textMuted} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Okul adı, kodu veya kurum ara..."
-                placeholderTextColor={Colors.textMuted}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-            </View>
 
-            {/* Okul Listesi */}
-            {filteredSchools.map((school) => {
-              const expiresDate = school.licenseExpiresAt ? new Date(school.licenseExpiresAt) : null;
-              const isExpired = expiresDate ? expiresDate < new Date() : false;
+                  {/* GENİŞLETİLMİŞ KURUM ALANI: ADMİN BİLGİLERİ VE 4 ALT SEKME */}
+                  {isExpanded && (
+                    <View style={styles.expandedContainer}>
+                      {isLoadingDetails && !details ? (
+                        <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 20 }} />
+                      ) : (
+                        <>
+                          {/* 1. Kurum Admin Bilgileri Kartı (Kullanıcı Adı & Şifre) */}
+                          <View style={styles.adminCredentialsCard}>
+                            <View style={styles.adminCardHeader}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Ionicons name="shield-checkmark" size={18} color="#4338CA" />
+                                <Text style={styles.adminCardTitle}>Kurum Yöneticisi (Admin Hesabı)</Text>
+                              </View>
+                              <TouchableOpacity
+                                onPress={() => handleOpenEdit(inst)}
+                                style={styles.adminCardEditBtn}
+                              >
+                                <Ionicons name="create-outline" size={14} color="#4338CA" />
+                                <Text style={styles.adminCardEditText}>Düzenle</Text>
+                              </TouchableOpacity>
+                            </View>
 
-              return (
-                <View key={school.id} style={styles.schoolCard}>
-                  <View style={styles.schoolCardHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.schoolName}>{school.name}</Text>
-                      <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-                        <View style={styles.codeBadge}>
-                          <Text style={styles.codeText}>Kod: {school.code}</Text>
-                        </View>
-                        {school.customerId && (
-                          <View style={[styles.codeBadge, { backgroundColor: '#EEF2FF' }]}>
-                            <Text style={[styles.codeText, { color: '#4338CA' }]}>
-                              Kurum: {school.customerId}
-                            </Text>
+                            <View style={styles.adminCredentialsGrid}>
+                              <View style={styles.credentialItem}>
+                                <Text style={styles.credentialLabel}>Yetkili Adı</Text>
+                                <Text style={styles.credentialValue}>
+                                  {inst.adminFullName || details?.adminUser?.fullName || inst.contactName || 'Belirtilmedi'}
+                                </Text>
+                              </View>
+
+                              <View style={styles.credentialItem}>
+                                <Text style={styles.credentialLabel}>Kullanıcı Adı</Text>
+                                <Text style={[styles.credentialValue, { color: '#4F46E5', fontWeight: '800' }]}>
+                                  @{inst.adminUsername || details?.adminUser?.username || 'atanmamış'}
+                                </Text>
+                              </View>
+
+                              <View style={[styles.credentialItem, { flex: 1.2 }]}>
+                                <Text style={styles.credentialLabel}>Giriş Şifresi</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                  <Text
+                                    style={[
+                                      styles.credentialValue,
+                                      {
+                                        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                                        color: '#B91C1C',
+                                        fontWeight: '800',
+                                        fontSize: 14,
+                                      },
+                                    ]}
+                                  >
+                                    {showPassword ? adminPass : '••••••••'}
+                                  </Text>
+                                  <TouchableOpacity
+                                    onPress={() =>
+                                      setShowAdminPassMap((prev) => ({
+                                        ...prev,
+                                        [inst.id]: !prev[inst.id],
+                                      }))
+                                    }
+                                    style={styles.eyeBtn}
+                                  >
+                                    <Ionicons
+                                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                                      size={16}
+                                      color="#6366F1"
+                                    />
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            </View>
                           </View>
-                        )}
-                        {school.dailyLessonHours && (
-                          <View style={[styles.codeBadge, { backgroundColor: '#FEF3C7' }]}>
-                            <Text style={[styles.codeText, { color: '#B45309' }]}>
-                              Ders: {school.dailyLessonHours} Saat
-                            </Text>
+
+                          {/* 2. 4 Alt Sekme Başlıkları */}
+                          <View style={styles.instSubTabRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.instSubTabBtn,
+                                instSubTab === 'schools' && styles.instSubTabBtnActive,
+                              ]}
+                              onPress={() => setInstSubTab('schools')}
+                            >
+                              <Text
+                                style={[
+                                  styles.instSubTabText,
+                                  instSubTab === 'schools' && styles.instSubTabTextActive,
+                                ]}
+                              >
+                                🏫 Okullar ({details?.schools?.length ?? inst.currentSchoolCount})
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.instSubTabBtn,
+                                instSubTab === 'teachers' && styles.instSubTabBtnActive,
+                              ]}
+                              onPress={() => setInstSubTab('teachers')}
+                            >
+                              <Text
+                                style={[
+                                  styles.instSubTabText,
+                                  instSubTab === 'teachers' && styles.instSubTabTextActive,
+                                ]}
+                              >
+                                👨‍🏫 Öğretmen ({details?.stats?.totalTeachers ?? inst.totalTeachers ?? 0})
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.instSubTabBtn,
+                                instSubTab === 'students' && styles.instSubTabBtnActive,
+                              ]}
+                              onPress={() => setInstSubTab('students')}
+                            >
+                              <Text
+                                style={[
+                                  styles.instSubTabText,
+                                  instSubTab === 'students' && styles.instSubTabTextActive,
+                                ]}
+                              >
+                                🎓 Öğrenci ({details?.stats?.totalStudents ?? inst.totalStudents ?? 0})
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.instSubTabBtn,
+                                instSubTab === 'logs' && styles.instSubTabBtnActive,
+                              ]}
+                              onPress={() => setInstSubTab('logs')}
+                            >
+                              <Text
+                                style={[
+                                  styles.instSubTabText,
+                                  instSubTab === 'logs' && styles.instSubTabTextActive,
+                                ]}
+                              >
+                                📊 Günlük ({details?.auditLogs?.length ?? 0})
+                              </Text>
+                            </TouchableOpacity>
                           </View>
-                        )}
-                      </View>
+
+                          {/* 3. Alt Sekme İçerikleri */}
+                          {instSubTab === 'schools' && (
+                            <View style={styles.subTabContentArea}>
+                              {(!details?.schools || details.schools.length === 0) ? (
+                                <View style={styles.emptySubState}>
+                                  <Ionicons name="school-outline" size={32} color={Colors.textMuted} />
+                                  <Text style={styles.emptySubStateText}>
+                                    Bu kuruma bağlı henüz açılmış okul bulunmuyor.
+                                  </Text>
+                                </View>
+                              ) : (
+                                details.schools.map((school) => {
+                                  const schExpires = school.licenseExpiresAt ? new Date(school.licenseExpiresAt) : null;
+                                  const schExpired = schExpires ? schExpires < new Date() : false;
+                                  return (
+                                    <View key={school.id} style={styles.nestedSchoolCard}>
+                                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                        <View style={{ flex: 1 }}>
+                                          <Text style={styles.nestedSchoolName}>{school.name}</Text>
+                                          <View style={{ flexDirection: 'row', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                                            <View style={styles.codeBadge}>
+                                              <Text style={styles.codeText}>Kod: {school.code}</Text>
+                                            </View>
+                                            {school.dailyLessonHours && (
+                                              <View style={[styles.codeBadge, { backgroundColor: '#FEF3C7' }]}>
+                                                <Text style={[styles.codeText, { color: '#B45309' }]}>
+                                                  {school.dailyLessonHours} Saat / Gün
+                                                </Text>
+                                              </View>
+                                            )}
+                                          </View>
+                                        </View>
+                                        <View
+                                          style={[
+                                            styles.statusBadge,
+                                            schExpired ? styles.statusExpired : styles.statusActive,
+                                          ]}
+                                        >
+                                          <Text style={styles.statusText}>{schExpired ? 'Süresi Doldu' : 'Aktif'}</Text>
+                                        </View>
+                                      </View>
+
+                                      <View style={styles.schoolMetaRow}>
+                                        <Text style={styles.metaItem}>👨‍🏫 {school.teacherCount} Öğretmen</Text>
+                                        <Text style={styles.metaItem}>🎓 {school.studentCount} Öğrenci</Text>
+                                        <Text style={styles.metaItem}>
+                                          📅 {schExpires ? schExpires.toLocaleDateString('tr-TR') : 'Süresiz'}
+                                        </Text>
+                                      </View>
+
+                                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 6, marginTop: 4 }}>
+                                        <TouchableOpacity
+                                          style={[styles.smallBtn, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}
+                                          onPress={async () => {
+                                            await handleExtendSchoolLicense(school);
+                                            fetchInstitutionDetails(inst.id);
+                                          }}
+                                        >
+                                          <Ionicons name="time-outline" size={14} color="#059669" />
+                                          <Text style={[styles.smallBtnText, { color: '#059669' }]}>+1 Yıl</Text>
+                                        </TouchableOpacity>
+
+                                        <TouchableOpacity
+                                          style={[styles.smallBtn, { backgroundColor: '#FEF2F2', borderColor: '#FECACA' }]}
+                                          onPress={async () => {
+                                            await handleDeleteSchool(school);
+                                            fetchInstitutionDetails(inst.id);
+                                          }}
+                                        >
+                                          <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                                          <Text style={[styles.smallBtnText, { color: '#DC2626' }]}>Okulu Sil</Text>
+                                        </TouchableOpacity>
+                                      </View>
+                                    </View>
+                                  );
+                                })
+                              )}
+                            </View>
+                          )}
+
+                          {instSubTab === 'teachers' && (
+                            <View style={styles.subTabContentArea}>
+                              {(!details?.teachers || details.teachers.length === 0) ? (
+                                <View style={styles.emptySubState}>
+                                  <Ionicons name="people-outline" size={32} color={Colors.textMuted} />
+                                  <Text style={styles.emptySubStateText}>
+                                    Bu kuruma bağlı okullarda henüz kayıtlı öğretmen bulunmuyor.
+                                  </Text>
+                                </View>
+                              ) : (
+                                details.teachers.map((t) => (
+                                  <View key={t.id} style={styles.subListItem}>
+                                    <View style={styles.subListIcon}>
+                                      <Ionicons name="person" size={16} color="#059669" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={styles.subListTitle}>{t.fullName}</Text>
+                                      <Text style={styles.subListSubtitle}>
+                                        @{t.username} • {t.branch || 'Branş Belirtilmedi'}
+                                      </Text>
+                                    </View>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                      <Text style={styles.subListTag}>{t.schoolName || 'Okul'}</Text>
+                                      <Text style={styles.subListDate}>
+                                        {t.lastLoginAt ? new Date(t.lastLoginAt).toLocaleDateString('tr-TR') : 'Hiç girmedi'}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                ))
+                              )}
+                            </View>
+                          )}
+
+                          {instSubTab === 'students' && (
+                            <View style={styles.subTabContentArea}>
+                              {(!details?.students || details.students.length === 0) ? (
+                                <View style={styles.emptySubState}>
+                                  <Ionicons name="school-outline" size={32} color={Colors.textMuted} />
+                                  <Text style={styles.emptySubStateText}>
+                                    Bu kuruma bağlı okullarda kayıtlı öğrenci bulunmuyor.
+                                  </Text>
+                                </View>
+                              ) : (
+                                details.students.map((s) => (
+                                  <View key={s.id} style={styles.subListItem}>
+                                    <View style={[styles.subListIcon, { backgroundColor: '#FEF3C7' }]}>
+                                      <Ionicons name="school" size={16} color="#D97706" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={styles.subListTitle}>{s.fullName}</Text>
+                                      <Text style={styles.subListSubtitle}>
+                                        No: {s.studentNumber || '-'} • Sınıf: {s.gradeSection || '-'}
+                                      </Text>
+                                    </View>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                      <Text style={[styles.subListTag, { backgroundColor: '#FEF3C7', color: '#92400E' }]}>
+                                        {s.schoolName || 'Okul'}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                ))
+                              )}
+                            </View>
+                          )}
+
+                          {instSubTab === 'logs' && (
+                            <View style={styles.subTabContentArea}>
+                              {/* Hızlı Özet Kartları */}
+                              <View style={styles.subStatsRow}>
+                                <View style={styles.subStatBox}>
+                                  <Text style={styles.subStatBoxVal}>{details?.stats.totalSchools ?? 0}</Text>
+                                  <Text style={styles.subStatBoxLbl}>Okul</Text>
+                                </View>
+                                <View style={styles.subStatBox}>
+                                  <Text style={styles.subStatBoxVal}>{details?.stats.totalTeachers ?? 0}</Text>
+                                  <Text style={styles.subStatBoxLbl}>Öğretmen</Text>
+                                </View>
+                                <View style={styles.subStatBox}>
+                                  <Text style={styles.subStatBoxVal}>{details?.stats.totalStudents ?? 0}</Text>
+                                  <Text style={styles.subStatBoxLbl}>Öğrenci</Text>
+                                </View>
+                                <View style={styles.subStatBox}>
+                                  <Text style={styles.subStatBoxVal}>{details?.auditLogs?.length ?? 0}</Text>
+                                  <Text style={styles.subStatBoxLbl}>İşlem</Text>
+                                </View>
+                              </View>
+
+                              {(!details?.auditLogs || details.auditLogs.length === 0) ? (
+                                <View style={styles.emptySubState}>
+                                  <Ionicons name="time-outline" size={32} color={Colors.textMuted} />
+                                  <Text style={styles.emptySubStateText}>
+                                    Bu kuruma ait denetim günlüğü kaydı bulunmuyor.
+                                  </Text>
+                                </View>
+                              ) : (
+                                details.auditLogs.map((log) => (
+                                  <View key={log.id} style={styles.subLogItem}>
+                                    <View style={styles.logHeader}>
+                                      <Text style={styles.logAction}>{log.actionType}</Text>
+                                      <Text style={styles.logTime}>
+                                        {new Date(log.timestamp).toLocaleDateString('tr-TR')}{' '}
+                                        {new Date(log.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                                      </Text>
+                                    </View>
+                                    <Text style={styles.logUser}>Rol: {log.userRole}</Text>
+                                    {log.detailsJson && <Text style={styles.logDetails}>{log.detailsJson}</Text>}
+                                  </View>
+                                ))
+                              )}
+                            </View>
+                          )}
+                        </>
+                      )}
                     </View>
-                    <View
-                      style={[
-                        styles.statusBadge,
-                        isExpired ? styles.statusExpired : styles.statusActive,
-                      ]}
-                    >
-                      <Text style={styles.statusText}>{isExpired ? 'Süresi Doldu' : 'Aktif'}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.schoolMetaRow}>
-                    <Text style={styles.metaItem}>👨‍🏫 {school.teacherCount} Öğretmen</Text>
-                    <Text style={styles.metaItem}>🎓 {school.studentCount} Öğrenci</Text>
-                    <Text style={styles.metaItem}>
-                      📅 Bitiş: {expiresDate ? expiresDate.toLocaleDateString('tr-TR') : '1 Yıl'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.schoolActionRow}>
-                    <TouchableOpacity
-                      style={[styles.smallBtn, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]}
-                      onPress={() => handleExtendSchoolLicense(school)}
-                    >
-                      <Ionicons name="time-outline" size={15} color="#059669" />
-                      <Text style={[styles.smallBtnText, { color: '#059669' }]}>+1 Yıl Uzat</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.smallBtn, { backgroundColor: '#FEF2F2', borderColor: '#FECACA', marginLeft: 8 }]}
-                      onPress={() => handleDeleteSchool(school)}
-                    >
-                      <Ionicons name="trash-outline" size={15} color="#DC2626" />
-                      <Text style={[styles.smallBtnText, { color: '#DC2626' }]}>Okulu Sil</Text>
-                    </TouchableOpacity>
-                  </View>
+                  )}
                 </View>
               );
             })}
@@ -737,46 +1171,120 @@ export function SuperAdminScreen({ navigation }: any) {
         </View>
       </Modal>
 
-      {/* KURUM DÜZENLEME & KOTA DEĞİŞTİRME MODALI */}
+      {/* KURUM DÜZENLEME & LİSANS BİTİŞ TARİHİ & KOTA MODALI */}
       <Modal visible={showEditModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="settings" size={22} color="#4F46E5" />
-                <Text style={styles.modalTitle}>Kurum Düzenle & Kota Belirle</Text>
+                <Text style={styles.modalTitle}>Kurum, Lisans & Yönetici Düzenle</Text>
               </View>
               <TouchableOpacity onPress={() => setShowEditModal(false)}>
                 <Ionicons name="close" size={24} color="#64748B" />
               </TouchableOpacity>
             </View>
 
-            {editingInst && (
-              <View style={styles.editInstBadge}>
-                <Text style={styles.editInstBadgeText}>
-                  Kurum Kodu: <Text style={{ fontWeight: '800' }}>{editingInst.code}</Text>
-                </Text>
-              </View>
-            )}
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
+              <Text style={styles.formSectionTitle}>1. Kurum Kimlik Bilgileri</Text>
+              <Text style={styles.inputLabel}>Kurum Kodu (Küçük harf, tireli)</Text>
+              <TextInput
+                style={[styles.modalInput, { borderColor: '#4F46E5', borderWidth: 1.5, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }]}
+                value={editCode}
+                onChangeText={setEditCode}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="Örn: zafer-egitim"
+              />
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
-              <Text style={styles.inputLabel}>Kurum Adı</Text>
+              <Text style={[styles.inputLabel, { marginTop: 8 }]}>Kurum Adı (Görünen Resmi Unvan)</Text>
               <TextInput
                 style={styles.modalInput}
                 value={editName}
                 onChangeText={setEditName}
+                placeholder="Örn: Zafer Eğitim Kurumları"
               />
 
+              <Text style={styles.formSectionTitle}>2. Manuel Lisans Bitiş Tarihi</Text>
+              <Text style={styles.inputLabel}>Lisans Bitiş Tarihi (YYYY-AA-GG)</Text>
+              <TextInput
+                style={[styles.modalInput, { borderColor: '#059669', borderWidth: 1.5, fontWeight: '700' }]}
+                value={editExpiresDate}
+                onChangeText={setEditExpiresDate}
+                placeholder="Örn: 2027-10-21"
+              />
+              <Text style={styles.inputHint}>
+                💡 Belirlediğiniz tarih bu kuruma bağlı tüm okulların ve kullanıcıların lisans bitişine de otomatik yansıtılır.
+              </Text>
+
+              {/* Hızlı Süre Ekleme Preset Butonları */}
+              <View style={styles.presetDateRow}>
+                <TouchableOpacity style={styles.presetDateBtn} onPress={() => addMonthsToDate(1)}>
+                  <Text style={styles.presetDateBtnText}>+1 Ay</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.presetDateBtn} onPress={() => addMonthsToDate(6)}>
+                  <Text style={styles.presetDateBtnText}>+6 Ay</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.presetDateBtn} onPress={() => addMonthsToDate(12)}>
+                  <Text style={styles.presetDateBtnText}>+1 Yıl</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.presetDateBtn} onPress={() => addMonthsToDate(24)}>
+                  <Text style={styles.presetDateBtnText}>+2 Yıl</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.presetDateBtn, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}
+                  onPress={() => {
+                    const d = new Date();
+                    d.setFullYear(d.getFullYear() + 1);
+                    const yyyy = d.getFullYear();
+                    const mm = String(d.getMonth() + 1).padStart(2, '0');
+                    const dd = String(d.getDate()).padStart(2, '0');
+                    setEditExpiresDate(`${yyyy}-${mm}-${dd}`);
+                  }}
+                >
+                  <Text style={[styles.presetDateBtnText, { color: '#B45309' }]}>Bugün+1 Yıl</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.formSectionTitle}>3. Kurum Yöneticisi (Admin Girişi)</Text>
+              <Text style={styles.inputLabel}>Admin Kullanıcı Adı</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={editAdminUsername}
+                onChangeText={setEditAdminUsername}
+                autoCapitalize="none"
+                placeholder="Örn: zaferadmin"
+              />
+
+              <Text style={styles.inputLabel}>Admin Giriş Şifresi</Text>
+              <View style={styles.passwordInputContainer}>
+                <TextInput
+                  style={[styles.modalInput, { flex: 1, borderWidth: 0 }]}
+                  value={editAdminPassword}
+                  onChangeText={setEditAdminPassword}
+                  placeholder="Yönetici şifresi"
+                  secureTextEntry={!showEditAdminPass}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowEditAdminPass(!showEditAdminPass)}
+                  style={{ padding: 10 }}
+                >
+                  <Ionicons
+                    name={showEditAdminPass ? 'eye-off-outline' : 'eye-outline'}
+                    size={20}
+                    color="#6366F1"
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.formSectionTitle}>4. Okul Kotası & İletişim</Text>
               <Text style={styles.inputLabel}>İzin Verilen Okul Kotası (Maksimum)</Text>
               <TextInput
-                style={[styles.modalInput, { borderColor: '#4F46E5', borderWidth: 2 }]}
+                style={styles.modalInput}
                 value={editMaxSchool}
                 onChangeText={setEditMaxSchool}
                 keyboardType="numeric"
               />
-              <Text style={styles.inputHint}>
-                💡 Süper Admin olarak bu kurumun en fazla kaç okul açabileceğini buradan belirleyebilirsiniz.
-              </Text>
 
               <Text style={styles.inputLabel}>Yetkili Kişi</Text>
               <TextInput
@@ -1140,5 +1648,241 @@ const styles = StyleSheet.create({
   editInstBadgeText: {
     fontSize: 12,
     color: '#3730A3',
+  },
+  customerCardExpanded: {
+    borderColor: '#818CF8',
+    borderWidth: 2,
+    shadowColor: '#4F46E5',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+  },
+  expandedContainer: {
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  adminCredentialsCard: {
+    backgroundColor: '#F5F3FF',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+    marginBottom: 14,
+  },
+  adminCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  adminCardTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#4338CA',
+  },
+  adminCardEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  adminCardEditText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
+  adminCredentialsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  credentialItem: {
+    flex: 1,
+    minWidth: 90,
+  },
+  credentialLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6B7280',
+    textTransform: 'uppercase',
+  },
+  credentialValue: {
+    fontSize: 13,
+    color: '#1F2937',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  eyeBtn: {
+    padding: 4,
+    backgroundColor: '#EEF2FF',
+    borderRadius: 4,
+  },
+  instSubTabRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    padding: 3,
+    marginBottom: 12,
+  },
+  instSubTabBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  instSubTabBtnActive: {
+    backgroundColor: '#4F46E5',
+    shadowColor: '#4F46E5',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  instSubTabText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  instSubTabTextActive: {
+    color: '#FFFFFF',
+  },
+  subTabContentArea: {
+    marginTop: 4,
+  },
+  emptySubState: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    gap: 8,
+  },
+  emptySubStateText: {
+    fontSize: 12,
+    color: Colors.textMuted,
+    textAlign: 'center',
+  },
+  nestedSchoolCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  nestedSchoolName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  subListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 10,
+  },
+  subListIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#D1FAE5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subListTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  subListSubtitle: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  subListTag: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#047857',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  subListDate: {
+    fontSize: 10,
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  subStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  subStatBox: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  subStatBoxVal: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  subStatBoxLbl: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: Colors.textMuted,
+    marginTop: 2,
+  },
+  subLogItem: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderLeftWidth: 3,
+    borderLeftColor: '#6366F1',
+  },
+  presetDateRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  presetDateBtn: {
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  presetDateBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
+  passwordInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingRight: 4,
   },
 });

@@ -42,6 +42,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   const [kurumInput, setKurumInput] = useState('zafer-egitim');
   const [verifyingKurum, setVerifyingKurum] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [isEditingKurum, setIsEditingKurum] = useState(false);
 
   // Okul Admini Modal & State
   const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
@@ -69,6 +70,9 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         if (saved) {
           setActiveInstitution(saved);
           setKurumInput(saved.code);
+          setIsEditingKurum(false);
+        } else {
+          setIsEditingKurum(true);
         }
         const rem = await getRememberMeSetting();
         setRememberMe(rem);
@@ -80,33 +84,42 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
     })();
   }, []);
 
-  const handleVerifyKurum = async (customCode?: string) => {
+  const handleVerifyKurum = async (customCode?: string): Promise<boolean> => {
     const codeToTest = (customCode || kurumInput || '').trim();
     if (!codeToTest) {
       Alert.alert('Uyarı', 'Lütfen kurum adını veya kodunu giriniz.');
-      return;
+      return false;
     }
     setVerifyingKurum(true);
     try {
       const res = await verifyInstitutionOnline(codeToTest);
       if (res.success && res.data) {
         setActiveInstitution(res.data);
+        setIsEditingKurum(false);
         if (rememberMe) {
           await saveInstitution(res.data);
         }
+        return true;
       } else {
         Alert.alert('Kurum Bulunamadı', res.message || 'Geçerli bir kurum adı veya kodu bulunamadı.');
+        return false;
       }
     } catch (e: any) {
       Alert.alert('Hata', e.message);
+      return false;
     } finally {
       setVerifyingKurum(false);
     }
   };
 
   const handleSwitchInstitution = async () => {
+    setIsEditingKurum(true);
+  };
+
+  const handleClearInstitution = async () => {
     await clearSavedInstitution();
     setActiveInstitution(null);
+    setIsEditingKurum(true);
   };
 
   // Sunucu Bağlantı Ayarları Modalı
@@ -161,7 +174,20 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   };
 
   // Okul Admini Giriş Butonu
-  const handleSelectAdmin = () => {
+  const handleSelectAdmin = async () => {
+    if (!activeInstitution) {
+      const codeToTest = (kurumInput || '').trim();
+      if (!codeToTest) {
+        Alert.alert(
+          'Kurum Belirtilmedi',
+          'Okul admini girişi için lütfen yukarıdaki kutucuğa kurum adınızı/kodunu giriniz veya deneme kurumunu (zafer-egitim) seçiniz.'
+        );
+        setIsEditingKurum(true);
+        return;
+      }
+      const ok = await handleVerifyKurum(codeToTest);
+      if (!ok) return;
+    }
     setShowAdminLoginModal(true);
   };
 
@@ -224,7 +250,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   };
 
   // Öğretmen Giriş Butonu
-  const handleSelectTeacher = () => {
+  const handleSelectTeacher = async () => {
+    if (!activeInstitution && kurumInput.trim()) {
+      await handleVerifyKurum(kurumInput.trim());
+    }
     setShowTeacherLoginModal(true);
   };
 
@@ -451,16 +480,52 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         </Text>
       </View>
 
-      {!activeInstitution ? (
-        /* ADIM 1: KURUM ADI GİRME EKRANI */
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>
-          <View style={styles.instPromptCard}>
-            <View style={styles.instIconWrap}>
-              <Ionicons name="business" size={32} color="#4F46E5" />
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>
+        {/* BÖLÜM 1: ENTEGRE KURUM ALANI (GİRİŞ VEYA AKTİF KURUM KARTI) */}
+        {activeInstitution && !isEditingKurum ? (
+          /* Aktif Doğrulanmış Kurum Kartı */
+          <View style={styles.activeInstBanner}>
+            <View style={styles.activeInstIcon}>
+              <Ionicons name="business" size={22} color="#4F46E5" />
             </View>
-            <Text style={styles.instTitle}>Kurum Adını Giriniz</Text>
-            <Text style={styles.instDesc}>
-              Lisanslı kurumunuza ait benzersiz adı veya kodu yazarak sisteme bağlanın.
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <Text style={styles.activeInstName}>{activeInstitution.name}</Text>
+                <View style={styles.activeInstBadge}>
+                  <Text style={styles.activeInstBadgeText}>{activeInstitution.code}</Text>
+                </View>
+              </View>
+              <Text style={styles.activeInstQuota}>
+                Lisans Aktif • {activeInstitution.maxSchoolCount} Okul Kotası
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.switchInstBtn}
+              onPress={() => setIsEditingKurum(true)}
+            >
+              <Ionicons name="create-outline" size={14} color="#6D28D9" />
+              <Text style={styles.switchInstBtnText}>Kurumu Değiştir</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          /* Kurum Adı / Kodu Girme Kartı (Rol Ekranıyla Bütünleşik) */
+          <View style={styles.instPromptCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={styles.instIconWrapSmall}>
+                  <Ionicons name="business" size={18} color="#4F46E5" />
+                </View>
+                <Text style={styles.instTitleSmall}>Kurum Bilgisi (Adı veya Kodu)</Text>
+              </View>
+              {activeInstitution && (
+                <TouchableOpacity onPress={() => setIsEditingKurum(false)} style={styles.cancelEditBtn}>
+                  <Text style={styles.cancelEditBtnText}>Vazgeç</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <Text style={styles.instDescSmall}>
+              Lisanslı kurumunuza ait benzersiz adı/kodu yazınız veya deneme kurumunu seçiniz:
             </Text>
 
             <View style={styles.instInputWrap}>
@@ -485,97 +550,56 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
                 handleVerifyKurum('zafer-egitim');
               }}
             >
-              <Ionicons name="flask" size={14} color="#4F46E5" />
+              <Ionicons name="flask" size={13} color="#4F46E5" />
               <Text style={styles.quickChipText}>
                 🧪 Deneme Kurumu: <Text style={{ fontWeight: '800' }}>zafer-egitim</Text> (Zafer Eğitim)
               </Text>
             </TouchableOpacity>
 
-            {/* Beni Hatırla Switch / Checkbox */}
-            <TouchableOpacity
-              style={styles.rememberRow}
-              activeOpacity={0.8}
-              onPress={() => setRememberMe(!rememberMe)}
-            >
-              <Ionicons
-                name={rememberMe ? 'checkbox' : 'square-outline'}
-                size={20}
-                color={rememberMe ? '#4F46E5' : Colors.textMuted}
-              />
-              <Text style={styles.rememberText}>Bu kurum adını bu cihazda hatırla</Text>
-            </TouchableOpacity>
+            <View style={styles.instActionRow}>
+              {/* Beni Hatırla Switch / Checkbox */}
+              <TouchableOpacity
+                style={styles.rememberRow}
+                activeOpacity={0.8}
+                onPress={() => setRememberMe(!rememberMe)}
+              >
+                <Ionicons
+                  name={rememberMe ? 'checkbox' : 'square-outline'}
+                  size={19}
+                  color={rememberMe ? '#4F46E5' : Colors.textMuted}
+                />
+                <Text style={styles.rememberText}>Bu kurum adını hatırla</Text>
+              </TouchableOpacity>
 
-            {/* Devam Et Butonu */}
-            <TouchableOpacity
-              style={styles.instSubmitBtn}
-              onPress={() => handleVerifyKurum()}
-              disabled={verifyingKurum}
-            >
-              {verifyingKurum ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <Text style={styles.instSubmitBtnText}>Kuruma Bağlan ve Devam Et</Text>
-                  <Ionicons name="arrow-forward" size={18} color="#fff" />
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {/* Kurum Bilgilendirme Kutusu */}
-          <View style={styles.roleTipCard}>
-            <Ionicons name="information-circle" size={22} color="#4F46E5" />
-            <Text style={styles.roleTipText}>
-              <Text style={{ fontWeight: '700', color: '#1E1B4B' }}>Kurum Bazlı Lisans: </Text>
-              Bir kurum birden fazla okulu tek lisansla yönetebilir. Kurum kodu sayesinde farklı illerdeki öğretmenlerin kullanıcı adları çakışmaz ve verileriniz izole edilir.
-            </Text>
-          </View>
-
-          {/* Süper Admin Girişi */}
-          <TouchableOpacity
-            style={styles.superAdminTrigger}
-            onPress={() => setSuperAdminModalVisible(true)}
-          >
-            <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
-            <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans & Müşteri Yönetimi)</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      ) : (
-        /* ADIM 2: ROL SEÇİM EKRANI (Kurum Doğrulandı) */
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>
-          {/* En Üstte Aktif Kurum Başlığı ve Değiştirme Butonu */}
-          <View style={styles.activeInstBanner}>
-            <View style={styles.activeInstIcon}>
-              <Ionicons name="business" size={22} color="#4F46E5" />
+              {/* Kurumu Doğrula Butonu */}
+              <TouchableOpacity
+                style={styles.instSubmitBtnSmall}
+                onPress={() => handleVerifyKurum()}
+                disabled={verifyingKurum}
+              >
+                {verifyingKurum ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <Ionicons name="checkmark-circle" size={15} color="#fff" />
+                    <Text style={styles.instSubmitBtnTextSmall}>Kurumu Bağla</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <Text style={styles.activeInstName}>{activeInstitution.name}</Text>
-                <View style={styles.activeInstBadge}>
-                  <Text style={styles.activeInstBadgeText}>{activeInstitution.code}</Text>
-                </View>
-              </View>
-              <Text style={styles.activeInstQuota}>
-                Lisans Aktif • İzin Verilen: {activeInstitution.maxSchoolCount} Okul
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.switchInstBtn}
-              onPress={handleSwitchInstitution}
-            >
-              <Ionicons name="swap-horizontal" size={14} color="#4F46E5" />
-              <Text style={styles.switchInstBtnText}>Kurumu Değiştir</Text>
-            </TouchableOpacity>
           </View>
+        )}
 
+        {/* BÖLÜM 2: ROL SEÇİMİ BÖLÜMÜ */}
+        <View style={{ marginTop: 14 }}>
           <Text style={styles.sectionTitle}>Lütfen Rolünüzü Seçiniz:</Text>
           <Text style={styles.sectionDesc}>
-            Seçiminiz cihazınızda hatırlanacak ve doğrudan ilgili panel açılacaktır.
+            Giriş yapmak istediğiniz paneli veya çalışma modunu seçiniz:
           </Text>
 
           {/* Rol Ayrımı Bilgilendirme Kutusu */}
           <View style={styles.roleTipCard}>
-            <Ionicons name="information-circle" size={22} color="#4F46E5" />
+            <Ionicons name="information-circle" size={20} color="#4F46E5" />
             <Text style={styles.roleTipText}>
               <Text style={{ fontWeight: '700', color: '#1E1B4B' }}>Rol Ayrımı: </Text>
               Bir kişi hem Fizik Öğretmeni hem de Okul Admini olabilir. Bu oturumda hangi işi yapacaksanız o rolü seçin. Paneller arasında dilediğiniz an tek tıkla geçiş yapabilirsiniz.
@@ -640,10 +664,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             onPress={() => setSuperAdminModalVisible(true)}
           >
             <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
-            <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans Yönetimi)</Text>
+            <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans & Müşteri Yönetimi)</Text>
           </TouchableOpacity>
-        </ScrollView>
-      )}
+        </View>
+      </ScrollView>
 
       {/* Okul Admini Giriş Modalı */}
       <Modal visible={showAdminLoginModal} animationType="fade" transparent>
@@ -1469,5 +1493,60 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: Colors.textSecondary,
+  },
+  instIconWrapSmall: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  instTitleSmall: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  instDescSmall: {
+    fontSize: 12,
+    color: Colors.textSecondary,
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  cancelEditBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: '#F1F5F9',
+  },
+  cancelEditBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  instActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginTop: 2,
+  },
+  instSubmitBtnSmall: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  instSubmitBtnTextSmall: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 });

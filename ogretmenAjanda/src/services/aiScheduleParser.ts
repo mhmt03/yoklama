@@ -36,6 +36,7 @@ export interface ParsedLessonItemDetail {
 }
 
 export interface ParsedScheduleResult {
+  schoolName?: string;
   teachers: string[];
   classes: string[]; // 9-A, 10-B...
   lessons: string[]; // Matematik, Fizik...
@@ -52,6 +53,7 @@ export interface ParsedScheduleResult {
     classroom?: string;
   }>;
   teacherVerifications?: TeacherScheduleVerification[];
+  warnings?: string[];
 }
 
 /**
@@ -761,13 +763,15 @@ ${jsonSchema}
           for (const wl of workloadSummary) {
             if (wl.lessonName) {
               const cleanName = wl.lessonName.trim();
-              const existing = lessonDetailsMap.get(cleanName.toLowerCase());
+              const parsedGrade = wl.className ? wl.className.split('-')[0].split('/')[0].trim() : undefined;
+              const key = `${cleanName.toLowerCase()}__${parsedGrade || 'all'}`;
+              const existing = lessonDetailsMap.get(key);
               if (!existing || (wl.weeklyHours && (!existing.weeklyHours || wl.weeklyHours > existing.weeklyHours))) {
-                lessonDetailsMap.set(cleanName.toLowerCase(), {
+                lessonDetailsMap.set(key, {
                   name: cleanName,
                   code: wl.lessonCode?.trim(),
                   weeklyHours: Number(wl.weeklyHours) > 0 ? Number(wl.weeklyHours) : undefined,
-                  grade: wl.className ? wl.className.split('-')[0].split('/')[0] : undefined
+                  grade: parsedGrade
                 });
               }
             }
@@ -1308,7 +1312,10 @@ export function mergeScheduleBatches(batches: ScheduleBatchItem[]): ParsedSchedu
     (data.lessons || []).forEach((l) => mergedLessons.add(l));
 
     (data.lessonDetails || []).forEach((ld) => {
-      if (ld.name) lessonDetailsMap.set(ld.name.toLowerCase(), ld);
+      if (ld.name) {
+        const key = `${ld.name.toLowerCase()}__${ld.grade || 'all'}`;
+        lessonDetailsMap.set(key, ld);
+      }
     });
 
     if (bellSchedule.length === 0 && (data.bellSchedule || []).length > 0) {

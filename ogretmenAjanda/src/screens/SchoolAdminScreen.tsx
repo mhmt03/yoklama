@@ -42,9 +42,15 @@ import {
   clearParsedScheduleDraft,
   CachedScheduleDocInfo,
 } from '../services/aiScheduleParser';
+import {
+  inspectExcelWorkbook,
+  parseInitialExcelSchedule,
+  ExcelInspectionResult,
+} from '../services/excelScheduleParser';
 import { countPdfPages } from '../utils/pdfSliceService';
 import { extractStudentPhotosWithAi } from '../services/aiStudentPhotoExtractor';
 import { parseStudentsFromExcel, saveParsedStudentsToServer, ParsedExcelStudent, generateStudentTemplateExcel } from '../services/excelStudentParser';
+import { parseStudentsFromExcelWithAi, AiStudentParseResult } from '../services/aiStudentExcelParser';
 import { analyzeUploadedDocument, convertRowsWithMapping, DocumentAnalysisResult, ColumnMappingSelection, generateYearlyPlanTemplateExcel } from '../utils/columnMappingService';
 import {
   exportTeachersReport,
@@ -104,6 +110,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [teachers, setTeachers] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
   const [lessons, setLessons] = useState<any[]>([]);
+  const [lessonGradeFilter, setLessonGradeFilter] = useState<'all' | '9' | '10' | '11' | '12' | 'common'>('all');
+  const [lessonSearchQuery, setLessonSearchQuery] = useState('');
   const [students, setStudents] = useState<any[]>([]);
 
   // Okul İçi Mesajlaşma Denetim State
@@ -235,6 +243,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [pdfStartPage, setPdfStartPage] = useState<string>('1');
   const [pdfEndPage, setPdfEndPage] = useState<string>('1');
   const [countingPdfPages, setCountingPdfPages] = useState<boolean>(false);
+
+  // Excel Çarşaf Ön İnceleme ve Yükleme State
+  const [excelPreviewModalVisible, setExcelPreviewModalVisible] = useState<boolean>(false);
+  const [excelInspection, setExcelInspection] = useState<ExcelInspectionResult | null>(null);
+  const [selectedExcelSheet, setSelectedExcelSheet] = useState<string>('');
 
   // 1.8 Detaylı Program Dağılımı & İstatistik Görünüm State
   const [scheduleSubView, setScheduleSubView] = useState<'editor' | 'analytics'>('editor');
@@ -372,6 +385,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [editingExpectedHours, setEditingExpectedHours] = useState(false);
   const [tempExpectedHours, setTempExpectedHours] = useState('');
   const [editingCellSlot, setEditingCellSlot] = useState<{
+    originDayOfWeek?: number;
+    originLessonHour?: number;
     dayOfWeek: number;
     lessonHour: number;
     grade: string;
@@ -402,6 +417,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     const existing = inspectingItems.find(it => it.dayOfWeek === dayOfWeek && it.lessonHour === lessonHour);
     if (existing) {
       setEditingCellSlot({
+        originDayOfWeek: dayOfWeek,
+        originLessonHour: lessonHour,
         dayOfWeek,
         lessonHour,
         grade: existing.grade,
@@ -415,6 +432,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       const parts = defaultCls.split('-');
       const defaultLsn = firstWl?.lessonName || firstWl?.lessonCode || inspectingItems[0]?.lessonName || parsedSchedule?.lessons?.[0] || '';
       setEditingCellSlot({
+        originDayOfWeek: dayOfWeek,
+        originLessonHour: lessonHour,
         dayOfWeek,
         lessonHour,
         grade: parts[0] || '9',
@@ -426,13 +445,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const handleSaveCellSlot = () => {
     if (!editingCellSlot) return;
-    const { dayOfWeek, lessonHour, grade, section, lessonName } = editingCellSlot;
+    const { originDayOfWeek, originLessonHour, dayOfWeek, lessonHour, grade, section, lessonName } = editingCellSlot;
     if (!grade.trim() || !section.trim() || !lessonName.trim()) {
       Alert.alert('Eksik Bilgi', 'Lütfen sınıf, şube ve ders adını doldurunuz.');
       return;
     }
 
-    const updated = inspectingItems.filter(it => !(it.dayOfWeek === dayOfWeek && it.lessonHour === lessonHour));
+    const origDay = originDayOfWeek ?? dayOfWeek;
+    const origHour = originLessonHour ?? lessonHour;
+
+    // 1. Orijinal slottaki dersi kaldır
+    let updated = inspectingItems.filter(it => !(it.dayOfWeek === origDay && it.lessonHour === origHour));
+
+    // 2. Hedef saatte daha önceden bir ders varsa üzerine yaz/kaldır
+    updated = updated.filter(it => !(it.dayOfWeek === dayOfWeek && it.lessonHour === lessonHour));
+
     updated.push({
       teacherName: inspectingTeacher,
       grade: grade.trim(),
@@ -623,16 +650,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       const alertButtons: any[] = [];
       if (firstConflictTeacher) {
         alertButtons.push({
-          text: `🔍 ${firstConflictTeacher}'ı İncele & Düzenle`,
+          text: `🔍 ${firstConflictTeacher}'a Geç (İncele)`,
           onPress: () => {
             handleOpenTeacherScheduleInspector(firstConflictTeacher);
-          },
-        });
-        alertButtons.push({
-          text: `⚡ ${firstConflictTeacher}'ı Belgeden Sıfırla`,
-          onPress: () => {
-            handleOpenTeacherScheduleInspector(firstConflictTeacher);
-            handleRescanTeacherFromDocument(firstConflictTeacher);
           },
         });
       }
@@ -643,7 +663,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         `"${inspectingTeacher}" için ${inspectingItems.length} saat programa aktarıldı ancak ${conflictsDetected.length} derste başka öğretmenlerle ÇAKIŞMA tespit edildi:\n\n` +
         `${conflictSummary}${extra}\n\n` +
         `İlgili saatlerde aynı şubede iki öğretmen görünmektedir.\n\n` +
-        `💡 "Zinciri Otomatik Çöz" derseniz yapay zeka sırayla tüm çakışan öğretmenleri belgeden tarayarak zinciri kendi kendine çözer.`,
+        `💡 Manuel Geçiş: Diğer öğretmene geçtiğinizde PDF otomatik okunmaz, mevcut dersler korunur. Yalnızca isterseniz pencere içindeki "⚡ Belgeden Yeniden Oku" butonuna basabilirsiniz.`,
         alertButtons
       );
     }
@@ -944,6 +964,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [detectedExcelClasses, setDetectedExcelClasses] = useState<string[]>([]);
   const [excelSchoolName, setExcelSchoolName] = useState<string | undefined>(undefined);
 
+  // 6.1 AI ile Excel Öğrenci Yükleme State
+  const [aiStudentModalVisible, setAiStudentModalVisible] = useState(false);
+  const [aiStudentParsing, setAiStudentParsing] = useState(false);
+  const [aiStudentSaving, setAiStudentSaving] = useState(false);
+  const [aiStudentResult, setAiStudentResult] = useState<AiStudentParseResult | null>(null);
+
   // 0. Admin Giriş ve Şifre Güncelleme State
   const [adminCredentialsModalVisible, setAdminCredentialsModalVisible] = useState(false);
   const [adminNewUsername, setAdminNewUsername] = useState('');
@@ -975,6 +1001,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   });
   const [analyzingPlanFile, setAnalyzingPlanFile] = useState(false);
   const [savingPlanRows, setSavingPlanRows] = useState(false);
+
+  // 3.2.1 Yıllık Plan Çoklu Sheet Seçim Modalı State
+  const [planSheetPickerVisible, setPlanSheetPickerVisible] = useState(false);
+  const [planSheetPickerSheets, setPlanSheetPickerSheets] = useState<string[]>([]);
+  const [planSheetPickerAsset, setPlanSheetPickerAsset] = useState<any>(null);
+  const [planSheetPickerLesson, setPlanSheetPickerLesson] = useState<any>(null);
 
   // 3.3 Yüklü Yıllık Planı İnceleme Modalı State
   const [viewPlanModalVisible, setViewPlanModalVisible] = useState(false);
@@ -1039,6 +1071,41 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       normalizeSearchStr(a.teacherName).includes(q)
     );
   }, [scheduleStats?.courseAllocations, analyticsSearchQuery]);
+
+  // Kademe ve aramaya göre filtrelenmiş ve sıralanmış dersler
+  const filteredLessons = useMemo(() => {
+    let result = [...lessons];
+
+    // Kademe Filtresi
+    if (lessonGradeFilter !== 'all') {
+      if (lessonGradeFilter === 'common') {
+        result = result.filter(l => !l.grade || l.grade === 'Tüm Kademeler' || l.grade === 'Ortak');
+      } else {
+        result = result.filter(l => {
+          const gStr = String(l.grade || '').trim();
+          return gStr === lessonGradeFilter || gStr.startsWith(lessonGradeFilter);
+        });
+      }
+    }
+
+    // Arama Filtresi
+    if (lessonSearchQuery.trim()) {
+      const q = normalizeSearchStr(lessonSearchQuery);
+      result = result.filter(l =>
+        normalizeSearchStr(l.name).includes(q) ||
+        (l.shortCode && normalizeSearchStr(l.shortCode).includes(q)) ||
+        (l.grade && normalizeSearchStr(String(l.grade)).includes(q))
+      );
+    }
+
+    // Sıralama: Önce kademe (9, 10, 11, 12, Ortak), sonra ders adı
+    return result.sort((a, b) => {
+      const gA = parseInt(String(a.grade || '').replace(/\D/g, '') || '999', 10);
+      const gB = parseInt(String(b.grade || '').replace(/\D/g, '') || '999', 10);
+      if (gA !== gB) return gA - gB;
+      return (a.name || '').localeCompare(b.name || '', 'tr');
+    });
+  }, [lessons, lessonGradeFilter, lessonSearchQuery]);
 
   // 1.5 Canlı İnteraktif Program Düzenleyici State
   const [scheduleEditorMode, setScheduleEditorMode] = useState<'class' | 'teacher'>('class');
@@ -1113,6 +1180,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [singleTeacherModalVisible, setSingleTeacherModalVisible] = useState(false);
   const [savingSingleTeacher, setSavingSingleTeacher] = useState(false);
   const [teacherLoginFilter, setTeacherLoginFilter] = useState<'all' | 'logged_in' | 'not_logged_in'>('all');
+  const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
+  const [teacherSortOrder, setTeacherSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // 4.2 Toplu Öğrenci Fotoğrafı Yükleme State
   const [bulkPhotoModalVisible, setBulkPhotoModalVisible] = useState(false);
@@ -1420,8 +1489,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           photos.push({
             studentNumber: stdNo,
             photoBase64: `data:image/jpeg;base64,${b64}`,
+            base64Data: `data:image/jpeg;base64,${b64}`,
             fileName: `${stdNo}.jpg`,
-          });
+          } as any);
         } catch (err) {
           console.warn('Fotoğraf okunamadı:', stdNo, err);
         }
@@ -1434,12 +1504,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         return;
       }
 
-      const apiRes = await apiRequest<{ updatedCount: number }>(`uploads/batch-student-photos?schoolId=${selectedSchool.id}`, 'POST', {
+      const apiRes = await apiRequest<{ updatedCount: number; successCount?: number }>(`uploads/batch-student-photos?schoolId=${selectedSchool.id}`, 'POST', {
+        schoolId: selectedSchool.id,
+        schoolCode: selectedSchool.schoolCode,
         photos,
       });
 
       if (apiRes.success) {
-        Alert.alert('Tamamlandı 🎉', `${apiRes.data?.updatedCount || photos.length} öğrencinin fotoğrafı PDF'den başarıyla yüklendi.`);
+        const count = apiRes.data?.updatedCount || apiRes.data?.successCount || photos.length;
+        Alert.alert('Tamamlandı 🎉', `${count} öğrencinin fotoğrafı PDF'den başarıyla yüklendi.`);
         loadStudents(selectedSchool.id);
       } else {
         Alert.alert('Hata', apiRes.error || 'Fotoğraflar sunucuya kaydedilemedi.');
@@ -2752,15 +2825,24 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setExcludedLessons(exclude ? [...(parsedSchedule.lessons || [])] : []);
   };
 
-  const handlePickAndAnalyzeSchedule = async () => {
+  const handlePickAndAnalyzeSchedule = async (targetFormat: 'pdf' | 'excel' = 'pdf') => {
     if (!selectedSchool) {
       Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçin.');
       return;
     }
 
     try {
+      const pickerTypes = targetFormat === 'excel'
+        ? [
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/vnd.ms-excel',
+            'application/vnd.ms-excel.sheet.macroEnabled.12',
+            '*/*',
+          ]
+        : ['image/*', 'application/pdf'];
+
       const pickerResult = await DocumentPicker.getDocumentAsync({
-        type: ['image/*', 'application/pdf'],
+        type: pickerTypes,
         copyToCacheDirectory: true,
       });
 
@@ -2769,6 +2851,22 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       }
 
       const file = pickerResult.assets[0];
+      const fileNameLower = (file.name || '').toLowerCase();
+      const isExcel = targetFormat === 'excel' || fileNameLower.endsWith('.xlsx') || fileNameLower.endsWith('.xls');
+
+      if (isExcel) {
+        try {
+          const b64 = await readUriAsBase64(file.uri);
+          const inspection = inspectExcelWorkbook(b64, file.name || 'carsaf.xlsx');
+          setExcelInspection(inspection);
+          setSelectedExcelSheet(inspection.sheetNames[0] || '');
+          setExcelPreviewModalVisible(true);
+        } catch (err: any) {
+          Alert.alert('Excel Okuma Hatası', err?.message || 'Excel dosyası incelenemedi.');
+        }
+        return;
+      }
+
       setPendingScheduleFile(file);
       if (selectedSchool) {
         const docInfo: CachedScheduleDocInfo = {
@@ -3213,6 +3311,94 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  // --- 6.1 AI İLE EXCEL ÖĞRENCİ YÜKLEME ---
+
+  const handlePickAndParseExcelWithAi = async () => {
+    if (!selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçin.');
+      return;
+    }
+
+    try {
+      const pickerResult = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
+        return;
+      }
+
+      const file = pickerResult.assets[0];
+      setAiStudentModalVisible(true);
+      setAiStudentParsing(true);
+      setAiStudentResult(null);
+
+      const result = await parseStudentsFromExcelWithAi(file.uri, {
+        schoolId: selectedSchool.id,
+        apiKey: selectedSchool.geminiApiKey,
+        model: selectedSchool.geminiModel,
+      });
+
+      setAiStudentParsing(false);
+
+      if (result.success && result.students.length > 0) {
+        setAiStudentResult(result);
+      } else {
+        Alert.alert('AI Ayrıştırma Hatası', result.error || 'Excel dosyasında öğrenci verisi bulunamadı.');
+        setAiStudentModalVisible(false);
+      }
+    } catch (e: any) {
+      setAiStudentParsing(false);
+      Alert.alert('Hata', e.message || 'Excel dosyası okunamadı.');
+      setAiStudentModalVisible(false);
+    }
+  };
+
+  const handleConfirmAndSaveAiStudents = async () => {
+    if (!selectedSchool || !aiStudentResult || aiStudentResult.students.length === 0) return;
+
+    setAiStudentSaving(true);
+    try {
+      // 1. Excel'de tespit edilen sınıflardan sistemde olmayanları sunucuda otomatik oluştur
+      for (const clsTag of aiStudentResult.detectedClasses) {
+        const parts = clsTag.split('-');
+        if (parts.length >= 2) {
+          const grade = parts[0];
+          const section = parts[1];
+          const exists = classes.some(c => c.grade === grade && c.section === section);
+          if (!exists) {
+            await apiRequest(`schools/${selectedSchool.id}/classes`, 'POST', {
+              grade,
+              section,
+              academicYear: '2026-2027',
+            });
+          }
+        }
+      }
+
+      // 2. Öğrencileri toplu sunucuya kaydet
+      const saveRes = await saveParsedStudentsToServer(selectedSchool.id, aiStudentResult.students);
+      if (saveRes.success) {
+        Alert.alert('Başarılı 🎉', saveRes.message);
+        setAiStudentModalVisible(false);
+        setAiStudentResult(null);
+        loadStudents(selectedSchool.id);
+        loadClasses(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', saveRes.message);
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setAiStudentSaving(false);
+    }
+  };
+
   // Oturumu Kapatma ve Çıkış (Web ve Mobil Uyumlu)
   const handleLogout = async () => {
     const doLogout = async () => {
@@ -3568,25 +3754,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         const { getWorkbookSheetNames } = await import('../utils/excelService');
         const sheetNames = await getWorkbookSheetNames(asset as any);
         if (sheetNames.length > 1) {
-          const selected = await new Promise<string | null>((resolve) => {
-            const buttons: any[] = sheetNames.slice(0, 5).map((s) => ({
-              text: s,
-              onPress: () => resolve(s),
-            }));
-            buttons.push({
-              text: 'Vazgeç',
-              style: 'cancel',
-              onPress: () => resolve(null),
-            });
-            Alert.alert(
-              'Çalışma Sayfası (Sheet) Seçin 📑',
-              `"${asset.name}" dosyasında birden fazla sayfa bulundu. Hangi sayfadaki planı aktarmak istiyorsunuz?`,
-              buttons
-            );
-          });
-
-          if (!selected) return;
-          targetSheet = selected;
+          // Birden fazla sheet varsa şık ve sınırsız seçim modalını aç
+          setPlanSheetPickerSheets(sheetNames);
+          setPlanSheetPickerAsset(asset);
+          setPlanSheetPickerLesson(lesson);
+          setPlanSheetPickerVisible(true);
+          return;
+        } else if (sheetNames.length === 1) {
+          targetSheet = sheetNames[0];
         }
       }
 
@@ -3594,6 +3769,27 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       setYearlyPlanModalVisible(true);
 
       const analysis = await analyzeUploadedDocument(asset as any, targetSheet);
+      setDocAnalysis(analysis);
+      setSelectedMapping(analysis.suggestedMapping);
+    } catch (e: any) {
+      Alert.alert('Hata', 'Yıllık plan dosyası okunamadı: ' + e.message);
+      setYearlyPlanModalVisible(false);
+    } finally {
+      setAnalyzingPlanFile(false);
+    }
+  };
+
+  // Sheet seçim modalından bir sayfa seçilince tetiklenir
+  const handleProceedWithPlanSheet = async (selectedSheet: string) => {
+    setPlanSheetPickerVisible(false);
+    if (!planSheetPickerAsset || !planSheetPickerLesson) return;
+
+    setSelectedLessonForPlan(planSheetPickerLesson);
+    setAnalyzingPlanFile(true);
+    setYearlyPlanModalVisible(true);
+
+    try {
+      const analysis = await analyzeUploadedDocument(planSheetPickerAsset as any, selectedSheet);
       setDocAnalysis(analysis);
       setSelectedMapping(analysis.suggestedMapping);
     } catch (e: any) {
@@ -3616,7 +3812,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         docAnalysis.rawRows,
         docAnalysis.headerRowIndex,
         selectedMapping,
-        selectedLessonForPlan.weeklyHours || 2
+        selectedLessonForPlan.weeklyHours || 2,
+        docAnalysis.detectedSchoolYear || new Date().getFullYear()
       );
 
       if (parsedItems.length === 0) {
@@ -3785,9 +3982,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
         const base64 = await readUriAsBase64(file.uri);
 
+        const fullBase64 = `data:image/jpeg;base64,${base64}`;
         photos.push({
           studentNumber,
-          photoBase64: `data:image/jpeg;base64,${base64}`,
+          photoBase64: fullBase64,
+          base64Data: fullBase64,
           fileName: file.name,
         });
       }
@@ -3801,6 +4000,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
       setBulkPhotoProgress(`${photos.length} öğrenci fotoğrafı sunucuya aktarılıyor...`);
       const apiRes = await apiRequest<{ updatedCount: number }>(`uploads/batch-student-photos?schoolId=${selectedSchool.id}`, 'POST', {
+        schoolId: selectedSchool.id,
+        schoolCode: selectedSchool.code,
         photos,
       });
 
@@ -3948,6 +4149,30 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       ]
     );
   };
+
+  // Filtrelenmiş ve Sıralanmış Öğretmen Listesi
+  const filteredTeachers = teachers
+    .filter((t) => {
+      if (teacherLoginFilter === 'logged_in') return !!t.lastLoginAt;
+      if (teacherLoginFilter === 'not_logged_in') return !t.lastLoginAt;
+      return true;
+    })
+    .filter((t) => {
+      if (!teacherSearchQuery.trim()) return true;
+      const q = teacherSearchQuery.trim().toLowerCase();
+      const matchName = (t.fullName || '').toLowerCase().includes(q);
+      const matchUser = (t.username || '').toLowerCase().includes(q);
+      const matchBranch = (t.branch || '').toLowerCase().includes(q);
+      return matchName || matchUser || matchBranch;
+    })
+    .sort((a, b) => {
+      const nameA = (a.fullName || a.username || '').trim();
+      const nameB = (b.fullName || b.username || '').trim();
+      if (teacherSortOrder === 'desc') {
+        return nameB.localeCompare(nameA, 'tr');
+      }
+      return nameA.localeCompare(nameB, 'tr');
+    });
 
   // Filtrelenmiş Öğrenci Listesi
   const filteredStudents = students.filter(s => {
@@ -4436,7 +4661,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </View>
 
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Bağlı Öğretmen Kadrosu ({teachers.length})</Text>
+                  <Text style={styles.sectionTitle}>
+                    Bağlı Öğretmen Kadrosu ({filteredTeachers.length}{filteredTeachers.length !== teachers.length ? ` / ${teachers.length}` : ''})
+                  </Text>
                   <View style={{ flexDirection: 'row', gap: 6 }}>
                     {teachers.length > 0 && (
                       <TouchableOpacity
@@ -4457,19 +4684,62 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </View>
                 </View>
 
-                {teachers.length === 0 ? (
+                {/* Öğretmen Arama & Ada Göre Sıralama Çubuğu */}
+                {teachers.length > 0 && (
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+                    <View style={[styles.searchBox, { flex: 1, marginBottom: 0 }]}>
+                      <Ionicons name="search" size={18} color={Colors.textMuted} />
+                      <TextInput
+                        style={styles.searchInput}
+                        placeholder="Öğretmen adı veya branş ile ara..."
+                        value={teacherSearchQuery}
+                        onChangeText={setTeacherSearchQuery}
+                        placeholderTextColor={Colors.textMuted}
+                      />
+                      {teacherSearchQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setTeacherSearchQuery('')}>
+                          <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    <TouchableOpacity
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: '#EEF2FF',
+                        borderWidth: 1,
+                        borderColor: '#C7D2FE',
+                        borderRadius: 10,
+                        paddingHorizontal: 10,
+                        height: 38,
+                        gap: 4,
+                      }}
+                      onPress={() => setTeacherSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    >
+                      <Ionicons
+                        name={teacherSortOrder === 'desc' ? 'arrow-down' : 'arrow-up'}
+                        size={14}
+                        color="#4F46E5"
+                      />
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#4F46E5' }}>
+                        {teacherSortOrder === 'desc' ? 'Z ➔ A' : 'A ➔ Z'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {filteredTeachers.length === 0 ? (
                   <View style={styles.emptyContainer}>
-                    <Ionicons name="people-outline" size={48} color={Colors.textMuted} />
-                    <Text style={styles.emptyText}>Henüz sisteme eklenmiş bir öğretmen bulunmuyor.</Text>
+                    <Ionicons name={teacherSearchQuery.trim() ? "search-outline" : "people-outline"} size={48} color={Colors.textMuted} />
+                    <Text style={styles.emptyText}>
+                      {teacherSearchQuery.trim()
+                        ? `"${teacherSearchQuery}" aramasına uygun öğretmen bulunamadı.`
+                        : 'Henüz sisteme eklenmiş bir öğretmen bulunmuyor.'}
+                    </Text>
                   </View>
                 ) : (
-                  teachers
-                    .filter((t) => {
-                      if (teacherLoginFilter === 'logged_in') return !!t.lastLoginAt;
-                      if (teacherLoginFilter === 'not_logged_in') return !t.lastLoginAt;
-                      return true;
-                    })
-                    .map((teacher) => (
+                  filteredTeachers.map((teacher) => (
                       <View key={teacher.id} style={styles.cardItem}>
                         <View style={styles.cardHeaderRow}>
                           <View style={styles.teacherAvatar}>
@@ -4692,7 +4962,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             {activeTab === 'lessons' && (
               <View>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Okul Müfredat Dersleri ({lessons.length})</Text>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.sectionTitle}>Okul Müfredat Dersleri ({filteredLessons.length}/{lessons.length})</Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                      Her sınıf düzeyi için yıllık planlar ayrı yüklenir ve programla otomatik eşleşir.
+                    </Text>
+                  </View>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                     {lessons.length > 0 && (
                       <TouchableOpacity
@@ -4721,13 +4996,81 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </View>
                 </View>
 
-                {lessons.length === 0 ? (
+                {/* Arama & Kademe Filtreleri */}
+                <View style={{ backgroundColor: '#F8FAFC', borderRadius: 12, padding: 10, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                  {/* Arama Inputu */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#CBD5E1', marginBottom: 8 }}>
+                    <Ionicons name="search" size={16} color="#94A3B8" />
+                    <TextInput
+                      style={{ flex: 1, marginLeft: 8, fontSize: 13, color: '#1E293B', padding: 0 }}
+                      placeholder="Ders adı, kısa kod veya kademe ara (örn: Seçmeli Fizik, S.FZK, 11)..."
+                      placeholderTextColor="#94A3B8"
+                      value={lessonSearchQuery}
+                      onChangeText={setLessonSearchQuery}
+                    />
+                    {lessonSearchQuery.length > 0 && (
+                      <TouchableOpacity onPress={() => setLessonSearchQuery('')}>
+                        <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Kademe Filtre Butonları */}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    <TouchableOpacity
+                      style={[
+                        { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' },
+                        lessonGradeFilter === 'all' && { backgroundColor: '#4F46E5', borderColor: '#4F46E5' }
+                      ]}
+                      onPress={() => setLessonGradeFilter('all')}
+                    >
+                      <Text style={[{ fontSize: 12, fontWeight: '700', color: '#475569' }, lessonGradeFilter === 'all' && { color: '#FFFFFF' }]}>
+                        Tüm Kademeler ({lessons.length})
+                      </Text>
+                    </TouchableOpacity>
+
+                    {['9', '10', '11', '12'].map((g) => {
+                      const count = lessons.filter(l => String(l.grade || '').trim() === g || String(l.grade || '').trim().startsWith(g)).length;
+                      const isActive = lessonGradeFilter === g;
+                      return (
+                        <TouchableOpacity
+                          key={g}
+                          style={[
+                            { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' },
+                            isActive && { backgroundColor: '#0284C7', borderColor: '#0284C7' }
+                          ]}
+                          onPress={() => setLessonGradeFilter(g as any)}
+                        >
+                          <Text style={[{ fontSize: 12, fontWeight: '700', color: '#475569' }, isActive && { color: '#FFFFFF' }]}>
+                            {g}. Sınıf ({count})
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    <TouchableOpacity
+                      style={[
+                        { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' },
+                        lessonGradeFilter === 'common' && { backgroundColor: '#64748B', borderColor: '#64748B' }
+                      ]}
+                      onPress={() => setLessonGradeFilter('common')}
+                    >
+                      <Text style={[{ fontSize: 12, fontWeight: '700', color: '#475569' }, lessonGradeFilter === 'common' && { color: '#FFFFFF' }]}>
+                        Ortak / Genel ({lessons.filter(l => !l.grade || l.grade === 'Tüm Kademeler' || l.grade === 'Ortak').length})
+                      </Text>
+                    </TouchableOpacity>
+                  </ScrollView>
+                </View>
+
+                {filteredLessons.length === 0 ? (
                   <View style={styles.emptyContainer}>
                     <Ionicons name="book-outline" size={48} color={Colors.textMuted} />
-                    <Text style={styles.emptyText}>Henüz okulunuza kayıtlı ders bulunmuyor.</Text>
+                    <Text style={styles.emptyText}>
+                      {lessons.length === 0 ? 'Henüz okulunuza kayıtlı ders bulunmuyor.' : 'Seçilen filtreye uygun ders bulunamadı.'}
+                    </Text>
                   </View>
                 ) : (
-                  lessons.map((lesson) => {
+                  filteredLessons.map((lesson) => {
                     const lessonPlans = schoolYearlyPlans.filter((p) => {
                       const pName = (p.lessonName || '').trim().toLowerCase();
                       const lName = (lesson.name || '').trim().toLowerCase();
@@ -4740,34 +5083,59 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     });
                     const hasPlan = lessonPlans.length > 0;
 
+                    // Kademe Renk Rozeti
+                    const gradeNum = String(lesson.grade || '').trim();
+                    const isGrade9 = gradeNum === '9';
+                    const isGrade10 = gradeNum === '10';
+                    const isGrade11 = gradeNum === '11';
+                    const isGrade12 = gradeNum === '12';
+                    const badgeBg = isGrade9 ? '#DCFCE7' : isGrade10 ? '#E0F2FE' : isGrade11 ? '#EEF2FF' : isGrade12 ? '#F5F3FF' : '#F1F5F9';
+                    const badgeBorder = isGrade9 ? '#86EFAC' : isGrade10 ? '#7DD3FC' : isGrade11 ? '#C7D2FE' : isGrade12 ? '#DDD6FE' : '#CBD5E1';
+                    const badgeTextColor = isGrade9 ? '#15803D' : isGrade10 ? '#0369A1' : isGrade11 ? '#4338CA' : isGrade12 ? '#6D28D9' : '#475569';
+
                     return (
                       <View key={lesson.id} style={styles.lessonCard}>
                         <View style={{ flex: 1, paddingRight: 8 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <Text style={styles.lessonName}>{lesson.name}</Text>
+                            {/* Belirgin Kademe Rozeti */}
+                            <View style={{
+                              backgroundColor: badgeBg,
+                              borderColor: badgeBorder,
+                              borderWidth: 1.5,
+                              paddingHorizontal: 8,
+                              paddingVertical: 2.5,
+                              borderRadius: 6,
+                            }}>
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: badgeTextColor }}>
+                                {lesson.grade && lesson.grade !== 'Tüm Kademeler' ? `${lesson.grade}. Sınıf` : 'Tüm Kademeler'}
+                              </Text>
+                            </View>
+
+                            <Text style={[styles.lessonName, { fontSize: 15, fontWeight: '800' }]}>{lesson.name}</Text>
                             {lesson.shortCode && (
                               <View style={styles.shortCodeTag}>
                                 <Text style={styles.shortCodeText}>{lesson.shortCode}</Text>
                               </View>
                             )}
                           </View>
-                          <Text style={styles.lessonSub}>
-                            Kademe: {lesson.grade ? `${lesson.grade}. Sınıf` : 'Tüm Kademeler'} • {lesson.weeklyHours || 2} Saat / Hafta
+
+                          <Text style={[styles.lessonSub, { marginTop: 4 }]}>
+                            Haftalık Ders Yükü: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{lesson.weeklyHours || 2} Saat / Hafta</Text>
                           </Text>
 
                           {/* Yıllık Plan Durum Göstergesi */}
                           {hasPlan ? (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                              <Ionicons name="checkmark-circle" size={13} color="#16A34A" />
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#16A34A' }}>
+                              <Ionicons name="checkmark-circle" size={14} color="#16A34A" />
+                              <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#16A34A' }}>
                                 Yıllık Plan Yüklü ({lessonPlans.length} Hafta)
                               </Text>
                             </View>
                           ) : (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
-                              <Ionicons name="alert-circle-outline" size={13} color="#D97706" />
-                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#D97706' }}>
-                                Plan Yüklenmedi
+                              <Ionicons name="alert-circle-outline" size={14} color="#D97706" />
+                              <Text style={{ fontSize: 11.5, fontWeight: '600', color: '#D97706' }}>
+                                Plan Yüklenmedi ({lesson.grade ? `${lesson.grade}. Sınıf Planı Bekleniyor` : 'Genel Plan Bekleniyor'})
                               </Text>
                             </View>
                           )}
@@ -4802,7 +5170,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
                           <TouchableOpacity
                             style={styles.deleteMiniBtn}
-                            onPress={() => handleDeleteLesson(lesson.id, lesson.name)}
+                            onPress={() => handleDeleteLesson(lesson.id, `${lesson.name} (${lesson.grade || 'Tüm Kademeler'})`)}
                           >
                             <Ionicons name="trash-outline" size={15} color="#DC2626" />
                           </TouchableOpacity>
@@ -4873,6 +5241,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     >
                       <Ionicons name="document-text" size={13} color="#fff" />
                       <Text style={styles.primaryAddBtnText}>Excel</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#8B5CF6' }]}
+                      onPress={handlePickAndParseExcelWithAi}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="sparkles" size={13} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>AI ile Excel</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -5156,19 +5533,59 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </TouchableOpacity>
                 )}
 
-                {/* 1. AI ile Çarşaf Yükleme Butonu */}
-                <TouchableOpacity style={styles.aiBanner} onPress={handlePickAndAnalyzeSchedule}>
-                  <View style={styles.aiBannerIcon}>
-                    <Ionicons name="sparkles" size={28} color="#fff" />
-                  </View>
-                  <View style={styles.aiBannerTextContainer}>
-                    <Text style={styles.aiBannerTitle}>AI ile Çarşaf Program Yükle</Text>
-                    <Text style={styles.aiBannerDesc}>
-                      Haftalık çarşaf programı yükleyin; öğretmenler, sınıflar ve dersler yapay zeka ile otomatik kurulsun!
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#6366F1" />
-                </TouchableOpacity>
+                {/* 1. ÇARŞAF PROGRAM YÜKLEME SEÇENEKLERİ (PDF & EXCEL) */}
+                <View style={{ marginBottom: 12, gap: 10 }}>
+                  {/* A) AI ile PDF / Fotoğraf Yükleme Butonu */}
+                  <TouchableOpacity
+                    style={[styles.aiBanner, { marginBottom: 0 }]}
+                    onPress={() => handlePickAndAnalyzeSchedule('pdf')}
+                  >
+                    <View style={styles.aiBannerIcon}>
+                      <Ionicons name="sparkles" size={26} color="#fff" />
+                    </View>
+                    <View style={styles.aiBannerTextContainer}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={styles.aiBannerTitle}>PDF / Fotoğraf ile Çarşaf Yükle</Text>
+                        <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#4F46E5' }}>AI OCR</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.aiBannerDesc}>
+                        PDF veya fotoğraf çarşafını yükleyin; öğretmenler, sınıflar ve dersler yapay zeka ile otomatik taranıp kurulsun.
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#6366F1" />
+                  </TouchableOpacity>
+
+                  {/* B) Excel (.xlsx, .xls) ile Çarşaf Yükleme Butonu */}
+                  <TouchableOpacity
+                    style={[
+                      styles.aiBanner,
+                      {
+                        marginBottom: 0,
+                        borderColor: '#A7F3D0',
+                        backgroundColor: '#F0FDF4',
+                      },
+                    ]}
+                    onPress={() => handlePickAndAnalyzeSchedule('excel')}
+                  >
+                    <View style={[styles.aiBannerIcon, { backgroundColor: '#10B981' }]}>
+                      <Ionicons name="grid" size={24} color="#fff" />
+                    </View>
+                    <View style={styles.aiBannerTextContainer}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={[styles.aiBannerTitle, { color: '#065F46' }]}>Excel Tablosu (.xlsx) ile Çarşaf Yükle</Text>
+                        <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#059669' }}>YENİ</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.aiBannerDesc, { color: '#047857' }]}>
+                        Excel çarşaf tablonuzu yükleyin; sayfaları ve satırları inceleyip doğrudan taslak programa dönüştürün.
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#10B981" />
+                  </TouchableOpacity>
+                </View>
 
                 {/* 1.1 ÇARŞAF PARÇA HAVUZU BANNERI */}
                 <TouchableOpacity
@@ -8177,29 +8594,56 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
             <TextInput
               style={styles.modalInput}
-              placeholder="Ders Adı (Örn: Biyoloji, Geometri)"
+              placeholder="Ders Adı (Örn: Biyoloji, Seçmeli Fizik)"
               value={newLessonName}
               onChangeText={setNewLessonName}
               placeholderTextColor={Colors.textMuted}
             />
             <TextInput
               style={styles.modalInput}
-              placeholder="Kısa Kod (Örn: BYL, GEO)"
+              placeholder="Kısa Kod (Örn: BYL, S.FZK)"
               value={newLessonShortCode}
               onChangeText={setNewLessonShortCode}
               autoCapitalize="characters"
               placeholderTextColor={Colors.textMuted}
             />
+
+            <View style={{ marginBottom: 10 }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
+                Sınıf Düzeyi / Kademe (Her düzeyin planı ayrı yüklenir):
+              </Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                {['9', '10', '11', '12', 'Tüm Kademeler'].map((g) => (
+                  <TouchableOpacity
+                    key={g}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 5,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: newLessonGrade === g ? '#4F46E5' : '#CBD5E1',
+                      backgroundColor: newLessonGrade === g ? '#EEF2FF' : '#FFFFFF',
+                    }}
+                    onPress={() => setNewLessonGrade(g)}
+                  >
+                    <Text style={{ fontSize: 11.5, fontWeight: '700', color: newLessonGrade === g ? '#4F46E5' : '#64748B' }}>
+                      {g.includes('Tüm') ? g : `${g}. Sınıf`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Kademe (Örn: 11 veya Tüm Kademeler)"
+                value={newLessonGrade}
+                onChangeText={setNewLessonGrade}
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+
             <TextInput
               style={styles.modalInput}
-              placeholder="Kademe (Örn: Tüm Kademeler veya 9)"
-              value={newLessonGrade}
-              onChangeText={setNewLessonGrade}
-              placeholderTextColor={Colors.textMuted}
-            />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Haftalık Saat (Örn: 2)"
+              placeholder="Haftalık Saat (Örn: 2, 4)"
               value={newLessonHours}
               onChangeText={setNewLessonHours}
               keyboardType="numeric"
@@ -9034,6 +9478,214 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </Text>
               </TouchableOpacity>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Excel Çarşaf Programı Ön İnceleme ve Yükleme Modalı */}
+      <Modal visible={excelPreviewModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '92%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="grid-outline" size={24} color="#10B981" />
+                <Text style={styles.modalTitle}>Excel Çarşaf Ön İnceleme</Text>
+              </View>
+              <TouchableOpacity onPress={() => setExcelPreviewModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
+              {/* Dosya Bilgi Kartı */}
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: '#ECFDF5',
+                borderRadius: 12,
+                padding: 12,
+                marginBottom: 12,
+                borderWidth: 1,
+                borderColor: '#A7F3D0',
+              }}>
+                <Ionicons name="document-text" size={32} color="#059669" />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#065F46' }} numberOfLines={1}>
+                    {excelInspection?.fileName || 'carsaf.xlsx'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: '#047857', marginTop: 2 }}>
+                    📊 {excelInspection?.sheetNames?.length || 0} Sayfa • Toplam {excelInspection?.totalRows || 0} Satır Bulundu
+                  </Text>
+                </View>
+              </View>
+
+              {/* Bilgilendirme Notu */}
+              <View style={{
+                backgroundColor: '#F0FDF4',
+                borderRadius: 10,
+                padding: 12,
+                marginBottom: 14,
+                borderLeftWidth: 4,
+                borderLeftColor: '#10B981',
+              }}>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#065F46' }}>
+                  💡 Excel Çarşaf Okuma Altyapısı Hazırlandı!
+                </Text>
+                <Text style={{ fontSize: 11, color: '#047857', marginTop: 4, lineHeight: 16 }}>
+                  Örnek Excel çarşafınızı oluşturduktan sonra bize sunduğunuzda hücre ve sütun eşleştirmesi (öğretmenler, ders saatleri, sınıflar) tam otomatik hale getirilecektir. Şimdilik bulunan sayfaları inceleyebilir ve şablonu taslak düzenleyiciye aktarabilirsiniz.
+                </Text>
+              </View>
+
+              {/* Sayfa Seçici Sekmeler (Varsa birden fazla sayfa) */}
+              {(excelInspection?.sheetNames?.length || 0) > 1 && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#334155', marginBottom: 6 }}>
+                    Görüntülenen Sayfa:
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    {excelInspection?.sheets.map((s) => {
+                      const isSelected = selectedExcelSheet === s.name;
+                      return (
+                        <TouchableOpacity
+                          key={s.name}
+                          onPress={() => setSelectedExcelSheet(s.name)}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            borderRadius: 8,
+                            backgroundColor: isSelected ? '#10B981' : '#F1F5F9',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#059669' : '#CBD5E1',
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? '#fff' : '#475569' }}>
+                            {s.name} ({s.rowCount} satır)
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Seçilen Sayfa Önizleme Tablosu */}
+              {(() => {
+                const curSheet = excelInspection?.sheets.find(s => s.name === selectedExcelSheet) || excelInspection?.sheets?.[0];
+                if (!curSheet) return null;
+                const sampleRows = curSheet.sampleRows || [];
+
+                return (
+                  <View style={{
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: '#E2E8F0',
+                    padding: 10,
+                    marginBottom: 16,
+                  }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
+                        Sayfa: {curSheet.name} (İlk {sampleRows.length} Satır)
+                      </Text>
+                      <Text style={{ fontSize: 10, color: '#64748B' }}>
+                        {curSheet.colCount} Sütun • {curSheet.rowCount} Satır
+                      </Text>
+                    </View>
+
+                    <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                      <View>
+                        {sampleRows.map((row, rIdx) => (
+                          <View
+                            key={rIdx}
+                            style={{
+                              flexDirection: 'row',
+                              backgroundColor: rIdx === 0 ? '#F8FAFC' : (rIdx % 2 === 0 ? '#FAFAFA' : '#FFFFFF'),
+                              borderBottomWidth: 1,
+                              borderBottomColor: '#F1F5F9',
+                              paddingVertical: 5,
+                            }}
+                          >
+                            <View style={{ width: 32, alignItems: 'center', justifyContent: 'center' }}>
+                              <Text style={{ fontSize: 10, color: '#94A3B8', fontWeight: '700' }}>{rIdx + 1}</Text>
+                            </View>
+                            {row.map((cell: any, cIdx: number) => (
+                              <View
+                                key={cIdx}
+                                style={{
+                                  width: 100,
+                                  paddingHorizontal: 6,
+                                  justifyContent: 'center',
+                                  borderRightWidth: 1,
+                                  borderRightColor: '#F1F5F9',
+                                }}
+                              >
+                                <Text
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: rIdx === 0 ? '700' : '400',
+                                    color: rIdx === 0 ? '#1E293B' : '#334155',
+                                  }}
+                                  numberOfLines={2}
+                                >
+                                  {cell !== null && cell !== undefined ? String(cell) : ''}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  </View>
+                );
+              })()}
+
+              {/* Aksiyon Butonları */}
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#10B981',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 14,
+                  borderRadius: 12,
+                  gap: 8,
+                  marginBottom: 10,
+                }}
+                onPress={() => {
+                  if (!excelInspection || !selectedSchool) return;
+                  const parsed = parseInitialExcelSchedule(excelInspection, selectedSchool.name);
+                  setParsedSchedule(parsed);
+                  saveParsedScheduleDraft(selectedSchool.id, parsed);
+                  setCachedScheduleDraft(parsed);
+                  setExcelPreviewModalVisible(false);
+                  setAiModalVisible(true);
+                  Alert.alert(
+                    'Excel Taslağı Hazırlandı 📊',
+                    `Excel dosyasından ${parsed.classes.length} sınıf ve ${excelInspection.totalRows} satır tespit edildi. Canlı düzenleyici ekranında açıldı.`
+                  );
+                }}
+              >
+                <Ionicons name="create-outline" size={20} color="#fff" />
+                <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>
+                  Taslak Olarak Aç & Canlı Düzenle ➔
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#F1F5F9',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: '#CBD5E1',
+                }}
+                onPress={() => setExcelPreviewModalVisible(false)}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B' }}>Kapat</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -10559,8 +11211,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   { id: 4, name: 'Perşembe', short: 'Per' },
                   { id: 5, name: 'Cuma', short: 'Cum' },
                 ].map((d) => {
-                  const dayCount = inspectingItems.filter(it => it.dayOfWeek === d.id).length;
+                  const dayLessons = inspectingItems.filter(it => it.dayOfWeek === d.id);
+                  const dayCount = dayLessons.length;
                   const isActive = inspectDayTab === d.id;
+
+                  // Bu günde bu öğretmenin başka öğretmenle çakışan dersi var mı?
+                  const hasDayConflict = dayLessons.some(it => {
+                    const itemClass = `${it.grade}-${it.section}`.toUpperCase().trim();
+                    return (parsedSchedule?.scheduleItems || []).some(ot =>
+                      (ot.teacherName || '').trim().toLowerCase() !== inspectingTeacher.trim().toLowerCase() &&
+                      ot.dayOfWeek === d.id &&
+                      ot.lessonHour === it.lessonHour &&
+                      `${ot.grade}-${ot.section}`.toUpperCase().trim() === itemClass
+                    );
+                  });
+
                   return (
                     <TouchableOpacity
                       key={d.id}
@@ -10573,16 +11238,37 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         paddingVertical: 8,
                         borderRadius: 8,
                         alignItems: 'center',
-                        backgroundColor: isActive ? '#4F46E5' : '#F1F5F9',
-                        borderWidth: 1,
-                        borderColor: isActive ? '#4F46E5' : '#CBD5E1',
+                        backgroundColor: isActive
+                          ? (hasDayConflict ? '#DC2626' : '#4F46E5')
+                          : (hasDayConflict ? '#FEF2F2' : '#F1F5F9'),
+                        borderWidth: hasDayConflict ? 1.5 : 1,
+                        borderColor: isActive
+                          ? (hasDayConflict ? '#B91C1C' : '#4F46E5')
+                          : (hasDayConflict ? '#EF4444' : '#CBD5E1'),
                       }}
                     >
-                      <Text style={{ fontSize: 11, fontWeight: '800', color: isActive ? '#fff' : '#475569' }}>
-                        {d.short}
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: '800',
+                          color: isActive
+                            ? '#FFFFFF'
+                            : (hasDayConflict ? '#DC2626' : '#475569'),
+                        }}
+                      >
+                        {hasDayConflict ? `⚠️ ${d.short}` : d.short}
                       </Text>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: isActive ? '#C7D2FE' : '#94A3B8', marginTop: 2 }}>
-                        {dayCount} Saat
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: '700',
+                          color: isActive
+                            ? (hasDayConflict ? '#FEE2E2' : '#C7D2FE')
+                            : (hasDayConflict ? '#EF4444' : '#94A3B8'),
+                          marginTop: 2,
+                        }}
+                      >
+                        {dayCount} Saat {hasDayConflict ? '(!)' : ''}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -10716,6 +11402,59 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     <TouchableOpacity onPress={() => setEditingCellSlot(null)}>
                       <Ionicons name="close-circle" size={18} color="#6366F1" />
                     </TouchableOpacity>
+                  </View>
+
+                  {/* 0. DERS SAATİ NUMARASI SEÇİMİ */}
+                  <View style={{ marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#312E81' }}>
+                        ⏰ Ders Saati Numarası:
+                      </Text>
+                      <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '900', color: '#1E40AF' }}>
+                          {editingCellSlot.lessonHour}. Ders Saati
+                        </Text>
+                      </View>
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                      <View style={{ flexDirection: 'row', gap: 6, paddingVertical: 2 }}>
+                        {Array.from(
+                          { length: Math.max(10, ...inspectingItems.map(it => it.lessonHour), editingCellSlot.lessonHour) },
+                          (_, i) => i + 1
+                        ).map((h) => {
+                          const isSel = editingCellSlot.lessonHour === h;
+                          const isOccupied = inspectingItems.some(it =>
+                            it.dayOfWeek === editingCellSlot.dayOfWeek &&
+                            it.lessonHour === h &&
+                            !(it.dayOfWeek === (editingCellSlot.originDayOfWeek ?? editingCellSlot.dayOfWeek) &&
+                              it.lessonHour === (editingCellSlot.originLessonHour ?? editingCellSlot.lessonHour))
+                          );
+
+                          return (
+                            <TouchableOpacity
+                              key={h}
+                              onPress={() => setEditingCellSlot({ ...editingCellSlot, lessonHour: h })}
+                              style={{
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                borderRadius: 8,
+                                backgroundColor: isSel ? '#4F46E5' : (isOccupied ? '#FEF3C7' : '#FFFFFF'),
+                                borderWidth: 1.5,
+                                borderColor: isSel ? '#4338CA' : (isOccupied ? '#F59E0B' : '#CBD5E1'),
+                                alignItems: 'center',
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '800', color: isSel ? '#FFFFFF' : (isOccupied ? '#92400E' : '#1E293B') }}>
+                                {h}. Saat
+                              </Text>
+                              {isOccupied && !isSel && (
+                                <Text style={{ fontSize: 8, fontWeight: '700', color: '#B45309' }}>Dolu</Text>
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
                   </View>
 
                   {/* Listbox Seçim Alanı: Öğretmenin Kendi Dersleri ve Sınıfları */}
@@ -11457,6 +12196,144 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
+      {/* 6.1 AI ile Excel Öğrenci Yükleme Onay Modalı */}
+      <Modal visible={aiStudentModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '90%', width: Platform.OS === 'web' ? 700 : '95%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="sparkles" size={22} color="#8B5CF6" />
+                <Text style={styles.modalTitle}>✨ AI ile Excel Öğrenci Aktarımı</Text>
+              </View>
+              <TouchableOpacity onPress={() => setAiStudentModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {aiStudentParsing ? (
+              <View style={styles.aiLoadingContainer}>
+                <ActivityIndicator size="large" color="#8B5CF6" />
+                <Text style={styles.aiLoadingText}>Yapay Zeka Excel Tablosunu Çözümlüyor...</Text>
+                <Text style={styles.aiLoadingSub}>
+                  Sütunlar (Okul No, Ad Soyad, Sınıf, Şube vb.) haritalandırılıyor, boş ve gereksiz satırlar eleniyor.
+                </Text>
+              </View>
+            ) : aiStudentResult && aiStudentResult.students.length > 0 ? (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 10 }}>
+                {/* AI Başlık ve Model Rozeti */}
+                <View style={{ backgroundColor: '#F5F3FF', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#DDD6FE', marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#6D28D9' }}>
+                      🤖 {aiStudentResult.modelUsed || 'Gemini Flash'} ile Çözümlendi
+                    </Text>
+                    {aiStudentResult.schoolName && (
+                      <View style={{ backgroundColor: '#EDE9FE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#5B21B6' }}>
+                          🏫 {aiStudentResult.schoolName}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  {aiStudentResult.aiReason && (
+                    <Text style={{ fontSize: 12, color: '#4C1D95', lineHeight: 18 }}>
+                      {aiStudentResult.aiReason}
+                    </Text>
+                  )}
+                </View>
+
+                {/* İstatistik Sayaçları */}
+                <View style={[styles.previewGrid, { marginBottom: 12 }]}>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#8B5CF6' }]}>{aiStudentResult.students.length}</Text>
+                    <Text style={styles.previewLbl}>Öğrenci</Text>
+                  </View>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#059669' }]}>{aiStudentResult.detectedClasses.length}</Text>
+                    <Text style={styles.previewLbl}>Sınıf / Şube</Text>
+                  </View>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#D97706' }]}>{aiStudentResult.skippedRowsCount}</Text>
+                    <Text style={styles.previewLbl}>Atlanan Satır</Text>
+                  </View>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#64748B' }]}>{aiStudentResult.totalRawRows}</Text>
+                    <Text style={styles.previewLbl}>Toplam Satır</Text>
+                  </View>
+                </View>
+
+                {/* Tespit Edilen Sınıflar Rozetleri */}
+                <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 6 }}>
+                  Tespit Edilen Sınıflar ({aiStudentResult.detectedClasses.length}):
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {aiStudentResult.detectedClasses.map((cls) => (
+                    <View key={cls} style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#4338CA' }}>{cls}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* İlk 6 Öğrenci Önizleme Listesi */}
+                <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.textSecondary, marginBottom: 6 }}>
+                  Örnek Öğrenci Önizlemesi (İlk {Math.min(aiStudentResult.students.length, 6)} Kayıt):
+                </Text>
+                <View style={{ backgroundColor: '#F8FAFC', borderRadius: 10, borderWidth: 1, borderColor: '#E2E8F0', padding: 8, marginBottom: 14 }}>
+                  {aiStudentResult.students.slice(0, 6).map((s, idx) => (
+                    <View
+                      key={idx}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingVertical: 6,
+                        borderBottomWidth: idx < 5 && idx < (aiStudentResult?.students.length ?? 0) - 1 ? 1 : 0,
+                        borderBottomColor: '#F1F5F9',
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                        <View style={{ backgroundColor: '#EDE9FE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#6D28D9' }}>{s.studentNumber}</Text>
+                        </View>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: Colors.text, flex: 1 }} numberOfLines={1}>
+                          {s.fullName}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={{ backgroundColor: '#E0F2FE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#0369A1' }}>
+                            {s.grade}-{s.section}
+                          </Text>
+                        </View>
+                        {s.gender && (
+                          <Text style={{ fontSize: 11, color: Colors.textMuted }}>{s.gender}</Text>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.confirmSaveButton, { backgroundColor: '#8B5CF6' }]}
+                  onPress={handleConfirmAndSaveAiStudents}
+                  disabled={aiStudentSaving}
+                >
+                  {aiStudentSaving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="cloud-upload" size={18} color="#fff" />
+                      <Text style={styles.confirmSaveText}>
+                        {aiStudentResult.students.length} Öğrenciyi Onayla & Sunucuya Aktar
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </ScrollView>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {/* 7. Sınıf Öğrencileri Detay & CRUD Modalı (Yukarıdan Aşağı İnme) */}
       <Modal
         visible={classStudentsModalVisible}
@@ -11758,13 +12635,32 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               placeholderTextColor={Colors.textMuted}
             />
 
-            <Text style={styles.inputLabel}>Kademe (Sınıf Düzeyi)</Text>
+            <Text style={styles.inputLabel}>Kademe (Sınıf Düzeyi - Müfredat Planı Bu Düzeyle Eşleşir)</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {['9', '10', '11', '12', 'Tüm Kademeler'].map((g) => (
+                <TouchableOpacity
+                  key={g}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: editLessonGrade === g ? '#4F46E5' : '#CBD5E1',
+                    backgroundColor: editLessonGrade === g ? '#EEF2FF' : '#FFFFFF',
+                  }}
+                  onPress={() => setEditLessonGrade(g)}
+                >
+                  <Text style={{ fontSize: 11.5, fontWeight: '700', color: editLessonGrade === g ? '#4F46E5' : '#64748B' }}>
+                    {g.includes('Tüm') ? g : `${g}. Sınıf`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
             <TextInput
               style={styles.modalInput}
-              placeholder="Örn: 5 veya boş bırakın"
+              placeholder="Örn: 11 veya Tüm Kademeler"
               value={editLessonGrade}
               onChangeText={setEditLessonGrade}
-              keyboardType="numeric"
               placeholderTextColor={Colors.textMuted}
             />
 
@@ -11793,6 +12689,104 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
+      {/* 3.1.5 Yıllık Plan Excel Çoklu Sheet Seçim Modalı */}
+      <Modal
+        visible={planSheetPickerVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPlanSheetPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 480, maxHeight: '85%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 10, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="layers" size={22} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.modalTitle, { fontSize: 16 }]}>Çalışma Sayfası (Sheet) Seçin</Text>
+                  <Text style={{ fontSize: 12, color: '#64748B', marginTop: 1 }} numberOfLines={1}>
+                    {planSheetPickerLesson?.name} ({planSheetPickerLesson?.grade ? `${planSheetPickerLesson.grade}. Sınıf` : 'Tüm Kademeler'}) • {planSheetPickerAsset?.name}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setPlanSheetPickerVisible(false)}
+                style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="close" size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#BBF7D0', padding: 10, borderRadius: 8, marginVertical: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="information-circle" size={16} color="#16A34A" />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#166534' }}>
+                  Bu Excel dosyasında {planSheetPickerSheets.length} adet çalışma sayfası bulundu.
+                </Text>
+              </View>
+              <Text style={{ fontSize: 11.5, color: '#15803D', marginTop: 3, lineHeight: 16 }}>
+                Yıllık plan konularını ve kazanımlarını aktarmak istediğiniz sayfayı listeden seçiniz:
+              </Text>
+            </View>
+
+            <ScrollView
+              style={{ maxHeight: 320, marginVertical: 4 }}
+              contentContainerStyle={{ gap: 8, paddingBottom: 6 }}
+              showsVerticalScrollIndicator={true}
+            >
+              {planSheetPickerSheets.map((sheetName, sIdx) => (
+                <TouchableOpacity
+                  key={sIdx}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: '#FFFFFF',
+                    borderWidth: 1.5,
+                    borderColor: '#E2E8F0',
+                    borderRadius: 10,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                  }}
+                  onPress={() => handleProceedWithPlanSheet(sheetName)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 6, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="document-text-outline" size={17} color="#4F46E5" />
+                    </View>
+                    <Text style={{ fontSize: 13.5, fontWeight: '700', color: '#1E293B' }} numberOfLines={1}>
+                      {sheetName}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>Seç</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#4F46E5" />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={{
+                marginTop: 10,
+                paddingVertical: 12,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderColor: '#CBD5E1',
+                backgroundColor: '#F8FAFC',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onPress={() => setPlanSheetPickerVisible(false)}
+            >
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748B' }}>İptal / Vazgeç</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* 3.2 Yıllık Plan Yükleme & Sütun Eşleştirme Modalı */}
       <Modal visible={yearlyPlanModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -11800,9 +12794,23 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.modalTitle}>📋 Yıllık Plan Yükle & Eşleştir</Text>
-                <Text style={styles.headerSubtitle} numberOfLines={1}>
-                  {selectedLessonForPlan?.name} ({docAnalysis?.fileName || 'Dosya Analizi'})
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, flexWrap: 'wrap' }}>
+                  <Text style={[styles.headerSubtitle, { fontWeight: '800', color: '#1E293B' }]} numberOfLines={1}>
+                    {selectedLessonForPlan?.name}
+                  </Text>
+                  <View style={{
+                    backgroundColor: '#EEF2FF',
+                    borderColor: '#C7D2FE',
+                    borderWidth: 1,
+                    paddingHorizontal: 7,
+                    paddingVertical: 1.5,
+                    borderRadius: 4,
+                  }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#4338CA' }}>
+                      🎯 Hedef Kademe: {selectedLessonForPlan?.grade && selectedLessonForPlan.grade !== 'Tüm Kademeler' ? `${selectedLessonForPlan.grade}. Sınıf` : 'Tüm Kademeler'}
+                    </Text>
+                  </View>
+                </View>
               </View>
               <TouchableOpacity onPress={() => setYearlyPlanModalVisible(false)}>
                 <Ionicons name="close" size={24} color={Colors.text} />
@@ -11831,6 +12839,39 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     <Ionicons name="sparkles" size={16} color="#7C3AED" />
                     <Text style={styles.mappingAiReasonText}>
                       {docAnalysis.aiReason}
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* 🧮 Ders Saati ve Hafta Matematiği Bilgilendirme Kartı */}
+                {docAnalysis.detectedTotalHours && docAnalysis.detectedWeeklyHours ? (
+                  <View style={{ backgroundColor: '#F0FDF4', borderRadius: 8, borderWidth: 1, borderColor: '#BBF7D0', padding: 10, marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="calculator-outline" size={16} color="#16A34A" />
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#166534' }}>
+                        MEB Müfredat Saati Matematiği:
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11.5, color: '#15803D', marginTop: 3, lineHeight: 16 }}>
+                      Belgede tespit edilen: Yıllık Toplam <Text style={{ fontWeight: '800' }}>{docAnalysis.detectedTotalHours} Saat</Text> ÷ Haftalık <Text style={{ fontWeight: '800' }}>{docAnalysis.detectedWeeklyHours} Saat</Text> = <Text style={{ fontWeight: '800', color: '#166534' }}>{docAnalysis.calculatedWeeks || Math.round(docAnalysis.detectedTotalHours / docAnalysis.detectedWeeklyHours)} Hafta</Text>
+                    </Text>
+                  </View>
+                ) : null}
+
+                {/* 🌴 Dönem Arası Tatiller Bilgilendirme Kartı */}
+                {docAnalysis.detectedHolidays && docAnalysis.detectedHolidays.length > 0 ? (
+                  <View style={{ backgroundColor: '#FFFBEB', borderRadius: 8, borderWidth: 1, borderColor: '#FDE68A', padding: 10, marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="sunny-outline" size={16} color="#D97706" />
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#B45309' }}>
+                        Dönem Arası Tatiller Tespit Edildi ({docAnalysis.detectedHolidays.length} Ara/Tatil):
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11.5, color: '#92400E', marginTop: 3, lineHeight: 16 }}>
+                      {docAnalysis.detectedHolidays.join(' • ')}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#B45309', marginTop: 3, fontStyle: 'italic' }}>
+                      Tatil haftaları eğitim dersi sayımından hariç tutularak hafta numaraları eksiksiz ve tutarlı şekilde dengelendi.
                     </Text>
                   </View>
                 ) : null}

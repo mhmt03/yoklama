@@ -114,10 +114,10 @@ export async function extractStudentPhotosWithAi(
       console.log(LOG, '1. Adım: PDF belgesi taranıyor...');
       onProgress?.('PDF içerisindeki fotoğraf ve metin akışları inceleniyor...');
 
-      // Önce PDF akışından fotoğrafları algıla
+      // Önce PDF akışından fotoğrafları algıla (kullanıcıya tekrar dosya seçtirmez, mevcut dosya kullanılır)
       let streamPhotos: any[] = [];
       try {
-        const streamRes = await extractPhotosFromPdf(students);
+        const streamRes = await extractPhotosFromPdf(students, fileUri);
         if (streamRes.success && streamRes.extractedPhotos?.length) {
           streamPhotos = streamRes.extractedPhotos;
           console.log(LOG, `PDF akışından ${streamPhotos.length} fotoğraf ham olarak çıkarıldı.`);
@@ -312,13 +312,17 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
     const payloadPhotos = resultPhotos.map((p) => ({
       studentNumber: p.studentNumber,
       photoBase64: p.photoBase64,
+      base64Data: p.photoBase64,
       fileName: p.fileName,
     }));
 
-    const uploadRes = await apiRequest<{ updatedCount: number }>(
+    const uploadRes = await apiRequest<{ updatedCount?: number; successCount?: number }>(
       `uploads/batch-student-photos?schoolId=${schoolId}`,
       'POST',
-      { photos: payloadPhotos }
+      {
+        schoolId,
+        photos: payloadPhotos
+      }
     );
 
     if (uploadRes.success) {

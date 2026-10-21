@@ -367,6 +367,7 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             // 2. Dersleri Ders Havuzuna Eşle / Ekle
+            // 2. Dersleri Ders Havuzuna Eşle / Ekle (Kademe bazlı)
             int addedLessonsCount = 0;
             if (request.SyncLessons && ((request.Lessons != null && request.Lessons.Count > 0) || (request.LessonDetails != null && request.LessonDetails.Count > 0)))
             {
@@ -374,29 +375,103 @@ namespace OgretmenAjanda.Api.Controllers
                     .Where(l => l.SchoolId == request.SchoolId)
                     .ToListAsync();
 
-                var lessonNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (request.Lessons != null)
-                {
-                    foreach (var l in request.Lessons) if (!string.IsNullOrWhiteSpace(l)) lessonNames.Add(l.Trim());
-                }
+                // 2.1 LessonDetails üzerinden kademe bazlı dersleri topla
+                var targets = new List<BatchScheduleLessonDetail>();
+                var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
                 if (request.LessonDetails != null)
                 {
-                    foreach (var ld in request.LessonDetails) if (!string.IsNullOrWhiteSpace(ld.Name)) lessonNames.Add(ld.Name.Trim());
+                    foreach (var ld in request.LessonDetails)
+                    {
+                        if (string.IsNullOrWhiteSpace(ld.Name)) continue;
+                        string cleanName = ld.Name.Trim();
+                        string grade = !string.IsNullOrWhiteSpace(ld.Grade) ? ld.Grade.Trim() : "Tüm Kademeler";
+                        string key = $"{cleanName}__{grade}";
+                        if (!seenKeys.Contains(key))
+                        {
+                            seenKeys.Add(key);
+                            targets.Add(new BatchScheduleLessonDetail
+                            {
+                                Name = cleanName,
+                                Grade = grade,
+                                Code = ld.Code?.Trim(),
+                                WeeklyHours = ld.WeeklyHours
+                            });
+                        }
+                    }
                 }
 
-                foreach (var cleanLesson in lessonNames)
+                // 2.2 LessonDetails'ta olmayan ama Lessons veya Schedules içinde yer alan dersleri tamamla
+                if (request.Lessons != null)
                 {
-                    var detail = request.LessonDetails?.FirstOrDefault(ld => string.Equals(ld.Name.Trim(), cleanLesson, StringComparison.OrdinalIgnoreCase));
-                    int realWeeklyHours = (detail != null && detail.WeeklyHours.HasValue && detail.WeeklyHours.Value > 0) ? detail.WeeklyHours.Value : 2;
-                    string shortCode = detail?.Code?.Trim() ?? (cleanLesson.Length > 3 ? cleanLesson.Substring(0, 3).ToUpper() : cleanLesson.ToUpper());
-                    string grade = !string.IsNullOrWhiteSpace(detail?.Grade) ? detail.Grade.Trim() : "Tüm Kademeler";
+                    foreach (var l in request.Lessons)
+                    {
+                        if (string.IsNullOrWhiteSpace(l)) continue;
+                        string cleanName = l.Trim();
 
-                    var existing = existingLessons.FirstOrDefault(l => string.Equals(l.Name.Trim(), cleanLesson, StringComparison.OrdinalIgnoreCase));
+                        // Schedules listesinden bu dersin hangi sınıflarda/kademelerde verildiğini tespit et
+                        var matchedGrades = request.Schedules?
+                            .Where(s => string.Equals(s.LessonName?.Trim(), cleanName, StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(s.LessonCode?.Trim(), cleanName, StringComparison.OrdinalIgnoreCase))
+                            .Select(s => s.Grade?.Trim())
+                            .Where(g => !string.IsNullOrWhiteSpace(g))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+
+                        if (matchedGrades != null && matchedGrades.Count > 0)
+                        {
+                            foreach (var mg in matchedGrades)
+                            {
+                                string key = $"{cleanName}__{mg}";
+                                if (!seenKeys.Contains(key))
+                                {
+                                    seenKeys.Add(key);
+                                    targets.Add(new BatchScheduleLessonDetail
+                                    {
+                                        Name = cleanName,
+                                        Grade = mg,
+                                        WeeklyHours = 2
+                                    });
+                                }
+                            }
+                        }
+                        else
+                        {
+                            string key = $"{cleanName}__Tüm Kademeler";
+                            if (!seenKeys.Contains(key))
+                            {
+                                seenKeys.Add(key);
+                                targets.Add(new BatchScheduleLessonDetail
+                                {
+                                    Name = cleanName,
+                                    Grade = "Tüm Kademeler",
+                                    WeeklyHours = 2
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // 2.3 Her ders/kademe çifti için veritabanını güncelle veya ekle
+                foreach (var item in targets)
+                {
+                    int realWeeklyHours = (item.WeeklyHours.HasValue && item.WeeklyHours.Value > 0) ? item.WeeklyHours.Value : 2;
+                    string shortCode = item.Code?.Trim() ?? (item.Name.Length > 3 ? item.Name.Substring(0, 3).ToUpper() : item.Name.ToUpper());
+                    string grade = item.Grade ?? "Tüm Kademeler";
+
+                    var existing = existingLessons.FirstOrDefault(l =>
+                        string.Equals(l.Name.Trim(), item.Name, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals((l.Grade ?? "Tüm Kademeler").Trim(), grade, StringComparison.OrdinalIgnoreCase));
+
                     if (existing != null)
                     {
-                        if (detail != null && detail.WeeklyHours.HasValue && detail.WeeklyHours.Value > 0 && existing.WeeklyHours != detail.WeeklyHours.Value)
+                        if (item.WeeklyHours.HasValue && item.WeeklyHours.Value > 0 && existing.WeeklyHours != item.WeeklyHours.Value)
                         {
-                            existing.WeeklyHours = detail.WeeklyHours.Value;
+                            existing.WeeklyHours = item.WeeklyHours.Value;
+                        }
+                        if (!string.IsNullOrWhiteSpace(item.Code) && string.IsNullOrWhiteSpace(existing.ShortCode))
+                        {
+                            existing.ShortCode = item.Code.Trim();
                         }
                     }
                     else
@@ -405,7 +480,7 @@ namespace OgretmenAjanda.Api.Controllers
                         {
                             Id = Guid.NewGuid(),
                             SchoolId = request.SchoolId,
-                            Name = cleanLesson,
+                            Name = item.Name,
                             ShortCode = shortCode,
                             Grade = grade,
                             WeeklyHours = realWeeklyHours,
@@ -1646,14 +1721,26 @@ namespace OgretmenAjanda.Api.Controllers
             // Eğer OverwriteExisting true ise, bu ders/kademelere ait mevcut satırları temizle
             if (request.OverwriteExisting)
             {
-                var lessonNames = request.PlanItems.Select(p => p.LessonName.Trim().ToLower()).Distinct().ToList();
-                var oldItems = await _context.YearlyPlanItems
-                    .Where(p => p.SchoolId == request.SchoolId && lessonNames.Contains(p.LessonName.ToLower()))
+                var keys = request.PlanItems
+                    .Select(p => new {
+                        Name = p.LessonName.Trim().ToLower(),
+                        Grade = (p.Grade ?? "Tüm Kademeler").Trim().ToLower()
+                    })
+                    .Distinct()
+                    .ToList();
+
+                var allOld = await _context.YearlyPlanItems
+                    .Where(p => p.SchoolId == request.SchoolId)
                     .ToListAsync();
 
-                if (oldItems.Any())
+                var toRemove = allOld.Where(old => keys.Any(k =>
+                    string.Equals(old.LessonName.Trim(), k.Name, StringComparison.OrdinalIgnoreCase) &&
+                    (k.Grade == "tüm kademeler" || string.Equals((old.Grade ?? "Tüm Kademeler").Trim(), k.Grade, StringComparison.OrdinalIgnoreCase))
+                )).ToList();
+
+                if (toRemove.Any())
                 {
-                    _context.YearlyPlanItems.RemoveRange(oldItems);
+                    _context.YearlyPlanItems.RemoveRange(toRemove);
                 }
             }
 
