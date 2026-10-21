@@ -62,6 +62,12 @@ export interface ParsedScheduleResult {
  * fetch + blob + FileReader + copyAsync fallback'li güvenli base64 okuyucu.
  */
 export async function readUriAsBase64(fileUri: string): Promise<string> {
+  // 0. Data URI kontrolü (Web ve önceden kodlanmış içerikler için doğrudan ayrıştır)
+  if (fileUri.startsWith('data:')) {
+    const parts = fileUri.split(',');
+    return parts.length > 1 ? parts[1] : parts[0];
+  }
+
   // 1. fetch -> blob -> FileReader (Android DocumentPicker cache/content URI ve Web için en sağlam yöntem)
   try {
     const response = await fetch(fileUri);
@@ -299,7 +305,7 @@ export function parseJsonLenient(raw: string): { data: any; repaired: boolean } 
 
   // 2. Kök öğe ({...} veya [...]) bitişini parantez derinliği ile bulup sondaki fazla metinleri kırp
   const openChar = text[0];
-  const closeChar = openChar === '{' ? '}' : ']';
+  const isArray = openChar === '[';
   let depth = 0;
   let inStr = false;
   let esc = false;
@@ -314,9 +320,9 @@ export function parseJsonLenient(raw: string): { data: any; repaired: boolean } 
     }
     if (ch === '"') {
       inStr = true;
-    } else if (ch === openChar) {
+    } else if (ch === '{' || ch === '[') {
       depth++;
-    } else if (ch === closeChar) {
+    } else if (ch === '}' || ch === ']') {
       depth--;
       if (depth === 0) {
         matchingEnd = i + 1;
@@ -343,33 +349,55 @@ export function parseJsonLenient(raw: string): { data: any; repaired: boolean } 
   } catch {}
 
   // 4. Kesilmiş JSON onarımı (Token limitinden dolayı yarım kesilmiş diziler/nesneler)
-  const stack: string[] = [];
-  inStr = false;
-  esc = false;
-  let lastSafe = -1;
-  let safeStack: string[] = [];
-  for (let i = 0; i < noTrailing.length; i++) {
-    const ch = noTrailing[i];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (ch === '\\') esc = true;
-      else if (ch === '"') inStr = false;
-      continue;
-    }
-    if (ch === '"') inStr = true;
-    else if (ch === '{') stack.push('}');
-    else if (ch === '[') stack.push(']');
-    else if (ch === '}' || ch === ']') {
-      stack.pop();
-      if (stack.length >= 1) {
-        lastSafe = i + 1;
-        safeStack = [...stack];
+  try {
+    const stack: string[] = [];
+    inStr = false;
+    esc = false;
+    let lastSafe = -1;
+    let safeStack: string[] = [];
+    for (let i = 0; i < noTrailing.length; i++) {
+      const ch = noTrailing[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') inStr = true;
+      else if (ch === '{') stack.push('}');
+      else if (ch === '[') stack.push(']');
+      else if (ch === '}' || ch === ']') {
+        stack.pop();
+        if (stack.length >= 1) {
+          lastSafe = i + 1;
+          safeStack = [...stack];
+        }
       }
     }
-  }
-  if (lastSafe < 0) throw new Error('JSON onarılamadı (yanıt çok kısa kesilmiş).');
-  const fixed = noTrailing.slice(0, lastSafe).replace(/,\s*$/, '') + safeStack.reverse().join('');
-  return { data: JSON.parse(fixed), repaired: true };
+    if (lastSafe > 0) {
+      const fixed = noTrailing.slice(0, lastSafe).replace(/,\s*$/, '') + safeStack.reverse().join('');
+      return { data: JSON.parse(fixed), repaired: true };
+    }
+  } catch {}
+
+  // 5. REGEX FALLBACK: Kök nesne veya dizi bozulmuşsa bağımsız nesneleri tek tek çek
+  try {
+    const objRegex = /\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g;
+    const matches = noTrailing.match(objRegex);
+    if (matches && matches.length > 0) {
+      const items: any[] = [];
+      for (const m of matches) {
+        try {
+          items.push(JSON.parse(m.replace(/,\s*([}\]])/g, '$1')));
+        } catch {}
+      }
+      if (items.length > 0) {
+        return { data: isArray ? items : items[0], repaired: true };
+      }
+    }
+  } catch {}
+
+  throw new Error('Yapay zeka yanıtı geçerli bir JSON formatına dönüştürülemedi.');
 }
 
 export interface ScheduleParseOptions {

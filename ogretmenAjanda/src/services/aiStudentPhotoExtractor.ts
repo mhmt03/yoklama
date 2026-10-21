@@ -194,7 +194,12 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
           },
         ]);
 
-        const rawText = visionRes.response.text().trim();
+        let rawText = '';
+        try {
+          rawText = visionRes.response.text().trim();
+        } catch (textErr: any) {
+          console.warn(LOG, 'visionRes.response.text() hatası:', textErr);
+        }
         console.log(LOG, 'Gemini Vision PDF yanıtı:', rawText.slice(0, 300));
         let detectedItems: any[] = [];
         try {
@@ -283,7 +288,12 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
         },
       ]);
 
-      const rawText = visionRes.response.text().trim();
+      let rawText = '';
+      try {
+        rawText = visionRes.response.text().trim();
+      } catch (textErr: any) {
+        console.warn(LOG, 'visionRes.response.text() hatası:', textErr);
+      }
       console.log(LOG, 'Gemini Vision Yanıtı (ilk 300 karakter):', rawText.slice(0, 300));
       let detectedBoxes: any[] = [];
       try {

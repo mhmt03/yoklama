@@ -640,8 +640,12 @@ export const extractPhotosFromPdf = async (
 
     console.log(`[PDF Fotoğraf] PDF baytları hafızaya alındı (${(buf.length / 1024).toFixed(1)} KB). Resim nesneleri taranıyor...`);
 
-    // Latin-1 string for text scanning (binary-safe)
-    const text = Array.from(buf).map(b => String.fromCharCode(b)).join('');
+    // Latin-1 string for text scanning (binary-safe & chunked to avoid browser memory spikes)
+    let text = '';
+    const chunkSz = 32768;
+    for (let ci = 0; ci < buf.length; ci += chunkSz) {
+      text += String.fromCharCode.apply(null, buf.subarray(ci, Math.min(ci + chunkSz, buf.length)) as any);
+    }
 
     // 1. Parse image objects (all pages, binary order)
     const allImgs = parsePdfImageObjs(text, buf);
