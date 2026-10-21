@@ -105,11 +105,14 @@ export const HomeScreen: React.FC = () => {
   const loadSchools = async () => {
     try {
       const session = await getActiveUserSession();
-      const isInst = !!(session?.schoolCode || session?.schoolId || (session?.affiliatedSchools && session.affiliatedSchools.length > 0));
+      const affSchools = (session?.affiliatedSchools && session.affiliatedSchools.length > 0)
+        ? session.affiliatedSchools
+        : (session?.schoolName ? [{ id: session.schoolCode || 'OKL-10001', name: session.schoolName, code: session.schoolCode || 'OKL-10001', geminiApiKey: session.geminiApiKey, geminiModel: session.geminiModel }] : []);
+      const isInst = !!(session?.schoolCode || session?.schoolId || affSchools.length > 0);
       setIsInstitutionalTeacher(isInst);
 
-      if (isInst && session?.affiliatedSchools && session.affiliatedSchools.length > 0) {
-        await syncAffiliatedSchools(session.affiliatedSchools, session.schoolCode);
+      if (isInst && affSchools.length > 0) {
+        await syncAffiliatedSchools(affSchools, session?.schoolCode || affSchools[0]?.code);
       }
 
       // Her zaman varsayılan okulu etkinleştir

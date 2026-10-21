@@ -1,5 +1,6 @@
 import { getDB } from '../db';
 import { setGeminiApiKey, setGeminiModel } from '../../utils/geminiScheduleService';
+import { getActiveUserSession } from '../../services/apiClient';
 
 export interface School {
   id: number;
@@ -23,20 +24,82 @@ export const SCHOOL_COLORS = [
 
 export const getSchools = async (): Promise<School[]> => {
   const db = await getDB();
-  return await db.getAllAsync<School>('SELECT * FROM schools ORDER BY id ASC');
+  const allSchools = await db.getAllAsync<School>('SELECT * FROM schools ORDER BY id ASC');
+
+  try {
+    const session = await getActiveUserSession();
+    const isTeacherOrStaff = session && (session.role === 'TEACHER' || session.role === 'STAFF');
+    if (isTeacherOrStaff) {
+      const affSchools = (session.affiliatedSchools && session.affiliatedSchools.length > 0)
+        ? session.affiliatedSchools
+        : (session.schoolName ? [{ name: session.schoolName, code: session.schoolCode || 'OKL-10001' }] : []);
+
+      if (affSchools.length > 0) {
+        const allowedCodes = new Set(affSchools.map(s => s.code?.trim().toUpperCase()).filter(Boolean));
+        const allowedNames = new Set(affSchools.map(s => s.name?.trim().toLowerCase()).filter(Boolean));
+
+        const filtered = allSchools.filter(s => 
+          (s.code && allowedCodes.has(s.code.trim().toUpperCase())) ||
+          allowedNames.has(s.name.trim().toLowerCase())
+        );
+
+        if (filtered.length > 0) {
+          return filtered;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Error filtering schools by session:', err);
+  }
+
+  return allSchools;
 };
 
 export const getActiveSchool = async (): Promise<School | null> => {
   const db = await getDB();
-  const school = await db.getFirstAsync<School>('SELECT * FROM schools WHERE is_active = 1 LIMIT 1');
-  if (school) return school;
 
-  // Fallback: Return first school if none active
-  const firstSchool = await db.getFirstAsync<School>('SELECT * FROM schools ORDER BY id ASC LIMIT 1');
-  if (firstSchool) {
+  let allowedCodes: Set<string> | null = null;
+  let allowedNames: Set<string> | null = null;
+
+  try {
+    const session = await getActiveUserSession();
+    const isTeacherOrStaff = session && (session.role === 'TEACHER' || session.role === 'STAFF');
+    if (isTeacherOrStaff) {
+      const affSchools = (session.affiliatedSchools && session.affiliatedSchools.length > 0)
+        ? session.affiliatedSchools
+        : (session.schoolName ? [{ name: session.schoolName, code: session.schoolCode || 'OKL-10001' }] : []);
+
+      if (affSchools.length > 0) {
+        allowedCodes = new Set(affSchools.map(s => s.code?.trim().toUpperCase()).filter(Boolean));
+        allowedNames = new Set(affSchools.map(s => s.name?.trim().toLowerCase()).filter(Boolean));
+      }
+    }
+  } catch {}
+
+  const activeSchool = await db.getFirstAsync<School>('SELECT * FROM schools WHERE is_active = 1 LIMIT 1');
+  if (activeSchool) {
+    if (allowedCodes && allowedNames) {
+      const isAllowed = (activeSchool.code && allowedCodes.has(activeSchool.code.trim().toUpperCase())) ||
+                        allowedNames.has(activeSchool.name.trim().toLowerCase());
+      if (isAllowed) return activeSchool;
+    } else {
+      return activeSchool;
+    }
+  }
+
+  // Fallback: Return first allowed school
+  const allSchools = await db.getAllAsync<School>('SELECT * FROM schools ORDER BY id ASC');
+  const validSchools = (allowedCodes && allowedNames)
+    ? allSchools.filter(s => (s.code && allowedCodes.has(s.code.trim().toUpperCase())) || allowedNames.has(s.name.trim().toLowerCase()))
+    : allSchools;
+
+  if (validSchools.length > 0) {
+    const firstSchool = validSchools[0];
+    await db.runAsync('UPDATE schools SET is_active = 0');
     await db.runAsync('UPDATE schools SET is_active = 1 WHERE id = ?', firstSchool.id);
     return { ...firstSchool, is_active: 1 };
   }
+
   return null;
 };
 
@@ -176,13 +239,10 @@ export const syncAffiliatedSchools = async (
   const db = await getDB();
   const currentSchools = await db.getAllAsync<School>('SELECT * FROM schools');
 
-  let activeSet = false;
-
   for (let i = 0; i < affiliatedSchools.length; i++) {
     const item = affiliatedSchools[i];
     const cleanCode = item.code?.trim().toUpperCase();
     const cleanName = item.name?.trim();
-    const isTarget = primaryCode && cleanCode === primaryCode.trim().toUpperCase();
 
     const existing = currentSchools.find(
       s => (s.code && s.code.trim().toUpperCase() === cleanCode) || s.name.trim().toLowerCase() === cleanName.toLowerCase()
@@ -206,6 +266,38 @@ export const syncAffiliatedSchools = async (
     }
   }
 
+  // Okul listesini SQLite'dan tekrar alıp kuruma AİT OLMAYAN okulları temizleyelim
+  const updatedDbSchools = await db.getAllAsync<School>('SELECT * FROM schools');
+  const allowedCodes = new Set(affiliatedSchools.map(s => s.code?.trim().toUpperCase()).filter(Boolean));
+  const allowedNames = new Set(affiliatedSchools.map(s => s.name?.trim().toLowerCase()).filter(Boolean));
+
+  const validSchoolIds: number[] = [];
+  const schoolsToDelete: School[] = [];
+
+  for (const sch of updatedDbSchools) {
+    const codeMatch = sch.code && allowedCodes.has(sch.code.trim().toUpperCase());
+    const nameMatch = allowedNames.has(sch.name.trim().toLowerCase());
+    if (codeMatch || nameMatch) {
+      validSchoolIds.push(sch.id);
+    } else {
+      schoolsToDelete.push(sch);
+    }
+  }
+
+  // Kuruma ait olmayan (örneğin Merkez Okulu, deneme amaçlı açılan dfgsdfg gibi) okulları temizle
+  for (const del of schoolsToDelete) {
+    try {
+      await db.runAsync('DELETE FROM schedule_items WHERE school_id = ?', del.id);
+      await db.runAsync('DELETE FROM students WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?)', del.id);
+      await db.runAsync('DELETE FROM assignments WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?)', del.id);
+      await db.runAsync('DELETE FROM classes WHERE school_id = ?', del.id);
+      await db.runAsync('DELETE FROM agenda_items WHERE school_id = ?', del.id);
+      await db.runAsync('DELETE FROM schools WHERE id = ?', del.id);
+    } catch (cleanErr) {
+      console.warn('Kurum dışı eski okul temizlenirken hata:', del.name, cleanErr);
+    }
+  }
+
   // Okulun Gemini API Key ve Modelini SQLite'a kaydet (böylece tüm öğretmenler ortak anahtarı kullanır)
   const targetItem = affiliatedSchools.find(
     s => primaryCode && s.code?.trim().toUpperCase() === primaryCode.trim().toUpperCase()
@@ -218,24 +310,33 @@ export const syncAffiliatedSchools = async (
     await setGeminiModel(targetItem.geminiModel);
   }
 
-  // Şimdi hedef okulu (primaryCode) aktif ve varsayılan yap
+  // Hedef okulu (primaryCode) veya ilk okulu aktif ve varsayılan yap
+  let targetSchool: School | null = null;
   if (primaryCode) {
-    const targetSchool = await db.getFirstAsync<School>(
+    targetSchool = await db.getFirstAsync<School>(
       'SELECT * FROM schools WHERE UPPER(code) = ? LIMIT 1',
       primaryCode.trim().toUpperCase()
     );
-    if (targetSchool) {
-      await db.runAsync('UPDATE schools SET is_active = 0');
-      await db.runAsync('UPDATE schools SET is_active = 1 WHERE id = ?', targetSchool.id);
-      
-      const currentDef = await db.getFirstAsync<{ value: string }>(
-        "SELECT value FROM app_settings WHERE key = 'default_school_id'"
-      );
-      if (!currentDef?.value) {
-        await setDefaultSchoolId(targetSchool.id);
-      }
-      return { ...targetSchool, is_active: 1 };
+  }
+  if (!targetSchool && validSchoolIds.length > 0) {
+    targetSchool = await db.getFirstAsync<School>(
+      'SELECT * FROM schools WHERE id = ? LIMIT 1',
+      validSchoolIds[0]
+    );
+  }
+
+  if (targetSchool) {
+    await db.runAsync('UPDATE schools SET is_active = 0');
+    await db.runAsync('UPDATE schools SET is_active = 1 WHERE id = ?', targetSchool.id);
+
+    const currentDef = await db.getFirstAsync<{ value: string }>(
+      "SELECT value FROM app_settings WHERE key = 'default_school_id'"
+    );
+    const defId = currentDef?.value ? parseInt(currentDef.value, 10) : null;
+    if (!defId || !validSchoolIds.includes(defId)) {
+      await setDefaultSchoolId(targetSchool.id);
     }
+    return { ...targetSchool, is_active: 1 };
   }
 
   return await getActiveSchool();
