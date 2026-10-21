@@ -196,7 +196,23 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
 
         const rawText = visionRes.response.text().trim();
         console.log(LOG, 'Gemini Vision PDF yanıtı:', rawText.slice(0, 300));
-        const { data: detectedItems } = parseJsonLenient(rawText);
+        let detectedItems: any[] = [];
+        try {
+          const parsed = parseJsonLenient(rawText);
+          detectedItems = Array.isArray(parsed.data) 
+            ? parsed.data 
+            : (parsed.data?.students || parsed.data?.items || (parsed.data ? [parsed.data] : []));
+        } catch (jsonErr: any) {
+          console.warn(LOG, 'parseJsonLenient hatası, regex fallback deneniyor:', jsonErr);
+          const itemRegex = /\{[\s\S]*?"studentNumber"\s*:\s*"?[^",}]+"?[\s\S]*?\}/g;
+          let match;
+          while ((match = itemRegex.exec(rawText)) !== null) {
+            try {
+              const item = JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
+              if (item.studentNumber) detectedItems.push(item);
+            } catch {}
+          }
+        }
 
         if (Array.isArray(detectedItems) && detectedItems.length > 0) {
           console.log(LOG, `Gemini Vision PDF'den ${detectedItems.length} öğrenci tespit etti.`);
@@ -269,7 +285,23 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
 
       const rawText = visionRes.response.text().trim();
       console.log(LOG, 'Gemini Vision Yanıtı (ilk 300 karakter):', rawText.slice(0, 300));
-      const { data: detectedBoxes } = parseJsonLenient(rawText);
+      let detectedBoxes: any[] = [];
+      try {
+        const parsed = parseJsonLenient(rawText);
+        detectedBoxes = Array.isArray(parsed.data)
+          ? parsed.data
+          : (parsed.data?.students || parsed.data?.items || (parsed.data ? [parsed.data] : []));
+      } catch (jsonErr: any) {
+        console.warn(LOG, 'parseJsonLenient hatası, regex fallback deneniyor:', jsonErr);
+        const itemRegex = /\{[\s\S]*?"studentNumber"\s*:\s*"?[^",}]+"?[\s\S]*?\}/g;
+        let match;
+        while ((match = itemRegex.exec(rawText)) !== null) {
+          try {
+            const item = JSON.parse(match[0].replace(/,\s*([}\]])/g, '$1'));
+            if (item.studentNumber && item.box_2d) detectedBoxes.push(item);
+          } catch {}
+        }
+      }
 
       if (Array.isArray(detectedBoxes) && detectedBoxes.length > 0) {
         console.log(LOG, `${detectedBoxes.length} öğrenci tespit edildi. Kırpma işlemi başlatılıyor...`);
