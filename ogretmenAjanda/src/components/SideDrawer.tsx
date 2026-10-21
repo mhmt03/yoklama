@@ -152,32 +152,14 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.menuItemTitle, { color: '#166534' }]}>Bağlı Kurum Okulu</Text>
                       <Text style={[styles.menuItemSub, { color: '#15803D' }]} numberOfLines={1}>
-                        {activeSchool.name} (Kod: {activeSchool.code})
+                        {activeSchool.name}
                       </Text>
                     </View>
                     <View style={{ backgroundColor: '#16A34A', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
                       <Text style={{ fontSize: 10, fontWeight: '700', color: '#fff' }}>Bağlı</Text>
                     </View>
                   </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.menuItem}
-                    onPress={() => {
-                      onClose();
-                      setTeacherModalVisible(true);
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <View style={[styles.menuIconWrap, { backgroundColor: '#F3E8FF' }]}>
-                      <Ionicons name="key" size={18} color="#9333EA" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.menuItemTitle}>Okul Koduna Bağlan</Text>
-                      <Text style={styles.menuItemSub}>Kod girerek okulun hazır sınıflarına eriş</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-                  </TouchableOpacity>
-                )}
+                ) : null}
 
                 <TouchableOpacity
                   style={styles.menuItem}

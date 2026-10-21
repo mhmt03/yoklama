@@ -39,7 +39,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   // --- KURUM (INSTITUTION / TENANT) STATE ---
   const [activeInstitution, setActiveInstitution] = useState<InstitutionInfo | null>(null);
   const [institutionLoading, setInstitutionLoading] = useState(true);
-  const [kurumInput, setKurumInput] = useState('zafer-egitim');
+  const [kurumInput, setKurumInput] = useState('mg-egitim');
   const [verifyingKurum, setVerifyingKurum] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isEditingKurum, setIsEditingKurum] = useState(false);
@@ -263,120 +263,97 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       return;
     }
 
-    const schoolCodeClean = teacherSchoolCode.trim();
-    const isIndividual = schoolCodeClean === '';
+    const instCode = (activeInstitution?.code || kurumInput.trim() || 'mg-egitim').trim();
 
     setTeacherLoading(true);
     try {
-      if (!isIndividual) {
-        // 1. Kurumsal Okul Girişi (Okul Kodu Mevcut)
-        const res = await apiRequest('auth/login', 'POST', {
-          username: teacherUsername.trim(),
-          password: teacherPassword.trim(),
-          schoolCode: schoolCodeClean,
-          institutionCode: activeInstitution?.code,
-        });
+      // Kurumsal Giriş (Kurum Kodu ile)
+      const res = await apiRequest('auth/login', 'POST', {
+        username: teacherUsername.trim(),
+        password: teacherPassword.trim(),
+        institutionCode: instCode,
+        schoolCode: teacherSchoolCode.trim() || undefined,
+      });
 
-        if (res.success && res.data) {
+      if (res.success && res.data) {
+        if (rememberMe && activeInstitution) {
+          await saveInstitution(activeInstitution);
+        } else if (!rememberMe) {
+          await clearSavedInstitution();
+        }
+        await setRememberMeSetting(rememberMe);
+
+        await saveAuthToken(res.data.token, res.data);
+        const displayName = res.data.fullName || teacherUsername.trim();
+        await setActiveTeacherName(displayName);
+
+        const isStaffRole = res.data.role === 'STAFF';
+        const nextRole = isStaffRole ? 'staff' : 'teacher';
+        await setActiveUserRole(nextRole);
+
+        // KURUMSAL OKULLARI YEREL VERİTABANINA SENKRONİZE ET VE AKTİF OKULU BELİRLE:
+        const affSchools = res.data.affiliatedSchools && res.data.affiliatedSchools.length > 0
+          ? res.data.affiliatedSchools
+          : (res.data.schoolName ? [{ name: res.data.schoolName, code: res.data.schoolCode || 'OKL-10001', geminiApiKey: res.data.geminiApiKey }] : []);
+        
+        const targetSchoolCode = res.data.schoolCode || affSchools[0]?.code || 'OKL-10001';
+
+        if (affSchools.length > 0) {
+          await syncAffiliatedSchools(affSchools, targetSchoolCode);
+        } else if (res.data.geminiApiKey) {
+          await setGeminiApiKey(res.data.geminiApiKey);
+        }
+
+        // OTOMATİK VERİ SENKRONİZASYONU:
+        try {
+          const { syncScheduleFromSchool } = await import('../services/scheduleSyncService');
+          const { syncTeacherAssignedClassesAndStudents } = await import('../services/studentSyncService');
+          const { syncYearlyPlansFromSchool } = await import('../services/yearlyPlanSyncService');
+
+          if (targetSchoolCode) {
+            await syncScheduleFromSchool(targetSchoolCode);
+            await syncTeacherAssignedClassesAndStudents(targetSchoolCode);
+            await syncYearlyPlansFromSchool({ providedSchoolCode: targetSchoolCode });
+          }
+        } catch (syncErr) {
+          console.warn('Auto-sync on teacher login error:', syncErr);
+        }
+
+        setShowTeacherLoginModal(false);
+        onRoleSelected(nextRole);
+      } else {
+        // Çevrimdışı test fallback: mehmetogretmen / 1234
+        if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
           if (rememberMe && activeInstitution) {
             await saveInstitution(activeInstitution);
-          } else if (!rememberMe) {
-            await clearSavedInstitution();
           }
           await setRememberMeSetting(rememberMe);
 
-          await saveAuthToken(res.data.token, res.data);
-          const displayName = res.data.fullName || teacherUsername.trim();
-          await setActiveTeacherName(displayName);
-
-          const isStaffRole = res.data.role === 'STAFF';
-          const nextRole = isStaffRole ? 'staff' : 'teacher';
-          await setActiveUserRole(nextRole);
-
-          // KURUMSAL OKULLARI YEREL VERİTABANINA SENKRONİZE ET VE AKTİF OKULU BELİRLE:
-          const affSchools = res.data.affiliatedSchools && res.data.affiliatedSchools.length > 0
-            ? res.data.affiliatedSchools
-            : (res.data.schoolName ? [{ name: res.data.schoolName, code: schoolCodeClean, geminiApiKey: res.data.geminiApiKey }] : []);
-          
-          if (affSchools.length > 0) {
-            await syncAffiliatedSchools(affSchools, schoolCodeClean);
-          } else if (res.data.geminiApiKey) {
-            await setGeminiApiKey(res.data.geminiApiKey);
-          }
-
-          // OTOMATİK VERİ SENKRONİZASYONU:
-          try {
-            const { syncScheduleFromSchool } = await import('../services/scheduleSyncService');
-            const { syncTeacherAssignedClassesAndStudents } = await import('../services/studentSyncService');
-            const { syncYearlyPlansFromSchool } = await import('../services/yearlyPlanSyncService');
-
-            await syncScheduleFromSchool(schoolCodeClean);
-            await syncTeacherAssignedClassesAndStudents(schoolCodeClean);
-            await syncYearlyPlansFromSchool({ providedSchoolCode: schoolCodeClean });
-          } catch (syncErr) {
-            console.warn('Auto-sync on teacher login error:', syncErr);
-          }
-
+          const defaultSchools = [
+            { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
+            { name: 'Cumhuriyet Fen Lisesi', code: 'OKL-10002', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
+          ];
+          await syncAffiliatedSchools(defaultSchools, 'OKL-10001');
+          await setGeminiApiKey(DEFAULT_GEMINI_API_KEY);
+          await setGeminiModel(DEFAULT_GEMINI_MODEL);
+          await saveAuthToken('offline_token', {
+            userId: 'offline-teacher',
+            username: 'mehmetogretmen',
+            fullName: 'Mehmet Öğretmen (Fizik)',
+            role: 'TEACHER',
+            schoolCode: 'OKL-10001',
+            schoolName: 'Atatürk Anadolu Lisesi',
+            geminiApiKey: DEFAULT_GEMINI_API_KEY,
+            geminiModel: DEFAULT_GEMINI_MODEL,
+            affiliatedSchools: defaultSchools.map(s => ({ id: s.code, name: s.name, code: s.code, geminiApiKey: s.geminiApiKey, geminiModel: s.geminiModel })),
+          });
+          await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
+          await setActiveUserRole('teacher');
           setShowTeacherLoginModal(false);
-          onRoleSelected(nextRole);
+          onRoleSelected('teacher');
         } else {
-          // Çevrimdışı test fallback: mehmetogretmen / 1234
-          if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
-            if (rememberMe && activeInstitution) {
-              await saveInstitution(activeInstitution);
-            }
-            await setRememberMeSetting(rememberMe);
-
-            const defaultSchools = [
-              { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
-              { name: 'Cumhuriyet Fen Lisesi', code: 'OKL-10002', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
-            ];
-            await syncAffiliatedSchools(defaultSchools, schoolCodeClean || 'OKL-10001');
-            await setGeminiApiKey(DEFAULT_GEMINI_API_KEY);
-            await setGeminiModel(DEFAULT_GEMINI_MODEL);
-            await saveAuthToken('offline_token', {
-              userId: 'offline-teacher',
-              username: 'mehmetogretmen',
-              fullName: 'Mehmet Öğretmen (Fizik)',
-              role: 'TEACHER',
-              schoolCode: schoolCodeClean || 'OKL-10001',
-              schoolName: schoolCodeClean === 'OKL-10002' ? 'Cumhuriyet Fen Lisesi' : 'Atatürk Anadolu Lisesi',
-              geminiApiKey: DEFAULT_GEMINI_API_KEY,
-              geminiModel: DEFAULT_GEMINI_MODEL,
-              affiliatedSchools: defaultSchools.map(s => ({ id: s.code, name: s.name, code: s.code, geminiApiKey: s.geminiApiKey, geminiModel: s.geminiModel })),
-            });
-            await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
-            await setActiveUserRole('teacher');
-            setShowTeacherLoginModal(false);
-            onRoleSelected('teacher');
-          } else {
-            Alert.alert('Giriş Başarısız', res.error || 'Okul kodu, kullanıcı adı veya şifre hatalı.');
-          }
+          Alert.alert('Giriş Başarısız', res.error || 'Kullanıcı adı veya şifre hatalı.');
         }
-      } else {
-        // 2. Bireysel Mod (Okul Kodu Boş)
-        const displayName = teacherUsername.trim() === 'mehmetogretmen' 
-          ? 'Mehmet Öğretmen (Fizik)' 
-          : teacherUsername.trim();
-        
-        await saveAuthToken('individual_offline_token', {
-          userId: 'individual',
-          username: teacherUsername.trim(),
-          fullName: displayName,
-          role: 'TEACHER',
-          schoolId: undefined,
-          schoolCode: undefined,
-        });
-
-        await setActiveTeacherName(displayName);
-        await setActiveUserRole('teacher');
-        setShowTeacherLoginModal(false);
-
-        Alert.alert(
-          'Bireysel Mod Açıldı 📌',
-          'Okul kodu girmeden bireysel modda giriş yaptınız. Ders programınızı ve yıllık planlarınızı kendiniz oluşturabilirsiniz. Kurum içi iletişim özellikleri okul koduna bağlı öğretmenler içindir.',
-          [{ text: 'Anladım, Başla', onPress: () => onRoleSelected('teacher') }]
-        );
       }
     } catch (e: any) {
       if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
@@ -692,7 +669,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
 
             <View style={styles.trialInfoBox}>
               <Ionicons name="information-circle" size={16} color="#D97706" />
-              <Text style={styles.trialInfoText}>Deneme Hesabı: mehmetadmin / 1234</Text>
+              <Text style={styles.trialInfoText}>Deneme Hesabı: mehmetadmin</Text>
             </View>
 
             <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
@@ -708,7 +685,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Text style={[styles.inputLabel, { marginTop: 10 }]}>Şifre</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Şifre (1234)"
+              placeholder="Şifre"
               placeholderTextColor={Colors.textMuted}
               value={adminPassword}
               onChangeText={setAdminPassword}
@@ -776,22 +753,9 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <View style={styles.trialInfoBoxBlue}>
               <Ionicons name="information-circle" size={16} color="#4F46E5" />
               <Text style={styles.trialInfoTextBlue}>
-                Deneme: mehmetogretmen / 1234 (Fizik Öğretmeni)
+                Deneme Hesabı: mehmetogretmen (Fizik Öğretmeni)
               </Text>
             </View>
-
-            <Text style={styles.inputLabel}>Okul Kodu (Kurumsal Giriş İçin)</Text>
-            <TextInput
-              style={styles.nameInput}
-              placeholder="Örn: OKL-10001 (Bireysel için boş bırakın)"
-              placeholderTextColor={Colors.textMuted}
-              value={teacherSchoolCode}
-              onChangeText={setTeacherSchoolCode}
-              autoCapitalize="characters"
-            />
-            <Text style={styles.fieldHint}>
-              💡 Bireysel kullanım için boş bırakabilirsiniz. Kurumsal kod girerseniz okulunuzun ders ve yıllık planları otomatik yüklenir.
-            </Text>
 
             <Text style={[styles.inputLabel, { marginTop: 8 }]}>Kullanıcı Adı</Text>
             <TextInput
@@ -806,7 +770,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Text style={[styles.inputLabel, { marginTop: 8 }]}>Şifre</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Şifre (1234)"
+              placeholder="Şifre"
               placeholderTextColor={Colors.textMuted}
               value={teacherPassword}
               onChangeText={setTeacherPassword}

@@ -36,7 +36,9 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             var inst = await _context.Institutions
-                .FirstOrDefaultAsync(i => i.Code.ToLower() == clean || i.Name.ToLower() == clean);
+                .FirstOrDefaultAsync(i => i.Code.ToLower() == clean || i.Name.ToLower() == clean ||
+                                         (clean == "mg-egitim" && (i.Code.ToLower() == "zafer-egitim" || i.Code == "MST-10001")) ||
+                                         (clean == "zafer-egitim" && i.Code.ToLower() == "mg-egitim"));
 
             if (inst == null)
             {
@@ -88,18 +90,30 @@ namespace OgretmenAjanda.Api.Controllers
 
             if (!string.IsNullOrEmpty(cleanInst))
             {
+                var validCodes = new HashSet<string> { cleanInst };
+                if (cleanInst == "mg-egitim" || cleanInst == "mg-eğitim kurumu")
+                {
+                    validCodes.Add("zafer-egitim");
+                    validCodes.Add("mst-10001");
+                    validCodes.Add("mg-egitim");
+                }
+                else if (cleanInst == "zafer-egitim")
+                {
+                    validCodes.Add("mg-egitim");
+                }
+
                 // Kurum Kodu ile eşleşen kullanıcı (SuperAdmin hariç kullanıcı adı çakışmalarını önler)
                 user = await _context.Users.FirstOrDefaultAsync(u =>
                     u.Username.ToLower() == cleanUsername &&
                     (u.Role == UserRoles.SuperAdmin ||
-                     (u.CustomerId != null && u.CustomerId.ToLower() == cleanInst) ||
-                     (u.RelationId != null && u.RelationId.ToLower() == cleanInst)));
+                     (u.CustomerId != null && validCodes.Contains(u.CustomerId.ToLower())) ||
+                     (u.RelationId != null && validCodes.Contains(u.RelationId.ToLower()))));
 
                 if (user == null)
                 {
                     // Okulun CustomerId'si üzerinden kontrol
                     var matchingSchoolIds = await _context.Schools
-                        .Where(s => s.CustomerId != null && s.CustomerId.ToLower() == cleanInst)
+                        .Where(s => s.CustomerId != null && validCodes.Contains(s.CustomerId.ToLower()))
                         .Select(s => s.Id)
                         .ToListAsync();
 
@@ -179,24 +193,50 @@ namespace OgretmenAjanda.Api.Controllers
             var customerId = user.CustomerId ?? school?.CustomerId;
             var relationId = user.RelationId ?? school?.RelationId;
 
-            var affiliatedSchools = await _context.Schools
-                .Where(s => s.IsActive && (
-                    (adminUserId.HasValue && s.AdminUserId == adminUserId.Value) ||
-                    (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
-                    (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId) ||
-                    (school != null && s.Id == school.Id)
-                ))
-                .Select(s => new SchoolDto
-                {
-                    Id = s.Id,
-                    Name = s.Name,
-                    Code = s.Code,
-                    Address = s.Address,
-                    Phone = s.Phone,
-                    GeminiApiKey = s.GeminiApiKey,
-                    GeminiModel = s.GeminiModel
-                })
-                .ToListAsync();
+            List<SchoolDto> affiliatedSchools;
+            if (user.Role == UserRoles.Teacher || user.Role == UserRoles.Staff)
+            {
+                // Öğretmen yalnızca kayıtlı olduğu okulu/okulları görebilir
+                var teacherSchoolIds = new List<Guid>();
+                if (user.SchoolId.HasValue) teacherSchoolIds.Add(user.SchoolId.Value);
+                if (school != null && !teacherSchoolIds.Contains(school.Id)) teacherSchoolIds.Add(school.Id);
+
+                affiliatedSchools = await _context.Schools
+                    .Where(s => s.IsActive && teacherSchoolIds.Contains(s.Id))
+                    .Select(s => new SchoolDto
+                    {
+                        Id = s.Id,
+                        Name = s.Name,
+                        Code = s.Code,
+                        Address = s.Address,
+                        Phone = s.Phone,
+                        GeminiApiKey = s.GeminiApiKey,
+                        GeminiModel = s.GeminiModel
+                    })
+                    .ToListAsync();
+            }
+            else
+            {
+                // Admin veya Süperadmin: Kuruma bağlı tüm okullar
+                affiliatedSchools = await _context.Schools
+                    .Where(s => s.IsActive && (
+                        (adminUserId.HasValue && s.AdminUserId == adminUserId.Value) ||
+                        (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
+                        (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId) ||
+                        (school != null && s.Id == school.Id)
+                    ))
+                    .Select(s => new SchoolDto
+                    {
+                        Id = s.Id,
+                        Name = s.Name,
+                        Code = s.Code,
+                        Address = s.Address,
+                        Phone = s.Phone,
+                        GeminiApiKey = s.GeminiApiKey,
+                        GeminiModel = s.GeminiModel
+                    })
+                    .ToListAsync();
+            }
 
             return Ok(new LoginResponse
             {

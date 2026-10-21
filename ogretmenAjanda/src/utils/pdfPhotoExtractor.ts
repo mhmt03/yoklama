@@ -49,8 +49,8 @@ async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | str
   const uri = typeof assetOrUri === 'string' ? assetOrUri : assetOrUri.uri;
   console.log('[PDF Fotoğraf] PDF Baytları okunuyor:', uri);
 
-  // 1. FileSystem ile base64 oku
-  if (Platform.OS !== 'android') {
+  // 1. FileSystem ile base64 oku (Yalnızca Web ve Android harici - örn: iOS)
+  if (Platform.OS !== 'web' && Platform.OS !== 'android') {
     try {
       const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       if (b64 && b64.length > 0) {
@@ -659,10 +659,17 @@ export const extractPhotosFromPdf = async (
       };
     }
 
-    // ── Ensure cache dir ────────────────────────────────────────────────────
-    const cacheDir = `${FileSystem.cacheDirectory}pdf_photos/`;
-    if (!(await FileSystem.getInfoAsync(cacheDir)).exists) {
-      await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+    // ── Ensure cache dir (Yalnızca Native) ──────────────────────────────────
+    const isWeb = Platform.OS === 'web';
+    const cacheDir = isWeb ? '' : `${FileSystem.cacheDirectory}pdf_photos/`;
+    if (!isWeb && cacheDir) {
+      try {
+        if (!(await FileSystem.getInfoAsync(cacheDir)).exists) {
+          await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+        }
+      } catch (dirErr) {
+        console.warn('[PDF Fotoğraf] Cache dir oluşturulamadı:', dirErr);
+      }
     }
 
     // Öğrenci numaralarını ve başındaki sıfırlar atılmış hallerini hazırla
@@ -904,8 +911,12 @@ export const extractPhotosFromPdf = async (
           }
           const jpegBytes = rawStream.subarray(start, end);
 
-          tempPath = `${cacheDir}pdf_${Date.now()}_${i}.jpg`;
-          await FileSystem.writeAsStringAsync(tempPath, uint8ArrayToBase64(jpegBytes), { encoding: 'base64' });
+          if (isWeb) {
+            tempPath = `data:image/jpeg;base64,${uint8ArrayToBase64(jpegBytes)}`;
+          } else {
+            tempPath = `${cacheDir}pdf_${Date.now()}_${i}.jpg`;
+            await FileSystem.writeAsStringAsync(tempPath, uint8ArrayToBase64(jpegBytes), { encoding: 'base64' });
+          }
           fileSize = jpegBytes.length;
         } else if (img.filter === 'FlateDecode') {
           const pixels = await inflateAsync(rawStream);
@@ -926,8 +937,12 @@ export const extractPhotosFromPdf = async (
           }
 
           if (pngBytes) {
-            tempPath = `${cacheDir}pdf_${Date.now()}_${i}.png`;
-            await FileSystem.writeAsStringAsync(tempPath, uint8ArrayToBase64(pngBytes), { encoding: 'base64' });
+            if (isWeb) {
+              tempPath = `data:image/png;base64,${uint8ArrayToBase64(pngBytes)}`;
+            } else {
+              tempPath = `${cacheDir}pdf_${Date.now()}_${i}.png`;
+              await FileSystem.writeAsStringAsync(tempPath, uint8ArrayToBase64(pngBytes), { encoding: 'base64' });
+            }
             fileSize = pngBytes.length;
           }
         }

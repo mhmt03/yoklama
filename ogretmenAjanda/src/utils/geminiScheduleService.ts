@@ -1018,9 +1018,10 @@ GÖREVLERİN:
      "gradeLevelCol": -1,
      "branchCol": -1
 3. Okul numarasının (örn: 105, 342, 1284) bulunduğu sütun indeksini bul ("studentNumberCol").
-4. Öğrenci ad ve soyadını tespit et:
-   - Ad ve soyad ayrı sütunlardaysa "firstNameCol" ve "lastNameCol" indekslerini ver, "fullNameCol" -1 olsun.
-   - Adı ve soyadı tek bir sütunda birleşmişse (örn: "Ahmet YILMAZ") "fullNameCol" indeksini ver, "firstNameCol" ve "lastNameCol" -1 olsun.
+4. Öğrenci ad ve soyadını tespit et (ÇOK DİKKAT):
+   - DURUM A (AYRI SÜTUNLAR): Ad ve soyad iki ayrı sütundaysa (örn: 1. sütun "Adı" -> "Ahmet", 2. sütun "Soyadı" -> "Yılmaz"), "firstNameCol" ve "lastNameCol" indekslerini ver, "fullNameCol" -1 olsun.
+   - DURUM B (BİLEŞİK / AYNI SÜTUN): Adı ve soyadı tek bir sütunda birleşmişse (örn: "Adı Soyadı" -> "Ahmet YILMAZ"), "fullNameCol" indeksini ver, "firstNameCol" ve "lastNameCol" -1 olsun.
+   - Sütundaki örnek değerleri incele: Sütunda sadece tek isimler ("Ahmet", "Zeynep") varsa ve yanında soyad sütunu ("Kaya", "Çelik") varsa bunlar kesinlikle ayrı sütunlardır, tek başına ad sütununu fullNameCol yapma!
 5. Varsa not/açıklama sütunu indeksini ("notesCol"), yoksa -1 yap.
 6. Analiz güven derecesini "high", "medium" veya "low" olarak belirt.
 7. Yanıtını YALNIZCA aşağıdaki JSON formatında ver, başka hiçbir metin veya markdown ekleme:

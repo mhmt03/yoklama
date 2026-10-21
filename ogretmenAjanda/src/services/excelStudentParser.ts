@@ -57,16 +57,28 @@ export async function parseStudentsFromExcel(fileUri: string): Promise<ParseExce
 
     if (isStandardTable) {
       // Sütun indekslerini tespit et
-      let noIdx = -1, nameIdx = -1, surnameIdx = -1, gradeIdx = -1, branchIdx = -1, genderIdx = -1;
+      let noIdx = -1, nameIdx = -1, surnameIdx = -1, fullNameIdx = -1, gradeIdx = -1, branchIdx = -1, genderIdx = -1;
       headerRow.forEach((val: any, idx: number) => {
         const str = String(val || '').toLowerCase().trim();
-        if (str.includes('okul no') || str.includes('öğrenci no')) noIdx = idx;
-        else if (str === 'ad' || str === 'adı') nameIdx = idx;
-        else if (str === 'soyad' || str === 'soyadı') surnameIdx = idx;
-        else if (str.includes('sınıf düzeyi') || str === 'sınıf') gradeIdx = idx;
-        else if (str === 'şube') branchIdx = idx;
+        if (str.includes('okul no') || str.includes('öğrenci no') || str === 'no') noIdx = idx;
+        else if (
+          str.includes('ad soyad') ||
+          str.includes('adı soyadı') ||
+          str.includes('adı ve soyadı') ||
+          str.includes('ad/soyad') ||
+          str.includes('ad-soyad')
+        ) fullNameIdx = idx;
+        else if (str === 'ad' || str === 'adı' || str === 'öğrenci adı' || str === 'öğrencinin adı') nameIdx = idx;
+        else if (str === 'soyad' || str === 'soyadı' || str === 'öğrenci soyadı' || str === 'öğrencinin soyadı') surnameIdx = idx;
+        else if (str.includes('sınıf düzeyi') || str === 'sınıf' || str === 'sınıfı') gradeIdx = idx;
+        else if (str === 'şube' || str === 'şubesi') branchIdx = idx;
         else if (str.includes('cinsiyet')) genderIdx = idx;
       });
+
+      // Eğer hem ad hem soyad ayrı sütunlardaysa, fullNameIdx'i iptal et
+      if (nameIdx !== -1 && surnameIdx !== -1) {
+        fullNameIdx = -1;
+      }
 
       for (let i = 1; i < rawData.length; i++) {
         const row = rawData[i];
@@ -76,9 +88,15 @@ export async function parseStudentsFromExcel(fileUri: string): Promise<ParseExce
         if (rawNo === undefined || rawNo === null || String(rawNo).trim() === '') continue;
 
         const studentNumber = String(rawNo).trim();
-        const ad = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).trim() : '';
-        const soyad = surnameIdx !== -1 && row[surnameIdx] ? String(row[surnameIdx]).trim() : '';
-        const fullName = `${ad} ${soyad}`.trim() || `Öğrenci ${studentNumber}`;
+        let fullName = '';
+        if (fullNameIdx !== -1 && row[fullNameIdx]) {
+          fullName = String(row[fullNameIdx]).trim();
+        } else {
+          const ad = nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).trim() : '';
+          const soyad = surnameIdx !== -1 && row[surnameIdx] ? String(row[surnameIdx]).trim() : '';
+          fullName = `${ad} ${soyad}`.trim();
+        }
+        if (!fullName) fullName = `Öğrenci ${studentNumber}`;
 
         let grade = '9';
         let section = 'A';

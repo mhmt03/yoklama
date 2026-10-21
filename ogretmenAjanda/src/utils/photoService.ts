@@ -1,16 +1,22 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { Platform } from 'react-native';
 import { Student } from '../types';
 
 export const MAX_PHOTO_SIZE_BYTES = 2 * 1024 * 1024; // 2 MB limit
 export const MAX_PHOTO_SIZE_LABEL = '2 MB';
 
 const getPhotosDirectory = async (): Promise<string> => {
+  if (Platform.OS === 'web') return '';
   const dir = `${FileSystem.documentDirectory}student_photos/`;
-  const dirInfo = await FileSystem.getInfoAsync(dir);
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+  try {
+    const dirInfo = await FileSystem.getInfoAsync(dir);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+    }
+  } catch (e) {
+    console.warn('getPhotosDirectory error:', e);
   }
   return dir;
 };
@@ -22,6 +28,10 @@ export const savePhotoPermanently = async (
   tempUri: string,
   studentNumberOrId: string | number
 ): Promise<string> => {
+  if (Platform.OS === 'web') {
+    // Web üzerinde dosya sistemi yoktur, data URI veya blob URI doğrudan kullanılır
+    return tempUri;
+  }
   const dir = await getPhotosDirectory();
   // Get extension from tempUri or default to jpg
   const cleanUri = tempUri.split('?')[0];
@@ -43,6 +53,13 @@ export const savePhotoPermanently = async (
  * Checks file size in bytes
  */
 export const getFileSizeBytes = async (uri: string): Promise<number> => {
+  if (Platform.OS === 'web') {
+    if (uri.startsWith('data:')) {
+      const comma = uri.indexOf(',');
+      return Math.round((uri.length - (comma >= 0 ? comma + 1 : 0)) * 0.75);
+    }
+    return 0;
+  }
   try {
     const info = await FileSystem.getInfoAsync(uri);
     if (info.exists && typeof info.size === 'number') {

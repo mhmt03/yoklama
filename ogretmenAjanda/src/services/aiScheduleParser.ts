@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import { apiRequest } from './apiClient';
 import { slicePdfPages } from '../utils/pdfSliceService';
 
@@ -61,7 +62,7 @@ export interface ParsedScheduleResult {
  * fetch + blob + FileReader + copyAsync fallback'li güvenli base64 okuyucu.
  */
 export async function readUriAsBase64(fileUri: string): Promise<string> {
-  // 1. fetch -> blob -> FileReader (Android DocumentPicker cache/content URI için en sağlam yöntem)
+  // 1. fetch -> blob -> FileReader (Android DocumentPicker cache/content URI ve Web için en sağlam yöntem)
   try {
     const response = await fetch(fileUri);
     const blob = await response.blob();
@@ -81,31 +82,33 @@ export async function readUriAsBase64(fileUri: string): Promise<string> {
     });
     if (b64 && b64.length > 0) return b64;
   } catch (fetchErr) {
-    console.warn('fetch blob base64 okuma başarısız, FileSystem deneniyor:', fetchErr);
+    console.warn('fetch blob base64 okuma başarısız, fallback deneniyor:', fetchErr);
   }
 
-  // 2. FileSystem.readAsStringAsync doğrudan okuma
-  try {
-    const b64 = await FileSystem.readAsStringAsync(fileUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    if (b64 && b64.length > 0) return b64;
-  } catch (fsErr) {
-    console.warn('readAsStringAsync başarısız, copyAsync deneniyor:', fsErr);
-  }
+  // 2. Yalnızca Native ortamlarda FileSystem.readAsStringAsync doğrudan okuma
+  if (Platform.OS !== 'web') {
+    try {
+      const b64 = await FileSystem.readAsStringAsync(fileUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      if (b64 && b64.length > 0) return b64;
+    } catch (fsErr) {
+      console.warn('readAsStringAsync başarısız, copyAsync deneniyor:', fsErr);
+    }
 
-  // 3. Geçici dosya kopyalama ile okuma (Scoped storage aşımı)
-  try {
-    const ext = fileUri.toLowerCase().includes('.pdf') ? '.pdf' : '.tmp';
-    const tempPath = `${FileSystem.cacheDirectory}schedule_safe_${Date.now()}${ext}`;
-    await FileSystem.copyAsync({ from: fileUri, to: tempPath });
-    const b64 = await FileSystem.readAsStringAsync(tempPath, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    await FileSystem.deleteAsync(tempPath, { idempotent: true });
-    if (b64 && b64.length > 0) return b64;
-  } catch (copyErr) {
-    console.warn('copyAsync fallback başarısız:', copyErr);
+    // 3. Geçici dosya kopyalama ile okuma (Scoped storage aşımı)
+    try {
+      const ext = fileUri.toLowerCase().includes('.pdf') ? '.pdf' : '.tmp';
+      const tempPath = `${FileSystem.cacheDirectory}schedule_safe_${Date.now()}${ext}`;
+      await FileSystem.copyAsync({ from: fileUri, to: tempPath });
+      const b64 = await FileSystem.readAsStringAsync(tempPath, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      await FileSystem.deleteAsync(tempPath, { idempotent: true });
+      if (b64 && b64.length > 0) return b64;
+    } catch (copyErr) {
+      console.warn('copyAsync fallback başarısız:', copyErr);
+    }
   }
 
   throw new Error('Belge dosyası okunamadı. Lütfen dosyayı tekrar seçiniz veya bir görsel (PNG/JPG) olarak yüklemeyi deneyiniz.');
@@ -274,23 +277,75 @@ const LOG = '[Çarşaf AI]';
  * yanıt token sınırında yarım kesilmişse son tamamlanmış öğeye kadar kesip parantezleri kapatır.
  */
 export function parseJsonLenient(raw: string): { data: any; repaired: boolean } {
-  let text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const first = text.indexOf('{');
+  let text = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  const firstBrace = text.indexOf('{');
+  const firstBracket = text.indexOf('[');
+  let first = -1;
+  if (firstBrace >= 0 && firstBracket >= 0) {
+    first = Math.min(firstBrace, firstBracket);
+  } else if (firstBrace >= 0) {
+    first = firstBrace;
+  } else if (firstBracket >= 0) {
+    first = firstBracket;
+  }
+
   if (first < 0) throw new Error('Yanıtta JSON bulunamadı.');
   text = text.slice(first);
+
+  // 1. Doğrudan parse denemesi
   try {
     return { data: JSON.parse(text), repaired: false };
   } catch {}
 
+  // 2. Kök öğe ({...} veya [...]) bitişini parantez derinliği ile bulup sondaki fazla metinleri kırp
+  const openChar = text[0];
+  const closeChar = openChar === '{' ? '}' : ']';
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let matchingEnd = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+    } else if (ch === openChar) {
+      depth++;
+    } else if (ch === closeChar) {
+      depth--;
+      if (depth === 0) {
+        matchingEnd = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (matchingEnd > 0) {
+    const sliced = text.slice(0, matchingEnd);
+    try {
+      return { data: JSON.parse(sliced), repaired: false };
+    } catch {}
+    const noTrailing = sliced.replace(/,\s*([}\]])/g, '$1');
+    try {
+      return { data: JSON.parse(noTrailing), repaired: true };
+    } catch {}
+  }
+
+  // 3. Sondaki virgülleri temizleyip dene
   const noTrailing = text.replace(/,\s*([}\]])/g, '$1');
   try {
     return { data: JSON.parse(noTrailing), repaired: true };
   } catch {}
 
-  // Kesilmiş JSON onarımı
+  // 4. Kesilmiş JSON onarımı (Token limitinden dolayı yarım kesilmiş diziler/nesneler)
   const stack: string[] = [];
-  let inStr = false;
-  let esc = false;
+  inStr = false;
+  esc = false;
   let lastSafe = -1;
   let safeStack: string[] = [];
   for (let i = 0; i < noTrailing.length; i++) {

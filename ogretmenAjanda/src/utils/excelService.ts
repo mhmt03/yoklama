@@ -719,6 +719,11 @@ export const pickAndParseAllSchoolStudentsWithAi = async (
         }
       }
 
+      // Eğer hem ad hem soyad ayrı sütunlardaysa, colFullName'i devre dışı bırak
+      if (colFirstName !== -1 && colLastName !== -1) {
+        colFullName = -1;
+      }
+
       if (
         (colNumber !== -1 || colFirstName !== -1 || colFullName !== -1) &&
         (colCombinedClass !== -1 || colBranch !== -1 || colGrade !== -1)

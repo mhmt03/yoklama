@@ -1,6 +1,6 @@
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
-
+import { Platform } from 'react-native';
 
 export interface OptimizedImageResult {
   uri: string;
@@ -20,13 +20,20 @@ export interface OptimizedImageResult {
 export async function optimizeStudentPhoto(uri: string): Promise<OptimizedImageResult> {
   try {
     let fileSize = 0;
-    try {
-      const fileInfo = await FileSystem.getInfoAsync(uri);
-      if (fileInfo.exists && 'size' in fileInfo) {
-        fileSize = fileInfo.size;
+    if (Platform.OS === 'web') {
+      if (uri.startsWith('data:')) {
+        const comma = uri.indexOf(',');
+        fileSize = Math.round((uri.length - (comma >= 0 ? comma + 1 : 0)) * 0.75);
       }
-    } catch {
-      // Dosya boyutu okunamasa bile manipülasyona devam et
+    } else {
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(uri);
+        if (fileInfo.exists && 'size' in fileInfo) {
+          fileSize = fileInfo.size;
+        }
+      } catch {
+        // Dosya boyutu okunamasa bile manipülasyona devam et
+      }
     }
 
     // 40 KB'dan küçükse zaten yeterince küçüktür
@@ -51,13 +58,20 @@ export async function optimizeStudentPhoto(uri: string): Promise<OptimizedImageR
     );
 
     let newSize = 0;
-    try {
-      const newInfo = await FileSystem.getInfoAsync(manipResult.uri);
-      if (newInfo.exists && 'size' in newInfo) {
-        newSize = newInfo.size;
+    if (Platform.OS === 'web') {
+      if (manipResult.uri.startsWith('data:')) {
+        const comma = manipResult.uri.indexOf(',');
+        newSize = Math.round((manipResult.uri.length - (comma >= 0 ? comma + 1 : 0)) * 0.75);
       }
-    } catch {
-      // yoksay
+    } else {
+      try {
+        const newInfo = await FileSystem.getInfoAsync(manipResult.uri);
+        if (newInfo.exists && 'size' in newInfo) {
+          newSize = newInfo.size;
+        }
+      } catch {
+        // yoksay
+      }
     }
 
     return {

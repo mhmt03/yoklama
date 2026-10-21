@@ -142,28 +142,44 @@ function heuristicColumnMatch(
     ) {
       studentNumberCol = idx;
     }
-    // Adı Soyadı (Bileşik)
+    // Adı Soyadı (Bileşik - Aynı Sütun)
     else if (
       fullNameCol === null &&
-      (val.includes('ad soyad') ||
+      ((val.includes('ad') && val.includes('soyad')) ||
         val.includes('adi soyadi') ||
-        val.includes('ogrenci adi') ||
+        val.includes('adi ve soyadi') ||
         val.includes('ad/soyad') ||
-        val.includes('adi ve soyadi'))
+        val.includes('ad-soyad') ||
+        val.includes('ad - soyad') ||
+        val.includes('ogrenci adi soyadi') ||
+        val.includes('tam ad'))
     ) {
       fullNameCol = idx;
     }
-    // Ad
+    // Ad (Ayrı Sütun)
     else if (
       firstNameCol === null &&
-      (val === 'ad' || val === 'adi' || val === 'ogrenci ad' || val === 'ogrenci adi')
+      (val === 'ad' ||
+        val === 'adi' ||
+        val === 'ogrenci ad' ||
+        val === 'ogrenci adi' ||
+        val === 'ogrencinin adi' ||
+        val === 'isim' ||
+        val === 'isimi' ||
+        val === 'ogrenci ismi')
     ) {
       firstNameCol = idx;
     }
-    // Soyad
+    // Soyad (Ayrı Sütun)
     else if (
       lastNameCol === null &&
-      (val === 'soyad' || val === 'soyadi' || val === 'ogrenci soyad' || val === 'ogrenci soyadi')
+      (val === 'soyad' ||
+        val === 'soyadi' ||
+        val === 'ogrenci soyad' ||
+        val === 'ogrenci soyadi' ||
+        val === 'ogrencinin soyadi' ||
+        val === 'soyisim' ||
+        val === 'soyisimi')
     ) {
       lastNameCol = idx;
     }
@@ -221,6 +237,15 @@ function heuristicColumnMatch(
     }
   });
 
+  // Eğer hem Ad hem Soyad ayrı sütunlarda tespit edildiyse, fullNameCol'u sıfırla (ayrı sütunlar önceliklidir)
+  if (firstNameCol !== null && lastNameCol !== null) {
+    fullNameCol = null;
+  } else if (fullNameCol !== null && lastNameCol !== null && firstNameCol === null) {
+    // Eğer başlık yanlışlıkla fullNameCol'a takılmış ama soyad sütunu da varsa, fullNameCol aslında firstNameCol'dur
+    firstNameCol = fullNameCol;
+    fullNameCol = null;
+  }
+
   return {
     mapping: {
       studentNumberCol,
@@ -271,21 +296,37 @@ ${JSON.stringify(columns, null, 2)}
 İlk 6 Satırın Ham Hali:
 ${JSON.stringify(sampleRows.slice(0, 6), null, 2)}
 
-GÖREVİN:
+GÖREVİN VE DİKKAT ETMEN GEREKEN KRİTİK KURALLAR:
 1. Hangi sütunun hangi öğrenci verisine denk geldiğini 0-tabanlı indeks numarasıyla (0, 1, 2...) tespit et. Eşleşmeyen sütun için null ver.
 2. Gerçek öğrenci satırlarının başladığı 0-tabanlı satır indeksini (startRowIndex) belirle (başlık satırlarını ve okul adı/açıklama satırlarını atla).
 3. "studentNumberCol": Okul / Öğrenci Numarası sütun indeksi (101, 1042, 542 gibi tam sayılar içerir).
-4. "fullNameCol": Eğer Ad ve Soyad aynı sütundaysa bu sütunun indeksi.
-5. "firstNameCol" & "lastNameCol": Eğer Ad ve Soyad ayrı sütunlardaysa bunların indeksleri.
-6. "gradeCol": Sınıf kademesi (9, 10, 11, 12, 1, 2 gibi değerler).
-7. "sectionCol": Şube harfi (A, B, C, D gibi harfler).
-8. "combinedClassCol": Eğer sınıf ve şube tek bir sütundaysa (örn: "9-A", "10/B", "11 C", "12-Fen A") bu sütunun indeksi.
-9. "genderCol": Cinsiyet sütunu (Erkek/Kız, E/K).
-10. "parentNameCol": Veli adı soyadı.
-11. "parentPhoneCol": Veli telefon numarası.
-12. "studentPhoneCol": Öğrenci cep telefonu.
-13. "skipKeywords": Öğrenci olmayan satırları elemek için anahtar kelimeler (örn: ["toplam", "sayfa", "öğrenci sayısı", "müdür", "imza"]).
-14. "reason": Neden bu sütunları seçtiğini açıklayan Türkçe kısa ve profesyonel bir özet (1-2 cümle).
+
+4. ⚠️ ÖĞRENCİ ADI VE SOYADI TESPİTİ (ÇOK ÖNEMLİ):
+   Excel dosyalarında öğrencinin adı ve soyadı iki farklı formatta bulunabilir:
+   - DURUM A (AYNI SÜTUNDA / BİLEŞİK AD-SOYAD):
+     Öğrencinin hem adı hem de soyadı tek bir sütunda birlikte yazılmıştır.
+     Örnek Başlıklar: "Adı Soyadı", "Adı ve Soyadı", "Öğrenci Adı Soyadı", "Ad Soyad", "Ad/Soyad"
+     Örnek Değerler: "AHMET YILMAZ", "FATMA ZEHRA KAYA", "MEHMET ALİ DEMİR"
+     -> Bu durumda: "fullNameCol" = ilgili sütunun indeksi, "firstNameCol" = null, "lastNameCol" = null olmalıdır.
+   
+   - DURUM B (AYRI SÜTUNLARDA AD VE SOYAD):
+     Öğrencinin adı bir sütunda, soyadı ise tamamen ayrı başka bir sütundadır.
+     Örnek Başlık 1 (Ad): "Adı", "Ad", "Öğrenci Adı", "Öğrencinin Adı" (Değerler: "AHMET", "FATMA ZEHRA", "MEHMET")
+     Örnek Başlık 2 (Soyad): "Soyadı", "Soyad", "Öğrenci Soyadı" (Değerler: "YILMAZ", "KAYA", "DEMİR")
+     -> Bu durumda: "firstNameCol" = Ad sütunu indeksi, "lastNameCol" = Soyad sütunu indeksi, "fullNameCol" = null olmalıdır.
+
+   - 🔍 HÜCRE DEĞERLERİNE GÖRE SAĞLAMA YAP:
+     Sütunlardaki örnek değerleri mutlaka incele! Eğer bir sütundaki değerler yalnızca isimlerden ("Elif", "Burak") oluşuyorsa ve başka bir sütunda soyisimler ("ŞAHİN", "ÖZTÜRK") yer alıyorsa, bunlar KESİNLİKLE ayrı sütunlardır; Ad sütununu tek başına fullNameCol olarak işaretleme! Tam ad ancak iki kelime birden aynı hücrede yer aldığında fullNameCol kabul edilir.
+
+5. "gradeCol": Sınıf kademesi (9, 10, 11, 12, 1, 2 gibi değerler).
+6. "sectionCol": Şube harfi (A, B, C, D gibi harfler).
+7. "combinedClassCol": Eğer sınıf ve şube tek bir sütundaysa (örn: "9-A", "10/B", "11 C", "12-Fen A") bu sütunun indeksi.
+8. "genderCol": Cinsiyet sütunu (Erkek/Kız, E/K).
+9. "parentNameCol": Veli adı soyadı.
+10. "parentPhoneCol": Veli telefon numarası.
+11. "studentPhoneCol": Öğrenci cep telefonu.
+12. "skipKeywords": Öğrenci olmayan satırları elemek için anahtar kelimeler (örn: ["toplam", "sayfa", "öğrenci sayısı", "müdür", "imza"]).
+13. "reason": Neden bu sütunları seçtiğini ve Ad-Soyad durumunun aynı sütunda mı yoksa ayrı sütunlarda mı olduğunu belirten kısa ve profesyonel Türkçe özet (1-2 cümle).
 
 YANIT FORMATI: Yalnızca aşağıdaki JSON şemasında çıktı üret:
 {

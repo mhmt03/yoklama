@@ -5185,9 +5185,19 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             {/* 4. ÖĞRENCİLER SEKMESİ (SERVER CRUD & FOTOĞRAF) */}
             {activeTab === 'students' && (
               <View>
-                <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Kayıtlı Öğrenciler ({filteredStudents.length}/{students.length})</Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                <View style={{ marginBottom: 12 }}>
+                  {/* Başlık Satırı */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="people" size={18} color="#4F46E5" />
+                      <Text style={[styles.sectionTitle, { fontSize: 15 }]}>
+                        Kayıtlı Öğrenciler ({filteredStudents.length}/{students.length})
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Butonlar Satırı */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
                     {students.length > 0 && (
                       <TouchableOpacity
                         style={styles.dangerHeaderBtn}
