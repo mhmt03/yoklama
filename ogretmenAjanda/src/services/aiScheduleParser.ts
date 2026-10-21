@@ -1342,6 +1342,7 @@ const SCHEDULE_CACHE_FILE = `${SCHEDULE_CACHE_DIR}latest_parsed_schedule.json`;
  * AI tarafından çözümlenen ham ders programı yığınını (stack) telefonda yerel JSON dosyasında saklar.
  */
 export async function saveParsedScheduleToCache(data: ParsedScheduleResult): Promise<void> {
+  if (Platform.OS === 'web') return;
   try {
     const dirInfo = await FileSystem.getInfoAsync(SCHEDULE_CACHE_DIR);
     if (!dirInfo.exists) {
@@ -1358,6 +1359,7 @@ export async function saveParsedScheduleToCache(data: ParsedScheduleResult): Pro
  * Telefonda saklanan son AI analiz verisini (stack dökümünü) okur.
  */
 export async function getCachedParsedSchedule(): Promise<ParsedScheduleResult | null> {
+  if (Platform.OS === 'web') return null;
   try {
     const fileInfo = await FileSystem.getInfoAsync(SCHEDULE_CACHE_FILE);
     if (fileInfo.exists) {

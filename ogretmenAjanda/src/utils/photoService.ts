@@ -158,6 +158,9 @@ export const pickSchedulePhoto = async (
   }
 
   const asset = result.assets[0];
+  if (Platform.OS === 'web') {
+    return asset.uri;
+  }
   const dir = `${FileSystem.documentDirectory}schedule/`;
   const dirInfo = await FileSystem.getInfoAsync(dir);
   if (!dirInfo.exists) {
@@ -208,6 +211,10 @@ export const cropAndRotateSchedulePhoto = async (
     compress: 0.95,
     format: SaveFormat.JPEG,
   });
+
+  if (Platform.OS === 'web') {
+    return result.uri;
+  }
 
   const dir = `${FileSystem.documentDirectory}schedule/`;
   const dirInfo = await FileSystem.getInfoAsync(dir);
