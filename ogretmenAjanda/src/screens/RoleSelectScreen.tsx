@@ -67,15 +67,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
     (async () => {
       try {
         const saved = await getSavedInstitution();
-        if (saved) {
+        const rem = await getRememberMeSetting();
+        setRememberMe(rem);
+        if (saved && (saved.name || saved.code)) {
           setActiveInstitution(saved);
-          setKurumInput(saved.code);
+          setKurumInput(saved.name || saved.code);
           setIsEditingKurum(false);
         } else {
           setIsEditingKurum(true);
         }
-        const rem = await getRememberMeSetting();
-        setRememberMe(rem);
       } catch (e) {
         console.warn('Kurum bilgisi yüklenemedi:', e);
       } finally {
@@ -83,6 +83,25 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       }
     })();
   }, []);
+
+  const handleToggleRememberMe = async () => {
+    const nextVal = !rememberMe;
+    setRememberMe(nextVal);
+    await setRememberMeSetting(nextVal);
+    if (nextVal) {
+      const cur = (kurumInput || '').trim();
+      if (cur) {
+        const info: InstitutionInfo = activeInstitution || {
+          code: cur.toLowerCase().replace(/\s+/g, '-'),
+          name: cur,
+          isActive: true,
+        };
+        await saveInstitution(info);
+      }
+    } else {
+      await clearSavedInstitution();
+    }
+  };
 
   const handleVerifyKurum = async (customCode?: string): Promise<boolean> => {
     const codeToTest = (customCode || kurumInput || '').trim();
@@ -101,12 +120,31 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         }
         return true;
       } else {
-        Alert.alert('Kurum Bulunamadı', res.message || 'Geçerli bir kurum adı veya kodu bulunamadı.');
-        return false;
+        // Sunucuda özel tenant bulunamadıysa bile girilen kurum adını yerel olarak koru
+        const fallbackInfo: InstitutionInfo = {
+          code: codeToTest.toLowerCase().replace(/\s+/g, '-'),
+          name: codeToTest,
+          isActive: true,
+        };
+        setActiveInstitution(fallbackInfo);
+        setIsEditingKurum(false);
+        if (rememberMe) {
+          await saveInstitution(fallbackInfo);
+        }
+        return true;
       }
     } catch (e: any) {
-      Alert.alert('Hata', e.message);
-      return false;
+      const fallbackInfo: InstitutionInfo = {
+        code: codeToTest.toLowerCase().replace(/\s+/g, '-'),
+        name: codeToTest,
+        isActive: true,
+      };
+      setActiveInstitution(fallbackInfo);
+      setIsEditingKurum(false);
+      if (rememberMe) {
+        await saveInstitution(fallbackInfo);
+      }
+      return true;
     } finally {
       setVerifyingKurum(false);
     }
@@ -206,12 +244,18 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       });
 
       if (res.success && res.data) {
-        if (rememberMe && activeInstitution) {
-          await saveInstitution(activeInstitution);
-        } else if (!rememberMe) {
+        const instToSave: InstitutionInfo = {
+          code: res.data?.customerId || activeInstitution?.code || (kurumInput || '').trim() || 'mg-egitim',
+          name: activeInstitution?.name || res.data?.schoolName || (kurumInput || '').trim() || 'Kurum',
+          isActive: true,
+        };
+        if (rememberMe) {
+          await saveInstitution(instToSave);
+          await setRememberMeSetting(true);
+        } else {
           await clearSavedInstitution();
+          await setRememberMeSetting(false);
         }
-        await setRememberMeSetting(rememberMe);
 
         await saveAuthToken(res.data.token, res.data);
         setShowAdminLoginModal(false);
@@ -221,10 +265,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       } else {
         // Çevrimdışı / Yerel Test Modu Fallback (mehmetadmin / 1234)
         if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
-          if (rememberMe && activeInstitution) {
-            await saveInstitution(activeInstitution);
+          const instToSave: InstitutionInfo = activeInstitution || {
+            code: (kurumInput || '').trim() || 'zafer-egitim',
+            name: (kurumInput || '').trim() || 'Zafer Eğitim Kurumları',
+            isActive: true,
+          };
+          if (rememberMe) {
+            await saveInstitution(instToSave);
+            await setRememberMeSetting(true);
           }
-          await setRememberMeSetting(rememberMe);
           setShowAdminLoginModal(false);
           await setActiveUserRole('admin');
           onRoleSelected('admin');
@@ -234,10 +283,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       }
     } catch (e: any) {
       if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
-        if (rememberMe && activeInstitution) {
-          await saveInstitution(activeInstitution);
+        const instToSave: InstitutionInfo = activeInstitution || {
+          code: (kurumInput || '').trim() || 'zafer-egitim',
+          name: (kurumInput || '').trim() || 'Zafer Eğitim Kurumları',
+          isActive: true,
+        };
+        if (rememberMe) {
+          await saveInstitution(instToSave);
+          await setRememberMeSetting(true);
         }
-        await setRememberMeSetting(rememberMe);
         setShowAdminLoginModal(false);
         await setActiveUserRole('admin');
         onRoleSelected('admin');
@@ -251,8 +305,13 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
 
   // Öğretmen Giriş Butonu
   const handleSelectTeacher = async () => {
-    if (!activeInstitution && kurumInput.trim()) {
-      await handleVerifyKurum(kurumInput.trim());
+    const raw = (kurumInput || '').trim();
+    if (raw) {
+      if (!activeInstitution) {
+        await handleVerifyKurum(raw);
+      } else if (rememberMe) {
+        await saveInstitution(activeInstitution);
+      }
     }
     setShowTeacherLoginModal(true);
   };
@@ -276,12 +335,18 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       });
 
       if (res.success && res.data) {
-        if (rememberMe && activeInstitution) {
-          await saveInstitution(activeInstitution);
-        } else if (!rememberMe) {
+        const instToSave: InstitutionInfo = {
+          code: res.data?.customerId || res.data?.relationId || activeInstitution?.code || instCode,
+          name: activeInstitution?.name || res.data?.schoolName || (kurumInput || '').trim() || instCode,
+          isActive: true,
+        };
+        if (rememberMe) {
+          await saveInstitution(instToSave);
+          await setRememberMeSetting(true);
+        } else {
           await clearSavedInstitution();
+          await setRememberMeSetting(false);
         }
-        await setRememberMeSetting(rememberMe);
 
         await saveAuthToken(res.data.token, res.data);
         const displayName = res.data.fullName || teacherUsername.trim();
@@ -324,10 +389,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       } else {
         // Çevrimdışı test fallback: mehmetogretmen / 1234
         if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
-          if (rememberMe && activeInstitution) {
-            await saveInstitution(activeInstitution);
+          const instToSave: InstitutionInfo = activeInstitution || {
+            code: instCode,
+            name: (kurumInput || '').trim() || 'Zafer Eğitim Kurumları',
+            isActive: true,
+          };
+          if (rememberMe) {
+            await saveInstitution(instToSave);
+            await setRememberMeSetting(true);
           }
-          await setRememberMeSetting(rememberMe);
 
           const defaultSchools = [
             { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
@@ -357,10 +427,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       }
     } catch (e: any) {
       if (teacherUsername.trim() === 'mehmetogretmen' && teacherPassword.trim() === '1234') {
-        if (rememberMe && activeInstitution) {
-          await saveInstitution(activeInstitution);
+        const instToSave: InstitutionInfo = activeInstitution || {
+          code: instCode,
+          name: (kurumInput || '').trim() || 'Zafer Eğitim Kurumları',
+          isActive: true,
+        };
+        if (rememberMe) {
+          await saveInstitution(instToSave);
+          await setRememberMeSetting(true);
         }
-        await setRememberMeSetting(rememberMe);
 
         await setActiveTeacherName('Mehmet Öğretmen (Fizik)');
         await setActiveUserRole('teacher');
@@ -516,7 +591,16 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
                 placeholder="Kurum Adı / Kodu (örn: zafer-egitim)"
                 placeholderTextColor={Colors.textMuted}
                 value={kurumInput}
-                onChangeText={setKurumInput}
+                onChangeText={(text) => {
+                  setKurumInput(text);
+                  if (activeInstitution) {
+                    setActiveInstitution({
+                      ...activeInstitution,
+                      name: text,
+                      code: text.toLowerCase().replace(/\s+/g, '-'),
+                    });
+                  }
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 onSubmitEditing={() => handleVerifyKurum()}
@@ -542,7 +626,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               <TouchableOpacity
                 style={styles.rememberRow}
                 activeOpacity={0.8}
-                onPress={() => setRememberMe(!rememberMe)}
+                onPress={handleToggleRememberMe}
               >
                 <Ionicons
                   name={rememberMe ? 'checkbox' : 'square-outline'}
@@ -673,14 +757,14 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               Okul tanımlama, öğretmen ekleme ve çarşaf program yönetimi için giriş yapınız.
             </Text>
 
-            {activeInstitution && (
+            {(activeInstitution || (kurumInput && kurumInput.trim())) ? (
               <View style={styles.modalInstBadge}>
                 <Ionicons name="business" size={14} color="#4338CA" />
                 <Text style={styles.modalInstBadgeText}>
-                  Kurum: <Text style={{ fontWeight: '800' }}>{activeInstitution.name}</Text>
+                  Kurum: <Text style={{ fontWeight: '800' }}>{activeInstitution?.name || activeInstitution?.code || kurumInput.trim()}</Text>
                 </Text>
               </View>
-            )}
+            ) : null}
 
             <View style={styles.trialInfoBox}>
               <Ionicons name="information-circle" size={16} color="#D97706" />
@@ -711,7 +795,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <TouchableOpacity
               style={styles.modalRememberRow}
               activeOpacity={0.8}
-              onPress={() => setRememberMe(!rememberMe)}
+              onPress={handleToggleRememberMe}
             >
               <Ionicons
                 name={rememberMe ? 'checkbox' : 'square-outline'}
@@ -756,14 +840,14 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               Kurumsal veya bireysel olarak derslerinizi yönetin.
             </Text>
 
-            {activeInstitution && (
+            {(activeInstitution || (kurumInput && kurumInput.trim())) ? (
               <View style={styles.modalInstBadge}>
                 <Ionicons name="business" size={14} color="#4338CA" />
                 <Text style={styles.modalInstBadgeText}>
-                  Kurum: <Text style={{ fontWeight: '800' }}>{activeInstitution.name}</Text>
+                  Kurum: <Text style={{ fontWeight: '800' }}>{activeInstitution?.name || activeInstitution?.code || kurumInput.trim()}</Text>
                 </Text>
               </View>
-            )}
+            ) : null}
 
             <View style={styles.trialInfoBoxBlue}>
               <Ionicons name="information-circle" size={16} color="#4F46E5" />
@@ -796,7 +880,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <TouchableOpacity
               style={styles.modalRememberRow}
               activeOpacity={0.8}
-              onPress={() => setRememberMe(!rememberMe)}
+              onPress={handleToggleRememberMe}
             >
               <Ionicons
                 name={rememberMe ? 'checkbox' : 'square-outline'}
