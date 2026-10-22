@@ -455,6 +455,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         <Text style={styles.brandSub}>
           Kurumsal, hibrit ve çok rollü eğitim platformu
         </Text>
+        <View style={styles.brandMetaBadge}>
+          <Ionicons name="mail-outline" size={13} color="#4F46E5" />
+          <Text style={styles.brandMetaEmail}>gundoner@yahoo.com</Text>
+        </View>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>
@@ -643,6 +647,17 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
             <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans & Müşteri Yönetimi)</Text>
           </TouchableOpacity>
+
+          {/* Telif Hakları & İletişim Footer */}
+          <View style={styles.footerCopyrightBox}>
+            <Text style={styles.footerCopyrightText}>
+              © {new Date().getFullYear()} Öğretmen Ajanda. Tüm hakları saklıdır.
+            </Text>
+            <View style={styles.footerContactRow}>
+              <Ionicons name="mail-outline" size={12} color={Colors.textMuted} />
+              <Text style={styles.footerContactText}>İletişim: gundoner@yahoo.com</Text>
+            </View>
+          </View>
         </View>
       </ScrollView>
 
@@ -1024,6 +1039,46 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
     paddingHorizontal: 16,
+  },
+  brandMetaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 8,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
+  },
+  brandMetaEmail: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4F46E5',
+    letterSpacing: 0.2,
+  },
+  footerCopyrightBox: {
+    marginTop: 22,
+    marginBottom: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  footerCopyrightText: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    fontWeight: '500',
+  },
+  footerContactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  footerContactText: {
+    fontSize: 11,
+    color: Colors.textMuted,
+    fontWeight: '600',
   },
   contentWrap: {
     paddingBottom: 24,
