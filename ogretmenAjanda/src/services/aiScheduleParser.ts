@@ -1322,7 +1322,7 @@ export async function saveMasterScheduleToServer(
     return {
       success: true,
       message: res.data?.message || (opts.overwriteAll
-        ? `Tüm okul ders programı sıfırlanıp yeniden kaydedildi.`
+        ? `Tüm okul ders programı sıfırlanıp yeniden kaydedildi. Öğretmen hesapları ve şifreleri korundu.`
         : `Ders programı başarıyla güncellendi.`),
       data: res.data,
     };

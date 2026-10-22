@@ -3143,8 +3143,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
     if (scheduleSaveMode === 'overwrite') {
       Alert.alert(
-        '⚠️ Dikkat: Mevcut Program Silinecek',
-        `Okulun mevcut haftalık ders programı kayıtları tamamen silinecektir ve yerine bu seçili çarşaf program (${activeTeachers.length} öğretmen, ${activeClasses.length} şube, ${activeLessons.length} ders) sıfırdan yazılacaktır.${excludedSummary}\n\nEmin misiniz?`,
+        '⚠️ Dikkat: Haftalık Ders Programı Sıfırlanacak',
+        `Okulun mevcut haftalık ders dağılım saatleri tamamen silinecektir ve yerine bu seçili çarşaf program (${activeTeachers.length} öğretmen, ${activeClasses.length} şube, ${activeLessons.length} ders) sıfırdan yazılacaktır.\n\n🛡️ Önemli: Sistemde kayıtlı öğretmenlerin hesapları, kullanıcı adları ve şifreleri KESİNLİKLE KORUNUR (silinmez veya sıfırlanmaz).${excludedSummary}\n\nEmin misiniz?`,
         [
           { text: 'Vazgeç', style: 'cancel' },
           {
@@ -10593,7 +10593,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               ⚠️ Sıfırdan Temiz Kurulum (Mevcut Programı Sil)
                             </Text>
                             <Text style={styles.scheduleModeDesc}>
-                              Okuldaki tüm mevcut ders programı kayıtları silinir ve bu çarşaf program sıfırdan yazılır.
+                              Okuldaki tüm mevcut haftalık ders dağılım saatleri silinir ve bu çarşaf program sıfırdan yazılır. Sistemde kayıtlı öğretmenlerin kullanıcı adı, şifre ve hesapları KESİNLİKLE silinmez ve korunur.
                             </Text>
                           </View>
                         </TouchableOpacity>

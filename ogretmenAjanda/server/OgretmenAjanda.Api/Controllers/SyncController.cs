@@ -501,24 +501,28 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             // 3. Öğretmenleri Ekle / Kadroya Tanımla
+            // KURAL: Mevcut öğretmenlerin hesapları, kullanıcı adları ve şifreleri KESİNLİKLE silinmez ve sıfırlanmaz!
+            // Sıfırdan temiz kurulumda yalnızca haftalık ders dağılım saatleri (ScheduleItems) sıfırlanır.
             int addedTeachersCount = 0;
+            var existingTeachers = await _context.Users
+                .Where(u => u.SchoolId == request.SchoolId && (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff))
+                .ToListAsync();
+
             if (request.SyncTeachers && request.Teachers != null && request.Teachers.Count > 0)
             {
-                var existingTeachers = await _context.Users
-                    .Where(u => u.SchoolId == request.SchoolId && u.Role == UserRoles.Teacher)
-                    .ToListAsync();
-
                 foreach (var teacherName in request.Teachers)
                 {
                     var cleanTeacher = teacherName?.Trim();
                     if (string.IsNullOrWhiteSpace(cleanTeacher)) continue;
 
-                    if (!existingTeachers.Any(t => string.Equals(t.FullName.Trim(), cleanTeacher, StringComparison.OrdinalIgnoreCase)))
+                    // Akıllı Türkçe isim normalizasyonu ile sistemdeki mevcut öğretmenleri kontrol et
+                    var matchedTeacher = existingTeachers.FirstOrDefault(t => IsTeacherNameMatch(t.FullName, cleanTeacher));
+
+                    if (matchedTeacher == null)
                     {
-                        var safeUsername = cleanTeacher.ToLower()
-                            .Replace("ç", "c").Replace("ğ", "g").Replace("ı", "i")
-                            .Replace("ö", "o").Replace("ş", "s").Replace("ü", "u")
-                            .Replace(" ", ".");
+                        // Sadece sistemde daha önce hiç tanımlanmamış yepyeni öğretmenler için yeni hesap oluştur
+                        var safeUsername = NormalizeTurkishPersonName(cleanTeacher).Replace(" ", ".");
+                        if (string.IsNullOrWhiteSpace(safeUsername)) safeUsername = "ogretmen";
                         var username = $"{safeUsername}.{Random.Shared.Next(100, 999)}";
 
                         var newTeacher = new User
@@ -536,6 +540,15 @@ namespace OgretmenAjanda.Api.Controllers
                         existingTeachers.Add(newTeacher);
                         addedTeachersCount++;
                     }
+                    else
+                    {
+                        // Öğretmen sistemde zaten mevcut: Kullanıcı adı ve şifresi KESİNLİKLE KORUNUR!
+                        // Pasifte kalmışsa aktif hale getir
+                        if (!matchedTeacher.IsActive)
+                        {
+                            matchedTeacher.IsActive = true;
+                        }
+                    }
                 }
             }
 
@@ -545,16 +558,23 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 if (request.OverwriteAll)
                 {
+                    // SIFIRDAN TEMİZ KURULUM: Yalnızca ve yalnızca bu okulun haftalık ders programı hücreleri silinir.
+                    // Sistemdeki öğretmen hesapları, kullanıcı adları ve şifreleri KESİNLİKLE SİLİNMEZ!
                     var existingItems = _context.ScheduleItems.Where(s => s.SchoolId == request.SchoolId);
                     _context.ScheduleItems.RemoveRange(existingItems);
 
                     foreach (var item in request.Schedules)
                     {
+                        var matchedTeacher = existingTeachers.FirstOrDefault(t => IsTeacherNameMatch(t.FullName, item.TeacherName));
+                        var finalTeacherName = matchedTeacher != null ? matchedTeacher.FullName : (item.TeacherName?.Trim() ?? string.Empty);
+                        var finalTeacherId = matchedTeacher?.Id;
+
                         _context.ScheduleItems.Add(new ScheduleItem
                         {
                             Id = item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
                             SchoolId = request.SchoolId,
-                            TeacherName = item.TeacherName,
+                            TeacherId = finalTeacherId,
+                            TeacherName = finalTeacherName,
                             DayOfWeek = item.DayOfWeek,
                             LessonHour = item.LessonHour,
                             Grade = item.Grade,
@@ -575,17 +595,22 @@ namespace OgretmenAjanda.Api.Controllers
 
                     foreach (var item in request.Schedules)
                     {
+                        var matchedTeacher = existingTeachers.FirstOrDefault(t => IsTeacherNameMatch(t.FullName, item.TeacherName));
+                        var finalTeacherName = matchedTeacher != null ? matchedTeacher.FullName : (item.TeacherName?.Trim() ?? string.Empty);
+                        var finalTeacherId = matchedTeacher?.Id;
+
                         // Sadece aynı öğretmenin aynı gün ve saatteki mevcut dersini güncelle (farklı öğretmen veya şube derslerini asla silme/ezme!)
                         var existing = existingList.FirstOrDefault(s =>
                             s.DayOfWeek == item.DayOfWeek &&
                             s.LessonHour == item.LessonHour &&
                             !string.IsNullOrEmpty(s.TeacherName) && !string.IsNullOrEmpty(item.TeacherName) &&
-                            string.Equals(s.TeacherName.Trim(), item.TeacherName.Trim(), StringComparison.OrdinalIgnoreCase)
+                            IsTeacherNameMatch(s.TeacherName, item.TeacherName)
                         );
 
                         if (existing != null)
                         {
-                            existing.TeacherName = item.TeacherName;
+                            existing.TeacherId = finalTeacherId ?? existing.TeacherId;
+                            existing.TeacherName = finalTeacherName;
                             existing.Grade = item.Grade;
                             existing.Section = item.Section;
                             existing.LessonName = item.LessonName;
@@ -598,7 +623,8 @@ namespace OgretmenAjanda.Api.Controllers
                             {
                                 Id = item.Id != Guid.Empty ? item.Id : Guid.NewGuid(),
                                 SchoolId = request.SchoolId,
-                                TeacherName = item.TeacherName,
+                                TeacherId = finalTeacherId,
+                                TeacherName = finalTeacherName,
                                 DayOfWeek = item.DayOfWeek,
                                 LessonHour = item.LessonHour,
                                 Grade = item.Grade,
@@ -613,7 +639,7 @@ namespace OgretmenAjanda.Api.Controllers
                 }
             }
 
-            var modeText = request.OverwriteAll ? "Sıfırdan Temiz Kurulum (Mevcut Program Silindi)" : "Mevcutları Koru & Güncelle";
+            var modeText = request.OverwriteAll ? "Sıfırdan Temiz Kurulum (Ders Programı Sıfırlandı, Öğretmen Hesapları Korundu)" : "Mevcutları Koru & Güncelle";
             var detailText = $"{modeText}. Kaydedilen: {addedTeachersCount} yeni öğretmen, {addedClassesCount} yeni şube, {addedLessonsCount} yeni ders, {savedScheduleCount} ders saati.";
 
             _context.AuditLogs.Add(new AuditLog
@@ -1403,6 +1429,75 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             return (movedCount, movedDescriptions);
+        }
+
+        private static string NormalizeTurkishPersonName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+
+            // 1. Parantez içindeki branş veya ek notları temizle (Örn: "Ahmet Yılmaz (Matematik)" -> "Ahmet Yılmaz")
+            var clean = System.Text.RegularExpressions.Regex.Replace(name, @"\s*\([^)]*\)", "");
+
+            // 2. Unvan ve kısaltmaları temizle (Örn: "Öğr.", "Öğrt.", "Gör.", "Uzm.", "Dr.", "Prof.")
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\b(öğr|öğrt|uzm|dr|prof|gör)\.?\b", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            // 3. Türkçe kültüre göre küçült
+            var trCulture = new System.Globalization.CultureInfo("tr-TR");
+            clean = clean.ToLower(trCulture);
+
+            // 4. Türkçe karakterleri standart Latin ASCII'ye eşle (I/İ, Ğ, Ş, Ç, Ö, Ü uyuşmazlıklarını ortadan kaldır)
+            clean = clean
+                .Replace("ç", "c")
+                .Replace("ğ", "g")
+                .Replace("ı", "i")
+                .Replace("i", "i")
+                .Replace("ö", "o")
+                .Replace("ş", "s")
+                .Replace("ü", "u");
+
+            // 5. Noktalama işaretlerini ve özel sembolleri kaldır
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"[^\w\s]", "");
+
+            // 6. Fazla boşlukları tek boşluğa indir
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
+
+            return clean;
+        }
+
+        private static bool IsTeacherNameMatch(string? name1, string? name2)
+        {
+            if (string.IsNullOrWhiteSpace(name1) || string.IsNullOrWhiteSpace(name2)) return false;
+
+            var norm1 = NormalizeTurkishPersonName(name1);
+            var norm2 = NormalizeTurkishPersonName(name2);
+
+            if (norm1 == norm2) return true;
+
+            // Ad Soyad vs A. Soyad veya Soyad Ad varyasyonları için kontrol
+            var parts1 = norm1.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var parts2 = norm2.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts1.Length >= 2 && parts2.Length >= 2)
+            {
+                // Soyadlar eşleşiyor mu?
+                var lastName1 = parts1[^1];
+                var lastName2 = parts2[^1];
+
+                if (lastName1 == lastName2)
+                {
+                    // İlk adlar tam eşleşiyor mu veya biri diğerinin kısaltması mı? (Örn: "m" vs "mehmet")
+                    var first1 = parts1[0];
+                    var first2 = parts2[0];
+                    if (first1 == first2 || 
+                        (first1.Length == 1 && first2.StartsWith(first1)) || 
+                        (first2.Length == 1 && first1.StartsWith(first2)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private static string CleanLessonName(string? name)
