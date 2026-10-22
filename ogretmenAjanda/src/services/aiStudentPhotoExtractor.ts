@@ -15,6 +15,8 @@ export interface AiExtractedStudentPhoto {
   fileName: string;
   matchedStudent?: Student;
   source: 'pdf-stream' | 'ai-vision-crop' | 'ai-matched';
+  tempUri?: string;
+  pageNumber?: number;
 }
 
 export interface AiPhotoExtractResult {
@@ -93,7 +95,8 @@ export async function extractStudentPhotosWithAi(
   schoolId: string,
   schoolApiKey?: string,
   schoolModel?: string,
-  onProgress?: (stageText: string) => void
+  onProgress?: (stageText: string) => void,
+  autoSave: boolean = true
 ): Promise<AiPhotoExtractResult> {
   console.log(`\n══════════════════ ${LOG} BAŞLADI ══════════════════`);
   console.log(LOG, 'Dosya:', fileName, '| MIME:', mimeType, '| Okul ID:', schoolId, '| Sistemdeki Öğrenci Sayısı:', students.length);
@@ -140,6 +143,8 @@ export async function extractStudentPhotosWithAi(
               fileName: `${stdNo}.jpg`,
               matchedStudent: matched,
               source: 'pdf-stream',
+              tempUri: sp.tempUri,
+              pageNumber: sp.pageNumber,
             });
           } catch {}
         }
@@ -238,6 +243,8 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
                 fileName: `${stdNo}.jpg`,
                 matchedStudent: matched,
                 source: 'ai-matched',
+                tempUri: streamPhotos[i].tempUri,
+                pageNumber: streamPhotos[i].pageNumber,
               });
             }
           }
@@ -331,6 +338,8 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
               fileName: `${stdNo}.jpg`,
               matchedStudent: matched,
               source: 'ai-vision-crop',
+              tempUri: cropRes.uri,
+              pageNumber: 1,
             });
           }
         }
@@ -345,6 +354,16 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
         uploadedCount: 0,
         photos: [],
         error: 'Belgede öğrenci numarası veya yüz fotoğrafı tespit edilemedi.',
+      };
+    }
+
+    if (!autoSave) {
+      console.log(LOG, `${resultPhotos.length} fotoğraf önizleme ve kullanıcı onayına hazır.`);
+      return {
+        success: true,
+        totalFound: resultPhotos.length,
+        uploadedCount: 0,
+        photos: resultPhotos,
       };
     }
 

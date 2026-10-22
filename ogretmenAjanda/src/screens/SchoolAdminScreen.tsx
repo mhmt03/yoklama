@@ -90,7 +90,7 @@ import {
   resetGeminiUsageStats,
   GeminiUsageStats,
 } from '../utils/geminiScheduleService';
-import { extractPhotosFromPdf } from '../utils/pdfPhotoExtractor';
+import { extractPhotosFromPdf, PdfExtractedStudentPhoto } from '../utils/pdfPhotoExtractor';
 
 type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'logs' | 'messages' | 'reports' | 'ai_settings';
 
@@ -1183,10 +1183,22 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [teacherSearchQuery, setTeacherSearchQuery] = useState('');
   const [teacherSortOrder, setTeacherSortOrder] = useState<'asc' | 'desc'>('asc');
 
-  // 4.2 Toplu Öğrenci Fotoğrafı Yükleme State
   const [bulkPhotoModalVisible, setBulkPhotoModalVisible] = useState(false);
   const [bulkPhotoProgress, setBulkPhotoProgress] = useState('');
   const [uploadingBulkPhotos, setUploadingBulkPhotos] = useState(false);
+
+  // PDF & AI Fotoğraf Önizleme, Sayfa Filtresi & Eşleştirme Onay Modalı
+  const [photoReviewModalVisible, setPhotoReviewModalVisible] = useState(false);
+  const [reviewPhotos, setReviewPhotos] = useState<PdfExtractedStudentPhoto[]>([]);
+  const [reviewPageFilter, setReviewPageFilter] = useState<'all' | number>('all');
+  const [reviewMatchFilter, setReviewMatchFilter] = useState<'all' | 'matched' | 'unmatched'>('all');
+  const [reviewSearchQuery, setReviewSearchQuery] = useState('');
+  const [savingReviewPhotos, setSavingReviewPhotos] = useState(false);
+
+  // Öğrenci Manuel Seçim / Eşleme Modalı
+  const [studentPickerVisible, setStudentPickerVisible] = useState(false);
+  const [studentPickerTargetId, setStudentPickerTargetId] = useState<string | null>(null);
+  const [studentPickerSearch, setStudentPickerSearch] = useState('');
 
   // Sunucu Görsel Kök Adresi (Fotoğraflar için)
   const serverBaseUrl = DEFAULT_API_URL.replace(/\/api\/?$/, '');
@@ -1446,16 +1458,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   };
 
   const handlePickPdfAndExtractPhotos = async () => {
-    if (!selectedSchool) return;
+    if (!selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçiniz.');
+      return;
+    }
     try {
       setBulkPhotoModalVisible(true);
       setUploadingBulkPhotos(true);
       setBulkPhotoProgress('e-Okul PDF belgesi seçiliyor ve taranıyor...');
 
       const res = await extractPhotosFromPdf(students);
+      setBulkPhotoModalVisible(false);
+      setUploadingBulkPhotos(false);
+      setBulkPhotoProgress('');
+
       if (!res.success) {
-        setBulkPhotoModalVisible(false);
-        setUploadingBulkPhotos(false);
         if (res.error && res.error !== 'Dosya seçilmedi.') {
           Alert.alert('PDF Fotoğraf Hatası', res.error);
         }
@@ -1464,65 +1481,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
       const extracted = res.extractedPhotos || [];
       if (extracted.length === 0) {
-        setBulkPhotoModalVisible(false);
-        setUploadingBulkPhotos(false);
-        Alert.alert('Fotoğraf Bulunamadı', 'Seçilen PDF belgesinde öğrenci numarası ile eşleşen fotoğraf tespit edilemedi.');
+        Alert.alert('Fotoğraf Bulunamadı', 'Seçilen PDF belgesinde vesikalık fotoğraf tespit edilemedi.');
         return;
       }
 
-      const matched = extracted.filter(p => p.matchedStudent?.student_number || p.detectedNumber);
-      if (matched.length === 0) {
-        setBulkPhotoModalVisible(false);
-        setUploadingBulkPhotos(false);
-        Alert.alert('Fotoğraf Eşleşmedi', 'PDF içindeki fotoğraflar sistemdeki öğrenci numaralarıyla eşleşemedi.');
-        return;
-      }
-
-      setBulkPhotoProgress(`${matched.length} öğrenci fotoğrafı sunucuya aktarılıyor...`);
-
-      const photos: { studentNumber: string; photoBase64: string; fileName: string }[] = [];
-      for (const p of matched) {
-        const stdNo = p.matchedStudent?.student_number || p.detectedNumber;
-        if (!stdNo) continue;
-        try {
-          const b64 = await readUriAsBase64(p.tempUri);
-          photos.push({
-            studentNumber: stdNo,
-            photoBase64: `data:image/jpeg;base64,${b64}`,
-            base64Data: `data:image/jpeg;base64,${b64}`,
-            fileName: `${stdNo}.jpg`,
-          } as any);
-        } catch (err) {
-          console.warn('Fotoğraf okunamadı:', stdNo, err);
-        }
-      }
-
-      if (photos.length === 0) {
-        setBulkPhotoModalVisible(false);
-        setUploadingBulkPhotos(false);
-        Alert.alert('Hata', 'Fotoğraflar işlenemedi.');
-        return;
-      }
-
-      const apiRes = await apiRequest<{ updatedCount: number; successCount?: number }>(`uploads/batch-student-photos?schoolId=${selectedSchool.id}`, 'POST', {
-        schoolId: selectedSchool.id,
-        schoolCode: selectedSchool.schoolCode,
-        photos,
-      });
-
-      if (apiRes.success) {
-        const count = apiRes.data?.updatedCount || apiRes.data?.successCount || photos.length;
-        Alert.alert('Tamamlandı 🎉', `${count} öğrencinin fotoğrafı PDF'den başarıyla yüklendi.`);
-        loadStudents(selectedSchool.id);
-      } else {
-        Alert.alert('Hata', apiRes.error || 'Fotoğraflar sunucuya kaydedilemedi.');
-      }
+      setReviewPhotos(extracted);
+      setReviewPageFilter('all');
+      setReviewMatchFilter('all');
+      setReviewSearchQuery('');
+      setPhotoReviewModalVisible(true);
     } catch (e: any) {
-      Alert.alert('Hata', e.message);
-    } finally {
       setUploadingBulkPhotos(false);
       setBulkPhotoModalVisible(false);
       setBulkPhotoProgress('');
+      Alert.alert('Hata', e.message || 'PDF fotoğrafları çıkarılırken bir hata oluştu.');
     }
   };
 
@@ -1563,27 +1535,220 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         selectedSchool.id,
         apiKey,
         model,
-        (progressText) => setBulkPhotoProgress(progressText)
+        (progressText) => setBulkPhotoProgress(progressText),
+        false // Önizleme ve onay için autoSave = false
       );
 
-      if (res.success) {
-        Alert.alert(
-          'AI Fotoğraf Çıkarımı Tamamlandı 🎉',
-          `${res.uploadedCount} öğrencinin fotoğrafı yapay zeka ile başarıyla tespit edilip sunucuya kaydedildi!`
-        );
-        loadStudents(selectedSchool.id);
-      } else {
-        Alert.alert('AI Fotoğraf Hatası', res.error || 'Fotoğraf analizi tamamlanamadı.');
-      }
-    } catch (e: any) {
-      console.error('[AI Foto UI Hata]:', e);
-      Alert.alert('Hata', e.message || 'Fotoğraf çıkarma işlemi başarısız.');
-    } finally {
       setUploadingBulkPhotos(false);
       setBulkPhotoModalVisible(false);
       setBulkPhotoProgress('');
+
+      if (!res.success) {
+        Alert.alert('AI Fotoğraf Hatası', res.error || 'Fotoğraf analizi tamamlanamadı.');
+        return;
+      }
+
+      const found = res.photos || [];
+      if (found.length === 0) {
+        Alert.alert('Fotoğraf Bulunamadı', 'Belgede vesikalık fotoğraf veya öğrenci numarası tespit edilemedi.');
+        return;
+      }
+
+      const mappedPhotos: PdfExtractedStudentPhoto[] = found.map((p, idx) => ({
+        id: `ai_${idx}_${Date.now()}`,
+        index: idx,
+        tempUri: p.tempUri || p.photoBase64,
+        fileSize: p.photoBase64 ? Math.round(p.photoBase64.length * 0.75) : 0,
+        matchedStudent: p.matchedStudent || students.find(s => String(s.student_number || '').trim() === String(p.studentNumber || '').trim()) || null,
+        detectedNumber: p.studentNumber,
+        detectedName: p.studentName,
+        pageNumber: p.pageNumber || 1,
+      }));
+
+      setReviewPhotos(mappedPhotos);
+      setReviewPageFilter('all');
+      setReviewMatchFilter('all');
+      setReviewSearchQuery('');
+      setPhotoReviewModalVisible(true);
+    } catch (e: any) {
+      setUploadingBulkPhotos(false);
+      setBulkPhotoModalVisible(false);
+      setBulkPhotoProgress('');
+      console.error('[AI Foto UI Hata]:', e);
+      Alert.alert('Hata', e.message || 'Fotoğraf çıkarma işlemi başarısız.');
     }
   };
+
+  const handleRemovePhotoMatch = (photoId: string) => {
+    setReviewPhotos(prev =>
+      prev.map(p => {
+        if (p.id === photoId) {
+          return { ...p, matchedStudent: null, detectedNumber: undefined };
+        }
+        return p;
+      })
+    );
+  };
+
+  const handleOpenStudentPicker = (photoId: string) => {
+    setStudentPickerTargetId(photoId);
+    setStudentPickerSearch('');
+    setStudentPickerVisible(true);
+  };
+
+  const handleAssignStudentToPhoto = (student: any) => {
+    if (!studentPickerTargetId) return;
+    setReviewPhotos(prev =>
+      prev.map(p => {
+        if (p.id === studentPickerTargetId) {
+          return {
+            ...p,
+            matchedStudent: student,
+            detectedNumber: student.student_number,
+          };
+        }
+        return p;
+      })
+    );
+    setStudentPickerVisible(false);
+    setStudentPickerTargetId(null);
+  };
+
+  const handleSaveConfirmedPhotos = async () => {
+    if (!selectedSchool) return;
+    const toSave = reviewPhotos.filter(p => p.matchedStudent !== null);
+    if (toSave.length === 0) {
+      Alert.alert('Uyarı', 'Kaydedilecek ve sisteme atanmış en az bir öğrenci fotoğrafı bulunmalıdır.');
+      return;
+    }
+
+    Alert.alert(
+      'Fotoğrafları Kaydet',
+      `Toplam ${toSave.length} adet onaylanmış öğrenci fotoğrafı okul veritabanına aktarılacak. Onaylıyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Kaydet',
+          onPress: async () => {
+            setSavingReviewPhotos(true);
+            try {
+              const preparedPhotos: { studentNumber: string; photoBase64: string; fileName: string }[] = [];
+              for (const item of toSave) {
+                const stdNo = item.matchedStudent?.student_number || item.detectedNumber;
+                if (!stdNo) continue;
+                try {
+                  let b64 = '';
+                  if (item.tempUri && item.tempUri.startsWith('data:image')) {
+                    b64 = item.tempUri;
+                  } else if (item.tempUri) {
+                    const rawB64 = await readUriAsBase64(item.tempUri);
+                    b64 = `data:image/jpeg;base64,${rawB64}`;
+                  }
+                  if (b64) {
+                    preparedPhotos.push({
+                      studentNumber: stdNo,
+                      photoBase64: b64,
+                      base64Data: b64,
+                      fileName: `${stdNo}.jpg`,
+                    } as any);
+                  }
+                } catch (bErr) {
+                  console.warn('Fotoğraf base64 okuma hatası:', stdNo, bErr);
+                }
+              }
+
+              if (preparedPhotos.length === 0) {
+                Alert.alert('Hata', 'Fotoğraflar işlenemedi.');
+                setSavingReviewPhotos(false);
+                return;
+              }
+
+              // 50'şerli paketler halinde sunucuya aktar
+              const BATCH_SIZE = 50;
+              let totalSaved = 0;
+              for (let i = 0; i < preparedPhotos.length; i += BATCH_SIZE) {
+                const chunk = preparedPhotos.slice(i, i + BATCH_SIZE);
+                const apiRes = await apiRequest<{ updatedCount: number; successCount?: number }>(
+                  `uploads/batch-student-photos?schoolId=${selectedSchool.id}`,
+                  'POST',
+                  {
+                    schoolId: selectedSchool.id,
+                    schoolCode: selectedSchool.schoolCode || selectedSchool.code,
+                    photos: chunk,
+                  }
+                );
+                if (apiRes.success) {
+                  totalSaved += apiRes.data?.updatedCount || apiRes.data?.successCount || chunk.length;
+                }
+              }
+
+              Alert.alert(
+                'Tamamlandı 🎉',
+                `Toplam ${totalSaved} öğrencinin vesikalık fotoğrafı başarıyla yüklendi ve sisteme kaydedildi.`
+              );
+              setPhotoReviewModalVisible(false);
+              setReviewPhotos([]);
+              loadStudents(selectedSchool.id);
+            } catch (err: any) {
+              Alert.alert('Hata', err.message || 'Fotoğraflar sunucuya kaydedilirken hata oluştu.');
+            } finally {
+              setSavingReviewPhotos(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // PDF Sayfa Numaraları
+  const reviewAvailablePages = useMemo(() => {
+    const pages = new Set<number>();
+    reviewPhotos.forEach(p => {
+      if (typeof p.pageNumber === 'number' && p.pageNumber > 0) {
+        pages.add(p.pageNumber);
+      }
+    });
+    return Array.from(pages).sort((a, b) => a - b);
+  }, [reviewPhotos]);
+
+  // Filtrelenmiş İnceleme Listesi
+  const filteredReviewPhotos = useMemo(() => {
+    return reviewPhotos.filter(item => {
+      if (reviewPageFilter !== 'all' && item.pageNumber !== reviewPageFilter) {
+        return false;
+      }
+      if (reviewMatchFilter === 'matched' && item.matchedStudent === null) {
+        return false;
+      }
+      if (reviewMatchFilter === 'unmatched' && item.matchedStudent !== null) {
+        return false;
+      }
+      if (reviewSearchQuery.trim()) {
+        const q = reviewSearchQuery.toLowerCase().trim();
+        const stdNo = String(item.matchedStudent?.student_number || item.detectedNumber || '').toLowerCase();
+        const stdName = String(item.matchedStudent?.first_name || item.matchedStudent?.name || item.detectedName || '').toLowerCase();
+        const stdLast = String(item.matchedStudent?.last_name || '').toLowerCase();
+        const cls = String(item.matchedStudent?.class_name || '').toLowerCase();
+        if (!stdNo.includes(q) && !stdName.includes(q) && !stdLast.includes(q) && !cls.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [reviewPhotos, reviewPageFilter, reviewMatchFilter, reviewSearchQuery]);
+
+  // Manuel Öğrenci Seçici Filtresi
+  const filteredPickerStudents = useMemo(() => {
+    if (!studentPickerSearch.trim()) return students.slice(0, 50);
+    const q = studentPickerSearch.toLowerCase().trim();
+    return students.filter(s => {
+      const num = String(s.student_number || '').toLowerCase();
+      const fn = String(s.first_name || s.name || '').toLowerCase();
+      const ln = String(s.last_name || '').toLowerCase();
+      const cls = String(s.class_name || '').toLowerCase();
+      return num.includes(q) || fn.includes(q) || ln.includes(q) || cls.includes(q);
+    }).slice(0, 50);
+  }, [students, studentPickerSearch]);
 
   // 1.4 Çarşaf Doğruluk, Doluluk & Sağlamlık Denetimi Fonksiyonları
   const loadScheduleStats = async (hours = scheduleDailyHours) => {
@@ -13946,6 +14111,467 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginTop: 8, paddingHorizontal: 16 }}>
               {bulkPhotoProgress || 'Lütfen bekleyin...'}
             </Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 4.3 PDF & Fotoğraf İnceleme, Sayfa Sayfa Gezinme ve Eşleştirme Onay Modalı */}
+      <Modal
+        visible={photoReviewModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => {
+          if (!savingReviewPhotos) setPhotoReviewModalVisible(false);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 680, width: '95%', maxHeight: '92%', padding: 0, overflow: 'hidden' }]}>
+            {/* Modal Başlık */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="images" size={20} color="#4F46E5" />
+                  <Text style={{ fontSize: 17, fontWeight: '800', color: '#0F172A' }}>
+                    PDF Fotoğraf İnceleme & Eşleştirme
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                  {reviewPhotos.length} vesikalık fotoğraf bulundu •{' '}
+                  <Text style={{ color: '#059669', fontWeight: '700' }}>
+                    {reviewPhotos.filter(p => p.matchedStudent !== null).length} eşleşti
+                  </Text>
+                  {reviewPhotos.filter(p => p.matchedStudent === null).length > 0 && (
+                    <Text style={{ color: '#D97706', fontWeight: '700' }}>
+                      {' '}• {reviewPhotos.filter(p => p.matchedStudent === null).length} eşleşmedi
+                    </Text>
+                  )}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => !savingReviewPhotos && setPhotoReviewModalVisible(false)}
+                style={{ padding: 6, borderRadius: 8, backgroundColor: '#E2E8F0' }}
+              >
+                <Ionicons name="close" size={20} color="#475569" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Bilgilendirme Kutusu */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#EFF6FF', borderBottomWidth: 1, borderBottomColor: '#DBEAFE', paddingHorizontal: 16, paddingVertical: 10 }}>
+              <Ionicons name="information-circle" size={18} color="#2563EB" />
+              <Text style={{ flex: 1, fontSize: 12, color: '#1E40AF', lineHeight: 16 }}>
+                Fotoğraflar PDF içerisindeki sayfa sırasına ve öğrenci numaralarına göre eşleştirildi. Hatalı olanları "Hatalı / Kaldır" ile çıkarabilir, yanlış olanları "Öğrenci Değiştir" ile düzeltebilirsiniz.
+              </Text>
+            </View>
+
+            {/* Filtre ve Arama Alanı */}
+            <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
+              {/* Sayfa Filtresi (Varsa) */}
+              {reviewAvailablePages.length > 1 && (
+                <View style={{ marginBottom: 10 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B', marginBottom: 6, textTransform: 'uppercase' }}>
+                    📄 Sayfa Seçimi:
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    <TouchableOpacity
+                      onPress={() => setReviewPageFilter('all')}
+                      style={{
+                        paddingHorizontal: 12,
+                        paddingVertical: 5,
+                        borderRadius: 16,
+                        backgroundColor: reviewPageFilter === 'all' ? '#4F46E5' : '#F1F5F9',
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: reviewPageFilter === 'all' ? '#fff' : '#475569' }}>
+                        Tüm Sayfalar ({reviewPhotos.length})
+                      </Text>
+                    </TouchableOpacity>
+                    {reviewAvailablePages.map(page => {
+                      const countOnPage = reviewPhotos.filter(p => p.pageNumber === page).length;
+                      const isSelected = reviewPageFilter === page;
+                      return (
+                        <TouchableOpacity
+                          key={page}
+                          onPress={() => setReviewPageFilter(page)}
+                          style={{
+                            paddingHorizontal: 12,
+                            paddingVertical: 5,
+                            borderRadius: 16,
+                            backgroundColor: isSelected ? '#4F46E5' : '#F1F5F9',
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? '#fff' : '#475569' }}>
+                            Sayfa {page} ({countOnPage})
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
+
+              {/* Durum Filtreleri ve Arama */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={() => setReviewMatchFilter('all')}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 12,
+                      backgroundColor: reviewMatchFilter === 'all' ? '#0F172A' : '#F1F5F9',
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: reviewMatchFilter === 'all' ? '#fff' : '#475569' }}>
+                      Tümü ({reviewPhotos.length})
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setReviewMatchFilter('matched')}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 12,
+                      backgroundColor: reviewMatchFilter === 'matched' ? '#059669' : '#ECFDF5',
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: reviewMatchFilter === 'matched' ? '#fff' : '#059669' }}>
+                      Eşleşen ({reviewPhotos.filter(p => p.matchedStudent !== null).length})
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setReviewMatchFilter('unmatched')}
+                    style={{
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                      borderRadius: 12,
+                      backgroundColor: reviewMatchFilter === 'unmatched' ? '#D97706' : '#FFFBEB',
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: reviewMatchFilter === 'unmatched' ? '#fff' : '#D97706' }}>
+                      Eşleşmeyen ({reviewPhotos.filter(p => p.matchedStudent === null).length})
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Arama Inputu */}
+                <View style={{ flex: 1, minWidth: 160, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 32 }}>
+                  <Ionicons name="search" size={14} color="#64748B" style={{ marginRight: 6 }} />
+                  <TextInput
+                    style={{ flex: 1, fontSize: 12, color: '#0F172A', paddingVertical: 0 }}
+                    placeholder="Ad, no veya şube ara..."
+                    placeholderTextColor="#94A3B8"
+                    value={reviewSearchQuery}
+                    onChangeText={setReviewSearchQuery}
+                  />
+                  {reviewSearchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setReviewSearchQuery('')}>
+                      <Ionicons name="close-circle" size={14} color="#94A3B8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            {/* Fotoğraflar Listesi */}
+            <ScrollView style={{ flex: 1, backgroundColor: '#F8FAFC' }} contentContainerStyle={{ padding: 12, gap: 10 }}>
+              {filteredReviewPhotos.length === 0 ? (
+                <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 40 }}>
+                  <Ionicons name="search-outline" size={36} color="#94A3B8" />
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#64748B', marginTop: 8 }}>
+                    Filtreye uygun fotoğraf bulunamadı.
+                  </Text>
+                </View>
+              ) : (
+                filteredReviewPhotos.map((item, idx) => {
+                  const matched = item.matchedStudent;
+                  const pdfDetectedStr = item.detectedNumber
+                    ? `PDF Okul No: ${item.detectedNumber}`
+                    : item.detectedName
+                    ? `PDF Metin: ${item.detectedName}`
+                    : 'PDF / OCR numara okunamadı';
+
+                  return (
+                    <View
+                      key={item.id || idx}
+                      style={{
+                        flexDirection: 'row',
+                        backgroundColor: '#fff',
+                        borderRadius: 12,
+                        padding: 10,
+                        borderWidth: 1,
+                        borderColor: matched ? '#E2E8F0' : '#FED7AA',
+                        shadowColor: '#000',
+                        shadowOpacity: 0.03,
+                        shadowRadius: 4,
+                        elevation: 1,
+                        gap: 12,
+                        alignItems: 'center',
+                      }}
+                    >
+                      {/* Vesikalık Görsel */}
+                      <View style={{ position: 'relative' }}>
+                        <Image
+                          source={{ uri: item.tempUri }}
+                          style={{
+                            width: 68,
+                            height: 82,
+                            borderRadius: 8,
+                            backgroundColor: '#E2E8F0',
+                            borderWidth: 1,
+                            borderColor: '#CBD5E1',
+                          }}
+                          resizeMode="cover"
+                        />
+                        {item.pageNumber && (
+                          <View
+                            style={{
+                              position: 'absolute',
+                              bottom: 2,
+                              right: 2,
+                              backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                              borderRadius: 4,
+                              paddingHorizontal: 4,
+                              paddingVertical: 1,
+                            }}
+                          >
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: '#fff' }}>
+                              S.{item.pageNumber}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Bilgiler ve Butonlar */}
+                      <View style={{ flex: 1, justifyContent: 'center' }}>
+                        {/* Sıra & Rozet */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#334155' }}>
+                            #{item.index + 1}. Fotoğraf {item.pageNumber ? `(Sayfa ${item.pageNumber})` : ''}
+                          </Text>
+                          {matched ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                              <Ionicons name="checkmark-circle" size={12} color="#059669" />
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>Eşleşti</Text>
+                            </View>
+                          ) : (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                              <Ionicons name="alert-circle" size={12} color="#D97706" />
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#D97706' }}>Eşleşmedi</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* PDF Algılanan Bilgi */}
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: '#4F46E5', marginTop: 1 }}>
+                          📄 {pdfDetectedStr}
+                        </Text>
+
+                        {/* Sistem Öğrenci Bilgisi */}
+                        {matched ? (
+                          <View style={{ marginTop: 2 }}>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#0F172A' }}>
+                              👤 Sistem: {matched.first_name || matched.name} {matched.last_name || ''}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
+                              Okul No: <Text style={{ fontWeight: '700', color: '#334155' }}>{matched.student_number || '-'}</Text> • Şube: <Text style={{ fontWeight: '700', color: '#334155' }}>{matched.class_name || '-'}</Text>
+                            </Text>
+                          </View>
+                        ) : (
+                          <Text style={{ fontSize: 11, fontStyle: 'italic', color: '#DC2626', marginTop: 2 }}>
+                            ⚠️ Sistemde bu fotoğrafla eşleşen öğrenci atanmadı.
+                          </Text>
+                        )}
+
+                        {/* Satır İçi İşlem Butonları */}
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                          {matched && (
+                            <TouchableOpacity
+                              onPress={() => handleRemovePhotoMatch(item.id)}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 4,
+                                backgroundColor: '#FEE2E2',
+                                paddingHorizontal: 8,
+                                paddingVertical: 4,
+                                borderRadius: 6,
+                              }}
+                            >
+                              <Ionicons name="close-circle-outline" size={13} color="#DC2626" />
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>
+                                Hatalı / Kaldır
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+
+                          <TouchableOpacity
+                            onPress={() => handleOpenStudentPicker(item.id)}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                              backgroundColor: '#EEF2FF',
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              borderRadius: 6,
+                            }}
+                          >
+                            <Ionicons name="person-add-outline" size={13} color="#4F46E5" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>
+                              {matched ? 'Öğrenci Değiştir' : 'Öğrenci Seç'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+
+            {/* Alt İşlem Butonları */}
+            <View style={{ flexDirection: 'row', gap: 10, padding: 14, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#fff' }}>
+              <TouchableOpacity
+                disabled={savingReviewPhotos}
+                onPress={() => setPhotoReviewModalVisible(false)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: '#CBD5E1',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: '#fff',
+                }}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#475569' }}>Vazgeç</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                disabled={savingReviewPhotos || reviewPhotos.filter(p => p.matchedStudent !== null).length === 0}
+                onPress={handleSaveConfirmedPhotos}
+                style={{
+                  flex: 2,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  backgroundColor: reviewPhotos.filter(p => p.matchedStudent !== null).length === 0 ? '#94A3B8' : '#059669',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  shadowColor: '#059669',
+                  shadowOpacity: 0.2,
+                  shadowRadius: 4,
+                  elevation: 2,
+                }}
+              >
+                {savingReviewPhotos ? (
+                  <>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#fff' }}>Sunucuya Kaydediliyor...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-done" size={16} color="#fff" />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#fff' }}>
+                      Onayla ve Kaydet ({reviewPhotos.filter(p => p.matchedStudent !== null).length})
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 4.4 Manuel Öğrenci Seçici Modalı */}
+      <Modal
+        visible={studentPickerVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setStudentPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 500, width: '90%', maxHeight: '80%', padding: 0, overflow: 'hidden' }]}>
+            {/* Başlık */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
+              <View>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                  Öğrenci Seç / Değiştir
+                </Text>
+                <Text style={{ fontSize: 11, color: '#64748B' }}>
+                  Fotoğrafa atamak istediğiniz öğrenciye dokunun
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setStudentPickerVisible(false)}
+                style={{ padding: 4, borderRadius: 6, backgroundColor: '#E2E8F0' }}
+              >
+                <Ionicons name="close" size={18} color="#475569" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Arama Inputu */}
+            <View style={{ padding: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 38 }}>
+                <Ionicons name="search" size={16} color="#64748B" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={{ flex: 1, fontSize: 13, color: '#0F172A', paddingVertical: 0 }}
+                  placeholder="Öğrenci adı, soyadı, no veya şube..."
+                  placeholderTextColor="#94A3B8"
+                  value={studentPickerSearch}
+                  onChangeText={setStudentPickerSearch}
+                  autoFocus
+                />
+                {studentPickerSearch.length > 0 && (
+                  <TouchableOpacity onPress={() => setStudentPickerSearch('')}>
+                    <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* Öğrenci Listesi */}
+            <ScrollView style={{ flex: 1, backgroundColor: '#fff' }} contentContainerStyle={{ padding: 8 }}>
+              {filteredPickerStudents.length === 0 ? (
+                <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 13, color: '#94A3B8' }}>Eşleşen öğrenci bulunamadı.</Text>
+                </View>
+              ) : (
+                filteredPickerStudents.map((std, sIdx) => (
+                  <TouchableOpacity
+                    key={std.id || sIdx}
+                    onPress={() => handleAssignStudentToPhoto(std)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      borderRadius: 8,
+                      borderBottomWidth: 1,
+                      borderBottomColor: '#F1F5F9',
+                      gap: 12,
+                    }}
+                  >
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#4F46E5' }}>
+                        {(std.first_name || std.name || 'Ö').charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                        {std.first_name || std.name} {std.last_name || ''}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
+                        No: <Text style={{ fontWeight: '700', color: '#334155' }}>{std.student_number || '-'}</Text> • Sınıf/Şube: <Text style={{ fontWeight: '700', color: '#334155' }}>{std.class_name || '-'}</Text>
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>

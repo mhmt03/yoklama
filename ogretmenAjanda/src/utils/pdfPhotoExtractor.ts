@@ -381,17 +381,19 @@ interface PdfImageObj {
 
 function parsePdfImageObjs(text: string, buf: Uint8Array): PdfImageObj[] {
   const results: PdfImageObj[] = [];
-  const re = /(\d+)\s+0\s+obj\s*\n?<<([\s\S]*?)>>/g;
+  const objRe = /(\d+)\s+0\s+obj([\s\S]*?)\bstream[\r\n]+/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  while ((m = objRe.exec(text)) !== null) {
+    const objNum = parseInt(m[1], 10);
     const hdr = m[2];
-    if (!hdr.includes('/Subtype') || !hdr.includes('/Image')) continue;
+    if (!hdr.includes('/Image') || (!hdr.includes('/Subtype') && !hdr.includes('/Type'))) continue;
+
     const wm = /\/Width\s+(\d+)/.exec(hdr);
     const hm = /\/Height\s+(\d+)/.exec(hdr);
     if (!wm || !hm) continue;
     const width = parseInt(wm[1], 10);
     const height = parseInt(hm[1], 10);
-    if (width < 40 || height < 40) continue; // skip tiny icons
+    if (width < 30 || height < 30) continue; // skip tiny icons/bullets
 
     let filter: 'DCTDecode' | 'FlateDecode' | '' = '';
     if (/DCTDecode/.test(hdr)) filter = 'DCTDecode';
@@ -402,7 +404,7 @@ function parsePdfImageObjs(text: string, buf: Uint8Array): PdfImageObj[] {
     const csRef = /\/ColorSpace\s+(\d+)\s+0\s+R/.exec(hdr);
     if (csRef) {
       const csNum = parseInt(csRef[1], 10);
-      const csObjRe = new RegExp(csNum + '\\s+0\\s+obj\\s*\\n?\\[\\s*/Indexed');
+      const csObjRe = new RegExp(csNum + '\\s+0\\s+obj[\\s\\S]*?\\/Indexed');
       const csM = csObjRe.exec(text);
       if (csM) {
         csType = 'Indexed';
@@ -415,15 +417,11 @@ function parsePdfImageObjs(text: string, buf: Uint8Array): PdfImageObj[] {
       csType = 'DeviceGray';
     }
 
-    const smIdx = text.indexOf('stream', m.index + m[0].length);
-    if (smIdx === -1) continue;
-    let ss = smIdx + 6;
-    if (text[ss] === '\r') ss++;
-    if (text[ss] === '\n') ss++;
+    const ss = m.index + m[0].length;
     const esIdx = text.indexOf('endstream', ss);
     if (esIdx === -1) continue;
 
-    results.push({ objNum: parseInt(m[1], 10), width, height, filter, csType, paletteObjNum, streamStart: ss, streamEnd: esIdx });
+    results.push({ objNum, width, height, filter, csType, paletteObjNum, streamStart: ss, streamEnd: esIdx });
   }
   return results;
 }
@@ -649,7 +647,10 @@ export const extractPhotosFromPdf = async (
 
     // 1. Parse image objects (all pages, binary order)
     const allImgs = parsePdfImageObjs(text, buf);
-    const photoObjs = allImgs.filter(img => img.height >= 50 && img.width >= 40 && img.height / img.width >= 0.8);
+    const photoObjs = allImgs.filter(img =>
+      img.height >= 35 && img.width >= 30 &&
+      (img.height / img.width >= 0.5 && img.height / img.width <= 2.8)
+    );
 
     console.log(`[PDF Fotoğraf] Toplam Resim Objesi: ${allImgs.length} adet | Vesikalık Kriterine Uyan: ${photoObjs.length} adet`);
 
@@ -707,13 +708,17 @@ export const extractPhotosFromPdf = async (
       pageNumber++;
 
       // ── 1. Decode this page's content stream(s) ──
-      const pageWindow = text.substring(Math.max(0, pm.index - 200), pm.index + 3000);
-      const textBefore = text.substring(Math.max(0, pm.index - 300), pm.index);
+      const textBefore = text.substring(Math.max(0, pm.index - 800), pm.index);
       const objNumM = /(\d+)\s+0\s+obj[\s\S]*?$/i.exec(textBefore);
       const pageObjNum = objNumM ? parseInt(objNumM[1], 10) : 0;
 
+      const endObjIdx = text.indexOf('endobj', pm.index);
+      const pageObjText = endObjIdx !== -1
+        ? text.substring(Math.max(0, pm.index - (objNumM ? objNumM[0].length : 300)), endObjIdx + 6)
+        : text.substring(Math.max(0, pm.index - 300), pm.index + 8000);
+
       let pageContent = '';
-      const arrayM = /\/Contents\s+\[([\s\S]*?)\]/.exec(pageWindow);
+      const arrayM = /\/Contents\s+\[([\s\S]*?)\]/.exec(pageObjText);
       if (arrayM) {
         const refs: number[] = [];
         const rRe = /(\d+)\s+0\s+R/g;
@@ -740,7 +745,7 @@ export const extractPhotosFromPdf = async (
           pageContent = Array.from(comb).map(b => String.fromCharCode(b)).join('');
         }
       } else {
-        const contentsM = /\/Contents\s+(\d+)\s+0\s+R/.exec(pageWindow);
+        const contentsM = /\/Contents\s+(\d+)\s+0\s+R/.exec(pageObjText);
         if (contentsM) {
           const raw = getObjRawStream(parseInt(contentsM[1], 10), text, buf);
           if (raw) {
@@ -885,6 +890,19 @@ export const extractPhotosFromPdf = async (
             positionalCursor++;
           }
         }
+      }
+    }
+
+    // ── 6. Sayfa akışlarına düşmemiş veya metin dışı kalmış fotoğrafları ekle (EKSİK FOTOĞRAF BIRAKMAZ) ──
+    for (let pi = 0; pi < photoObjs.length; pi++) {
+      const remainingPhoto = photoObjs[pi];
+      if (!usedObjNums.has(remainingPhoto.objNum)) {
+        orderedPairs.push({
+          photo: remainingPhoto,
+          info: { imgName: `img_${remainingPhoto.objNum}`, number: '', name: '' },
+          pageNumber: 0
+        });
+        usedObjNums.add(remainingPhoto.objNum);
       }
     }
 

@@ -1,7 +1,9 @@
 import { getDB } from '../database/db';
-import { apiRequest, getActiveUserSession } from './apiClient';
+import { apiRequest, getActiveUserSession, getBaseApiUrl } from './apiClient';
 import { getActiveSchool } from '../database/operations/schoolOperations';
 import { getStudentsByClass } from '../database/operations/studentOperations';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Platform } from 'react-native';
 
 export interface ServerStudentItem {
   id?: string;
@@ -21,6 +23,48 @@ export interface SyncResult {
   totalServer?: number;
   updatedCount?: number;
   addedCount?: number;
+}
+
+/**
+ * Sunucudaki öğrenci vesikalık fotoğrafını tam URL'e dönüştürür ve
+ * yerel mobil cihazda çevrimdışı kullanım için kalıcı olarak indirip önbelleğe alır.
+ */
+async function resolveAndDownloadStudentPhoto(photoPath?: string | null, studentNumber?: string): Promise<string | null> {
+  if (!photoPath || !photoPath.trim()) return null;
+  const cleanPath = photoPath.trim();
+
+  try {
+    const apiBase = await getBaseApiUrl();
+    const origin = apiBase.replace(/\/api\/?$/, '');
+    const fullUrl = cleanPath.startsWith('http')
+      ? cleanPath
+      : `${origin}${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
+
+    if (Platform.OS === 'web') {
+      return fullUrl;
+    }
+
+    // Mobil ortamda (Android/iOS) yerel kalıcı klasöre indir
+    const photoDir = `${FileSystem.documentDirectory}student_photos/`;
+    const dirInfo = await FileSystem.getInfoAsync(photoDir);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(photoDir, { intermediates: true });
+    }
+
+    const extMatch = cleanPath.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
+    const ext = extMatch ? `.${extMatch[1]}` : '.jpg';
+    const safeNum = (studentNumber || 'unknown').replace(/[^a-zA-Z0-9]/g, '_');
+    const localUri = `${photoDir}std_${safeNum}${ext}`;
+
+    const downloadRes = await FileSystem.downloadAsync(fullUrl, localUri);
+    if (downloadRes.status === 200) {
+      return localUri;
+    }
+    return fullUrl;
+  } catch (err) {
+    console.warn('[Öğrenci Senkronizasyon] Fotoğraf çözme/indirme uyarısı:', err);
+    return photoPath;
+  }
 }
 
 /**
@@ -107,6 +151,9 @@ export async function syncClassStudentsFromServer(
           return normalize(locFullName) === normalize(sFullName);
         });
 
+        // Fotoğrafı yerel cihaz için hazırla / indir
+        const resolvedPhotoUri = await resolveAndDownloadStudentPhoto(serverItem.photoPath, sNo);
+
         if (matchedLocal) {
           // Öğrenci zaten yerelde var -> Bilgilerini güncelle, ID KORUNDUĞU İÇİN TÜM NOT VE GÖRÜŞLER AYNEN KORUNUR!
           await db.runAsync(
@@ -122,7 +169,7 @@ export async function syncClassStudentsFromServer(
             sNo,
             firstName,
             lastName,
-            serverItem.photoPath || null,
+            resolvedPhotoUri,
             serverItem.parentName || null,
             serverItem.parentPhone || null,
             serverItem.studentPhone || null,
@@ -141,7 +188,7 @@ export async function syncClassStudentsFromServer(
             sNo,
             firstName,
             lastName,
-            serverItem.photoPath || null,
+            resolvedPhotoUri,
             serverItem.parentName || null,
             serverItem.parentPhone || null,
             serverItem.studentPhone || null
