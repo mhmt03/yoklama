@@ -155,30 +155,49 @@ export const deleteTeacherAssignment = async (assignmentId: number): Promise<voi
 
 /**
  * Öğretmenin sadece onaylanmış (yetkili) olduğu sınıf ID'lerini döner.
- * Eğer henüz hiçbir atama kısıtlaması yoksa boş liste döner (böylece tüm sınıflara erişebilir).
+ * Hem teacher_assignments tablosunu hem de schedules (haftalık ders programı) tablosunu kontrol eder.
+ * Eğer öğretmenin tanımlı dersi veya ataması varsa sadece o sınıfları döner, yoksa null döner.
  */
 export const getTeacherAuthorizedClassIds = async (
   schoolId: number,
-  teacherName: string
+  teacherName?: string
 ): Promise<number[] | null> => {
   const db = await getDB();
-  const countRow = await db.getFirstAsync<{ count: number }>(
-    'SELECT count(*) as count FROM teacher_assignments WHERE school_id = ? AND teacher_name = ?',
-    schoolId,
-    teacherName.trim()
-  );
+  const cleanName = teacherName?.trim() || '';
+  const idSet = new Set<number>();
 
-  // Öğretmenin tanımlı ataması yoksa henüz kısıtlama uygulanmamıştır
-  if (!countRow || countRow.count === 0) {
-    return null; // Null: Kısıtlama yok, tüm sınıfları görebilir
+  // 1. teacher_assignments tablosundan onaylı sınıfları al
+  if (cleanName) {
+    const approvedRows = await db.getAllAsync<{ class_id: number }>(
+      'SELECT DISTINCT class_id FROM teacher_assignments WHERE school_id = ? AND teacher_name = ? AND is_approved = 1',
+      schoolId,
+      cleanName
+    );
+    approvedRows.forEach((r) => idSet.add(r.class_id));
+  }
+  
+  if (idSet.size === 0) {
+    const allApprovedRows = await db.getAllAsync<{ class_id: number }>(
+      'SELECT DISTINCT class_id FROM teacher_assignments WHERE school_id = ? AND is_approved = 1',
+      schoolId
+    );
+    allApprovedRows.forEach((r) => idSet.add(r.class_id));
   }
 
-  // Sadece onaylı (is_approved = 1) olanları al
-  const approvedRows = await db.getAllAsync<{ class_id: number }>(
-    'SELECT DISTINCT class_id FROM teacher_assignments WHERE school_id = ? AND teacher_name = ? AND is_approved = 1',
+  // 2. schedules tablosunda öğretmenin dersinin olduğu sınıfları al
+  const scheduleRows = await db.getAllAsync<{ class_id: number }>(
+    `SELECT DISTINCT s.class_id 
+     FROM schedules s 
+     JOIN classes c ON c.id = s.class_id 
+     WHERE (c.school_id = ? OR s.school_id = ?) AND s.class_id IS NOT NULL`,
     schoolId,
-    teacherName.trim()
+    schoolId
   );
+  scheduleRows.forEach((r) => idSet.add(r.class_id));
 
-  return approvedRows.map((r) => r.class_id);
+  if (idSet.size > 0) {
+    return Array.from(idSet);
+  }
+
+  return null;
 };

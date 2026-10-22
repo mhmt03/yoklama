@@ -294,13 +294,20 @@ namespace OgretmenAjanda.Api.Controllers
                 var parts = cleanClass.Split(new[] { '-', '/', ' ' }, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length == 2)
                 {
-                    var g = parts[0];
-                    var sec = parts[1];
-                    query = query.Where(s => (s.Grade == g && s.Section == sec) || (s.Grade + "-" + s.Section == cleanClass));
+                    var g = parts[0].Trim();
+                    var sec = parts[1].Trim();
+                    query = query.Where(s => 
+                        (s.Grade.ToLower() == g.ToLower() && s.Section.ToLower() == sec.ToLower()) || 
+                        (s.Grade + "-" + s.Section == cleanClass) ||
+                        (s.Grade + "/" + s.Section == cleanClass) ||
+                        (s.Grade + s.Section == cleanClass));
                 }
                 else
                 {
-                    query = query.Where(s => s.Section == cleanClass || s.Grade == cleanClass || (s.Grade + "-" + s.Section == cleanClass));
+                    query = query.Where(s => 
+                        s.Section.ToLower() == cleanClass.ToLower() || 
+                        s.Grade.ToLower() == cleanClass.ToLower() || 
+                        (s.Grade + "-" + s.Section == cleanClass));
                 }
             }
 
@@ -645,10 +652,34 @@ namespace OgretmenAjanda.Api.Controllers
 
             if (!string.IsNullOrEmpty(teacherName))
             {
-                query = query.Where(s => s.TeacherName != null && s.TeacherName.ToLower().Contains(teacherName.ToLower()));
+                var t = teacherName.Trim().ToLower();
+                query = query.Where(s => s.TeacherName != null && s.TeacherName.ToLower().Contains(t));
             }
 
             var items = await query.ToListAsync();
+
+            // Eğer öğretmen adına göre sonuç bulunamadıysa, Türkçe karakter ve kelime bazlı esnek eşleştirme yap
+            if (!string.IsNullOrEmpty(teacherName) && items.Count == 0)
+            {
+                var allSchoolItems = await _context.ScheduleItems.Where(s => s.SchoolId == schoolId).ToListAsync();
+                var cleanT = teacherName.Trim();
+                var words = cleanT.Split(new[] { ' ', '.', '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Where(w => w.Length >= 2)
+                    .ToList();
+
+                items = allSchoolItems.Where(s =>
+                {
+                    if (string.IsNullOrWhiteSpace(s.TeacherName)) return false;
+                    var tDb = s.TeacherName.Trim();
+                    if (tDb.Contains(cleanT, StringComparison.CurrentCultureIgnoreCase) ||
+                        cleanT.Contains(tDb, StringComparison.CurrentCultureIgnoreCase))
+                    {
+                        return true;
+                    }
+                    return words.Any(w => tDb.Contains(w, StringComparison.CurrentCultureIgnoreCase));
+                }).ToList();
+            }
+
             return Ok(items);
         }
 

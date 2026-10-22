@@ -37,6 +37,7 @@ import { useDrawer } from '../context/DrawerContext';
 import { getActiveUserRole, getActiveTeacherName } from '../utils/roleService';
 import { getTeacherAuthorizedClassIds } from '../database/operations/schoolCodeOperations';
 import { syncClassStudentsFromServer, syncTeacherAssignedClassesAndStudents } from '../services/studentSyncService';
+import { getActiveUserSession } from '../services/apiClient';
 
 export const ClassesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -74,15 +75,14 @@ export const ClassesScreen: React.FC = () => {
       setIsSchoolTeacher(teacherInSchool);
 
       if (teacherInSchool) {
-        const teacherName = await getActiveTeacherName();
-        if (teacherName) {
-          const authIds = await getTeacherAuthorizedClassIds(active.id, teacherName);
-          if (authIds !== null) {
-            setTeacherRestrictionActive(true);
-            data = data.filter((c) => authIds.includes(c.id));
-          } else {
-            setTeacherRestrictionActive(false);
-          }
+        const session = await getActiveUserSession();
+        const teacherName = (await getActiveTeacherName()) || session?.fullName || session?.username || '';
+        const authIds = await getTeacherAuthorizedClassIds(active.id, teacherName);
+        if (authIds !== null && authIds.length > 0) {
+          setTeacherRestrictionActive(true);
+          data = data.filter((c) => authIds.includes(c.id));
+        } else {
+          setTeacherRestrictionActive(false);
         }
       } else {
         setTeacherRestrictionActive(false);

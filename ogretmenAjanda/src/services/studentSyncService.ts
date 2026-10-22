@@ -248,12 +248,104 @@ export async function syncTeacherAssignedClassesAndStudents(
       } catch {}
     }
 
-    // Öğretmen adı
+    // 2. Öğretmen adı ve yardımcı normalizasyon
     const { getActiveTeacherName } = await import('../utils/roleService');
-    const teacherName = (await getActiveTeacherName()) || session?.fullName || session?.username || '';
+    const rawTeacherName = (await getActiveTeacherName()) || session?.fullName || session?.username || '';
+    const cleanTeacherName = rawTeacherName.trim();
+
+    const normalizeText = (str: string) =>
+      (str || '')
+        .trim()
+        .toLowerCase()
+        .replace(/ı/g, 'i')
+        .replace(/ğ/g, 'g')
+        .replace(/ü/g, 'u')
+        .replace(/ş/g, 's')
+        .replace(/ö/g, 'o')
+        .replace(/ç/g, 'c')
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\s+/g, ' ');
+
+    const normTeacher = normalizeText(cleanTeacherName);
+    const teacherTokens = normTeacher.split(' ').filter((w) => w.length >= 2);
+
+    const matchesTeacher = (target: string): boolean => {
+      if (!target || !cleanTeacherName) return false;
+      const normTarget = normalizeText(target);
+      if (normTarget === normTeacher || normTarget.includes(normTeacher) || normTeacher.includes(normTarget)) {
+        return true;
+      }
+      return teacherTokens.some((tok) => normTarget.includes(tok));
+    };
+
     const assignedClassNames = new Set<string>();
 
-    // 2. Sunucudaki Öğretmen Profili (AssignedClassesJson)
+    const addClassIfValid = (grade?: string, section?: string) => {
+      const g = (grade || '').trim();
+      const sec = (section || '').trim();
+      let cls = '';
+      if (g && sec) {
+        if (g.includes('-') || g.includes('/')) {
+          cls = g;
+        } else {
+          cls = `${g}-${sec}`;
+        }
+      } else if (g) {
+        cls = g;
+      } else if (sec) {
+        cls = sec;
+      }
+      if (cls) {
+        const standardized = cls.replace('/', '-').toUpperCase();
+        assignedClassNames.add(standardized);
+      }
+    };
+
+    // 3. Sunucudan öğretmen ders programını da senkronize etmeyi dene
+    try {
+      const { syncScheduleFromSchool } = await import('./scheduleSyncService');
+      await syncScheduleFromSchool(code);
+    } catch (schedSyncErr) {
+      console.warn('Otomatik ders programı kontrolü uyarısı:', schedSyncErr);
+    }
+
+    // 4. Yerel SQLite schedules tablosundan öğretmenin girdiği sınıfları topla
+    const db = await getDB();
+    try {
+      const localSchedClasses = await db.getAllAsync<{ name: string }>(
+        `SELECT DISTINCT c.name 
+         FROM schedules s 
+         JOIN classes c ON c.id = s.class_id 
+         WHERE (c.school_id = ? OR s.school_id = ?) AND c.name IS NOT NULL`,
+        targetLocalSchoolId,
+        targetLocalSchoolId
+      );
+      for (const sc of localSchedClasses) {
+        if (sc.name && sc.name.trim()) {
+          addClassIfValid(sc.name);
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Yerel program sınıfları okunurken hata:', dbErr);
+    }
+
+    // 5. Sunucudaki Çarşaf Ders Programından gelen sınıflar (sync/schedules)
+    if (schoolId) {
+      try {
+        const schedRes = await apiRequest<any[]>(`sync/schedules?schoolId=${schoolId}`);
+        if (schedRes.success && schedRes.data && schedRes.data.length > 0) {
+          for (const s of schedRes.data) {
+            if (matchesTeacher(s.teacherName)) {
+              addClassIfValid(s.grade, s.section);
+            }
+          }
+        }
+      } catch (schedErr) {
+        console.warn('Sunucu programından şube tarama hatası:', schedErr);
+      }
+    }
+
+    // 6. Sunucudaki Öğretmen Profilinden atanmış sınıflar (AssignedClassesJson)
     if (schoolId) {
       try {
         const teachersRes = await apiRequest<any[]>(`schools/${schoolId}/teachers`);
@@ -261,10 +353,7 @@ export async function syncTeacherAssignedClassesAndStudents(
           const myProfile = teachersRes.data.find(
             (t) =>
               (t.username && session?.username && t.username.toLowerCase() === session.username.toLowerCase()) ||
-              (t.fullName && teacherName && (
-                t.fullName.toLowerCase().includes(teacherName.toLowerCase()) ||
-                teacherName.toLowerCase().includes(t.fullName.toLowerCase())
-              ))
+              matchesTeacher(t.fullName)
           );
 
           if (myProfile?.assignedClassesJson) {
@@ -280,7 +369,7 @@ export async function syncTeacherAssignedClassesAndStudents(
               if (Array.isArray(parsed)) {
                 parsed.forEach((c: any) => {
                   const clean = String(c).trim();
-                  if (clean) assignedClassNames.add(clean);
+                  if (clean) addClassIfValid(clean);
                 });
               }
             } catch {}
@@ -289,24 +378,7 @@ export async function syncTeacherAssignedClassesAndStudents(
       } catch {}
     }
 
-    // 3. Sunucudaki Çarşaf Ders Programından gelen sınıflar (sync/schedules)
-    if (schoolId && teacherName) {
-      try {
-        const schedRes = await apiRequest<any[]>(
-          `sync/schedules?schoolId=${schoolId}&teacherName=${encodeURIComponent(teacherName)}`
-        );
-        if (schedRes.success && schedRes.data && schedRes.data.length > 0) {
-          schedRes.data.forEach((s) => {
-            if (s.grade && s.section) {
-              const cls = `${s.grade}-${s.section}`.trim();
-              assignedClassNames.add(cls);
-            }
-          });
-        }
-      } catch {}
-    }
-
-    // 4. Öğretmenin bu okulda hiç atanmış şubesi/dersi yoksa (2. okulda dersi yoksa veri göremez kuralı)
+    // 7. Öğretmenin bu okulda hiç atanmış şubesi/dersi yoksa
     if (assignedClassNames.size === 0) {
       return {
         success: true,
@@ -316,18 +388,21 @@ export async function syncTeacherAssignedClassesAndStudents(
       };
     }
 
-    // 5. Şubeleri yerel SQLite'ta ilgili okul (school_id) altına ekle/güncelle ve öğrencilerini senkronize et
+    // 8. Şubeleri yerel SQLite'ta ilgili okul (school_id) altına ekle/güncelle ve öğrencilerini senkronize et
     const { getClasses, createClass } = await import('../database/operations/classOperations');
     const localClasses = await getClasses(targetLocalSchoolId);
     let totalStudentsSynced = 0;
     const syncedList: string[] = [];
+    const validAssignedClassIds: number[] = [];
 
     for (const rawName of Array.from(assignedClassNames)) {
       const className = rawName.trim();
       if (!className) continue;
 
       let existing = localClasses.find(
-        (c) => c.name.trim().toLowerCase() === className.toLowerCase()
+        (c) =>
+          c.name.trim().toLowerCase() === className.toLowerCase() ||
+          c.name.trim().replace('/', '-').toLowerCase() === className.toLowerCase()
       );
 
       let classId: number;
@@ -339,15 +414,54 @@ export async function syncTeacherAssignedClassesAndStudents(
         classId = await createClass(className, 'Okuldan çekildi', gradeLevel, targetLocalSchoolId);
       }
 
-      // Bu sınıfın öğrencilerini çek
+      validAssignedClassIds.push(classId);
+
+      // Öğretmen yetkisini teacher_assignments tablosuna kaydet
+      try {
+        await db.runAsync(
+          `INSERT OR REPLACE INTO teacher_assignments (school_id, teacher_name, class_id, is_approved)
+           VALUES (?, ?, ?, 1)`,
+          targetLocalSchoolId,
+          cleanTeacherName,
+          classId
+        );
+      } catch (taErr) {
+        console.warn('teacher_assignments kaydı uyarısı:', taErr);
+      }
+
+      // Bu sınıfın öğrencilerini sunucudan çek
       try {
         const studentSync = await syncClassStudentsFromServer(classId, className, code);
         if (studentSync.success && studentSync.totalServer) {
           totalStudentsSynced += studentSync.totalServer;
         }
-      } catch {}
+      } catch (stErr) {
+        console.warn(`${className} öğrencileri çekilirken hata:`, stErr);
+      }
 
       syncedList.push(className);
+    }
+
+    // 9. Kurumsal öğretmen için: Bu okulda öğretmenin girmediği ve herhangi bir not/quiz kaydı olmayan şubeleri temizle
+    try {
+      for (const locClass of localClasses) {
+        if (!validAssignedClassIds.includes(locClass.id)) {
+          const noteCount = await db.getFirstAsync<{ count: number }>(
+            'SELECT COUNT(*) as count FROM student_notes WHERE class_id = ?',
+            locClass.id
+          );
+          const quizCount = await db.getFirstAsync<{ count: number }>(
+            'SELECT COUNT(*) as count FROM quizzes WHERE class_id = ?',
+            locClass.id
+          );
+          if ((noteCount?.count || 0) === 0 && (quizCount?.count || 0) === 0) {
+            await db.runAsync('DELETE FROM students WHERE class_id = ?', locClass.id);
+            await db.runAsync('DELETE FROM classes WHERE id = ?', locClass.id);
+          }
+        }
+      }
+    } catch (cleanErr) {
+      console.warn('Kullanılmayan şubeler temizlenirken hata:', cleanErr);
     }
 
     return {
