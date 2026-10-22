@@ -59,6 +59,8 @@ import { getTodayDateString, formatDateToTR } from '../utils/dateUtils';
 import { getGradeLevels } from '../database/operations/gradeLevelOperations';
 import { YearlyPlanItem, CourseName, ClassItem, GradeLevelItem } from '../types';
 import { syncYearlyPlansFromSchool } from '../services/yearlyPlanSyncService';
+import { getActiveUserRole } from '../utils/roleService';
+import { getActiveUserSession } from '../services/apiClient';
 
 import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
 export const YearlyPlanScreen: React.FC = () => {
@@ -298,58 +300,117 @@ export const YearlyPlanScreen: React.FC = () => {
     const currentCourse = courses.find((c) => c.id === selectedCourseId);
     const currentCourseName = currentCourse ? currentCourse.name : '';
 
-    Alert.alert(
-      'Okuldan Müfredat Planını Çek',
-      'Okul idaresi (Admin) tarafından sisteme yüklenmiş olan yıllık müfredat planını sisteminize aktarmak istiyor musunuz?',
-      [
-        { text: 'Vazgeç', style: 'cancel' },
-        {
-          text: currentCourseName ? `Yalnızca "${currentCourseName}" Planını Çek` : 'Seçili Dersi Çek',
-          onPress: async () => {
-            try {
-              setSyncingPlan(true);
-              const res = await syncYearlyPlansFromSchool({
-                courseId: selectedCourseId,
-                courseName: currentCourseName,
-                gradeLevel: selectedGradeLevel,
-                syncAll: false,
-              });
-              setSyncingPlan(false);
-              if (res.success) {
-                Alert.alert('Başarılı ✨', res.message);
-                loadData();
-              } else {
-                Alert.alert('Bilgi', res.message);
+    const role = ((await getActiveUserRole()) || '').toLowerCase();
+    const session = await getActiveUserSession();
+    const isTeacher = role === 'teacher' || (session?.role || '').toLowerCase() === 'teacher';
+
+    if (isTeacher) {
+      Alert.alert(
+        'Okuldan Müfredat Planını Çek',
+        'Okul idaresi (Admin) tarafından sisteme yüklenmiş olan yıllık müfredat planlarından yalnızca girdiğiniz derslerin planları sisteminize aktarılacaktır.\n\nNasıl aktarmak istersiniz?',
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: currentCourseName ? `Yalnızca "${currentCourseName}" Planını Çek` : 'Seçili Dersi Çek',
+            onPress: async () => {
+              try {
+                setSyncingPlan(true);
+                const res = await syncYearlyPlansFromSchool({
+                  courseId: selectedCourseId,
+                  courseName: currentCourseName,
+                  gradeLevel: selectedGradeLevel,
+                  syncAll: false,
+                });
+                setSyncingPlan(false);
+                if (res.success) {
+                  Alert.alert('Başarılı ✨', res.message);
+                  loadData();
+                } else {
+                  Alert.alert('Bilgi', res.message);
+                }
+              } catch (e: any) {
+                setSyncingPlan(false);
+                Alert.alert('Hata', e?.message || 'Plan çekilemedi.');
               }
-            } catch (e: any) {
-              setSyncingPlan(false);
-              Alert.alert('Hata', e?.message || 'Plan çekilemedi.');
-            }
+            },
           },
-        },
-        {
-          text: 'Okuldaki Tüm Planları Çek',
-          onPress: async () => {
-            try {
-              setSyncingPlan(true);
-              const res = await syncYearlyPlansFromSchool({
-                syncAll: true,
-              });
-              setSyncingPlan(false);
-              if (res.success) {
-                Alert.alert('Başarılı ✨', res.message);
-                loadData();
-              } else {
-                Alert.alert('Bilgi', res.message);
+          {
+            text: 'Girdiğim Tüm Derslerin Planlarını Çek',
+            onPress: async () => {
+              try {
+                setSyncingPlan(true);
+                const res = await syncYearlyPlansFromSchool({
+                  syncAll: false,
+                });
+                setSyncingPlan(false);
+                if (res.success) {
+                  Alert.alert('Başarılı ✨', res.message);
+                  loadData();
+                } else {
+                  Alert.alert('Bilgi', res.message);
+                }
+              } catch (e: any) {
+                setSyncingPlan(false);
+                Alert.alert('Hata', e?.message || 'Planlar çekilemedi.');
               }
-            } catch (e: any) {
-              setSyncingPlan(false);
-              Alert.alert('Hata', e?.message || 'Planlar çekilemedi.');
-            }
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } else {
+      Alert.alert(
+        'Okuldan Müfredat Planını Çek',
+        'Okul idaresi (Admin) tarafından sisteme yüklenmiş olan yıllık müfredat planını sisteminize aktarmak istiyor musunuz?',
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: currentCourseName ? `Yalnızca "${currentCourseName}" Planını Çek` : 'Seçili Dersi Çek',
+            onPress: async () => {
+              try {
+                setSyncingPlan(true);
+                const res = await syncYearlyPlansFromSchool({
+                  courseId: selectedCourseId,
+                  courseName: currentCourseName,
+                  gradeLevel: selectedGradeLevel,
+                  syncAll: false,
+                });
+                setSyncingPlan(false);
+                if (res.success) {
+                  Alert.alert('Başarılı ✨', res.message);
+                  loadData();
+                } else {
+                  Alert.alert('Bilgi', res.message);
+                }
+              } catch (e: any) {
+                setSyncingPlan(false);
+                Alert.alert('Hata', e?.message || 'Plan çekilemedi.');
+              }
+            },
+          },
+          {
+            text: 'Okuldaki Tüm Planları Çek',
+            onPress: async () => {
+              try {
+                setSyncingPlan(true);
+                const res = await syncYearlyPlansFromSchool({
+                  syncAll: true,
+                });
+                setSyncingPlan(false);
+                if (res.success) {
+                  Alert.alert('Başarılı ✨', res.message);
+                  loadData();
+                } else {
+                  Alert.alert('Bilgi', res.message);
+                }
+              } catch (e: any) {
+                setSyncingPlan(false);
+                Alert.alert('Hata', e?.message || 'Planlar çekilemedi.');
+              }
+            },
+          },
+        ]
+      );
+    }
   };
 
   // Bulk Delete Entire Plan for this grade level & course

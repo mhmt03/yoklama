@@ -2199,6 +2199,18 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           if (match) {
             await updateSchool(match.id, editSchoolName.trim(), match.color, target.code);
           }
+          try {
+            const { updateActiveUserSession } = await import('../services/apiClient');
+            await updateActiveUserSession(prev => ({
+              ...prev,
+              schoolName: prev.schoolCode?.toUpperCase() === target.code?.toUpperCase() ? editSchoolName.trim() : prev.schoolName,
+              affiliatedSchools: prev.affiliatedSchools?.map(s =>
+                (s.code && s.code.toUpperCase() === target.code?.toUpperCase()) || s.id === target.id
+                  ? { ...s, name: editSchoolName.trim() }
+                  : s
+              ),
+            }));
+          } catch {}
         } catch (localErr) {
           console.warn('Yerel okul güncelleme uyarısı:', localErr);
         }
@@ -2248,6 +2260,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   if (match && localSchools.length > 1) {
                     await deleteSchool(match.id);
                   }
+                  try {
+                    const { updateActiveUserSession } = await import('../services/apiClient');
+                    await updateActiveUserSession(prev => ({
+                      ...prev,
+                      affiliatedSchools: prev.affiliatedSchools?.filter(s =>
+                        (s.code && s.code.toUpperCase() !== schoolToDelete.code?.toUpperCase()) && s.id !== schoolToDelete.id
+                      ),
+                    }));
+                  } catch {}
                 } catch (localErr) {
                   console.warn('Yerel okul silme uyarısı:', localErr);
                 }

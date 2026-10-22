@@ -64,7 +64,7 @@ import {
   getPendingAgendaCountToday,
 } from '../database/operations/agendaOperations';
 
-import { School, getSchools, getActiveSchool, setActiveSchool, createSchool, SCHOOL_COLORS, syncAffiliatedSchools, getDefaultSchoolId, setDefaultSchoolId, activateDefaultSchoolOnStartup } from '../database/operations/schoolOperations';
+import { School, getSchools, getActiveSchool, setActiveSchool, createSchool, SCHOOL_COLORS, syncAffiliatedSchools, refreshAffiliatedSchoolsFromServer, getDefaultSchoolId, setDefaultSchoolId, activateDefaultSchoolOnStartup } from '../database/operations/schoolOperations';
 import { useSchoolTheme, getOpaqueTint } from '../context/SchoolThemeContext';
 import { getActiveUserSession } from '../services/apiClient';
 
@@ -111,11 +111,18 @@ export const HomeScreen: React.FC = () => {
       const isInst = !!(session?.schoolCode || session?.schoolId || affSchools.length > 0);
       setIsInstitutionalTeacher(isInst);
 
-      if (isInst && affSchools.length > 0) {
-        await syncAffiliatedSchools(affSchools, session?.schoolCode || affSchools[0]?.code);
+      // 1. Önce yerel veritabanındaki mevcut okulları anında göster
+      const initialActive = await getActiveSchool();
+      if (initialActive) setActiveSchoolState(initialActive);
+      const initialList = await getSchools();
+      if (initialList.length > 0) setSchoolsList(initialList);
+
+      // 2. Kurumsal bağlantı varsa sunucudan en güncel okulları çekip senkronize et (İsmi değişen veya silinen okullar anında güncellenir)
+      if (isInst) {
+        await refreshAffiliatedSchoolsFromServer();
       }
 
-      // Her zaman varsayılan okulu etkinleştir
+      // 3. Güncellenmiş varsayılan okulu etkinleştir
       const active = await activateDefaultSchoolOnStartup();
       setActiveSchoolState(active);
       const defId = await getDefaultSchoolId();

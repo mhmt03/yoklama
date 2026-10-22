@@ -284,15 +284,14 @@ export const syncAffiliatedSchools = async (
 
   for (const sch of updatedDbSchools) {
     const codeMatch = sch.code && allowedCodes.has(sch.code.trim().toUpperCase());
-    const nameMatch = allowedNames.has(sch.name.trim().toLowerCase());
-    if (codeMatch || nameMatch) {
+    if (codeMatch) {
       validSchoolIds.push(sch.id);
     } else {
       schoolsToDelete.push(sch);
     }
   }
 
-  // Kuruma ait olmayan (örneğin Merkez Okulu, deneme amaçlı açılan dfgsdfg gibi) okulları temizle
+  // Kuruma ait olmayan veya admin tarafından silinmiş okulları yerel SQLite'tan tamamen temizle
   for (const del of schoolsToDelete) {
     try { await db.runAsync('DELETE FROM schedules WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?) OR school_id = ?', del.id, del.id); } catch {}
     try { await db.runAsync('DELETE FROM students WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?)', del.id); } catch {}
@@ -345,4 +344,65 @@ export const syncAffiliatedSchools = async (
   }
 
   return await getActiveSchool();
+};
+
+/**
+ * Sunucudan öğretmenin bağlı olduğu kurumun en güncel aktif okul listesini çeker.
+ * İdarecinin sildiği veya adını değiştirdiği okullar varsa:
+ * - Silinen okullar yerel SQLite'tan ve oturumdan tamamen kaldırılır.
+ * - Adı değişen okulların yeni isimleri yerel SQLite'a ve oturuma anında yansıtılır.
+ */
+export const refreshAffiliatedSchoolsFromServer = async (): Promise<School[]> => {
+  try {
+    const session = await getActiveUserSession();
+    const activeSchool = await getActiveSchool();
+
+    let targetCode = session?.schoolCode;
+    if (!targetCode && session?.affiliatedSchools && session.affiliatedSchools.length > 0) {
+      targetCode = session.affiliatedSchools[0].code;
+    }
+    if (!targetCode && activeSchool?.code) {
+      targetCode = activeSchool.code;
+    }
+
+    if (!targetCode) {
+      return await getSchools();
+    }
+
+    const { apiRequest, updateActiveUserSession } = await import('../../services/apiClient');
+    const res = await apiRequest<Array<{ id: string; name: string; code: string; geminiApiKey?: string; geminiModel?: string }>>(
+      `schools/affiliated-by-code/${encodeURIComponent(targetCode.trim().toUpperCase())}`
+    );
+
+    if (res.success && res.data && Array.isArray(res.data) && res.data.length > 0) {
+      const freshSchools = res.data;
+
+      // 1. AsyncStorage oturumundaki okulları ve isimleri güncelle
+      await updateActiveUserSession((prev: any) => {
+        const matchPrimary = freshSchools.find(
+          s => s.code?.trim().toUpperCase() === (prev.schoolCode || targetCode)?.trim().toUpperCase()
+        ) || freshSchools[0];
+
+        return {
+          ...prev,
+          schoolName: matchPrimary?.name || prev.schoolName,
+          schoolCode: matchPrimary?.code || prev.schoolCode,
+          affiliatedSchools: freshSchools.map(s => ({
+            id: s.id,
+            name: s.name,
+            code: s.code,
+            geminiApiKey: s.geminiApiKey,
+            geminiModel: s.geminiModel,
+          })),
+        };
+      });
+
+      // 2. Yerel SQLite veritabanına senkronize et
+      await syncAffiliatedSchools(freshSchools, targetCode);
+    }
+  } catch (err) {
+    console.warn('refreshAffiliatedSchoolsFromServer hatası:', err);
+  }
+
+  return await getSchools();
 };

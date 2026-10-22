@@ -99,6 +99,16 @@ export async function getActiveUserSession(): Promise<UserSession | null> {
   }
 }
 
+export async function updateActiveUserSession(
+  updater: (prev: UserSession) => UserSession
+): Promise<UserSession | null> {
+  const current = await getActiveUserSession();
+  if (!current) return null;
+  const updated = updater(current);
+  await AsyncStorage.setItem(USER_KEY, JSON.stringify(updated));
+  return updated;
+}
+
 export async function clearAuthSession(): Promise<void> {
   await AsyncStorage.removeItem(TOKEN_KEY);
   await AsyncStorage.removeItem(USER_KEY);
