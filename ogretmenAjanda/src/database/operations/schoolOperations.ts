@@ -370,8 +370,22 @@ export const refreshAffiliatedSchoolsFromServer = async (): Promise<School[]> =>
     }
 
     const { apiRequest, updateActiveUserSession } = await import('../../services/apiClient');
+    const { getActiveUserRole, getActiveTeacherName } = await import('../../utils/roleService');
+    const role = ((await getActiveUserRole()) || '').toLowerCase();
+    const isTeacher = role === 'teacher' || (session?.role || '').toLowerCase() === 'teacher';
+    const teacherName = (await getActiveTeacherName()) || session?.fullName || '';
+    const username = session?.username || '';
+
+    let queryParams = '';
+    if (isTeacher) {
+      const parts: string[] = [];
+      if (teacherName) parts.push(`teacherName=${encodeURIComponent(teacherName)}`);
+      if (username) parts.push(`username=${encodeURIComponent(username)}`);
+      if (parts.length > 0) queryParams = `?${parts.join('&')}`;
+    }
+
     const res = await apiRequest<Array<{ id: string; name: string; code: string; geminiApiKey?: string; geminiModel?: string }>>(
-      `schools/affiliated-by-code/${encodeURIComponent(targetCode.trim().toUpperCase())}`
+      `schools/affiliated-by-code/${encodeURIComponent(targetCode.trim().toUpperCase())}${queryParams}`
     );
 
     if (res.success && res.data && Array.isArray(res.data) && res.data.length > 0) {

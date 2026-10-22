@@ -58,7 +58,11 @@ import {
 import { getTodayDateString, formatDateToTR } from '../utils/dateUtils';
 import { getGradeLevels } from '../database/operations/gradeLevelOperations';
 import { YearlyPlanItem, CourseName, ClassItem, GradeLevelItem } from '../types';
-import { syncYearlyPlansFromSchool } from '../services/yearlyPlanSyncService';
+import {
+  syncYearlyPlansFromSchool,
+  getTeacherTaughtLessons,
+  matchLessonNames,
+} from '../services/yearlyPlanSyncService';
 import { getActiveUserRole } from '../utils/roleService';
 import { getActiveUserSession } from '../services/apiClient';
 
@@ -122,11 +126,37 @@ export const YearlyPlanScreen: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [crs, cls, gLevels] = await Promise.all([
+      let [crs, cls, gLevels] = await Promise.all([
         getCourses(),
         getClasses(),
         getGradeLevels(),
       ]);
+
+      const role = ((await getActiveUserRole()) || '').toLowerCase();
+      const session = await getActiveUserSession();
+      const isTeacher = role === 'teacher' || (session?.role || '').toLowerCase() === 'teacher';
+
+      if (isTeacher) {
+        const taught = await getTeacherTaughtLessons();
+        if (taught.length > 0) {
+          crs = crs.filter((c) =>
+            taught.some(
+              (tl) =>
+                matchLessonNames(tl.lessonName, c.name) ||
+                (c.code && matchLessonNames(tl.lessonName, c.code))
+            )
+          );
+
+          const teacherGrades = new Set<number>();
+          taught.forEach((t) => t.gradeLevels.forEach((g) => teacherGrades.add(g)));
+          if (teacherGrades.size > 0) {
+            gLevels = gLevels.filter((g) => teacherGrades.has(g.level));
+          }
+        } else {
+          crs = [];
+        }
+      }
+
       setCourses(crs);
       setClasses(cls);
       setGradeLevels(gLevels);
@@ -138,11 +168,15 @@ export const YearlyPlanScreen: React.FC = () => {
       }
 
       let targetCourseId = selectedCourseId;
-      if (!targetCourseId && crs.length > 0) {
-        // Try selecting S.FZK or first course
-        const defaultCourse = crs.find((c) => c.code === 'S.FZK') || crs[0];
-        targetCourseId = defaultCourse.id;
-        setSelectedCourseId(targetCourseId);
+      if (crs.length > 0) {
+        if (!targetCourseId || !crs.some((c) => c.id === targetCourseId)) {
+          // Select first available authorized course
+          targetCourseId = crs[0].id;
+          setSelectedCourseId(targetCourseId);
+        }
+      } else {
+        targetCourseId = null;
+        setSelectedCourseId(null);
       }
 
       if (targetCourseId) {
@@ -157,6 +191,10 @@ export const YearlyPlanScreen: React.FC = () => {
         ]);
         setPlans(planList);
         setPdfDoc(doc);
+      } else {
+        setScheduleInfo(null);
+        setPlans([]);
+        setPdfDoc(null);
       }
     } catch (e) {
       console.error('Error loading yearly plans:', e);
@@ -974,21 +1012,29 @@ export const YearlyPlanScreen: React.FC = () => {
       {/* 2. Ders Seçicisi */}
       <View style={styles.courseChipsBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
-          {courses.map((crs) => {
-            const isSelected = selectedCourseId === crs.id;
-            return (
-              <TouchableOpacity
-                key={crs.id}
-                style={[styles.chip, isSelected && styles.chipActive]}
-                onPress={() => handleSelectCourse(crs.id)}
-              >
-                <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
-                  {crs.code ? `[${crs.code}] ` : ''}
-                  {crs.name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+          {courses.length === 0 ? (
+            <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
+              <Text style={{ fontSize: 13, color: '#6B7280', fontStyle: 'italic' }}>
+                Bu okulda adınıza tanımlı ders bulunamadı
+              </Text>
+            </View>
+          ) : (
+            courses.map((crs) => {
+              const isSelected = selectedCourseId === crs.id;
+              return (
+                <TouchableOpacity
+                  key={crs.id}
+                  style={[styles.chip, isSelected && styles.chipActive]}
+                  onPress={() => handleSelectCourse(crs.id)}
+                >
+                  <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
+                    {crs.code ? `[${crs.code}] ` : ''}
+                    {crs.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </ScrollView>
       </View>
 
@@ -1200,22 +1246,28 @@ export const YearlyPlanScreen: React.FC = () => {
           <View>
             <EmptyState
               icon="calendar-outline"
-              title={`${selectedGradeLevel}. Sınıf Planı Bulunmuyor`}
-              description={`Bu ders ve sınıf düzeyi için henüz haftalık müfredat planı yüklenmemiş. İdarenin eklediği planı çekebilir veya Excel ile yükleyebilirsiniz.`}
-              actionTitle="Excel ile Yükle"
-              onAction={handleOpenBulkModal}
+              title={courses.length === 0 ? 'Ders Tanımı Bulunamadı' : `${selectedGradeLevel}. Sınıf Planı Bulunmuyor`}
+              description={
+                courses.length === 0
+                  ? 'Bu okulda adınıza tanımlanmış bir ders bulunmamaktadır. Yalnızca girdiğiniz derslerin yıllık planlarını görebilir ve yönetebilirsiniz.'
+                  : 'Bu ders ve sınıf düzeyi için henüz haftalık müfredat planı yüklenmemiş. İdarenin eklediği planı çekebilir veya Excel ile yükleyebilirsiniz.'
+              }
+              actionTitle={courses.length === 0 ? undefined : 'Excel ile Yükle'}
+              onAction={courses.length === 0 ? undefined : handleOpenBulkModal}
             />
-            <View style={{ alignItems: 'center', marginTop: -6, marginBottom: 20 }}>
-              <TouchableOpacity
-                style={styles.emptySchoolSyncBtn}
-                onPress={handleSyncYearlyPlanFromSchool}
-                disabled={syncingPlan}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="cloud-download-outline" size={16} color="#4F46E5" />
-                <Text style={styles.emptySchoolSyncBtnText}>Okuldan Planı Çek</Text>
-              </TouchableOpacity>
-            </View>
+            {courses.length > 0 && (
+              <View style={{ alignItems: 'center', marginTop: -6, marginBottom: 20 }}>
+                <TouchableOpacity
+                  style={styles.emptySchoolSyncBtn}
+                  onPress={handleSyncYearlyPlanFromSchool}
+                  disabled={syncingPlan}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="cloud-download-outline" size={16} color="#4F46E5" />
+                  <Text style={styles.emptySchoolSyncBtnText}>Okuldan Planı Çek</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         }
         renderItem={({ item }) => {

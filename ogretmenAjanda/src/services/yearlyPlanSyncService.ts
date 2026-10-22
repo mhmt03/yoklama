@@ -446,6 +446,36 @@ export async function syncYearlyPlansFromSchool(options?: {
       importedCourseLabels.push(`${group.lessonName} (${group.gradeLevel}. Sınıf - ${resBulk.insertedCount} Hafta)`);
     }
 
+    // 6. Eğer öğretmen ise, girmediği derslere ait eski/artık yerel plan kayıtlarını temizle
+    if (isTeacher && typeof taughtLessons !== 'undefined' && taughtLessons.length > 0) {
+      try {
+        const db = await (await import('../database/db')).getDB();
+        const allLocalCourses = await db.getAllAsync<{ id: number; name: string; code?: string }>(
+          'SELECT id, name, code FROM courses'
+        );
+        const unauthorizedCourseIds = allLocalCourses
+          .filter(
+            (c) =>
+              !taughtLessons.some(
+                (tl) =>
+                  matchLessonNames(tl.lessonName, c.name) ||
+                  (c.code && matchLessonNames(tl.lessonName, c.code))
+              )
+          )
+          .map((c) => c.id);
+
+        if (unauthorizedCourseIds.length > 0) {
+          const placeholders = unauthorizedCourseIds.map(() => '?').join(',');
+          await db.runAsync(
+            `DELETE FROM yearly_plans WHERE course_id IN (${placeholders})`,
+            ...unauthorizedCourseIds
+          );
+        }
+      } catch (cleanErr) {
+        console.warn('Eski yetkisiz planları temizleme uyarısı:', cleanErr);
+      }
+    }
+
     return {
       success: true,
       totalPlans: Object.keys(groupedPlans).length,

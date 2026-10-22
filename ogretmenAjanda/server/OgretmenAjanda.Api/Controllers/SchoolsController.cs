@@ -103,10 +103,13 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(schools);
         }
 
-        // Okul koduna göre aynı adminin/kurumun yönettiği tüm okulları listele
+        // Okul koduna göre aynı adminin/kurumun yönettiği okulları listele
         [AllowAnonymous]
         [HttpGet("affiliated-by-code/{code}")]
-        public async Task<IActionResult> GetAffiliatedByCode(string code)
+        public async Task<IActionResult> GetAffiliatedByCode(
+            string code,
+            [FromQuery] string? teacherName = null,
+            [FromQuery] string? username = null)
         {
             var cleanCode = code.Trim().ToUpper();
             var primarySchool = await _context.Schools
@@ -121,12 +124,65 @@ namespace OgretmenAjanda.Api.Controllers
             var customerId = primarySchool.CustomerId;
             var relationId = primarySchool.RelationId;
 
-            var allSchools = await _context.Schools
+            var allSchoolsQuery = _context.Schools
                 .Where(s => s.IsActive && (
                     s.AdminUserId == adminUserId ||
                     (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
                     (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId)
-                ))
+                ));
+
+            var cleanTeacher = teacherName?.Trim().ToLower();
+            var cleanUser = username?.Trim().ToLower();
+
+            // Eğer öğretmen için sorgulanıyorsa, sadece öğretmenin tanımlı olduğu okulları filtrele
+            if (!string.IsNullOrEmpty(cleanTeacher) || !string.IsNullOrEmpty(cleanUser) || CurrentUserRole == UserRoles.Teacher)
+            {
+                var targetSchools = await allSchoolsQuery.ToListAsync();
+                var validSchoolIds = new List<Guid>();
+
+                foreach (var sch in targetSchools)
+                {
+                    // 1. Bu okulda bu kullanıcı adına veya tam adına kayıtlı öğretmen var mı?
+                    var hasUser = await _context.Users.AnyAsync(u =>
+                        u.SchoolId == sch.Id && u.IsActive &&
+                        ((!string.IsNullOrEmpty(cleanUser) && u.Username.ToLower() == cleanUser) ||
+                         (!string.IsNullOrEmpty(cleanTeacher) && u.FullName.ToLower() == cleanTeacher))
+                    );
+
+                    if (hasUser)
+                    {
+                        validSchoolIds.Add(sch.Id);
+                        continue;
+                    }
+
+                    // 2. Bu okulun ders programında bu öğretmene atanmış ders var mı?
+                    if (!string.IsNullOrEmpty(cleanTeacher))
+                    {
+                        var hasSchedule = await _context.ScheduleItems.AnyAsync(si =>
+                            si.SchoolId == sch.Id && si.TeacherName != null &&
+                            si.TeacherName.ToLower().Contains(cleanTeacher)
+                        );
+
+                        if (hasSchedule)
+                        {
+                            validSchoolIds.Add(sch.Id);
+                            continue;
+                        }
+                    }
+                }
+
+                if (validSchoolIds.Count > 0)
+                {
+                    allSchoolsQuery = _context.Schools.Where(s => validSchoolIds.Contains(s.Id));
+                }
+                else
+                {
+                    // Eğer öğretmen diğer alt okullarda bulunamadıysa giriş yaptığı okulu koru
+                    allSchoolsQuery = _context.Schools.Where(s => s.Id == primarySchool.Id);
+                }
+            }
+
+            var allSchools = await allSchoolsQuery
                 .Select(s => new
                 {
                     s.Id,

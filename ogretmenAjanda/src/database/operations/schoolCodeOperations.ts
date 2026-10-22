@@ -161,43 +161,43 @@ export const deleteTeacherAssignment = async (assignmentId: number): Promise<voi
 export const getTeacherAuthorizedClassIds = async (
   schoolId: number,
   teacherName?: string
-): Promise<number[] | null> => {
+): Promise<number[]> => {
   const db = await getDB();
-  const cleanName = teacherName?.trim() || '';
+  const cleanName = teacherName?.trim().toLowerCase() || '';
   const idSet = new Set<number>();
 
-  // 1. teacher_assignments tablosundan onaylı sınıfları al
+  // 1. teacher_assignments tablosundan bu öğretmene ait onaylı sınıfları al
   if (cleanName) {
-    const approvedRows = await db.getAllAsync<{ class_id: number }>(
-      'SELECT DISTINCT class_id FROM teacher_assignments WHERE school_id = ? AND teacher_name = ? AND is_approved = 1',
-      schoolId,
-      cleanName
-    );
-    approvedRows.forEach((r) => idSet.add(r.class_id));
-  }
-  
-  if (idSet.size === 0) {
-    const allApprovedRows = await db.getAllAsync<{ class_id: number }>(
-      'SELECT DISTINCT class_id FROM teacher_assignments WHERE school_id = ? AND is_approved = 1',
+    const allAssignments = await db.getAllAsync<{ class_id: number; teacher_name: string }>(
+      'SELECT DISTINCT class_id, teacher_name FROM teacher_assignments WHERE school_id = ? AND is_approved = 1',
       schoolId
     );
-    allApprovedRows.forEach((r) => idSet.add(r.class_id));
+    const tokens = cleanName.split(/\s+/).filter((w) => w.length >= 2);
+    for (const a of allAssignments) {
+      const aName = (a.teacher_name || '').trim().toLowerCase();
+      if (
+        aName === cleanName ||
+        aName.includes(cleanName) ||
+        cleanName.includes(aName) ||
+        tokens.some((tok) => aName.includes(tok))
+      ) {
+        idSet.add(a.class_id);
+      }
+    }
   }
 
   // 2. schedules tablosunda öğretmenin dersinin olduğu sınıfları al
-  const scheduleRows = await db.getAllAsync<{ class_id: number }>(
-    `SELECT DISTINCT s.class_id 
-     FROM schedules s 
-     JOIN classes c ON c.id = s.class_id 
-     WHERE (c.school_id = ? OR s.school_id = ?) AND s.class_id IS NOT NULL`,
-    schoolId,
-    schoolId
-  );
-  scheduleRows.forEach((r) => idSet.add(r.class_id));
+  try {
+    const scheduleRows = await db.getAllAsync<{ class_id: number }>(
+      `SELECT DISTINCT s.class_id 
+       FROM schedules s 
+       JOIN classes c ON c.id = s.class_id 
+       WHERE (c.school_id = ? OR s.school_id = ?) AND s.class_id IS NOT NULL`,
+      schoolId,
+      schoolId
+    );
+    scheduleRows.forEach((r) => idSet.add(r.class_id));
+  } catch {}
 
-  if (idSet.size > 0) {
-    return Array.from(idSet);
-  }
-
-  return null;
+  return Array.from(idSet);
 };

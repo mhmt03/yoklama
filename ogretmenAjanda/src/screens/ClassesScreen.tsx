@@ -79,11 +79,11 @@ export const ClassesScreen: React.FC = () => {
         const session = await getActiveUserSession();
         const teacherName = (await getActiveTeacherName()) || session?.fullName || session?.username || '';
         const authIds = await getTeacherAuthorizedClassIds(active.id, teacherName);
-        if (authIds !== null && authIds.length > 0) {
-          setTeacherRestrictionActive(true);
+        setTeacherRestrictionActive(true);
+        if (authIds.length > 0) {
           data = data.filter((c) => authIds.includes(c.id));
         } else {
-          setTeacherRestrictionActive(false);
+          data = [];
         }
       } else {
         setTeacherRestrictionActive(false);
