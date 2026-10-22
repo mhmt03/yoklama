@@ -28,11 +28,15 @@ export const getSchools = async (): Promise<School[]> => {
 
   try {
     const session = await getActiveUserSession();
-    const isTeacherOrStaff = session && (session.role === 'TEACHER' || session.role === 'STAFF');
+    const rawRole = (session?.role || '').toLowerCase();
+    const { getActiveUserRole } = await import('../../utils/roleService');
+    const activeRole = ((await getActiveUserRole()) || '').toLowerCase();
+    const isTeacherOrStaff = rawRole === 'teacher' || rawRole === 'staff' || activeRole === 'teacher';
+
     if (isTeacherOrStaff) {
-      const affSchools = (session.affiliatedSchools && session.affiliatedSchools.length > 0)
+      const affSchools = (session?.affiliatedSchools && session.affiliatedSchools.length > 0)
         ? session.affiliatedSchools
-        : (session.schoolName ? [{ name: session.schoolName, code: session.schoolCode || 'OKL-10001' }] : []);
+        : (session?.schoolName ? [{ name: session.schoolName, code: session.schoolCode || 'OKL-10001' }] : []);
 
       if (affSchools.length > 0) {
         const allowedCodes = new Set(affSchools.map(s => s.code?.trim().toUpperCase()).filter(Boolean));
@@ -63,11 +67,15 @@ export const getActiveSchool = async (): Promise<School | null> => {
 
   try {
     const session = await getActiveUserSession();
-    const isTeacherOrStaff = session && (session.role === 'TEACHER' || session.role === 'STAFF');
+    const rawRole = (session?.role || '').toLowerCase();
+    const { getActiveUserRole } = await import('../../utils/roleService');
+    const activeRole = ((await getActiveUserRole()) || '').toLowerCase();
+    const isTeacherOrStaff = rawRole === 'teacher' || rawRole === 'staff' || activeRole === 'teacher';
+
     if (isTeacherOrStaff) {
-      const affSchools = (session.affiliatedSchools && session.affiliatedSchools.length > 0)
+      const affSchools = (session?.affiliatedSchools && session.affiliatedSchools.length > 0)
         ? session.affiliatedSchools
-        : (session.schoolName ? [{ name: session.schoolName, code: session.schoolCode || 'OKL-10001' }] : []);
+        : (session?.schoolName ? [{ name: session.schoolName, code: session.schoolCode || 'OKL-10001' }] : []);
 
       if (affSchools.length > 0) {
         allowedCodes = new Set(affSchools.map(s => s.code?.trim().toUpperCase()).filter(Boolean));
@@ -286,16 +294,13 @@ export const syncAffiliatedSchools = async (
 
   // Kuruma ait olmayan (örneğin Merkez Okulu, deneme amaçlı açılan dfgsdfg gibi) okulları temizle
   for (const del of schoolsToDelete) {
-    try {
-      await db.runAsync('DELETE FROM schedule_items WHERE school_id = ?', del.id);
-      await db.runAsync('DELETE FROM students WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?)', del.id);
-      await db.runAsync('DELETE FROM assignments WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?)', del.id);
-      await db.runAsync('DELETE FROM classes WHERE school_id = ?', del.id);
-      await db.runAsync('DELETE FROM agenda_items WHERE school_id = ?', del.id);
-      await db.runAsync('DELETE FROM schools WHERE id = ?', del.id);
-    } catch (cleanErr) {
-      console.warn('Kurum dışı eski okul temizlenirken hata:', del.name, cleanErr);
-    }
+    try { await db.runAsync('DELETE FROM schedules WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?) OR school_id = ?', del.id, del.id); } catch {}
+    try { await db.runAsync('DELETE FROM students WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?)', del.id); } catch {}
+    try { await db.runAsync('DELETE FROM assignments WHERE class_id IN (SELECT id FROM classes WHERE school_id = ?)', del.id); } catch {}
+    try { await db.runAsync('DELETE FROM classes WHERE school_id = ?', del.id); } catch {}
+    try { await db.runAsync('DELETE FROM agenda_items WHERE school_id = ?', del.id); } catch {}
+    try { await db.runAsync('DELETE FROM teacher_assignments WHERE school_id = ?', del.id); } catch {}
+    try { await db.runAsync('DELETE FROM schools WHERE id = ?', del.id); } catch {}
   }
 
   // Okulun Gemini API Key ve Modelini SQLite'a kaydet (böylece tüm öğretmenler ortak anahtarı kullanır)

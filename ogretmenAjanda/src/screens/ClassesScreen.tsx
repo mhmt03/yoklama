@@ -38,6 +38,7 @@ import { getActiveUserRole, getActiveTeacherName } from '../utils/roleService';
 import { getTeacherAuthorizedClassIds } from '../database/operations/schoolCodeOperations';
 import { syncClassStudentsFromServer, syncTeacherAssignedClassesAndStudents } from '../services/studentSyncService';
 import { getActiveUserSession } from '../services/apiClient';
+import { getOpaqueTint } from '../context/SchoolThemeContext';
 
 export const ClassesScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -266,7 +267,7 @@ export const ClassesScreen: React.FC = () => {
 
   const totalStudents = classes.reduce((sum, c) => sum + (c.student_count || 0), 0);
 
-  const schoolBgTint = activeSchool?.color ? `${activeSchool.color}0E` : Colors.background;
+  const schoolBgTint = activeSchool?.color ? getOpaqueTint(activeSchool.color) : Colors.background;
 
   return (
     <View style={[styles.container, { backgroundColor: schoolBgTint }]}>

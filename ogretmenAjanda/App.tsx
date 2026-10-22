@@ -60,13 +60,15 @@ function MainTabs() {
 
   return (
     <Tab.Navigator
+      detachInactiveScreens={true}
       screenOptions={{
         headerShown: false,
-        sceneStyle: { backgroundColor: bgTint },
+        unmountOnBlur: Platform.OS === 'web',
+        sceneStyle: { backgroundColor: bgTint || Colors.background },
         tabBarActiveTintColor: themeColor,
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarStyle: {
-          backgroundColor: bgTint,
+          backgroundColor: bgTint || Colors.background,
           borderTopWidth: 1,
           borderTopColor: `${themeColor}25`,
           height: tabHeight,

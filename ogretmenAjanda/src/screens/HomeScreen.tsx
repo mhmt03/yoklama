@@ -65,7 +65,7 @@ import {
 } from '../database/operations/agendaOperations';
 
 import { School, getSchools, getActiveSchool, setActiveSchool, createSchool, SCHOOL_COLORS, syncAffiliatedSchools, getDefaultSchoolId, setDefaultSchoolId, activateDefaultSchoolOnStartup } from '../database/operations/schoolOperations';
-import { useSchoolTheme } from '../context/SchoolThemeContext';
+import { useSchoolTheme, getOpaqueTint } from '../context/SchoolThemeContext';
 import { getActiveUserSession } from '../services/apiClient';
 
 interface HeroNavTarget {
@@ -1001,7 +1001,7 @@ export const HomeScreen: React.FC = () => {
     Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 20
   );
 
-  const schoolBgTint = activeSchool?.color ? `${activeSchool.color}0E` : Colors.background;
+  const schoolBgTint = bgTint || (activeSchool?.color ? getOpaqueTint(activeSchool.color) : Colors.background);
 
   return (
     <View style={{ flex: 1, backgroundColor: schoolBgTint }}>

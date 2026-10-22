@@ -56,6 +56,7 @@ import { apiRequest } from '../services/apiClient';
 import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
 import { useDrawer } from '../context/DrawerContext';
 import { syncScheduleFromSchool } from '../services/scheduleSyncService';
+import { getOpaqueTint } from '../context/SchoolThemeContext';
 
 export const ScheduleScreen: React.FC = () => {
   const navigation = useNavigation<any>();
@@ -643,7 +644,7 @@ export const ScheduleScreen: React.FC = () => {
   const currentDayObj = DAYS_OF_WEEK.find((d) => d.id === selectedDay);
   const isCurrentDayCustom = customDays.includes(selectedDay);
 
-  const schoolBgTint = activeSchool?.color ? `${activeSchool.color}0E` : Colors.background;
+  const schoolBgTint = activeSchool?.color ? getOpaqueTint(activeSchool.color) : Colors.background;
 
   return (
     <View style={[styles.container, { backgroundColor: schoolBgTint }]}>
