@@ -3,6 +3,7 @@ import { getActiveSchool } from '../database/operations/schoolOperations';
 import { getActiveTeacherName } from '../utils/roleService';
 import { applyAnalyzedSchedule } from '../database/operations/scheduleOperations';
 import { AnalyzedLessonItem } from '../utils/geminiScheduleService';
+import { isTeacherMatch } from '../utils/teacherUtils';
 
 export interface ScheduleSyncResult {
   success: boolean;
@@ -105,25 +106,17 @@ export async function syncScheduleFromSchool(
         );
 
         if (rawTeacherName) {
-          const normTarget = rawTeacherName.toLowerCase();
-          const targetWords = normTarget.split(/\s+/).filter((w) => w.length >= 2);
-
-          // Akıllı eşleşme (ad veya soyad kelimesi geçenler)
-          const matchedName = distinctTeachers.find((tName) => {
-            const normT = tName.toLowerCase();
-            if (normT === normTarget || normT.includes(normTarget) || normTarget.includes(normT)) {
-              return true;
-            }
-            return targetWords.some((word) => normT.includes(word));
-          });
+          // Akıllı ve güvenilir eşleşme (soyad ve ad uyumu)
+          const matchedName = distinctTeachers.find((tName) => isTeacherMatch(rawTeacherName, tName));
 
           if (matchedName) {
             detectedTeacher = matchedName;
             matchedItems = allItems.filter(
-              (s) => (s.teacherName || '').trim().toLowerCase() === matchedName.toLowerCase()
+              (s) => isTeacherMatch(matchedName, s.teacherName)
             );
           }
         }
+
       }
     }
 

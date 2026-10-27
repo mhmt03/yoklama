@@ -58,6 +58,7 @@ export async function parseStudentsFromExcel(fileUri: string): Promise<ParseExce
     if (isStandardTable) {
       // Sütun indekslerini tespit et
       let noIdx = -1, nameIdx = -1, surnameIdx = -1, fullNameIdx = -1, gradeIdx = -1, branchIdx = -1, genderIdx = -1;
+      let parentNameIdx = -1, parentPhoneIdx = -1, studentPhoneIdx = -1;
       headerRow.forEach((val: any, idx: number) => {
         const str = String(val || '').toLowerCase().trim();
         if (str.includes('okul no') || str.includes('öğrenci no') || str === 'no') noIdx = idx;
@@ -73,6 +74,9 @@ export async function parseStudentsFromExcel(fileUri: string): Promise<ParseExce
         else if (str.includes('sınıf düzeyi') || str === 'sınıf' || str === 'sınıfı') gradeIdx = idx;
         else if (str === 'şube' || str === 'şubesi') branchIdx = idx;
         else if (str.includes('cinsiyet')) genderIdx = idx;
+        else if (str.includes('veli adı') || str.includes('veli ad') || str === 'veli') parentNameIdx = idx;
+        else if (str.includes('veli tel') || str.includes('veli telefon') || str.includes('veli cep')) parentPhoneIdx = idx;
+        else if (str.includes('öğrenci tel') || str.includes('öğrenci telefon') || str.includes('öğrenci cep') || str === 'telefon') studentPhoneIdx = idx;
       });
 
       // Eğer hem ad hem soyad ayrı sütunlardaysa, fullNameIdx'i iptal et
@@ -119,12 +123,19 @@ export async function parseStudentsFromExcel(fileUri: string): Promise<ParseExce
         const className = `${grade}-${section}`;
         classSet.add(className);
 
+        const parentName = parentNameIdx !== -1 && row[parentNameIdx] ? String(row[parentNameIdx]).trim() : undefined;
+        const parentPhone = parentPhoneIdx !== -1 && row[parentPhoneIdx] ? String(row[parentPhoneIdx]).trim() : undefined;
+        const studentPhone = studentPhoneIdx !== -1 && row[studentPhoneIdx] ? String(row[studentPhoneIdx]).trim() : undefined;
+
         students.push({
           studentNumber,
           fullName,
           grade,
           section,
           gender: genderIdx !== -1 && row[genderIdx] ? String(row[genderIdx]).trim() : undefined,
+          parentName: parentName || undefined,
+          parentPhone: parentPhone || undefined,
+          studentPhone: studentPhone || undefined,
         });
       }
     } else {
@@ -252,9 +263,11 @@ export async function saveParsedStudentsToServer(
 }
 
 /**
- * Boş öğrenci listesi Excel şablonu oluşturup cihazda paylaşılmasını / indirilmesini sağlar.
+ * Öğrenci listesi Excel şablonu oluşturup cihazda paylaşılmasını / indirilmesini sağlar.
+ * Eğer sistemde mevcut öğrenciler varsa onları şablona doldurur, böylece kullanıcı
+ * mevcut verileri güncelleyip tekrar Excel ile sisteme yükleyebilir.
  */
-export async function generateStudentTemplateExcel(): Promise<boolean> {
+export async function generateStudentTemplateExcel(existingStudents?: any[], schoolName?: string): Promise<boolean> {
   const { saveAndShareWorkbook } = await import('../utils/excelService');
   const workbook = XLSX.utils.book_new();
 
@@ -270,14 +283,73 @@ export async function generateStudentTemplateExcel(): Promise<boolean> {
     'Öğrenci Telefonu',
   ];
 
-  const sampleRows = [
-    header,
-    ['101', 'Ahmet', 'Yılmaz', '9', 'A', 'Erkek', 'Mehmet Yılmaz', '05321112233', '05554443322'],
-    ['102', 'Ayşe', 'Demir', '9', 'A', 'Kız', 'Fatma Demir', '05332223344', '05553332211'],
-    ['201', 'Burak', 'Kaya', '10', 'B', 'Erkek', 'Ali Kaya', '05423334455', ''],
-  ];
+  let rows: (string | number)[][] = [header];
 
-  const worksheet = XLSX.utils.aoa_to_sheet(sampleRows);
+  if (existingStudents && existingStudents.length > 0) {
+    // Öğrencileri Sınıf Düzeyi, Şube ve Okul Numarasına göre sırala
+    const sorted = [...existingStudents].sort((a, b) => {
+      const gA = parseInt(String(a.grade || a.grade_level || 0), 10) || 0;
+      const gB = parseInt(String(b.grade || b.grade_level || 0), 10) || 0;
+      if (gA !== gB) return gA - gB;
+      const secA = String(a.section || a.class_name || '').localeCompare(String(b.section || b.class_name || ''), 'tr');
+      if (secA !== 0) return secA;
+      const noA = parseInt(String(a.studentNumber || a.student_number || 0), 10) || 0;
+      const noB = parseInt(String(b.studentNumber || b.student_number || 0), 10) || 0;
+      return noA - noB;
+    });
+
+    for (const s of sorted) {
+      const studentNo = String(s.studentNumber || s.student_number || s.number || '').trim();
+      let firstName = String(s.first_name || '').trim();
+      let lastName = String(s.last_name || '').trim();
+
+      if (!firstName && !lastName && s.fullName) {
+        const parts = String(s.fullName).trim().split(/\s+/);
+        if (parts.length > 1) {
+          lastName = parts.pop() || '';
+          firstName = parts.join(' ');
+        } else {
+          firstName = parts[0] || '';
+          lastName = '';
+        }
+      }
+
+      let grade = String(s.grade !== undefined && s.grade !== null ? s.grade : (s.grade_level !== undefined && s.grade_level !== null ? s.grade_level : '')).trim();
+      let section = String(s.section || '').trim();
+
+      if (!section && s.class_name) {
+        const m = String(s.class_name).match(/^(\d{1,2})[-/]?([a-zA-ZçğıöşüÇĞİÖŞÜ]+)/i);
+        if (m) {
+          if (!grade) grade = m[1];
+          section = m[2].toUpperCase();
+        } else {
+          section = String(s.class_name).trim();
+        }
+      }
+
+      rows.push([
+        studentNo,
+        firstName,
+        lastName,
+        grade,
+        section,
+        s.gender || '',
+        s.parentName || s.parent_name || '',
+        s.parentPhone || s.parent_phone || '',
+        s.studentPhone || s.student_phone || '',
+      ]);
+    }
+  } else {
+    // Sistemde henüz kayıtlı öğrenci yoksa rehber olması için örnek 3 satır
+    rows = [
+      header,
+      ['101', 'Ahmet', 'Yılmaz', '9', 'A', 'Erkek', 'Mehmet Yılmaz', '05321112233', '05554443322'],
+      ['102', 'Ayşe', 'Demir', '9', 'A', 'Kız', 'Fatma Demir', '05332223344', '05553332211'],
+      ['201', 'Burak', 'Kaya', '10', 'B', 'Erkek', 'Ali Kaya', '05423334455', ''],
+    ];
+  }
+
+  const worksheet = XLSX.utils.aoa_to_sheet(rows);
   worksheet['!cols'] = [
     { wch: 14 },
     { wch: 20 },
@@ -294,18 +366,21 @@ export async function generateStudentTemplateExcel(): Promise<boolean> {
 
   // Açıklama sayfası
   const infoRows = [
-    ['ÖĞRENCİ LİSTESİ TOPLU YÜKLEME KILAVUZU'],
+    ['ÖĞRENCİ LİSTESİ TOPLU GÜNCELLEME VE YÜKLEME KILAVUZU'],
     [],
-    ['1.', 'Yıldızlı (*) alanların doldurulması zorunludur.'],
-    ['2.', 'Öğrenci numaraları benzersiz olmalıdır.'],
-    ['3.', 'Sınıf Düzeyi rakam (örn: 9, 10, 11, 12, 1, 2 vb.) olmalıdır.'],
-    ['4.', 'Şube harf (örn: A, B, C, D vb.) olmalıdır.'],
-    ['5.', 'Listeyi doldurduktan sonra Yönetim Paneli -> Öğrenciler -> "Excel Yükle" butonu ile sisteme aktarabilirsiniz.'],
-    ['6.', 'e-Okuldan aldığınız resmi sınıf/okul listesi Excel dosyalarını doğrudan da yükleyebilirsiniz; sistem formatı otomatik algılar.'],
+    ['1.', 'Mevcut öğrencilerin bilgileri şablona otomatik doldurulmuştur.'],
+    ['2.', 'Mevcut öğrencinin numarasını koruyarak adını, soyadını, şubesini, veli veya telefon bilgilerini güncelleyebilirsiniz.'],
+    ['3.', 'Yeni öğrenci eklemek için tablonun altına yeni satırlar ekleyebilirsiniz.'],
+    ['4.', 'Yıldızlı (*) alanların doldurulması zorunludur (Öğrenci No, Ad, Soyad, Sınıf Düzeyi, Şube).'],
+    ['5.', 'Düzenlemenizi tamamladıktan sonra Yönetim Paneli -> Öğrenciler -> "Excel" butonu ile yüklediğinizde sistem mevcut kayıtları güncelleyecek ve yenileri ekleyecektir.'],
+    ['6.', 'e-Okuldan aldığınız resmi sınıf/okul listesi Excel dosyalarını doğrudan da yükleyebilirsiniz.'],
   ];
   const infoSheet = XLSX.utils.aoa_to_sheet(infoRows);
   infoSheet['!cols'] = [{ wch: 10 }, { wch: 80 }];
   XLSX.utils.book_append_sheet(workbook, infoSheet, 'Kılavuz');
 
-  return await saveAndShareWorkbook(workbook, 'Okul_Ogrenci_Yukleme_Sablonu.xlsx');
+  const safeSchoolName = schoolName ? schoolName.replace(/[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]/g, '_') : 'Okul';
+  const fileName = `${safeSchoolName}_Ogrenci_Guncelleme_Sablonu.xlsx`;
+
+  return await saveAndShareWorkbook(workbook, fileName);
 }

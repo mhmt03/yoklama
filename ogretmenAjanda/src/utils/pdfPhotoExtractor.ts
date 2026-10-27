@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as DocumentPicker from 'expo-document-picker';
 import { Platform } from 'react-native';
+import { unzlibSync, inflateSync } from 'fflate';
 import { Student } from '../types';
 
 export interface PdfExtractedStudentPhoto {
@@ -49,8 +50,14 @@ async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | str
   const uri = typeof assetOrUri === 'string' ? assetOrUri : assetOrUri.uri;
   console.log('[PDF Fotoğraf] PDF Baytları okunuyor:', uri);
 
-  // 1. FileSystem ile base64 oku (Yalnızca Web ve Android harici - örn: iOS)
-  if (Platform.OS !== 'web' && Platform.OS !== 'android') {
+  // 1. Data URI kontrolü (Web ve önceden kodlanmış içerikler için)
+  if (uri.startsWith('data:')) {
+    const clean = uri.includes(',') ? uri.split(',')[1] : uri;
+    return base64ToUint8Array(clean);
+  }
+
+  // 2. Native ortamlarda (Android & iOS) doğrudan FileSystem ile oku
+  if (Platform.OS !== 'web') {
     try {
       const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       if (b64 && b64.length > 0) {
@@ -58,61 +65,90 @@ async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | str
         return base64ToUint8Array(b64);
       }
     } catch (e) {
-      console.warn('[PDF Fotoğraf] readAsStringAsync uyarısı, fetch deneniyor:', e);
+      console.warn('[PDF Fotoğraf] readAsStringAsync doğrudan okunamadı, copyAsync deneniyor:', e);
+      try {
+        const tempPath = `${FileSystem.cacheDirectory}pdf_safe_${Date.now()}.pdf`;
+        await FileSystem.copyAsync({ from: uri, to: tempPath });
+        const b64 = await FileSystem.readAsStringAsync(tempPath, { encoding: 'base64' });
+        await FileSystem.deleteAsync(tempPath, { idempotent: true });
+        if (b64 && b64.length > 0) {
+          console.log(`[PDF Fotoğraf] FileSystem (safe copy) ile ${b64.length} karakter base64 okundu.`);
+          return base64ToUint8Array(b64);
+        }
+      } catch (copyErr) {
+        console.warn('[PDF Fotoğraf] copyAsync fallback başarısız:', copyErr);
+      }
     }
   }
 
-  // 2. Fetch ArrayBuffer — avoids the slow base64 blob round-trip
+  // 3. Web / Fallback: Fetch -> ArrayBuffer veya Blob
   try {
     const res = await fetch(uri);
-    const arrayBuffer = await res.arrayBuffer();
-    if (arrayBuffer && arrayBuffer.byteLength > 0) {
-      console.log(`[PDF Fotoğraf] Fetch ArrayBuffer ile ${arrayBuffer.byteLength} bayt okundu.`);
-      return new Uint8Array(arrayBuffer);
-    }
-  } catch (e) {
-    console.warn('[PDF Fotoğraf] fetch arrayBuffer uyarısı, blob deneniyor:', e);
-  }
-
-  // 3. Final fallback: blob
-  const res = await fetch(uri);
-  const blob = await res.blob();
-  return new Promise<Uint8Array>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
+    if (typeof res.arrayBuffer === 'function') {
       try {
-        if (reader.result instanceof ArrayBuffer) {
-          console.log(`[PDF Fotoğraf] FileReader ile ${reader.result.byteLength} bayt okundu.`);
-          return resolve(new Uint8Array(reader.result));
+        const ab = await res.arrayBuffer();
+        if (ab && ab.byteLength > 0) {
+          console.log(`[PDF Fotoğraf] Fetch ArrayBuffer ile ${ab.byteLength} bayt okundu.`);
+          return new Uint8Array(ab);
         }
-        const str = reader.result as string;
-        const clean = str.includes(',') ? str.split(',')[1] : str;
-        console.log(`[PDF Fotoğraf] FileReader dataURL ile ${clean.length} karakter base64 okundu.`);
-        resolve(base64ToUint8Array(clean));
-      } catch (e) { reject(e); }
-    };
-    reader.onerror = reject;
-    typeof reader.readAsArrayBuffer === 'function'
-      ? reader.readAsArrayBuffer(blob)
-      : reader.readAsDataURL(blob);
-  });
+      } catch {}
+    }
+    const blob = await res.blob();
+    return new Promise<Uint8Array>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        try {
+          if (reader.result instanceof ArrayBuffer) {
+            console.log(`[PDF Fotoğraf] FileReader ArrayBuffer ile ${reader.result.byteLength} bayt okundu.`);
+            return resolve(new Uint8Array(reader.result));
+          }
+          const str = reader.result as string;
+          const clean = str.includes(',') ? str.split(',')[1] : str;
+          console.log(`[PDF Fotoğraf] FileReader dataURL ile ${clean.length} karakter base64 okundu.`);
+          resolve(base64ToUint8Array(clean));
+        } catch (e) { reject(e); }
+      };
+      reader.onerror = reject;
+      typeof reader.readAsArrayBuffer === 'function' && Platform.OS === 'web'
+        ? reader.readAsArrayBuffer(blob)
+        : reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.error('[PDF Fotoğraf] Dosya okuma hatası:', e);
+    throw new Error('PDF dosyası okunamadı.');
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Inflate (FlateDecode / zlib)
-// Use DecompressionStream when available (Expo/Hermes), otherwise pure-JS.
+// Use fflate (fast C-speed pure JS), DecompressionStream or pure-JS fallback
 // ---------------------------------------------------------------------------
 
 async function inflateAsync(compressed: Uint8Array): Promise<Uint8Array> {
-  // Try zlib wrapper first with DecompressionStream
-  const tryStream = async (mode: string, data: Uint8Array): Promise<Uint8Array | null> => {
+  // 1. fflate unzlibSync (zlib-wrapped streams, standard PDF FlateDecode)
+  try {
+    return unzlibSync(compressed);
+  } catch {}
+
+  // 2. fflate inflateSync (raw deflate streams without zlib headers)
+  try {
+    return inflateSync(compressed);
+  } catch {}
+
+  // 3. Strip zlib 2-byte header if present and retry
+  if (compressed.length > 6 && (compressed[0] & 0x0f) === 8) {
     try {
-      if (typeof DecompressionStream === 'undefined') return null;
-      const ds = new DecompressionStream(mode as any);
+      return inflateSync(compressed.subarray(2, compressed.length - 4));
+    } catch {}
+  }
+
+  // 4. Try browser DecompressionStream if available
+  try {
+    if (typeof DecompressionStream !== 'undefined') {
+      const ds = new DecompressionStream('deflate' as any);
       const writer = ds.writable.getWriter();
-      // Copy to a plain ArrayBuffer to satisfy strict TypeScript types
-      const copy = new Uint8Array(new ArrayBuffer(data.byteLength));
-      copy.set(data);
+      const copy = new Uint8Array(new ArrayBuffer(compressed.byteLength));
+      copy.set(compressed);
       writer.write(copy);
       writer.close();
       const reader = ds.readable.getReader();
@@ -127,21 +163,10 @@ async function inflateAsync(compressed: Uint8Array): Promise<Uint8Array> {
       let off = 0;
       for (const c of chunks) { out.set(c, off); off += c.length; }
       return out;
-    } catch { return null; }
-  };
+    }
+  } catch {}
 
-  // 1. Try 'deflate' (handles zlib-wrapped streams)
-  const r1 = await tryStream('deflate', compressed);
-  if (r1) return r1;
-
-  // 2. Try stripping zlib 2-byte header and retry as raw deflate
-  if (compressed.length > 6 && (compressed[0] & 0x0f) === 8) {
-    const raw = compressed.subarray(2, compressed.length - 4);
-    const r2 = await tryStream('deflate-raw', raw);
-    if (r2) return r2;
-  }
-
-  // 3. Pure-JS fallback
+  // 5. Pure-JS fallback
   return inflatePureJS(compressed);
 }
 
@@ -418,19 +443,45 @@ function parsePdfImageObjs(text: string, buf: Uint8Array): PdfImageObj[] {
     }
 
     const ss = m.index + m[0].length;
-    const esIdx = text.indexOf('endstream', ss);
+    let esIdx = -1;
+    const lenM = /\/Length\s+(\d+)/.exec(hdr);
+    if (lenM) {
+      const explicitLen = parseInt(lenM[1], 10);
+      if (explicitLen > 0 && ss + explicitLen <= text.length) {
+        esIdx = ss + explicitLen;
+      }
+    }
+    if (esIdx === -1) {
+      esIdx = text.indexOf('endstream', ss);
+    }
     if (esIdx === -1) continue;
 
     results.push({ objNum, width, height, filter, csType, paletteObjNum, streamStart: ss, streamEnd: esIdx });
+
+    // Binary akışın üzerinden atla (Regex bir sonraki nesneyi bayt akışının içinde aramasın!)
+    objRe.lastIndex = Math.max(objRe.lastIndex, esIdx + 9);
   }
   return results;
 }
 
+function findObjStart(objNum: number, text: string): number {
+  const target = `${objNum} 0 obj`;
+  let idx = text.indexOf(target);
+  while (idx !== -1) {
+    if (idx === 0 || /\s/.test(text[idx - 1])) {
+      return idx;
+    }
+    idx = text.indexOf(target, idx + 1);
+  }
+  return -1;
+}
+
 function getObjRawStream(objNum: number, text: string, buf: Uint8Array): Uint8Array | null {
-  const re = new RegExp('(?:^|\\n)' + objNum + '\\s+0\\s+obj');
-  const m = re.exec(text);
-  if (!m) return null;
-  let ss = text.indexOf('stream', m.index) + 6;
+  const objStart = findObjStart(objNum, text);
+  if (objStart === -1) return null;
+  const streamIdx = text.indexOf('stream', objStart);
+  if (streamIdx === -1) return null;
+  let ss = streamIdx + 6;
   if (text[ss] === '\r') ss++;
   if (text[ss] === '\n') ss++;
   const es = text.indexOf('endstream', ss);
@@ -445,96 +496,270 @@ function getObjRawStream(objNum: number, text: string, buf: Uint8Array): Uint8Ar
 interface StudentInfo { imgName: string; number: string; name: string; }
 
 function getPdfObjContent(objNum: number, text: string): string | null {
-  const re = new RegExp('(?:^|\\r?\\n)' + objNum + '\\s+0\\s+obj([\\s\\S]*?)endobj');
-  const m = re.exec(text);
-  return m ? m[1] : null;
+  const objStart = findObjStart(objNum, text);
+  if (objStart === -1) return null;
+  const endIdx = text.indexOf('endobj', objStart);
+  if (endIdx === -1) return null;
+  return text.substring(objStart, endIdx);
 }
 
 function getPageXObjectMap(pageObjNum: number, pageDictText: string, text: string): Record<string, number> {
   const map: Record<string, number> = {};
+  const visitedObjs = new Set<number>();
 
-  // 1. Find Resources text (direct reference, inline, or inherited from parent)
-  let resDictText = '';
-  const resRef = /\/Resources\s+(\d+)\s+0\s+R/.exec(pageDictText);
-  if (resRef) {
-    resDictText = getPdfObjContent(parseInt(resRef[1], 10), text) || '';
-  } else {
-    const resInline = /\/Resources\s*<<([\s\S]*?)>>/.exec(pageDictText);
-    if (resInline) {
-      resDictText = resInline[1];
-    } else if (pageObjNum > 0) {
-      const pageObj = getPdfObjContent(pageObjNum, text);
-      if (pageObj) {
-        const pResRef = /\/Resources\s+(\d+)\s+0\s+R/.exec(pageObj);
-        if (pResRef) {
-          resDictText = getPdfObjContent(parseInt(pResRef[1], 10), text) || '';
-        } else {
-          const parentRef = /\/Parent\s+(\d+)\s+0\s+R/.exec(pageObj);
-          if (parentRef) {
-            const parentObj = getPdfObjContent(parseInt(parentRef[1], 10), text);
-            if (parentObj) {
-              const prRef = /\/Resources\s+(\d+)\s+0\s+R/.exec(parentObj);
-              if (prRef) {
-                resDictText = getPdfObjContent(parseInt(prRef[1], 10), text) || '';
+  const scanDictForXObjects = (dictStr: string) => {
+    if (!dictStr) return;
+
+    // 1. Direct /XObject << ... >> or /XObject 12 0 R
+    const xobjIdx = dictStr.indexOf('/XObject');
+    if (xobjIdx !== -1) {
+      const sub = dictStr.substring(xobjIdx);
+      const refM = /^\/XObject\s+(\d+)\s+0\s+R/.exec(sub);
+      if (refM) {
+        const refObj = parseInt(refM[1], 10);
+        if (!visitedObjs.has(refObj)) {
+          visitedObjs.add(refObj);
+          const refContent = getPdfObjContent(refObj, text);
+          if (refContent) scanDictForXObjects(refContent);
+        }
+      } else {
+        const openIdx = dictStr.indexOf('<<', xobjIdx);
+        if (openIdx !== -1 && openIdx - xobjIdx < 30) {
+          let depth = 0;
+          let endIdx = -1;
+          for (let i = openIdx; i < dictStr.length - 1; i++) {
+            if (dictStr[i] === '<' && dictStr[i + 1] === '<') {
+              depth++;
+              i++;
+            } else if (dictStr[i] === '>' && dictStr[i + 1] === '>') {
+              depth--;
+              i++;
+              if (depth === 0) {
+                endIdx = i + 1;
+                break;
               }
+            }
+          }
+          if (endIdx !== -1) {
+            const inner = dictStr.substring(openIdx, endIdx);
+            const itemRe = /\/([a-zA-Z0-9_\-]+)\s+(\d+)\s+0\s+R/g;
+            let im: RegExpExecArray | null;
+            while ((im = itemRe.exec(inner)) !== null) {
+              map[im[1]] = parseInt(im[2], 10);
             }
           }
         }
       }
     }
-  }
 
-  if (!resDictText) return map;
-
-  // 2. Find XObject dictionary (direct reference or inline)
-  let xobjDictText = '';
-  const xobjRef = /\/XObject\s+(\d+)\s+0\s+R/.exec(resDictText);
-  if (xobjRef) {
-    xobjDictText = getPdfObjContent(parseInt(xobjRef[1], 10), text) || '';
-  } else {
-    const xobjInline = /\/XObject\s*<<([\s\S]*?)>>/.exec(resDictText);
-    if (xobjInline) {
-      xobjDictText = xobjInline[1];
+    // 2. /Resources indirect reference or inline
+    const resIdx = dictStr.indexOf('/Resources');
+    if (resIdx !== -1) {
+      const resSub = dictStr.substring(resIdx);
+      const resRef = /^\/Resources\s+(\d+)\s+0\s+R/.exec(resSub);
+      if (resRef) {
+        const rNum = parseInt(resRef[1], 10);
+        if (!visitedObjs.has(rNum)) {
+          visitedObjs.add(rNum);
+          const rContent = getPdfObjContent(rNum, text);
+          if (rContent) scanDictForXObjects(rContent);
+        }
+      }
     }
-  }
+  };
 
-  if (!xobjDictText) return map;
+  scanDictForXObjects(pageDictText);
 
-  // 3. Extract alias -> objNum entries
-  const itemRe = /\/([a-zA-Z0-9_\-]+)\s+(\d+)\s+0\s+R/g;
-  let im: RegExpExecArray | null;
-  while ((im = itemRe.exec(xobjDictText)) !== null) {
-    map[im[1]] = parseInt(im[2], 10);
+  // Inherited from parent Pages object
+  if (Object.keys(map).length === 0 && pageObjNum > 0) {
+    const parentRef = /\/Parent\s+(\d+)\s+0\s+R/.exec(pageDictText);
+    if (parentRef) {
+      const parentObj = getPdfObjContent(parseInt(parentRef[1], 10), text);
+      if (parentObj) scanDictForXObjects(parentObj);
+    }
   }
 
   return map;
 }
 
+/**
+ * Windows-1254 (Turkish) / ISO-8859-9 bayt çözücü.
+ * e-Okul ve MEB PDF'lerinde Türkçe karakterler Windows-1254 kod sayfasında saklanır:
+ * 0xDD -> İ, 0xFD -> ı, 0xD0 -> Ğ, 0xF0 -> ğ, 0xDE -> Ş, 0xFE -> ş,
+ * 0xC7 -> Ç, 0xE7 -> ç, 0xD6 -> Ö, 0xF6 -> ö, 0xDC -> Ü, 0xFC -> ü
+ */
+function decodeWindows1254Byte(byte: number): string {
+  switch (byte) {
+    case 0xdd: return 'İ'; // Latin capital letter I with dot above
+    case 0xfd: return 'ı'; // Latin small letter dotless i
+    case 0xd0: return 'Ğ'; // Latin capital letter G with breve
+    case 0xf0: return 'ğ'; // Latin small letter g with breve
+    case 0xde: return 'Ş'; // Latin capital letter S with cedilla
+    case 0xfe: return 'ş'; // Latin small letter s with cedilla
+    case 0xc7: return 'Ç'; // Latin capital letter C with cedilla
+    case 0xe7: return 'ç'; // Latin small letter c with cedilla
+    case 0xd6: return 'Ö'; // Latin capital letter O with diaeresis
+    case 0xf6: return 'ö'; // Latin small letter o with diaeresis
+    case 0xdc: return 'Ü'; // Latin capital letter U with diaeresis
+    case 0xfc: return 'ü'; // Latin small letter u with diaeresis
+    default:
+      if (byte >= 32 && byte <= 126) return String.fromCharCode(byte);
+      if (byte >= 160 && byte <= 255) return String.fromCharCode(byte);
+      return '';
+  }
+}
+
+/**
+ * Windows-1254 / Latin-1 Mojibake karakterlerini düzeltir:
+ * Ý -> İ, Ð -> Ğ, Þ -> Ş, ý -> ı, ð -> ğ, þ -> ş
+ */
+function fixTurkishMojibake(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/\u00DD|Ý/g, 'İ')
+    .replace(/\u00FD|ý/g, 'ı')
+    .replace(/\u00D0|Ð/g, 'Ğ')
+    .replace(/\u00F0|ð/g, 'ğ')
+    .replace(/\u00DE|Þ/g, 'Ş')
+    .replace(/\u00FE|þ/g, 'ş');
+}
+
+/**
+ * PDF literal string içeriğindeki kaçış dizilerini (özellikle sekizlik \ddd octal escapes ve \n, \r, \( vb.)
+ * bayt dizisine dönüştürür.
+ * e-Okul PDF'lerinde Türkçe karakterler örneğin \335 (İ), \320 (Ğ), \336 (Ş) gibi sekizlik kaçışlarla gelir.
+ * Bunlar çözülmezse sayı regex'i bu sekizlikleri öğrenci numarası zanneder ve ismi bozar.
+ */
+function parsePdfLiteralStringToBytes(raw: string): number[] {
+  const bytes: number[] = [];
+  let i = 0;
+  while (i < raw.length) {
+    const c = raw.charCodeAt(i);
+    if (c === 92) { // '\\'
+      i++;
+      if (i >= raw.length) break;
+      const nextChar = raw[i];
+      // 1 ila 3 haneli sekizlik (octal) kaçış dizisi: \ddd
+      if (nextChar >= '0' && nextChar <= '7') {
+        let octStr = nextChar;
+        i++;
+        if (i < raw.length && raw[i] >= '0' && raw[i] <= '7') {
+          octStr += raw[i];
+          i++;
+          if (i < raw.length && raw[i] >= '0' && raw[i] <= '7') {
+            octStr += raw[i];
+            i++;
+          }
+        }
+        bytes.push(parseInt(octStr, 8));
+        continue;
+      }
+      switch (nextChar) {
+        case 'n': bytes.push(10); break;
+        case 'r': bytes.push(13); break;
+        case 't': bytes.push(9); break;
+        case 'b': bytes.push(8); break;
+        case 'f': bytes.push(12); break;
+        case '(': bytes.push(40); break;
+        case ')': bytes.push(41); break;
+        case '\\': bytes.push(92); break;
+        case '\r':
+          if (i + 1 < raw.length && raw[i + 1] === '\n') i++;
+          // Satır sonu kaçışı PDF standardında atlanır
+          break;
+        case '\n':
+          // Satır sonu kaçışı PDF standardında atlanır
+          break;
+        default:
+          bytes.push(raw.charCodeAt(i));
+          break;
+      }
+      i++;
+    } else {
+      bytes.push(c & 0xff);
+      i++;
+    }
+  }
+  return bytes;
+}
+
+/**
+ * PDF literal dizesini (parantez içi (...)) çözümler.
+ * UTF-16BE (\xFE\xFF) veya Windows-1254 / ISO-8859-9 desteğiyle Türkçe karakterleri doğru üretir.
+ */
+function parsePdfLiteralString(raw: string): string {
+  if (!raw) return '';
+  const bytes = parsePdfLiteralStringToBytes(raw);
+  if (bytes.length === 0) return '';
+
+  // 1. UTF-16BE BOM kontrolü (\xFE\xFF)
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    let s = '';
+    for (let j = 2; j + 1 < bytes.length; j += 2) {
+      const code = (bytes[j] << 8) | bytes[j + 1];
+      if (code > 0) s += String.fromCharCode(code);
+    }
+    return fixTurkishMojibake(s.trim());
+  }
+
+  // 2. Windows-1254 / ISO-8859-9 (e-Okul / MEB standart)
+  let s = '';
+  for (const b of bytes) {
+    const ch = decodeWindows1254Byte(b);
+    if (ch) s += ch;
+  }
+  return fixTurkishMojibake(s.trim());
+}
+
+/**
+ * PDF Onaltılık (Hexadecimal <...>) dizesini çözümler.
+ */
 function decodeHexPdfString(hex: string): string {
   if (!hex || hex.length < 2) return '';
   if (hex.length % 2 !== 0) hex += '0';
   let result = '';
-  // Check if UTF-16BE (starts with 00 or FEFF)
-  if (hex.length >= 4 && hex.length % 4 === 0 && (hex.toLowerCase().startsWith('feff') || hex.startsWith('00'))) {
+
+  // UTF-16BE (00xx, FEFF veya Türkçe UTF-16BE 01xx ile başlayan)
+  let isUtf16 = hex.length >= 4 && hex.length % 4 === 0 && (
+    hex.toLowerCase().startsWith('feff') ||
+    hex.startsWith('00') ||
+    hex.startsWith('01')
+  );
+
+  // Genel kontrol: 4'ün katıysa ve karakterlerin çoğu 00..01 aralığındaysa kesinlikle UTF-16BE'dir
+  if (!isUtf16 && hex.length >= 4 && hex.length % 4 === 0) {
+    let highByteCount = 0;
+    const numChars = hex.length / 4;
+    for (let c = 0; c < hex.length; c += 4) {
+      const hb = parseInt(hex.substring(c, c + 2), 16);
+      if (hb === 0x00 || hb === 0x01) highByteCount++;
+    }
+    if (highByteCount >= Math.ceil(numChars * 0.75)) {
+      isUtf16 = true;
+    }
+  }
+
+  if (isUtf16) {
     for (let i = 0; i < hex.length; i += 4) {
       const code = parseInt(hex.substring(i, i + 4), 16);
-      if (code > 0 && code !== 0xfeff) result += String.fromCharCode(code);
+      if (code > 0 && code !== 0xfeff) {
+        result += String.fromCharCode(code);
+      }
     }
-    return result.trim();
+    return fixTurkishMojibake(result.trim());
   }
-  // Standard ASCII/Latin-1
+
+  // Windows-1254 8-bit tek baytlık karakterler
   for (let i = 0; i < hex.length; i += 2) {
     const code = parseInt(hex.substring(i, i + 2), 16);
-    if (code >= 32 && code <= 255) result += String.fromCharCode(code);
+    const ch = decodeWindows1254Byte(code);
+    if (ch) result += ch;
   }
-  return result.trim();
+  return fixTurkishMojibake(result.trim());
 }
 
 function extractStringsFromContext(ctx: string): string[] {
   const list: string[] = [];
-  const parseStr = (s: string) => {
-    return s.replace(/\\([()\\])/g, '$1').trim();
-  };
 
   // 1. Array TJ operator: [ (1) 20 (2) ] TJ or [ <0031> 10 <0032> ] TJ (e-Okul kerning)
   const tjRe = /\[([\s\S]*?)\]\s*TJ/gi;
@@ -542,63 +767,51 @@ function extractStringsFromContext(ctx: string): string[] {
   while ((tjM = tjRe.exec(ctx)) !== null) {
     const arrContent = tjM[1];
     let assembled = '';
-    const tokenRe = /\(((\\.|[^)])*)\)|<([0-9a-fA-F]+)>/g;
+    const tokenRe = /\(((\\.|[^)])*)\)|<([0-9a-fA-F]+)>|(-?\d+(?:\.\d+)?)/g;
     let tokM: RegExpExecArray | null;
     while ((tokM = tokenRe.exec(arrContent)) !== null) {
       if (tokM[1] !== undefined) {
-        assembled += parseStr(tokM[1]);
+        assembled += parsePdfLiteralString(tokM[1]);
       } else if (tokM[3] !== undefined) {
         assembled += decodeHexPdfString(tokM[3]);
+      } else if (tokM[4] !== undefined) {
+        // Kerning number: if spacing is significant negative (e.g. <= -150), insert space between words
+        const kerning = parseFloat(tokM[4]);
+        if (kerning <= -150 && assembled.length > 0 && !assembled.endsWith(' ')) {
+          assembled += ' ';
+        }
       }
     }
-    const clean = assembled.trim();
+    const clean = fixTurkishMojibake(assembled.trim());
     if (clean && !list.includes(clean)) list.push(clean);
   }
 
-  // 2. Direct string operator: (text) Tj
-  const singleTjRe = /\(((\\.|[^)])*)\)\s*Tj/gi;
+  // 2. Direct string operator: (text) Tj or (text) '
+  const singleTjRe = /\(((\\.|[^)])*)\)\s*(?:Tj|['"])/gi;
   let stM: RegExpExecArray | null;
   while ((stM = singleTjRe.exec(ctx)) !== null) {
-    const s = parseStr(stM[1]);
+    const s = fixTurkishMojibake(parsePdfLiteralString(stM[1]).trim());
     if (s && !list.includes(s)) list.push(s);
   }
 
-  // 3. Hex string operator: <00310032> Tj
-  const hexTjRe = /<([0-9a-fA-F]+)>\s*Tj/gi;
+  // 3. Hex string operator: <00310032> Tj or <hex> '
+  const hexTjRe = /<([0-9a-fA-F]+)>\s*(?:Tj|['"])/gi;
   let htM: RegExpExecArray | null;
   while ((htM = hexTjRe.exec(ctx)) !== null) {
-    const s = decodeHexPdfString(htM[1]);
+    const s = fixTurkishMojibake(decodeHexPdfString(htM[1]).trim());
     if (s && !list.includes(s)) list.push(s);
   }
 
-  // 4. Match inside BT ... ET blocks
-  const btEtRe = /BT([\s\S]*?)ET/g;
-  let bm: RegExpExecArray | null;
-  while ((bm = btEtRe.exec(ctx)) !== null) {
-    const block = bm[1];
-    const strRe = /\(((\\.|[^)])*)\)/g;
-    let sm: RegExpExecArray | null;
-    while ((sm = strRe.exec(block)) !== null) {
-      const s = parseStr(sm[1]);
-      if (s && !list.includes(s)) list.push(s);
-    }
-    const hexRe = /<([0-9a-fA-F]+)>/g;
-    let hm: RegExpExecArray | null;
-    while ((hm = hexRe.exec(block)) !== null) {
-      const s = decodeHexPdfString(hm[1]);
-      if (s && !list.includes(s)) list.push(s);
-    }
-  }
-
-  // 5. Fallback to literal strings outside BT...ET
+  // 4. Fallback: if no Tj/TJ operators found, match direct literal strings
   if (list.length === 0) {
     const directRe = /\(((\\.|[^)])*)\)/g;
     let dm: RegExpExecArray | null;
     while ((dm = directRe.exec(ctx)) !== null) {
-      const s = parseStr(dm[1]);
+      const s = fixTurkishMojibake(parsePdfLiteralString(dm[1]).trim());
       if (s && !list.includes(s)) list.push(s);
     }
   }
+
   return list;
 }
 
@@ -647,15 +860,23 @@ export const extractPhotosFromPdf = async (
 
     // 1. Parse image objects (all pages, binary order)
     const allImgs = parsePdfImageObjs(text, buf);
-    const photoObjs = allImgs.filter(img =>
+    // Vesikalık fotoğraflar: Hem dikey standart hem de kare (webcam 1:1) formatı kabul et
+    // MEB e-Okul'a yüklenen fotoğrafların çoğu 1:1 kare veya 3:4/4:5 dikey formatındadır.
+    let photoObjs = allImgs.filter(img =>
       img.height >= 35 && img.width >= 30 &&
-      (img.height / img.width >= 0.5 && img.height / img.width <= 2.8)
+      (img.height / img.width >= 0.70 && img.height / img.width <= 2.6)
     );
+    if (photoObjs.length === 0) {
+      photoObjs = allImgs.filter(img =>
+        img.height >= 30 && img.width >= 25 &&
+        (img.height / img.width >= 0.65 && img.height / img.width <= 2.8)
+      );
+    }
 
     console.log(`[PDF Fotoğraf] Toplam Resim Objesi: ${allImgs.length} adet | Vesikalık Kriterine Uyan: ${photoObjs.length} adet`);
 
     if (!photoObjs.length) {
-      console.warn('[PDF Fotoğraf] PDF içinde vesikalık boyutuna (>= 40x50) uygun fotoğraf nesnesi bulunamadı.');
+      console.warn('[PDF Fotoğraf] PDF içinde vesikalık boyutuna uygun fotoğraf nesnesi bulunamadı.');
       return {
         success: false,
         totalImages: allImgs.length,
@@ -677,12 +898,28 @@ export const extractPhotosFromPdf = async (
       }
     }
 
-    // Öğrenci numaralarını ve başındaki sıfırlar atılmış hallerini hazırla
+    // Öğrenci numaralarını ve başındaki sıfırlar atılmış hallerini hazırla (Öncelikli 1. Kriter)
+    const getStudentNum = (s: any): string => {
+      const n = s.student_number || s.studentNumber || s.number || '';
+      return String(n).trim();
+    };
+
+    const getStudentFullName = (s: any): string => {
+      if (s.full_name) return String(s.full_name).trim();
+      if (s.fullName) return String(s.fullName).trim();
+      const fn = `${s.first_name || ''} ${s.last_name || ''}`.trim();
+      return fn;
+    };
+
+    const getStudentId = (s: any): string => {
+      return String(s.id);
+    };
+
     const numSet = new Set<string>();
     const normalizedNumMap = new Map<string, Student>();
     for (const s of students) {
-      if (s.student_number) {
-        const raw = s.student_number.trim();
+      const raw = getStudentNum(s);
+      if (raw) {
         numSet.add(raw);
         const clean = raw.replace(/^0+/, '');
         if (clean) normalizedNumMap.set(clean, s);
@@ -762,10 +999,10 @@ export const extractPhotosFromPdf = async (
       if (!pageContent) continue;
 
       // ── 2. Build per-page XObject map ──
-      const pageXobjMap = getPageXObjectMap(pageObjNum, pageWindow, text);
+      const pageXobjMap = getPageXObjectMap(pageObjNum, pageObjText, text);
       const hasAliasMap = Object.keys(pageXobjMap).length > 0;
 
-      // ── 3. Find image placements on this page ──
+      // ── 3. Find image placements on this page with spatial (x, y) coordinates ──
       const doRe = /\/([a-zA-Z0-9_\-]+)\s+Do/g;
       let dm: RegExpExecArray | null;
       interface PagePlacement {
@@ -773,6 +1010,10 @@ export const extractPhotosFromPdf = async (
         index: number;
         objNum: number;
         photo?: PdfImageObj;
+        x?: number;
+        y?: number;
+        width?: number;
+        height?: number;
       }
       const pagePlacements: PagePlacement[] = [];
       while ((dm = doRe.exec(pageContent)) !== null) {
@@ -782,96 +1023,242 @@ export const extractPhotosFromPdf = async (
         if (objNum > 0) {
           photo = photoObjs.find(p => p.objNum === objNum);
         }
-        pagePlacements.push({ alias, index: dm.index, objNum, photo });
+
+        // Do komutunun hemen önündeki koordinat matrisini (cm) yakala
+        let x: number | undefined;
+        let y: number | undefined;
+        let width: number | undefined;
+        let height: number | undefined;
+
+        const beforeDo = pageContent.substring(Math.max(0, dm.index - 350), dm.index);
+        const cmRe = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+cm/g;
+        let cmM: RegExpExecArray | null;
+        let lastCmM: RegExpExecArray | null = null;
+        while ((cmM = cmRe.exec(beforeDo)) !== null) {
+          lastCmM = cmM;
+        }
+        if (lastCmM) {
+          width = Math.abs(parseFloat(lastCmM[1]));
+          height = Math.abs(parseFloat(lastCmM[4]));
+          x = parseFloat(lastCmM[5]);
+          y = parseFloat(lastCmM[6]);
+        }
+
+        pagePlacements.push({ alias, index: dm.index, objNum, photo, x, y, width, height });
       }
 
-      // Filter to student photos (skips logos, headers, stamps not matching photoObjs criteria)
+      // Filter to student photos
       let photoPlacements: PagePlacement[] = [];
       if (hasAliasMap) {
         photoPlacements = pagePlacements.filter(p => p.photo !== undefined);
       }
       if (photoPlacements.length === 0) {
-        const imgDoRe = /\/(img\d+|Im\d+|I\d+)\s+Do/gi;
+        const imgDoRe = /\/(img\d+|Im\d+|I\d+|Fm\d+|X\d+)\s+Do/gi;
         let idm: RegExpExecArray | null;
         while ((idm = imgDoRe.exec(pageContent)) !== null) {
-          photoPlacements.push({ alias: idm[1], index: idm.index, objNum: 0 });
+          let x: number | undefined;
+          let y: number | undefined;
+          let width: number | undefined;
+          let height: number | undefined;
+          const beforeDo = pageContent.substring(Math.max(0, idm.index - 350), idm.index);
+          const cmRe = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+cm/g;
+          let cmM: RegExpExecArray | null;
+          let lastCmM: RegExpExecArray | null = null;
+          while ((cmM = cmRe.exec(beforeDo)) !== null) {
+            lastCmM = cmM;
+          }
+          if (lastCmM) {
+            width = Math.abs(parseFloat(lastCmM[1]));
+            height = Math.abs(parseFloat(lastCmM[4]));
+            x = parseFloat(lastCmM[5]);
+            y = parseFloat(lastCmM[6]);
+          }
+          photoPlacements.push({ alias: idm[1], index: idm.index, objNum: 0, x, y, width, height });
         }
+      }
+
+      // ── KRİTİK: Fotoğrafları sayfa üzerindeki gerçek görsel konumuna göre sırala ──
+      // Üst satırdan alt satıra (y azalan), aynı satırda soldan sağa (x artan).
+      // Bu sayede 1. sıradaki fotoğraf daima en üst-soldaki öğrenci (Örn: Orhan Yücel) olur!
+      if (photoPlacements.some(p => p.y !== undefined && p.x !== undefined)) {
+        photoPlacements.sort((a, b) => {
+          if (a.y !== undefined && b.y !== undefined) {
+            if (Math.abs(a.y - b.y) <= 35) {
+              return (a.x || 0) - (b.x || 0); // Soldan sağa
+            }
+            return b.y - a.y; // Yukarıdan aşağıya
+          }
+          return a.index - b.index;
+        });
       }
 
       console.log(`[PDF Fotoğraf] Sayfa ${pageNumber}: ${photoPlacements.length} resim yerleşimi bulundu.`);
 
       if (photoPlacements.length === 0) continue;
 
-      // ── 4. Determine whether text is drawn before or after photo on this page ──
-      const firstPhotoIdx = photoPlacements[0].index;
-      const region0Text = pageContent.substring(Math.max(0, firstPhotoIdx - 1200), firstPhotoIdx);
-      const region0Strings = extractStringsFromContext(region0Text);
-      const region0Numbers = region0Strings.filter(s => /^\d{1,6}$/.test(s));
+      // ── 3.b. Sayfadaki metinleri koordinatlarıyla topla ──
+      interface PageTextItem { text: string; x: number; y: number; }
+      const pageTextItems: PageTextItem[] = [];
+      const btEtRe = /BT([\s\S]*?)ET/g;
+      let bmM: RegExpExecArray | null;
+      while ((bmM = btEtRe.exec(pageContent)) !== null) {
+        const block = bmM[1];
+        let curX = 0;
+        let curY = 0;
+        const tmM = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+Tm/.exec(block);
+        if (tmM) {
+          curX = parseFloat(tmM[5]);
+          curY = parseFloat(tmM[6]);
+        } else {
+          const tdM = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+T[dD]/.exec(block);
+          if (tdM) {
+            curX = parseFloat(tdM[1]);
+            curY = parseFloat(tdM[2]);
+          }
+        }
 
-      const hasStudentNumBeforeFirstPhoto = region0Numbers.some(n => numSet.has(n) || n.length >= 3);
-      const textOrder: 'before' | 'after' = hasStudentNumBeforeFirstPhoto ? 'before' : 'after';
+        const blockStrs = extractStringsFromContext(block);
+        for (const s of blockStrs) {
+          const clean = s.trim();
+          if (clean.length > 0) {
+            pageTextItems.push({ text: clean, x: curX, y: curY });
+          }
+        }
+      }
 
+      // ── 4. Associate text with photo placements ──
       const IGNORE_WORDS = new Set([
         'T.C.', 'TC', 'MİLLİ', 'MILLI', 'EĞİTİM', 'EGITIM', 'BAKANLIĞI', 'BAKANLIGI',
         'ÖĞRENCİ', 'OGRENCI', 'FOTOĞRAF', 'FOTOGRAF', 'LİSTESİ', 'LISTESI', 'SINIF',
-        'ŞUBE', 'SUBE', 'SAYFA', 'SIRA', 'NO', 'NUMARASI', 'OKUL', 'DERS', 'TARİH', 'TARIH'
+        'ŞUBE', 'SUBE', 'SAYFA', 'SIRA', 'NO', 'NUMARASI', 'OKUL', 'DERS', 'TARİH', 'TARIH',
+        'DÖNEM', 'DONEM', 'YIL', 'EĞİTİM-ÖĞRETİM', 'ÖĞRETİM', 'İMZA', 'IMZA'
       ]);
 
       const usedNumbersOnPage = new Set<string>();
 
       for (let k = 0; k < photoPlacements.length; k++) {
         const cur = photoPlacements[k];
-        let ctx = '';
+        const prevIdx = k > 0 ? photoPlacements[k - 1].index : 0;
+        const nextIdx = k + 1 < photoPlacements.length ? photoPlacements[k + 1].index : pageContent.length;
 
-        if (textOrder === 'before') {
-          const prevIdx = k > 0 ? photoPlacements[k - 1].index : 0;
-          ctx = pageContent.substring(Math.max(prevIdx, cur.index - 1200), cur.index);
-        } else {
-          const nextIdx = k + 1 < photoPlacements.length ? photoPlacements[k + 1].index : pageContent.length;
-          ctx = pageContent.substring(cur.index, Math.min(nextIdx, cur.index + 1200));
-        }
+        let candidateNumbers: string[] = [];
+        let candidateNames: string[] = [];
+        let matchingKnown: string[] = [];
 
-        let strings = extractStringsFromContext(ctx);
-        if (strings.length === 0) {
-          if (textOrder === 'before') {
-            const nextIdx = k + 1 < photoPlacements.length ? photoPlacements[k + 1].index : pageContent.length;
-            ctx = pageContent.substring(cur.index, Math.min(nextIdx, cur.index + 1200));
-          } else {
-            const prevIdx = k > 0 ? photoPlacements[k - 1].index : 0;
-            ctx = pageContent.substring(Math.max(prevIdx, cur.index - 1200), cur.index);
+        // YÖNTEM A: Koordinat Tabanlı Eşleştirme (Fotoğrafın hemen altındaki metinler)
+        if (cur.x !== undefined && cur.y !== undefined && pageTextItems.length > 0) {
+          const photoW = cur.width || 80;
+          const photoH = cur.height || 100;
+          const textsForPhoto = pageTextItems.filter(item => {
+            const xDiff = Math.abs(item.x - cur.x!);
+            if (xDiff > photoW + 50) return false;
+            const yDiff = cur.y! - item.y;
+            return yDiff >= -25 && yDiff <= photoH + 90;
+          });
+
+          for (const item of textsForPhoto) {
+            const tokens = item.text.match(/\b\d{1,6}\b/g);
+            if (tokens) {
+              for (const t of tokens) {
+                if (!candidateNumbers.includes(t)) candidateNumbers.push(t);
+              }
+            }
+            if (
+              item.text.length >= 2 &&
+              /[A-Za-zÇĞİÖŞÜçğışöşü]/.test(item.text) &&
+              !/^\d+$/.test(item.text) &&
+              !IGNORE_WORDS.has(item.text.toUpperCase()) &&
+              !IGNORE_WORDS.has(item.text.toLocaleUpperCase('tr-TR'))
+            ) {
+              candidateNames.push(item.text);
+            }
           }
-          strings = extractStringsFromContext(ctx);
+
+          matchingKnown = candidateNumbers.filter(
+            n => (numSet.has(n) || normalizedNumMap.has(n.replace(/^0+/, ''))) &&
+                 !usedNumbersOnPage.has(n) &&
+                 !usedNumbersOnPage.has(n.replace(/^0+/, ''))
+          );
         }
 
-        const candidateNumbers = strings.filter(s => /^\d{1,6}$/.test(s));
-        const candidateNames = strings.filter(
-          s => /[A-Za-zÇĞİÖŞÜçğışöşü]/.test(s) &&
-               !/^\d+$/.test(s) &&
-               !IGNORE_WORDS.has(s.toUpperCase())
-        );
+        // YÖNTEM B: Fallback (Akış / Context bazlı)
+        if (matchingKnown.length === 0 && candidateNumbers.length === 0) {
+          const ctxAfter = pageContent.substring(cur.index, Math.min(nextIdx, cur.index + 2000));
+          const ctxBefore = pageContent.substring(Math.max(prevIdx, cur.index - 2000), cur.index);
+
+          const parseContextCandidates = (ctxText: string) => {
+            const rawStrs = extractStringsFromContext(ctxText);
+            const cleanStrs = rawStrs.filter(s => {
+              const clean = s.trim();
+              if (!clean) return false;
+              if (/SINIF|ŞUBE|SUBE|SAYFA|TARİH|TARIH|DÖNEM|DONEM|BAKANLIĞI|BAKANLIGI|MÜDÜRLÜĞÜ|MUDURLUGU|İLÇE|ILCE|MİLLİ|MILLI|LİSTESİ|LISTESI/i.test(clean)) return false;
+              return true;
+            });
+
+            const numbers: string[] = [];
+            for (const s of cleanStrs) {
+              const tokens = s.match(/\b\d{1,6}\b/g);
+              if (tokens) {
+                for (const t of tokens) {
+                  if (!numbers.includes(t)) numbers.push(t);
+                }
+              }
+            }
+
+            const names = cleanStrs.filter(
+              s => s.length >= 2 &&
+                   /[A-Za-zÇĞİÖŞÜçğışöşü]/.test(s) &&
+                   !/^\d+$/.test(s) &&
+                   !IGNORE_WORDS.has(s.toUpperCase()) &&
+                   !IGNORE_WORDS.has(s.toLocaleUpperCase('tr-TR'))
+            );
+
+            const mKnown = numbers.filter(
+              n => (numSet.has(n) || normalizedNumMap.has(n.replace(/^0+/, ''))) &&
+                   !usedNumbersOnPage.has(n) &&
+                   !usedNumbersOnPage.has(n.replace(/^0+/, ''))
+            );
+
+            return { numbers, names, matchedKnownNumbers: mKnown };
+          };
+
+          const afterAnalysis = parseContextCandidates(ctxAfter);
+          const beforeAnalysis = parseContextCandidates(ctxBefore);
+
+          let chosenAnalysis = afterAnalysis;
+          if (afterAnalysis.matchedKnownNumbers.length === 0 && beforeAnalysis.matchedKnownNumbers.length > 0) {
+            chosenAnalysis = beforeAnalysis;
+          } else if (afterAnalysis.numbers.length === 0 && afterAnalysis.names.length === 0 && (beforeAnalysis.numbers.length > 0 || beforeAnalysis.names.length > 0)) {
+            chosenAnalysis = beforeAnalysis;
+          }
+
+          candidateNumbers = chosenAnalysis.numbers;
+          if (candidateNames.length === 0) candidateNames = chosenAnalysis.names;
+          matchingKnown = chosenAnalysis.matchedKnownNumbers;
+        }
 
         let detNum = '';
-        // 1. Look for numbers that actually belong to the students in the class/system
-        const matchingKnown = candidateNumbers.filter(
-          n => (numSet.has(n) || normalizedNumMap.has(n.replace(/^0+/, ''))) && !usedNumbersOnPage.has(n)
-        );
         if (matchingKnown.length > 0) {
-          matchingKnown.sort((a, b) => b.length - a.length);
           detNum = matchingKnown[0];
-        } else {
-          // 2. If not in known numbers, accept 3+ digit numbers
-          const validCandidates = candidateNumbers.filter(n => n.length >= 3 && !usedNumbersOnPage.has(n));
+        } else if (candidateNumbers.length > 0) {
+          const validCandidates = candidateNumbers.filter(n => n.length >= 1 && n.length <= 5 && !usedNumbersOnPage.has(n));
           if (validCandidates.length > 0) {
-            validCandidates.sort((a, b) => b.length - a.length);
             detNum = validCandidates[0];
           }
         }
 
         if (detNum) {
           usedNumbersOnPage.add(detNum);
+          usedNumbersOnPage.add(detNum.replace(/^0+/, ''));
         }
 
-        const name = candidateNames.slice(-3).join(' ').trim();
+        // İsim adaylarını temizle (tek harfli parçalar elenir)
+        const cleanNameWords = candidateNames
+          .join(' ')
+          .split(/\s+/)
+          .filter(w => w.length >= 2 && !IGNORE_WORDS.has(w.toUpperCase()))
+          .slice(-3);
+        const name = cleanNameWords.length >= 1 ? cleanNameWords.join(' ').trim() : '';
         const info: StudentInfo = { imgName: cur.alias, number: detNum, name };
 
         // ── 5. Resolve image object for this photo ──
@@ -974,40 +1361,64 @@ export const extractPhotosFromPdf = async (
         const detNum = info.number;
         let matched: Student | null = null;
 
-        // ── 1. Numara Eşleştirme (Tam eşleşme veya başındaki sıfırlar göz ardı edilmiş) ──
-        if (detNum) {
+        // ── 1. Numara Eşleştirme (BİRİNCİ VE KESİN KRİTER) ──
+        if (detNum && detNum.trim()) {
           const cleanDet = detNum.trim().replace(/^0+/, '');
-          const candidate =
-            students.find(
-              s =>
-                s.student_number?.trim() === detNum.trim() ||
-                (cleanDet.length > 0 && s.student_number?.trim().replace(/^0+/, '') === cleanDet)
-            ) || null;
+          if (cleanDet.length > 0) {
+            const candidate =
+              students.find(s => {
+                const sNum = getStudentNum(s).trim();
+                const sClean = sNum.replace(/^0+/, '');
+                return (sNum.length > 0 && sNum === detNum.trim()) || (sClean.length > 0 && sClean === cleanDet);
+              }) || null;
 
-          if (candidate && !usedStudentIds.has(candidate.id)) {
-            matched = candidate;
+            if (candidate) {
+              const cId = getStudentId(candidate);
+              if (!usedStudentIds.has(cId as any)) {
+                matched = candidate;
+              }
+            }
           }
         }
 
-        // ── 2. İsim ile Destekleme (Numara bulunamadıysa tam isimden ara) ──
-        if (!matched && info.name && info.name.length >= 4) {
-          const normInfoName = info.name.toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+        // ── 2. İsim ile Destekleme (Yalnızca numara hiç tespit edilemediyse) ──
+        // KATI VE GÜVENLİ EŞLEŞTİRME: Numara yoksa, kısmi kelime eşleşmesi ASLA yapılmaz!
+        // Yalnızca öğrencinin tam adı (Ad + Soyad) sistemdeki kayıtla birebir/tam olarak eşleşiyorsa atanır.
+        if (!matched && !detNum && info.name && info.name.length >= 4) {
+          const normStr = (str: string) =>
+            fixTurkishMojibake(str)
+              .toLocaleLowerCase('tr-TR')
+              .replace(/[^a-zçğıöşü0-9]/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+          const normInfoName = normStr(info.name);
           const candidate = students.find(s => {
-            const fName = `${s.first_name || ''} ${s.last_name || ''}`.toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
-            const fullName = (s.full_name || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
-            return fName === normInfoName || fullName === normInfoName;
+            const fullName = normStr(getStudentFullName(s));
+            if (fullName === normInfoName) return true;
+            const pToks = normInfoName.split(' ').filter(t => t.length >= 2);
+            const sToks = fullName.split(' ').filter(t => t.length >= 2);
+            // Öğrencinin tüm ad ve soyadı (en az 2 kelime) ve PDF'ten okunan tüm kelimeler BİREBİR aynı olmalı!
+            if (pToks.length >= 2 && sToks.length === pToks.length) {
+              return pToks.every((pt, idx) => pt === sToks[idx]);
+            }
+            return false;
           });
-          if (candidate && !usedStudentIds.has(candidate.id)) {
-            matched = candidate;
-            console.log(`[PDF Fotoğraf] İsimden tam eşleşme sağlandı: "${info.name}" -> ${candidate.first_name} ${candidate.last_name} (${candidate.student_number})`);
+          if (candidate) {
+            const cId = getStudentId(candidate);
+            if (!usedStudentIds.has(cId as any)) {
+              matched = candidate;
+              console.log(`[PDF Fotoğraf] İsimden tam eşleşme sağlandı: "${info.name}" -> ${getStudentFullName(candidate)} (${getStudentNum(candidate)})`);
+            }
           }
         }
 
-        if (matched) usedStudentIds.add(matched.id);
+        if (matched) usedStudentIds.add(getStudentId(matched) as any);
 
+        const matchedDisplay = matched ? getStudentFullName(matched) : '';
         console.log(
           `[PDF Fotoğraf] Foto #${i + 1} (Sayfa ${pageNumber}): No=${detNum || 'YOK'} | İsim="${info.name}" -> ${
-            matched ? `✅ EŞLEŞTİ (${matched.full_name || `${matched.first_name} ${matched.last_name}`})` : '⚠️ EŞLEŞMEDİ (Manuel Atama)'
+            matched ? `✅ EŞLEŞTİ (${matchedDisplay} - No: ${getStudentNum(matched)})` : '⚠️ EŞLEŞMEDİ (Manuel Atama)'
           }`
         );
 

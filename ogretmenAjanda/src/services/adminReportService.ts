@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { saveAndShareWorkbook } from '../utils/excelService';
+import { isTeacherMatch } from '../utils/teacherUtils';
 
 export interface ReportSchoolInfo {
   id: string;
@@ -470,6 +471,64 @@ export async function exportSchedulesReport(params: {
   wsMatrix['!cols'] = [{ wch: 14 }, ...Array(40).fill({ wch: 18 })];
   XLSX.utils.book_append_sheet(wb, wsMatrix, 'Carsaf_Matrisi');
 
+  // 3. Sekme: Öğretmen Bazlı Çarşaf Matrisi (Satırlar: Alfabetik Öğretmenler, Sütunlar: Gün x Saat)
+  // Hücre içeriği: Girdiği şube (örn: "11-A" veya "11-A (Fizik)")
+  const teacherNameSet = new Set<string>();
+  teachers.forEach((t) => {
+    if (t.fullName && t.fullName.trim()) teacherNameSet.add(t.fullName.trim());
+  });
+  schedules.forEach((s) => {
+    if (s.teacherName && s.teacherName.trim()) teacherNameSet.add(s.teacherName.trim());
+  });
+
+  const sortedTeacherNames = Array.from(teacherNameSet).sort((a, b) =>
+    a.localeCompare(b, 'tr-TR', { sensitivity: 'base' })
+  );
+
+  const teacherMatrixHeaderRow: string[] = ['Öğretmen Adı Soyadı'];
+  for (let d = 1; d <= 5; d++) {
+    const dayName = DAY_NAMES[d];
+    for (let h = 1; h <= maxDailyHours; h++) {
+      teacherMatrixHeaderRow.push(`${dayName} (${h}. Saat)`);
+    }
+  }
+
+  const teacherMatrixRows: any[][] = [
+    [`👨‍🏫 ${school.name.toUpperCase()} - ÖĞRETMEN BAZLI ÇARŞAF DERS VE KONUM MATRİSİ`],
+    ['Yukarıdan aşağı öğretmen adları, yatay olarak günler ve ders saatleri (Hücrede personelin bulunduğu şube yer alır).'],
+    [],
+    teacherMatrixHeaderRow,
+  ];
+
+  sortedTeacherNames.forEach((tName) => {
+    const row: string[] = [tName];
+
+    for (let d = 1; d <= 5; d++) {
+      for (let h = 1; h <= maxDailyHours; h++) {
+        const found = schedules.find(
+          (s) =>
+            s.dayOfWeek === d &&
+            s.lessonHour === h &&
+            s.teacherName &&
+            (s.teacherName.trim().toLowerCase() === tName.toLowerCase() ||
+             isTeacherMatch(tName, s.teacherName))
+        );
+
+        if (found) {
+          const className = `${found.grade || ''}-${found.section || ''}`.trim().replace(/^-|-$/, '');
+          row.push(className ? `${className}\n(${found.lessonName || 'Ders'})` : (found.lessonName || 'Ders'));
+        } else {
+          row.push('-');
+        }
+      }
+    }
+    teacherMatrixRows.push(row);
+  });
+
+  const wsTeacherMatrix = XLSX.utils.aoa_to_sheet(teacherMatrixRows);
+  wsTeacherMatrix['!cols'] = [{ wch: 22 }, ...Array(40).fill({ wch: 16 })];
+  XLSX.utils.book_append_sheet(wb, wsTeacherMatrix, 'Ogretmen_Carsaf_Matrisi');
+
   const fileName = `Ders_Programi_${school.code || 'Okul'}_${Date.now()}.xlsx`;
   return await saveAndShareWorkbook(wb, fileName);
 }
@@ -560,13 +619,15 @@ export async function exportAuditLogsReport(params: {
     [],
     [
       'Sıra No',
-      'Tarih / Saat',
-      'İşlem Türü',
+      'Tarih / Saat (TR)',
+      'İşlem Başlığı',
+      'İşlem Kodu',
+      'İşlemi Yapan (Ad Soyad)',
       'Kullanıcı Adı',
-      'Adı Soyadı',
       'Rolü',
-      'Açıklama',
-      'İlgili Varlık',
+      'Açıklama (Ne Yapıldı)',
+      'İlgili Varlık / Hedef',
+      'Teknik Detaylar',
       'IP Adresi',
     ],
   ];
@@ -574,13 +635,15 @@ export async function exportAuditLogsReport(params: {
   filtered.forEach((log, idx) => {
     rows.push([
       idx + 1,
-      log.timestamp ? new Date(log.timestamp).toLocaleString('tr-TR') : '-',
+      log.formattedDate || (log.timestamp ? new Date(log.timestamp).toLocaleString('tr-TR') : '-'),
+      safeStr(log.actionTitle || log.actionType),
       safeStr(log.actionType),
-      safeStr(log.userName),
-      safeStr(log.userFullName),
-      safeStr(log.userRole),
-      safeStr(log.description),
-      safeStr(log.entityName || '-'),
+      safeStr(log.userFullName || log.userName || 'Sistem'),
+      safeStr(log.userName || '-'),
+      safeStr(log.roleLabel || log.userRole),
+      safeStr(log.description || log.actionType),
+      safeStr(`${log.entityName || '-'} ${log.entityId ? `(#${log.entityId})` : ''}`.trim()),
+      safeStr(log.detailsJson || '-'),
       safeStr(log.ipAddress || '-'),
     ]);
   });
@@ -856,7 +919,7 @@ export async function exportStudentCredentialsReport(params: {
   const rows: any[][] = [
     [`${school.name.toUpperCase()} - ÖĞRENCİ PORTALI GİRİŞ VE ŞİFRE LİSTESİ`],
     [`Okul Kodu: ${school.code || '-'} | Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')} | Toplam Öğrenci: ${filtered.length}`],
-    ['NOT: Öğrenci portalı girişi için "Okul Kodu" + "Öğrenci Numarası" + "Şifre" kullanılır. Varsayılan şifre: "aaaa_öğrencino" şeklindedir.'],
+    ['NOT: Öğrenci portalı girişi için "Okul Kodu" + "Öğrenci Numarası" + "Şifre" kullanılır. Başlangıç şifresi: "ooo_öğrencino" şeklindedir.'],
     [],
     [
       'Sıra No',
@@ -874,7 +937,7 @@ export async function exportStudentCredentialsReport(params: {
 
   filtered.forEach((s, i) => {
     const stdNo = safeStr(s.studentNumber);
-    const defaultPass = stdNo ? `aaaa_${stdNo}` : '-';
+    const defaultPass = stdNo ? `ooo_${stdNo}` : '-';
     rows.push([
       i + 1,
       stdNo,
@@ -945,7 +1008,7 @@ export async function exportParentCredentialsReport(params: {
   const rows: any[][] = [
     [`${school.name.toUpperCase()} - VELİ BİLGİLENDİRME VE PORTAL ERİŞİM ŞİFRE LİSTESİ`],
     [`Okul Kodu: ${school.code || '-'} | Rapor Tarihi: ${new Date().toLocaleDateString('tr-TR')} | Toplam Veli / Öğrenci: ${filtered.length}`],
-    ['NOT: Veliler öğrenci takip paneline öğrencinin numarası veya kayıtlı veli telefonu ile giriş yaparlar. Başlangıç şifresi: "aaaa_öğrencino" şeklindedir.'],
+    ['NOT: Veliler öğrenci takip paneline öğrencinin numarası veya kayıtlı veli telefonu ile giriş yaparlar. Başlangıç şifresi: "vvv_öğrencino" şeklindedir.'],
     [],
     [
       'Sıra No',
@@ -963,7 +1026,7 @@ export async function exportParentCredentialsReport(params: {
 
   filtered.forEach((s, i) => {
     const stdNo = safeStr(s.studentNumber);
-    const defaultPass = stdNo ? `aaaa_${stdNo}` : '-';
+    const defaultPass = stdNo ? `vvv_${stdNo}` : '-';
     rows.push([
       i + 1,
       safeStr(s.parentName || 'Belirtilmedi'),

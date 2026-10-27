@@ -39,28 +39,28 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
   // --- KURUM (INSTITUTION / TENANT) STATE ---
   const [activeInstitution, setActiveInstitution] = useState<InstitutionInfo | null>(null);
   const [institutionLoading, setInstitutionLoading] = useState(true);
-  const [kurumInput, setKurumInput] = useState('mg-egitim');
+  const [kurumInput, setKurumInput] = useState('');
   const [verifyingKurum, setVerifyingKurum] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isEditingKurum, setIsEditingKurum] = useState(false);
 
   // Okul Admini Modal & State
   const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
-  const [adminUsername, setAdminUsername] = useState('mehmetadmin');
-  const [adminPassword, setAdminPassword] = useState('1234');
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
 
   // Öğretmen Giriş Modalı (Okul Kodu + Kullanıcı Adı + Şifre)
   const [showTeacherLoginModal, setShowTeacherLoginModal] = useState(false);
-  const [teacherSchoolCode, setTeacherSchoolCode] = useState('OKL-10001');
-  const [teacherUsername, setTeacherUsername] = useState('mehmetogretmen');
-  const [teacherPassword, setTeacherPassword] = useState('1234');
+  const [teacherSchoolCode, setTeacherSchoolCode] = useState('');
+  const [teacherUsername, setTeacherUsername] = useState('');
+  const [teacherPassword, setTeacherPassword] = useState('');
   const [teacherLoading, setTeacherLoading] = useState(false);
 
   // Süper Admin Modal
   const [superAdminModalVisible, setSuperAdminModalVisible] = useState(false);
-  const [superAdminUsername, setSuperAdminUsername] = useState('mehmetsuper');
-  const [superAdminPassword, setSuperAdminPassword] = useState('1234');
+  const [superAdminUsername, setSuperAdminUsername] = useState('');
+  const [superAdminPassword, setSuperAdminPassword] = useState('');
   const [superAdminLoading, setSuperAdminLoading] = useState(false);
 
   React.useEffect(() => {
@@ -235,12 +235,16 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       return;
     }
 
+    const cleanInst = (activeInstitution?.code || kurumInput || '').trim().toLowerCase();
+    const cleanUsername = adminUsername.trim().toLowerCase();
+    const isSuperAdminTrigger = (cleanInst === 'ogretmenajanda' || cleanInst === 'ogretmen ajanda') && cleanUsername === 'mehmetsuper';
+
     setAdminLoading(true);
     try {
       const res = await apiRequest('auth/login', 'POST', {
         username: adminUsername.trim(),
         password: adminPassword.trim(),
-        institutionCode: activeInstitution?.code,
+        institutionCode: activeInstitution?.code || (kurumInput || '').trim(),
       });
 
       if (res.success && res.data) {
@@ -259,10 +263,19 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
 
         await saveAuthToken(res.data.token, res.data);
         setShowAdminLoginModal(false);
-        const nextRole = res.data.role === 'STAFF' ? 'staff' : 'admin';
+        const isSuper = res.data.role === 'SUPERADMIN' || isSuperAdminTrigger;
+        const nextRole = isSuper ? 'superadmin' : (res.data.role === 'STAFF' ? 'staff' : 'admin');
         await setActiveUserRole(nextRole);
         onRoleSelected(nextRole);
       } else {
+        // Özel Gizli Süper Admin Girişi (ogretmenajanda + mehmetsuper / 1234)
+        if (isSuperAdminTrigger && (adminPassword.trim() === '1234' || adminPassword.trim() === '123456')) {
+          setShowAdminLoginModal(false);
+          await setActiveUserRole('superadmin');
+          onRoleSelected('superadmin');
+          return;
+        }
+
         // Çevrimdışı / Yerel Test Modu Fallback (mehmetadmin / 1234)
         if (adminUsername.trim() === 'mehmetadmin' && adminPassword.trim() === '1234') {
           const instToSave: InstitutionInfo = activeInstitution || {
@@ -360,7 +373,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         const affSchools = res.data.affiliatedSchools && res.data.affiliatedSchools.length > 0
           ? res.data.affiliatedSchools
           : (res.data.schoolName ? [{ name: res.data.schoolName, code: res.data.schoolCode || 'OKL-10001', geminiApiKey: res.data.geminiApiKey }] : []);
-        
+
         const targetSchoolCode = res.data.schoolCode || affSchools[0]?.code || 'OKL-10001';
 
         if (affSchools.length > 0) {
@@ -454,6 +467,11 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
     onRoleSelected('student');
   };
 
+  const handleSelectParent = async () => {
+    await setActiveUserRole('parent');
+    onRoleSelected('parent');
+  };
+
   // Süper Admin Girişi (mehmetsuper / 1234)
   const handleSuperAdminLogin = async () => {
     if (!superAdminUsername.trim() || !superAdminPassword.trim()) {
@@ -530,9 +548,15 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         <Text style={styles.brandSub}>
           Kurumsal, hibrit ve çok rollü eğitim platformu
         </Text>
-        <View style={styles.brandMetaBadge}>
-          <Ionicons name="mail-outline" size={13} color="#4F46E5" />
-          <Text style={styles.brandMetaEmail}>gundoner@yahoo.com</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8 }}>
+          <View style={styles.brandMetaBadge}>
+            <Ionicons name="sparkles-outline" size={12} color="#4F46E5" />
+            <Text style={styles.brandMetaEmail}>v1.0.10</Text>
+          </View>
+          <View style={styles.brandMetaBadge}>
+            <Ionicons name="mail-outline" size={12} color="#4F46E5" />
+            <Text style={styles.brandMetaEmail}>gundoner@yahoo.com</Text>
+          </View>
         </View>
       </View>
 
@@ -581,14 +605,14 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             </View>
 
             <Text style={styles.instDescSmall}>
-              Lisanslı kurumunuza ait benzersiz adı/kodu yazınız veya deneme kurumunu seçiniz:
+              Lisanslı kurumunuza ait adı veya kurum kodunu yazınız:
             </Text>
 
             <View style={styles.instInputWrap}>
               <Ionicons name="shield-checkmark-outline" size={20} color="#6366F1" style={{ marginRight: 8 }} />
               <TextInput
                 style={styles.instTextInput}
-                placeholder="Kurum Adı / Kodu (örn: zafer-egitim)"
+                placeholder="Kurum Adı veya Kodu"
                 placeholderTextColor={Colors.textMuted}
                 value={kurumInput}
                 onChangeText={(text) => {
@@ -606,20 +630,6 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
                 onSubmitEditing={() => handleVerifyKurum()}
               />
             </View>
-
-            {/* Hızlı Test Çipi */}
-            <TouchableOpacity
-              style={styles.quickChip}
-              onPress={() => {
-                setKurumInput('zafer-egitim');
-                handleVerifyKurum('zafer-egitim');
-              }}
-            >
-              <Ionicons name="flask" size={13} color="#4F46E5" />
-              <Text style={styles.quickChipText}>
-                🧪 Deneme Kurumu: <Text style={{ fontWeight: '800' }}>zafer-egitim</Text> (Zafer Eğitim)
-              </Text>
-            </TouchableOpacity>
 
             <View style={styles.instActionRow}>
               {/* Beni Hatırla Switch / Checkbox */}
@@ -709,37 +719,52 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
           </TouchableOpacity>
 
-          {/* 3. ÖĞRENCİ & VELİ KARTI */}
+          {/* 3. ÖĞRENCİ KARTI */}
           <TouchableOpacity style={styles.roleCard} onPress={handleSelectStudent} activeOpacity={0.85}>
             <View style={[styles.roleIconWrap, { backgroundColor: '#ECFDF5' }]}>
               <Ionicons name="school" size={28} color="#059669" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.roleCardTitle}>Öğrenci & Veli Paneli</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.roleCardTitle}>Öğrenci Paneli</Text>
+                <View style={[styles.popBadge, { backgroundColor: '#D1FAE5' }]}>
+                  <Text style={[styles.popBadgeText, { color: '#065F46' }]}>Öğrenci</Text>
+                </View>
+              </View>
               <Text style={styles.roleCardDesc}>
-                Ödev bildirimleri, teslim durumları, ders programı ve öğretmen görüşleri.
+                Ödev teslimleri, quizler, sınıf haftalık ders programı ve öğrenci bildirimleri.
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
           </TouchableOpacity>
 
-          {/* 4. SÜPER ADMİN (GİZLİ SİSTEM SAHİBİ GİRİŞİ) */}
-          <TouchableOpacity
-            style={styles.superAdminTrigger}
-            onPress={() => setSuperAdminModalVisible(true)}
-          >
-            <Ionicons name="key-outline" size={16} color={Colors.textMuted} />
-            <Text style={styles.superAdminTriggerText}>Süper Admin Girişi (Lisans & Müşteri Yönetimi)</Text>
+          {/* 4. VELİ KARTI */}
+          <TouchableOpacity style={styles.roleCard} onPress={handleSelectParent} activeOpacity={0.85}>
+            <View style={[styles.roleIconWrap, { backgroundColor: '#EFF6FF' }]}>
+              <Ionicons name="people" size={28} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={styles.roleCardTitle}>Veli Portalı</Text>
+                <View style={[styles.popBadge, { backgroundColor: '#DBEAFE' }]}>
+                  <Text style={[styles.popBadgeText, { color: '#1E40AF' }]}>Veli Takip</Text>
+                </View>
+              </View>
+              <Text style={styles.roleCardDesc}>
+                Öğrenci gelişim takibi, pedagojik öğretmen görüşleri, ders programı ve veli anonsları.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
           </TouchableOpacity>
 
           {/* Telif Hakları & İletişim Footer */}
           <View style={styles.footerCopyrightBox}>
             <Text style={styles.footerCopyrightText}>
-              © {new Date().getFullYear()} Öğretmen Ajanda. Tüm hakları saklıdır.
+              © {new Date().getFullYear()} Öğretmen Ajanda v1.0.10 • Tüm hakları saklıdır.
             </Text>
             <View style={styles.footerContactRow}>
               <Ionicons name="mail-outline" size={12} color={Colors.textMuted} />
-              <Text style={styles.footerContactText}>İletişim: gundoner@yahoo.com</Text>
+              <Text style={styles.footerContactText}>Geliştirici: gundoner@yahoo.com</Text>
             </View>
           </View>
         </View>
@@ -766,15 +791,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               </View>
             ) : null}
 
-            <View style={styles.trialInfoBox}>
-              <Ionicons name="information-circle" size={16} color="#D97706" />
-              <Text style={styles.trialInfoText}>Deneme Hesabı: mehmetadmin</Text>
-            </View>
-
-            <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
+            <Text style={[styles.inputLabel, { marginTop: 12 }]}>Kullanıcı Adı</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Kullanıcı Adı (mehmetadmin)"
+              placeholder="Kullanıcı Adı"
               placeholderTextColor={Colors.textMuted}
               value={adminUsername}
               onChangeText={setAdminUsername}
@@ -849,17 +869,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               </View>
             ) : null}
 
-            <View style={styles.trialInfoBoxBlue}>
-              <Ionicons name="information-circle" size={16} color="#4F46E5" />
-              <Text style={styles.trialInfoTextBlue}>
-                Deneme Hesabı: mehmetogretmen (Fizik Öğretmeni)
-              </Text>
-            </View>
-
-            <Text style={[styles.inputLabel, { marginTop: 8 }]}>Kullanıcı Adı</Text>
+            <Text style={[styles.inputLabel, { marginTop: 12 }]}>Kullanıcı Adı</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Kullanıcı Adı (mehmetogretmen)"
+              placeholder="Kullanıcı Adı"
               placeholderTextColor={Colors.textMuted}
               value={teacherUsername}
               onChangeText={setTeacherUsername}
@@ -927,15 +940,10 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
               Sistem lisanslarını ve tüm okulları yönetmek için giriş yapın.
             </Text>
 
-            <View style={styles.trialInfoBox}>
-              <Ionicons name="information-circle" size={16} color="#D97706" />
-              <Text style={styles.trialInfoText}>Deneme Hesabı: mehmetsuper / 1234</Text>
-            </View>
-
-            <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
+            <Text style={[styles.inputLabel, { marginTop: 12 }]}>Kullanıcı Adı</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Kullanıcı Adı (mehmetsuper)"
+              placeholder="Kullanıcı Adı"
               placeholderTextColor={Colors.textMuted}
               value={superAdminUsername}
               onChangeText={setSuperAdminUsername}
@@ -945,7 +953,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             <Text style={[styles.inputLabel, { marginTop: 10 }]}>Şifre</Text>
             <TextInput
               style={styles.nameInput}
-              placeholder="Şifre (1234)"
+              placeholder="Şifre"
               placeholderTextColor={Colors.textMuted}
               value={superAdminPassword}
               onChangeText={setSuperAdminPassword}

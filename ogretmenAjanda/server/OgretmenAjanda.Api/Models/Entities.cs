@@ -8,10 +8,12 @@ namespace OgretmenAjanda.Api.Models
     public static class UserRoles
     {
         public const string SuperAdmin = "SUPERADMIN";
-        public const string SchoolAdmin = "SCHOOL_ADMIN";
-        public const string Staff = "STAFF";
+        public const string InstitutionAdmin = "INSTITUTION_ADMIN"; // Kurum Admini (Müşteri - 1 tane)
+        public const string SchoolAdmin = "SCHOOL_ADMIN"; // Okul Admini (Birden fazla)
+        public const string Staff = "STAFF"; // İdareci / Md. Yrd. (Birden fazla)
         public const string Teacher = "TEACHER";
         public const string Student = "STUDENT";
+        public const string Parent = "PARENT";
     }
 
     public class Institution
@@ -128,15 +130,25 @@ namespace OgretmenAjanda.Api.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? LastLoginAt { get; set; }
 
-        // Öğretmenin sorumlu olduğu sınıflar/şubeler (JSON formatında saklanabilir)
+        // Öğretmenin sorumlu olduğu sınıflar/şubeler (JSON formatında: ["11-A", "11-B"])
         public string? AssignedClassesJson { get; set; }
+
+        // Öğretmenin girdiği dersler (JSON formatında: ["Fizik", "Hedef Temelli Destek Eğitimi"])
+        public string? AssignedLessonsJson { get; set; }
 
         [MaxLength(100)]
         public string? Branch { get; set; }
 
+        [MaxLength(50)]
+        public string? CounselorClass { get; set; } // Sınıf Rehber Öğretmenliği (Örn: "10-A")
+
         // Öğretmenin yetki kısıtlamaları (JSON: canMessageStudents, canMessageTeachers, canMessageParents, canViewAllClasses, canUseAiAssistant, canExportReports, canManageAttendance, canEditStudents)
         [MaxLength(2000)]
         public string? PermissionsJson { get; set; }
+
+        // İdarecinin veya öğretmenin erişebileceği birden fazla okul (JSON formatında: ["guid-1", "guid-2"])
+        [MaxLength(2000)]
+        public string? AssignedSchoolIdsJson { get; set; }
 
         [MaxLength(300)]
         public string? PushToken { get; set; } // Expo Push Token (Kilitli ekran bildirimi için)
@@ -177,6 +189,18 @@ namespace OgretmenAjanda.Api.Models
         public string? StudentPhone { get; set; }
 
         public string? Notes { get; set; }
+
+        [MaxLength(50)]
+        public string? ParentUsername { get; set; } // Özel veli kullanıcı adı (boşsa öğrenci no veya tel)
+
+        [MaxLength(255)]
+        public string? ParentPasswordHash { get; set; } // Veli şifre hash'i (varsayılan: vvv_ogrencino)
+
+        [MaxLength(50)]
+        public string? ParentCustomPassword { get; set; } // Admin ekranında veli şifresini net görebilmek/sıfırlamak için
+
+        [MaxLength(50)]
+        public string? StudentCustomPassword { get; set; } // Admin ekranında öğrenci şifresini net görebilmek/sıfırlamak için
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -255,7 +279,11 @@ namespace OgretmenAjanda.Api.Models
 
         public double? Score { get; set; } // Quiz veya sınav notu ise
 
-        public bool IsSharedWithParent { get; set; } = false; // Veliye gönderildi mi?
+        public bool IsSharedWithParent { get; set; } = true; // Veli görebilir mi? (Varsayılan true)
+        public bool IsSharedWithStudent { get; set; } = true; // Öğrenci görebilir mi? (Varsayılan true)
+
+        [MaxLength(20)]
+        public string TargetAudience { get; set; } = "BOTH"; // "BOTH", "PARENT", "STUDENT"
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -347,8 +375,18 @@ namespace OgretmenAjanda.Api.Models
         [MaxLength(150)]
         public string? TargetDescription { get; set; }
 
+        [MaxLength(20)]
+        public string TargetAudience { get; set; } = "ALL"; // "ALL", "STUDENT", "PARENT"
+
         [Required]
         public string Content { get; set; } = string.Empty;
+
+        public Guid? ReplyToMessageId { get; set; }
+
+        public string? ReplyToContent { get; set; }
+
+        [MaxLength(200)]
+        public string? Subject { get; set; }
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public bool IsRead { get; set; } = false;
@@ -430,4 +468,28 @@ namespace OgretmenAjanda.Api.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
+
+    public class TeacherDuty
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(120)]
+        public string TeacherName { get; set; } = string.Empty;
+
+        [Required, MaxLength(100)]
+        public string DutyPlace { get; set; } = string.Empty; // 1. Kat, 2. Kat, Bahçe vb.
+
+        [MaxLength(30)]
+        public string? DayOfWeek { get; set; } // Pazartesi, Salı, Çarşamba, Perşembe, Cuma
+
+        [MaxLength(20)]
+        public string? Date { get; set; } // YYYY-MM-DD (Opsiyonel belirli bir gün için)
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
 }
+

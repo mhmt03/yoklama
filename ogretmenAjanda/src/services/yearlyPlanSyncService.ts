@@ -2,6 +2,7 @@ import { apiRequest, getActiveUserSession } from './apiClient';
 import { getActiveSchool } from '../database/operations/schoolOperations';
 import { getCourses, createCourse } from '../database/operations/scheduleOperations';
 import { bulkCreateYearlyPlanItems, BulkPlanItemPayload } from '../database/operations/yearlyPlanOperations';
+import { isTeacherMatch } from '../utils/teacherUtils';
 
 export interface YearlyPlanSyncResult {
   success: boolean;
@@ -71,46 +72,7 @@ export async function getTeacherTaughtLessons(
     const activeSchool = await getActiveSchool();
     const code = (schoolCode || activeSchool?.code || session?.schoolCode || '').trim();
 
-    // 1. Yerel veritabanındaki ders programı (schedules) ve sınıflar (classes)
-    let localSchoolId: number | undefined;
-    if (code) {
-      const schRow = await db.getFirstAsync<{ id: number }>(
-        'SELECT id FROM schools WHERE UPPER(code) = ?',
-        code.toUpperCase()
-      );
-      if (schRow?.id) localSchoolId = schRow.id;
-    }
-    if (!localSchoolId && activeSchool?.id) {
-      localSchoolId = activeSchool.id;
-    }
-
-    const localQuery = `
-      SELECT DISTINCT c.name as course_name, cl.name as class_name, cl.grade_level
-      FROM schedules s
-      JOIN courses c ON c.id = s.course_id
-      LEFT JOIN classes cl ON cl.id = s.class_id
-      ${localSchoolId ? 'WHERE s.school_id = ? OR cl.school_id = ?' : ''}
-    `;
-    const localRows = localSchoolId
-      ? await db.getAllAsync<{ course_name: string; class_name: string; grade_level: number }>(
-          localQuery,
-          localSchoolId,
-          localSchoolId
-        )
-      : await db.getAllAsync<{ course_name: string; class_name: string; grade_level: number }>(
-          localQuery
-        );
-
-    for (const r of localRows) {
-      let gLevel = r.grade_level;
-      if (!gLevel && r.class_name) {
-        const m = r.class_name.match(/\d+/);
-        if (m) gLevel = parseInt(m[0], 10);
-      }
-      addLesson(r.course_name, gLevel);
-    }
-
-    // 2. Sunucudaki haftalık ders programı (sync/schedules)
+    // 1. Sunucudaki haftalık ders programı (sync/schedules) - Kurumsal modda tek ve kesin doğruluk kaynağı
     let sId = schoolId || session?.schoolId;
     if (!sId && session?.affiliatedSchools && Array.isArray(session.affiliatedSchools)) {
       const match = session.affiliatedSchools.find(
@@ -148,22 +110,14 @@ export async function getTeacherTaughtLessons(
         } catch {}
       }
 
-      if (matchedServerSchedules.length === 0) {
+      // Sunucu programında öğretmen adına göre hassas eşleştirme (adaș çakıșmasını engelleyen kontrol)
+      if (matchedServerSchedules.length === 0 && teacherName) {
         try {
           const allRes = await apiRequest<any[]>(`sync/schedules?schoolId=${sId}`);
           if (allRes.success && allRes.data && allRes.data.length > 0) {
-            const allItems = allRes.data;
-            const normTarget = teacherName.toLowerCase();
-            const targetWords = normTarget.split(/\s+/).filter((w) => w.length >= 2);
-
-            matchedServerSchedules = allItems.filter((s) => {
-              if (!s.teacherName) return false;
-              const tDb = s.teacherName.trim().toLowerCase();
-              if (tDb === normTarget || tDb.includes(normTarget) || normTarget.includes(tDb)) {
-                return true;
-              }
-              return targetWords.some((w) => tDb.includes(w));
-            });
+            matchedServerSchedules = allRes.data.filter((s) =>
+              isTeacherMatch(teacherName, s.teacherName)
+            );
           }
         } catch {}
       }
@@ -178,24 +132,47 @@ export async function getTeacherTaughtLessons(
           addLesson(item.lessonName, gLevel);
         }
       }
+    }
 
-      // 3. Öğretmen profilindeki branş (Branch)
-      try {
-        const teachersRes = await apiRequest<any[]>(`schools/${sId}/teachers`);
-        if (teachersRes.success && teachersRes.data) {
-          const myProfile = teachersRes.data.find(
-            (t) =>
-              (t.username && session?.username && t.username.toLowerCase() === session.username.toLowerCase()) ||
-              (t.fullName && teacherName && (
-                t.fullName.toLowerCase().includes(teacherName.toLowerCase()) ||
-                teacherName.toLowerCase().includes(t.fullName.toLowerCase())
-              ))
+    // 2. Eğer sunucuya erişilemediyse veya okul programı sunucudan dönmediyse yerel SQLite'a bak (Offline mod)
+    if (lessonGradeMap.size === 0) {
+      let localSchoolId: number | undefined;
+      if (code) {
+        const schRow = await db.getFirstAsync<{ id: number }>(
+          'SELECT id FROM schools WHERE UPPER(code) = ?',
+          code.toUpperCase()
+        );
+        if (schRow?.id) localSchoolId = schRow.id;
+      }
+      if (!localSchoolId && activeSchool?.id) {
+        localSchoolId = activeSchool.id;
+      }
+
+      const localQuery = `
+        SELECT DISTINCT c.name as course_name, cl.name as class_name, cl.grade_level
+        FROM schedules s
+        JOIN courses c ON c.id = s.course_id
+        LEFT JOIN classes cl ON cl.id = s.class_id
+        ${localSchoolId ? 'WHERE s.school_id = ? OR cl.school_id = ?' : ''}
+      `;
+      const localRows = localSchoolId
+        ? await db.getAllAsync<{ course_name: string; class_name: string; grade_level: number }>(
+            localQuery,
+            localSchoolId,
+            localSchoolId
+          )
+        : await db.getAllAsync<{ course_name: string; class_name: string; grade_level: number }>(
+            localQuery
           );
-          if (myProfile?.branch) {
-            addLesson(myProfile.branch);
-          }
+
+      for (const r of localRows) {
+        let gLevel = r.grade_level;
+        if (!gLevel && r.class_name) {
+          const m = r.class_name.match(/\d+/);
+          if (m) gLevel = parseInt(m[0], 10);
         }
-      } catch {}
+        addLesson(r.course_name, gLevel);
+      }
     }
   } catch (err) {
     console.warn('getTeacherTaughtLessons hatası:', err);

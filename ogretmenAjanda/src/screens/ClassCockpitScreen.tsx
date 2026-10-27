@@ -46,6 +46,20 @@ export function ClassCockpitScreen({ route, navigation }: any) {
   const [students, setStudents] = useState<StudentCockpitItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const getDisplayPhotoUri = (uri?: string | null): string | undefined => {
+    if (!uri || !uri.trim()) return undefined;
+    const clean = uri.trim();
+    if (
+      clean.startsWith('file://') ||
+      clean.startsWith('data:image') ||
+      clean.startsWith('http://') ||
+      clean.startsWith('https://')
+    ) {
+      return clean;
+    }
+    return `http://ogretmenajanda.runasp.net${clean.startsWith('/') ? '' : '/'}${clean}`;
+  };
+
   // Ders Defterine yazılacak konu (Yıllık Plandan gelir)
   const [currentWeekSubject, setCurrentWeekSubject] = useState<string>(
     '1. Hafta: Vektörler, Kuvvet Dengesi ve Bileşke Kuvvet'
@@ -269,8 +283,8 @@ export function ClassCockpitScreen({ route, navigation }: any) {
               <View key={student.id} style={styles.studentCard}>
                 {/* Öğrenci Fotoğrafı */}
                 <View style={styles.avatarWrap}>
-                  {student.photo_uri ? (
-                    <Image source={{ uri: student.photo_uri }} style={styles.avatarImg} />
+                  {getDisplayPhotoUri(student.photo_uri) ? (
+                    <Image source={{ uri: getDisplayPhotoUri(student.photo_uri) }} style={styles.avatarImg} />
                   ) : (
                     <View style={styles.avatarPlaceholder}>
                       <Text style={styles.avatarInitial}>{student.first_name[0]}</Text>

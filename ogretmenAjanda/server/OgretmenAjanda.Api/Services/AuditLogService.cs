@@ -228,6 +228,29 @@ namespace OgretmenAjanda.Api.Services
                 }
             }
 
+            // Hala eksik kalan varsa Students tablosundan da eşle (Öğrenci işlemleri)
+            var stillMissing = logs
+                .Where(l => string.IsNullOrEmpty(l.UserFullName) && l.UserId != Guid.Empty)
+                .Select(l => l.UserId)
+                .Distinct()
+                .ToList();
+
+            if (stillMissing.Any())
+            {
+                var studentMap = await context.Students
+                    .Where(s => stillMissing.Contains(s.Id))
+                    .ToDictionaryAsync(s => s.Id, s => new { s.StudentNumber, s.FullName });
+
+                foreach (var logItem in logs)
+                {
+                    if (string.IsNullOrEmpty(logItem.UserFullName) && studentMap.TryGetValue(logItem.UserId, out var sInfo))
+                    {
+                        logItem.UserName = sInfo.StudentNumber;
+                        logItem.UserFullName = sInfo.FullName;
+                    }
+                }
+            }
+
             // Filtre dropdownları için okuldaki kullanıcılar
             var schoolUsers = await context.Users
                 .Where(u => u.SchoolId == schoolId || u.Role == UserRoles.SchoolAdmin)
@@ -247,27 +270,59 @@ namespace OgretmenAjanda.Api.Services
                 .Distinct()
                 .ToListAsync();
 
-            return new
+            var trCulture = new System.Globalization.CultureInfo("tr-TR");
+            var nowTr = DateTime.UtcNow.AddHours(3);
+
+            var enhancedLogs = logs.Select(l =>
             {
-                total = totalCount,
-                todayCount = todayCount,
-                logs = logs.Select(l => new
+                var logTr = l.Timestamp.AddHours(3);
+                var diff = nowTr - logTr;
+
+                string relativeTime;
+                if (diff.TotalMinutes < 1) relativeTime = "Az önce";
+                else if (diff.TotalMinutes < 60) relativeTime = $"{(int)diff.TotalMinutes} dakika önce";
+                else if (diff.TotalHours < 24 && logTr.Date == nowTr.Date) relativeTime = $"Bugün, {logTr:HH:mm}";
+                else if (logTr.Date == nowTr.Date.AddDays(-1)) relativeTime = $"Dün, {logTr:HH:mm}";
+                else relativeTime = logTr.ToString("d MMMM yyyy, HH:mm", trCulture);
+
+                var actionTitle = GetActionTitle(l.ActionType);
+                var resolvedName = !string.IsNullOrEmpty(l.UserFullName) ? l.UserFullName : (!string.IsNullOrEmpty(l.UserName) ? l.UserName : "Sistem");
+                var roleLabel = GetRoleLabel(l.UserRole);
+
+                var desc = l.Description;
+                if (string.IsNullOrWhiteSpace(desc))
+                {
+                    desc = !string.IsNullOrWhiteSpace(l.DetailsJson) ? l.DetailsJson : actionTitle;
+                }
+
+                return new
                 {
                     l.Id,
                     l.SchoolId,
                     l.UserId,
-                    l.UserName,
-                    l.UserFullName,
-                    l.UserRole,
-                    l.ActionType,
-                    l.EntityName,
-                    l.EntityId,
-                    l.Description,
-                    l.DetailsJson,
+                    userName = l.UserName ?? "-",
+                    userFullName = resolvedName,
+                    userRole = l.UserRole,
+                    roleLabel = roleLabel,
+                    actionType = l.ActionType,
+                    actionTitle = actionTitle,
+                    entityName = l.EntityName,
+                    entityId = l.EntityId,
+                    description = desc,
+                    detailsJson = l.DetailsJson,
                     timestamp = l.Timestamp,
-                    localTimeString = l.Timestamp.AddHours(3).ToString("yyyy-MM-dd HH:mm:ss"),
-                    l.IpAddress
-                }),
+                    localTimeString = logTr.ToString("yyyy-MM-dd HH:mm:ss"),
+                    formattedDate = logTr.ToString("dd MMMM yyyy, dddd HH:mm:ss", trCulture),
+                    relativeTime = relativeTime,
+                    ipAddress = l.IpAddress ?? "Bilinmiyor"
+                };
+            }).ToList();
+
+            return new
+            {
+                total = totalCount,
+                todayCount = todayCount,
+                logs = enhancedLogs,
                 users = schoolUsers,
                 actionTypes = distinctActionTypes
             };
@@ -315,32 +370,57 @@ namespace OgretmenAjanda.Api.Services
                 );
             }
 
-            var logs = await query.OrderByDescending(l => l.Timestamp).Take(1000).ToListAsync();
+            var logs = await query.OrderByDescending(l => l.Timestamp).Take(2000).ToListAsync();
+
+            // Eksik kullanıcı isimlerini doldur
+            var missingUserIds = logs
+                .Where(l => string.IsNullOrEmpty(l.UserFullName) && l.UserId != Guid.Empty)
+                .Select(l => l.UserId)
+                .Distinct()
+                .ToList();
+
+            if (missingUserIds.Any())
+            {
+                var userMap = await context.Users
+                    .Where(u => missingUserIds.Contains(u.Id))
+                    .ToDictionaryAsync(u => u.Id, u => new { u.Username, u.FullName });
+
+                foreach (var logItem in logs)
+                {
+                    if (string.IsNullOrEmpty(logItem.UserFullName) && userMap.TryGetValue(logItem.UserId, out var uInfo))
+                    {
+                        logItem.UserName = uInfo.Username;
+                        logItem.UserFullName = uInfo.FullName;
+                    }
+                }
+            }
+
             var school = await context.Schools.FindAsync(schoolId);
             var schoolName = school?.Name ?? "Okul";
+            var trCulture = new System.Globalization.CultureInfo("tr-TR");
 
             var timeStampStr = DateTime.UtcNow.AddHours(3).ToString("yyyyMMdd_HHmm");
 
             if (format.ToLowerInvariant() == "csv")
             {
                 var sb = new StringBuilder();
-                // UTF-8 BOM
-                sb.Append('\uFEFF');
-                sb.AppendLine("Tarih/Saat (TR);Kullanıcı Adı;Ad Soyad;Rol;İşlem Türü;Varlık;Açıklama;Detay;IP Adresi");
+                sb.Append('\uFEFF'); // UTF-8 BOM
+                sb.AppendLine("Tarih ve Saat (TR);İşlem Başlığı;İşlemi Yapan (Ad Soyad);Kullanıcı Adı;Rol;İşlem Türü;Hedef/Varlık;Açıklama;Detaylar;IP Adresi");
 
                 foreach (var log in logs)
                 {
-                    var trDate = log.Timestamp.AddHours(3).ToString("yyyy-MM-dd HH:mm:ss");
+                    var trDate = log.Timestamp.AddHours(3).ToString("dd.MM.yyyy HH:mm:ss", trCulture);
+                    var title = EscapeCsv(GetActionTitle(log.ActionType));
+                    var fName = EscapeCsv(!string.IsNullOrEmpty(log.UserFullName) ? log.UserFullName : (log.UserName ?? "Sistem"));
                     var uName = EscapeCsv(log.UserName ?? "-");
-                    var fName = EscapeCsv(log.UserFullName ?? "-");
-                    var role = EscapeCsv(log.UserRole);
+                    var role = EscapeCsv(GetRoleLabel(log.UserRole));
                     var action = EscapeCsv(log.ActionType);
                     var entity = EscapeCsv($"{log.EntityName} ({log.EntityId ?? "-"})");
-                    var desc = EscapeCsv(log.Description ?? "-");
+                    var desc = EscapeCsv(log.Description ?? log.ActionType);
                     var details = EscapeCsv(log.DetailsJson ?? "");
                     var ip = EscapeCsv(log.IpAddress ?? "-");
 
-                    sb.AppendLine($"{trDate};{uName};{fName};{role};{action};{entity};{desc};{details};{ip}");
+                    sb.AppendLine($"{trDate};{title};{fName};{uName};{role};{action};{entity};{desc};{details};{ip}");
                 }
 
                 var bytes = Encoding.UTF8.GetBytes(sb.ToString());
@@ -352,24 +432,28 @@ namespace OgretmenAjanda.Api.Services
                 sb.AppendLine("================================================================================");
                 sb.AppendLine($"           {schoolName.ToUpperInvariant()} - SİSTEM VE İŞLEM DENETİM RAPORU");
                 sb.AppendLine("================================================================================");
-                sb.AppendLine($"Rapor Oluşturulma Tarihi: {DateTime.UtcNow.AddHours(3):yyyy-MM-dd HH:mm:ss} (TR)");
+                sb.AppendLine($"Rapor Oluşturulma Tarihi: {DateTime.UtcNow.AddHours(3):dd MMMM yyyy, dddd HH:mm:ss} (TR)");
                 sb.AppendLine($"Toplam Kayıt Sayısı: {logs.Count}");
                 sb.AppendLine("--------------------------------------------------------------------------------");
                 sb.AppendLine();
 
                 foreach (var log in logs)
                 {
-                    var trDate = log.Timestamp.AddHours(3).ToString("yyyy-MM-dd HH:mm:ss");
-                    sb.AppendLine($"[{trDate}] [{log.ActionType}] {log.Description ?? log.ActionType}");
-                    sb.AppendLine($"    Kullanıcı : {log.UserFullName ?? log.UserName ?? "Sistem"} ({log.UserName ?? "-"}) - Rol: {log.UserRole}");
-                    sb.AppendLine($"    Varlık    : {log.EntityName} (ID: {log.EntityId ?? "-"})");
+                    var trDate = log.Timestamp.AddHours(3).ToString("dd MMMM yyyy, HH:mm:ss", trCulture);
+                    var title = GetActionTitle(log.ActionType);
+                    var userDisplay = !string.IsNullOrEmpty(log.UserFullName) ? log.UserFullName : (log.UserName ?? "Sistem");
+
+                    sb.AppendLine($"[{trDate}] {title} ({log.ActionType})");
+                    sb.AppendLine($"    İşlemi Yapan : {userDisplay} (Kullanıcı Adı: {log.UserName ?? "-"} | Rol: {GetRoleLabel(log.UserRole)})");
+                    sb.AppendLine($"    Açıklama     : {log.Description ?? log.ActionType}");
+                    sb.AppendLine($"    Hedef/Varlık : {log.EntityName} (ID: {log.EntityId ?? "-"})");
                     if (!string.IsNullOrEmpty(log.DetailsJson))
                     {
-                        sb.AppendLine($"    Detay     : {log.DetailsJson}");
+                        sb.AppendLine($"    Teknik Detay : {log.DetailsJson}");
                     }
                     if (!string.IsNullOrEmpty(log.IpAddress))
                     {
-                        sb.AppendLine($"    IP Adresi : {log.IpAddress}");
+                        sb.AppendLine($"    IP Adresi    : {log.IpAddress}");
                     }
                     sb.AppendLine(new string('-', 70));
                 }
@@ -394,6 +478,53 @@ namespace OgretmenAjanda.Api.Services
             var invalid = Path.GetInvalidFileNameChars();
             var clean = new string(name.Where(c => !invalid.Contains(c) && c != ' ').ToArray());
             return string.IsNullOrEmpty(clean) ? "okul" : clean.ToLowerInvariant();
+        }
+
+        public static string GetRoleLabel(string? role)
+        {
+            if (string.IsNullOrWhiteSpace(role)) return "Kullanıcı";
+            return role.ToUpperInvariant() switch
+            {
+                UserRoles.SuperAdmin => "Süper Yönetici",
+                UserRoles.SchoolAdmin => "Okul Yöneticisi (Müdür)",
+                UserRoles.Staff => "Müdür Yardımcısı / İdareci",
+                UserRoles.Teacher => "Öğretmen",
+                UserRoles.Student => "Öğrenci / Veli",
+                _ => role
+            };
+        }
+
+        public static string GetActionTitle(string? actionType)
+        {
+            if (string.IsNullOrWhiteSpace(actionType)) return "Sistem İşlemi";
+            return actionType.ToUpperInvariant() switch
+            {
+                "LOGIN" => "🔑 Sisteme Giriş",
+                "TEACHER_CREATED" => "👨‍🏫 Yeni Öğretmen Eklendi",
+                "TEACHER_UPDATED" => "✏️ Öğretmen Bilgisi Güncellendi",
+                "TEACHER_DELETED" => "🗑️ Öğretmen Kadrodan Silindi",
+                "ALL_TEACHERS_DELETED" => "⚠️ Tüm Öğretmen Kadrosu Silindi",
+                "TEACHER_REGISTERED" => "📝 Öğretmen Okula Kaydoldu",
+                "BATCH_TEACHERS_SYNCED" => "📊 Öğretmen Kadrosu Excel Senkronizasyonu",
+                "STUDENT_CREATED" => "🎓 Yeni Öğrenci Kaydedildi",
+                "STUDENT_UPDATED" => "✏️ Öğrenci Bilgisi Güncellendi",
+                "STUDENT_DELETED" => "🗑️ Öğrenci Sistemden Silindi",
+                "ALL_STUDENTS_DELETED" => "⚠️ Tüm Öğrenci Kayıtları Silindi",
+                "BATCH_STUDENTS_SYNCED" => "📊 Öğrenci Listesi Excel Senkronizasyonu",
+                "BATCH_SCHEDULE_SYNCED" => "📅 Ders Programı Senkronizasyonu",
+                "PASSWORD_RESET" => "🔒 Şifre Güncellendi / Sıfırlandı",
+                "MESSAGE_SENT" => "💬 Okul İçi Mesaj Gönderildi",
+                "PHOTOS_UPLOADED" => "📸 Öğrenci Fotoğrafları Yüklendi",
+                "ASSIGNMENT_SYNCED" => "📚 Ödev Paylaşıldı / Güncellendi",
+                "EVALUATION_CREATED" => "⭐ Öğrenci Değerlendirmesi Eklendi",
+                "EVALUATION_UPDATED" => "✏️ Öğrenci Değerlendirmesi Güncellendi",
+                "CLASS_CREATED" => "🏫 Yeni Şube / Sınıf Açıldı",
+                "CLASS_DELETED" => "🗑️ Sınıf / Şube Silindi",
+                "LESSON_CREATED" => "📖 Yeni Ders Tanımlandı",
+                "LESSON_DELETED" => "🗑️ Ders Silindi",
+                "SCHOOL_SETTINGS_UPDATED" => "⚙️ Okul Ayarları Güncellendi",
+                _ => actionType
+            };
         }
     }
 }

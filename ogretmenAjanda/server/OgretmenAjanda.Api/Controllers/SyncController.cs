@@ -86,6 +86,14 @@ namespace OgretmenAjanda.Api.Controllers
                     if (!string.IsNullOrEmpty(item.ParentPhone)) existing.ParentPhone = item.ParentPhone;
                     if (!string.IsNullOrEmpty(item.StudentPhone)) existing.StudentPhone = item.StudentPhone;
                     existing.UpdatedAt = DateTime.UtcNow;
+
+                    // Öğrenci/Veli giriş hesabı varsa adını güncelle; şifresi (PasswordHash) ve kullanıcı adı (Username) KESİNLİKLE KORUNUR!
+                    var studentUser = await _context.Users
+                        .FirstOrDefaultAsync(u => u.SchoolId == request.SchoolId && u.Username == existing.StudentNumber);
+                    if (studentUser != null)
+                    {
+                        studentUser.FullName = item.FullName.Trim();
+                    }
                 }
                 else
                 {
@@ -108,16 +116,14 @@ namespace OgretmenAjanda.Api.Controllers
                 }
             }
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = request.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "BATCH_STUDENTS_SYNCED",
-                EntityName = "Student",
-                DetailsJson = $"{request.Students.Count} öğrenci başarıyla kaydedildi/güncellendi.",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                request.SchoolId,
+                "BATCH_STUDENTS_SYNCED",
+                "Student",
+                null,
+                $"{request.Students.Count} adet öğrenci kaydı Excel ile sisteme aktarıldı/güncellendi.",
+                $"{{\"studentCount\": {request.Students.Count}}}"
+            );
 
             await _context.SaveChangesAsync();
             return Ok(new { message = $"{request.Students.Count} öğrenci başarıyla sunucuya kaydedildi." });
@@ -161,17 +167,14 @@ namespace OgretmenAjanda.Api.Controllers
 
             await _context.Students.AddAsync(student);
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = request.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "STUDENT_CREATED",
-                EntityName = "Student",
-                EntityId = student.Id.ToString(),
-                DetailsJson = $"{student.FullName} ({student.StudentNumber} - {student.Grade}/{student.Section}) eklendi.",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                request.SchoolId,
+                "STUDENT_CREATED",
+                "Student",
+                student.Id.ToString(),
+                $"{student.FullName} (No: {student.StudentNumber}, Sınıf: {student.Grade}/{student.Section}) yeni öğrenci olarak kaydedildi.",
+                $"{{\"studentNumber\": \"{student.StudentNumber}\", \"grade\": \"{student.Grade}\", \"section\": \"{student.Section}\"}}"
+            );
 
             await _context.SaveChangesAsync();
             return Ok(student);
@@ -199,6 +202,15 @@ namespace OgretmenAjanda.Api.Controllers
             if (request.PhotoPath != null) student.PhotoPath = request.PhotoPath;
             student.UpdatedAt = DateTime.UtcNow;
 
+            await LogActionAsync(
+                student.SchoolId,
+                "STUDENT_UPDATED",
+                "Student",
+                student.Id.ToString(),
+                $"{student.FullName} (No: {student.StudentNumber}, Sınıf: {student.Grade}/{student.Section}) öğrenci bilgileri güncellendi.",
+                $"{{\"studentNumber\": \"{student.StudentNumber}\", \"grade\": \"{student.Grade}\", \"section\": \"{student.Section}\"}}"
+            );
+
             await _context.SaveChangesAsync();
             return Ok(student);
         }
@@ -217,17 +229,13 @@ namespace OgretmenAjanda.Api.Controllers
 
             _context.Students.Remove(student);
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = student.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "STUDENT_DELETED",
-                EntityName = "Student",
-                EntityId = student.Id.ToString(),
-                DetailsJson = $"{student.FullName} ({student.StudentNumber}) silindi.",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                student.SchoolId,
+                "STUDENT_DELETED",
+                "Student",
+                student.Id.ToString(),
+                $"{student.FullName} (No: {student.StudentNumber}) sistemden silindi."
+            );
 
             await _context.SaveChangesAsync();
             return Ok(new { message = "Öğrenci silindi." });
@@ -326,7 +334,10 @@ namespace OgretmenAjanda.Api.Controllers
                     s.PhotoPath,
                     s.ParentName,
                     s.ParentPhone,
-                    s.StudentPhone
+                    s.StudentPhone,
+                    s.ParentUsername,
+                    s.ParentCustomPassword,
+                    s.StudentCustomPassword
                 })
                 .ToListAsync();
 
@@ -642,20 +653,20 @@ namespace OgretmenAjanda.Api.Controllers
             var modeText = request.OverwriteAll ? "Sıfırdan Temiz Kurulum (Ders Programı Sıfırlandı, Öğretmen Hesapları Korundu)" : "Mevcutları Koru & Güncelle";
             var detailText = $"{modeText}. Kaydedilen: {addedTeachersCount} yeni öğretmen, {addedClassesCount} yeni şube, {addedLessonsCount} yeni ders, {savedScheduleCount} ders saati.";
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = request.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "BATCH_SCHEDULE_SYNCED",
-                EntityName = "ScheduleItem",
-                DetailsJson = detailText,
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                request.SchoolId,
+                "BATCH_SCHEDULE_SYNCED",
+                "ScheduleItem",
+                null,
+                detailText,
+                $"{{\"overwrite\": {request.OverwriteAll.ToString().ToLower()}, \"teachers\": {addedTeachersCount}, \"classes\": {addedClassesCount}, \"lessons\": {addedLessonsCount}, \"hours\": {savedScheduleCount}}}"
+            );
 
             await _context.SaveChangesAsync();
-            await LogActionAsync(request.SchoolId, "BATCH_SCHEDULE_SYNCED", "ScheduleItem", null, detailText);
             
+            // Öğretmenlerin girdiği dersleri ve şubeleri ScheduleItems üzerinden otomatik güncelle
+            await ReconcileTeacherAssignmentsAsync(request.SchoolId);
+
             // Kullanıcı talebi doğrultusunda: Uydurma ders yerleşimi olmaması için çarşaf yükleme sonrasında otomatik saat kaydırma çalıştırılmaz.
             int autoMovedCount = 0;
 
@@ -671,43 +682,36 @@ namespace OgretmenAjanda.Api.Controllers
         }
 
         // 4. Ders Programını Çek
+
         [HttpGet("schedules")]
         public async Task<IActionResult> GetSchedules([FromQuery] Guid schoolId, [FromQuery] string? teacherName)
         {
-            var query = _context.ScheduleItems.Where(s => s.SchoolId == schoolId);
+            var allSchoolItems = await _context.ScheduleItems.Where(s => s.SchoolId == schoolId).ToListAsync();
 
-            if (!string.IsNullOrEmpty(teacherName))
+            // Öğretmen rolündeki kullanıcı idareci değilse sadece kendi derslerini alır:
+            if (IsTeacher)
             {
-                var t = teacherName.Trim().ToLower();
-                query = query.Where(s => s.TeacherName != null && s.TeacherName.ToLower().Contains(t));
-            }
-
-            var items = await query.ToListAsync();
-
-            // Eğer öğretmen adına göre sonuç bulunamadıysa, Türkçe karakter ve kelime bazlı esnek eşleştirme yap
-            if (!string.IsNullOrEmpty(teacherName) && items.Count == 0)
-            {
-                var allSchoolItems = await _context.ScheduleItems.Where(s => s.SchoolId == schoolId).ToListAsync();
-                var cleanT = teacherName.Trim();
-                var words = cleanT.Split(new[] { ' ', '.', '-', '_' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Where(w => w.Length >= 2)
-                    .ToList();
-
-                items = allSchoolItems.Where(s =>
+                var currentTeacher = await _context.Users.FindAsync(CurrentUserId);
+                var targetName = !string.IsNullOrWhiteSpace(teacherName) ? teacherName : currentTeacher?.FullName;
+                if (!string.IsNullOrWhiteSpace(targetName))
                 {
-                    if (string.IsNullOrWhiteSpace(s.TeacherName)) return false;
-                    var tDb = s.TeacherName.Trim();
-                    if (tDb.Contains(cleanT, StringComparison.CurrentCultureIgnoreCase) ||
-                        cleanT.Contains(tDb, StringComparison.CurrentCultureIgnoreCase))
-                    {
-                        return true;
-                    }
-                    return words.Any(w => tDb.Contains(w, StringComparison.CurrentCultureIgnoreCase));
-                }).ToList();
+                    var teacherItems = allSchoolItems.Where(s =>
+                        (s.TeacherId.HasValue && s.TeacherId.Value == CurrentUserId) ||
+                        IsTeacherNameMatch(s.TeacherName, targetName)
+                    ).ToList();
+                    return Ok(teacherItems);
+                }
             }
 
+            if (string.IsNullOrWhiteSpace(teacherName))
+            {
+                return Ok(allSchoolItems);
+            }
+
+            var items = allSchoolItems.Where(s => IsTeacherNameMatch(s.TeacherName, teacherName)).ToList();
             return Ok(items);
         }
+
 
         // 4.1 Tek Bir Ders Programı Hücresini Güncelle / Ekle
         [HttpPost("schedules/item")]
@@ -1473,31 +1477,87 @@ namespace OgretmenAjanda.Api.Controllers
 
             if (norm1 == norm2) return true;
 
-            // Ad Soyad vs A. Soyad veya Soyad Ad varyasyonları için kontrol
-            var parts1 = norm1.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var parts2 = norm2.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var compact1 = norm1.Replace(" ", "");
+            var compact2 = norm2.Replace(" ", "");
+            if (compact1 == compact2) return true;
+            if (compact1.Contains(compact2) || compact2.Contains(compact1)) return true;
+
+            var parts1 = norm1.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length >= 2 && !w.All(char.IsDigit))
+                .ToArray();
+            var parts2 = norm2.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => w.Length >= 2 && !w.All(char.IsDigit))
+                .ToArray();
+
+            if (parts1.Length == 0 || parts2.Length == 0) return false;
 
             if (parts1.Length >= 2 && parts2.Length >= 2)
             {
-                // Soyadlar eşleşiyor mu?
                 var lastName1 = parts1[^1];
                 var lastName2 = parts2[^1];
 
-                if (lastName1 == lastName2)
+                // Soyadlar farklıysa KESİNLİKLE farklı kişilerdir (Örn: Mehmet Gündöner ile Mehmet Oktay asla eşleşmez)
+                if (lastName1 != lastName2)
                 {
-                    // İlk adlar tam eşleşiyor mu veya biri diğerinin kısaltması mı? (Örn: "m" vs "mehmet")
-                    var first1 = parts1[0];
-                    var first2 = parts2[0];
-                    if (first1 == first2 || 
-                        (first1.Length == 1 && first2.StartsWith(first1)) || 
-                        (first2.Length == 1 && first1.StartsWith(first2)))
-                    {
-                        return true;
-                    }
+                    return false;
                 }
+
+                var first1 = parts1[..^1];
+                var first2 = parts2[..^1];
+                return first1.Any(f1 => first2.Any(f2 => f1 == f2 || f1.Contains(f2) || f2.Contains(f1)));
             }
 
-            return false;
+            if (parts1.Length == 1) return parts2.Contains(parts1[0]);
+            if (parts2.Length == 1) return parts1.Contains(parts2[0]);
+
+            var shorter = parts1.Length <= parts2.Length ? parts1 : parts2;
+            var longer = parts1.Length <= parts2.Length ? parts2 : parts1;
+            return shorter.All(t => longer.Contains(t));
+        }
+
+        private async Task ReconcileTeacherAssignmentsAsync(Guid schoolId)
+        {
+            try
+            {
+                var teachers = await _context.Users
+                    .Where(u => u.SchoolId == schoolId && (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff))
+                    .ToListAsync();
+
+                var schedules = await _context.ScheduleItems
+                    .Where(s => s.SchoolId == schoolId)
+                    .ToListAsync();
+
+                foreach (var teacher in teachers)
+                {
+                    var teacherItems = schedules.Where(s =>
+                        (s.TeacherId.HasValue && s.TeacherId.Value == teacher.Id) ||
+                        (!string.IsNullOrWhiteSpace(s.TeacherName) && IsTeacherNameMatch(s.TeacherName, teacher.FullName))
+                    ).ToList();
+
+                    var lessons = teacherItems
+                        .Select(i => i.LessonName?.Trim())
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(x => x)
+                        .ToList();
+
+                    var classes = teacherItems
+                        .Select(i => $"{i.Grade}-{i.Section}".Trim('-'))
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .OrderBy(x => x)
+                        .ToList();
+
+                    teacher.AssignedLessonsJson = System.Text.Json.JsonSerializer.Serialize(lessons);
+                    teacher.AssignedClassesJson = System.Text.Json.JsonSerializer.Serialize(classes);
+                }
+
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error reconciling teacher assignments: {ex.Message}");
+            }
         }
 
         private static string CleanLessonName(string? name)
@@ -1939,6 +1999,30 @@ namespace OgretmenAjanda.Api.Controllers
         {
             var query = _context.YearlyPlanItems.Where(p => p.SchoolId == schoolId);
 
+            // Öğretmen rolündeki kullanıcı yalnızca adıyla eşleşen girdiği derslerin planlarını çekebilir
+            if (IsTeacher)
+            {
+                var teacher = await _context.Users.FindAsync(CurrentUserId);
+                if (teacher != null && !string.IsNullOrWhiteSpace(teacher.AssignedLessonsJson))
+                {
+                    try
+                    {
+                        var assignedLessons = System.Text.Json.JsonSerializer.Deserialize<List<string>>(teacher.AssignedLessonsJson);
+                        if (assignedLessons != null && assignedLessons.Count > 0)
+                        {
+                            var normAssigned = assignedLessons
+                                .Where(l => !string.IsNullOrWhiteSpace(l))
+                                .Select(l => l.Trim().ToLower())
+                                .ToList();
+
+                            query = query.Where(p => normAssigned.Contains(p.LessonName.ToLower()) ||
+                                                     normAssigned.Any(a => p.LessonName.ToLower().Contains(a) || a.Contains(p.LessonName.ToLower())));
+                        }
+                    }
+                    catch { }
+                }
+            }
+
             if (!string.IsNullOrWhiteSpace(lessonName))
             {
                 var normLesson = lessonName.Trim().ToLower();
@@ -2023,17 +2107,14 @@ namespace OgretmenAjanda.Api.Controllers
                 }
             }
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = request.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "ASSIGNMENT_SYNCED",
-                EntityName = "Assignment",
-                EntityId = assignment.Id.ToString(),
-                DetailsJson = $"Ödev: '{assignment.Title}' ({assignment.TargetGrade}-{assignment.TargetSection})",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                request.SchoolId,
+                "ASSIGNMENT_SYNCED",
+                "Assignment",
+                assignment.Id.ToString(),
+                $"'{assignment.Title}' başlıklı ödev ({assignment.TargetGrade}-{assignment.TargetSection} şubesi için) paylaşıldı/güncellendi.",
+                $"{{\"title\": \"{assignment.Title}\", \"grade\": \"{assignment.TargetGrade}\", \"section\": \"{assignment.TargetSection}\"}}"
+            );
 
             await _context.SaveChangesAsync();
             return Ok(assignment);
@@ -2047,13 +2128,19 @@ namespace OgretmenAjanda.Api.Controllers
             var evaluation = await _context.StudentEvaluations.FindAsync(request.Id);
 
             string? oldContent = null;
+            var targetAudience = !string.IsNullOrEmpty(request.TargetAudience) ? request.TargetAudience.ToUpperInvariant() : "BOTH";
+            bool sharedParent = targetAudience == "BOTH" || targetAudience == "PARENT" || request.IsSharedWithParent;
+            bool sharedStudent = targetAudience == "BOTH" || targetAudience == "STUDENT" || request.IsSharedWithStudent;
+
             if (evaluation != null)
             {
                 oldContent = evaluation.Content;
                 evaluation.Title = request.Title;
                 evaluation.Content = request.Content;
                 evaluation.Score = request.Score;
-                evaluation.IsSharedWithParent = request.IsSharedWithParent;
+                evaluation.IsSharedWithParent = sharedParent;
+                evaluation.IsSharedWithStudent = sharedStudent;
+                evaluation.TargetAudience = targetAudience;
                 evaluation.UpdatedAt = DateTime.UtcNow;
             }
             else
@@ -2069,7 +2156,9 @@ namespace OgretmenAjanda.Api.Controllers
                     Title = request.Title,
                     Content = request.Content,
                     Score = request.Score,
-                    IsSharedWithParent = request.IsSharedWithParent,
+                    IsSharedWithParent = sharedParent,
+                    IsSharedWithStudent = sharedStudent,
+                    TargetAudience = targetAudience,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -2077,35 +2166,42 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             // Düzeltme yapıldıysa audit log ile eski ve yeni değer saklanır
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = request.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = oldContent != null ? "EVALUATION_UPDATED" : "EVALUATION_CREATED",
-                EntityName = "StudentEvaluation",
-                EntityId = evaluation.Id.ToString(),
-                DetailsJson = oldContent != null
-                    ? $"{{\"old\": \"{oldContent}\", \"new\": \"{evaluation.Content}\", \"shared\": {evaluation.IsSharedWithParent}}}"
-                    : $"{{\"content\": \"{evaluation.Content}\", \"shared\": {evaluation.IsSharedWithParent}}}",
-                Timestamp = DateTime.UtcNow
-            });
+            var evalAction = oldContent != null ? "EVALUATION_UPDATED" : "EVALUATION_CREATED";
+            var evalDesc = oldContent != null
+                ? $"Öğrenci değerlendirmesi güncellendi: '{evaluation.Title}' (Puan: {evaluation.Score?.ToString() ?? "-"})"
+                : $"Yeni öğrenci değerlendirmesi eklendi: '{evaluation.Title}' (Puan: {evaluation.Score?.ToString() ?? "-"})";
+
+            await LogActionAsync(
+                request.SchoolId,
+                evalAction,
+                "StudentEvaluation",
+                evaluation.Id.ToString(),
+                evalDesc,
+                oldContent != null
+                    ? $"{{\"old\": \"{oldContent}\", \"new\": \"{evaluation.Content}\", \"shared\": {evaluation.IsSharedWithParent.ToString().ToLower()}}}"
+                    : $"{{\"content\": \"{evaluation.Content}\", \"shared\": {evaluation.IsSharedWithParent.ToString().ToLower()}}}"
+            );
 
             await _context.SaveChangesAsync();
             return Ok(evaluation);
         }
 
-        // 9. Öğrenci & Veli Akışı (Kendi ödevlerini, teslimlerini ve veliye paylaşılan notları görme)
+        // 9. Öğrenci & Veli Akışı (Ödevler, quizler, öğretmen görüşleri, sınıf ders programı, ders öğretmenleri, idare anonsları ve mesajlar)
         [HttpGet("student-feed")]
-        public async Task<IActionResult> GetStudentFeed([FromQuery] Guid studentId)
+        public async Task<IActionResult> GetStudentFeed([FromQuery] Guid studentId, [FromQuery] string? role = null)
         {
             var student = await _context.Students.FindAsync(studentId);
             if (student == null) return NotFound();
 
+            var activeRole = !string.IsNullOrEmpty(role) ? role.ToUpperInvariant() : (CurrentUserRole?.ToUpperInvariant() ?? "STUDENT");
+            bool isParent = activeRole == UserRoles.Parent || activeRole == "PARENT";
+            bool isAdminOrTeacher = activeRole == "ADMIN" || activeRole == "SUPERADMIN" || activeRole == "TEACHER" || activeRole == UserRoles.SchoolAdmin || activeRole == "SCHOOLADMIN";
+
+            // 1. Ödevler
             var assignments = await _context.Assignments
                 .Where(a => a.SchoolId == student.SchoolId &&
-                            a.TargetGrade == student.Grade &&
-                            (a.TargetSection == student.Section || string.IsNullOrEmpty(a.TargetSection)))
+                            (a.TargetGrade == student.Grade || string.IsNullOrEmpty(a.TargetGrade) || a.TargetGrade == "ALL") &&
+                            (a.TargetSection == student.Section || string.IsNullOrEmpty(a.TargetSection) || a.TargetSection == "ALL"))
                 .OrderByDescending(a => a.CreatedAt)
                 .Select(a => new
                 {
@@ -2122,22 +2218,101 @@ namespace OgretmenAjanda.Api.Controllers
                 })
                 .ToListAsync();
 
-            // Sadece veliyle paylaşılmış olan görüş ve notlar
+            // 2. Görüş ve quiz notları: Veli ve Öğrenci hedef kitle filtresi (Admin ve Öğretmen tümünü görebilir)
             var evaluations = await _context.StudentEvaluations
-                .Where(e => e.StudentId == studentId && e.IsSharedWithParent)
+                .Where(e => e.StudentId == studentId && 
+                    (isAdminOrTeacher ||
+                    (isParent 
+                        ? (e.IsSharedWithParent || e.TargetAudience == "PARENT" || e.TargetAudience == "BOTH" || string.IsNullOrEmpty(e.TargetAudience))
+                        : (e.IsSharedWithStudent || e.TargetAudience == "STUDENT" || e.TargetAudience == "BOTH" || string.IsNullOrEmpty(e.TargetAudience))
+                    )))
                 .OrderByDescending(e => e.CreatedAt)
                 .Select(e => new
                 {
                     e.Id,
-                    e.Type,
+                    e.Type, // "NOTE", "OBSERVATION", "QUIZ"
                     e.Title,
                     e.Content,
                     e.Score,
                     e.TeacherName,
+                    TargetAudience = e.TargetAudience ?? "BOTH",
+                    IsSharedWithParent = e.IsSharedWithParent,
+                    IsSharedWithStudent = e.IsSharedWithStudent,
                     e.CreatedAt,
                     e.UpdatedAt
                 })
                 .ToListAsync();
+
+            // 3. Kendi sınıfına ait haftalık ders programı
+            var rawSchedules = await _context.ScheduleItems
+                .Where(s => s.SchoolId == student.SchoolId &&
+                            (s.Grade == student.Grade || s.Grade == $"{student.Grade}-{student.Section}" || s.Grade.StartsWith($"{student.Grade}/")) &&
+                            (s.Section == student.Section || string.IsNullOrEmpty(s.Section) || s.Grade.EndsWith(student.Section)))
+                .OrderBy(s => s.DayOfWeek)
+                .ThenBy(s => s.LessonHour)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.DayOfWeek,
+                    s.LessonHour,
+                    s.LessonName,
+                    s.LessonCode,
+                    s.TeacherName,
+                    s.Classroom
+                })
+                .ToListAsync();
+
+            // 4. Sınıfın ders öğretmenleri listesi (programdan tekilleştirilmiş)
+            var teachers = rawSchedules
+                .Where(s => !string.IsNullOrEmpty(s.TeacherName))
+                .GroupBy(s => s.TeacherName!.Trim())
+                .Select(g => new
+                {
+                    TeacherName = g.Key,
+                    Lessons = string.Join(", ", g.Select(x => x.LessonName).Where(x => !string.IsNullOrEmpty(x)).Distinct())
+                })
+                .OrderBy(t => t.TeacherName)
+                .ToList();
+
+            // 5. İdare anonsları ve mesajlar (Veli ve Öğrenci için mesajlar ortak olmayacak şekilde ayrıştırılır)
+            var announcementsQuery = _context.AppMessages
+                .Where(m => m.SchoolId == student.SchoolId &&
+                           (m.TargetRole == "ALL" ||
+                            (isParent 
+                                ? (m.TargetRole == "PARENT" || m.TargetRole == "PARENTS" || m.TargetAudience == "PARENT" || m.TargetAudience == "ALL" || string.IsNullOrEmpty(m.TargetAudience))
+                                : (m.TargetRole == "STUDENT" || m.TargetRole == "MY_STUDENTS" || m.TargetAudience == "STUDENT" || m.TargetAudience == "ALL" || string.IsNullOrEmpty(m.TargetAudience))) ||
+                            (m.TargetRole == "GRADE" && m.TargetGrade == student.Grade) ||
+                            (m.TargetRole == "SECTION" && m.TargetGrade == student.Grade && m.TargetSection == student.Section) ||
+                            m.ReceiverId == studentId));
+
+            // Öğrenciye özel mesaj veliye görünmesin, veliye özel mesaj öğrenciye görünmesin kuralı:
+            if (isParent)
+            {
+                announcementsQuery = announcementsQuery.Where(m => m.TargetAudience != "STUDENT" && m.TargetRole != "STUDENT");
+            }
+            else
+            {
+                announcementsQuery = announcementsQuery.Where(m => m.TargetAudience != "PARENT" && m.TargetRole != "PARENT" && m.TargetRole != "PARENTS");
+            }
+
+            var announcements = await announcementsQuery
+                .OrderByDescending(m => m.CreatedAt)
+                .Take(50)
+                .Select(m => new
+                {
+                    m.Id,
+                    m.SenderName,
+                    m.SenderRole,
+                    m.TargetRole,
+                    m.TargetAudience,
+                    m.TargetDescription,
+                    m.Content,
+                    m.CreatedAt,
+                    m.IsRead
+                })
+                .ToListAsync();
+
+            var unreadCount = announcements.Count(a => !a.IsRead);
 
             return Ok(new
             {
@@ -2148,10 +2323,16 @@ namespace OgretmenAjanda.Api.Controllers
                     student.FullName,
                     student.Grade,
                     student.Section,
+                    student.ParentName,
+                    student.ParentPhone,
                     student.PhotoPath
                 },
                 assignments,
-                evaluations
+                evaluations,
+                schedules = rawSchedules,
+                teachers,
+                announcements,
+                unreadCount
             });
         }
     }

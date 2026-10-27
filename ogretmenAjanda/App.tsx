@@ -23,6 +23,7 @@ import { SchoolThemeProvider, useSchoolTheme } from './src/context/SchoolThemeCo
 import { DrawerProvider, useDrawer } from './src/context/DrawerContext';
 import { SideDrawer } from './src/components/SideDrawer';
 import { getActiveUserRole, setActiveUserRole, UserRole } from './src/utils/roleService';
+import { checkForAppUpdate } from './src/services/appUpdateService';
 
 // Screens
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -44,6 +45,7 @@ import { SuperAdminScreen } from './src/screens/SuperAdminScreen';
 import { SchoolAdminScreen } from './src/screens/SchoolAdminScreen';
 import { ClassCockpitScreen } from './src/screens/ClassCockpitScreen';
 import { MessagesScreen } from './src/screens/MessagesScreen';
+import { requestNotificationPermission } from './src/services/notificationPermissionService';
 
 
 
@@ -190,6 +192,10 @@ function AppContent() {
 
   useEffect(() => {
     loadRoleAndSchool();
+    setTimeout(() => {
+      requestNotificationPermission();
+      checkForAppUpdate(true);
+    }, 1200);
   }, []);
 
   const handleRoleChange = async (newRole: UserRole | null) => {
@@ -244,10 +250,11 @@ function AppContent() {
     );
   }
 
-  // 4. Veli / Öğrenci rolü -> Süper sade öğrenci paneli
-  if (currentRole === 'student') {
+  // 4. Veli / Öğrenci rolü -> Süper sade öğrenci & veli paneli
+  if (currentRole === 'student' || currentRole === 'parent') {
     return (
       <StudentDashboardScreen
+        initialMode={currentRole === 'parent' ? 'parent' : 'student'}
         onLogout={() => handleRoleChange(null)}
       />
     );

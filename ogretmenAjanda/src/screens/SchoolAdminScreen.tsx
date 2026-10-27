@@ -13,6 +13,7 @@ import {
   Image,
   Linking,
   Platform,
+  InteractionManager,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Colors } from '../theme/colors';
+import { getActiveTeacherName } from '../utils/roleService';
 import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession, getAuthToken } from '../services/apiClient';
 import {
   parseMasterScheduleWithAi,
@@ -50,7 +52,13 @@ import {
 import { countPdfPages } from '../utils/pdfSliceService';
 import { extractStudentPhotosWithAi } from '../services/aiStudentPhotoExtractor';
 import { parseStudentsFromExcel, saveParsedStudentsToServer, ParsedExcelStudent, generateStudentTemplateExcel } from '../services/excelStudentParser';
+import { parseTeachersFromExcel, saveParsedTeachersToServer, ParsedExcelTeacher, generateTeacherTemplateExcel } from '../services/excelTeacherParser';
 import { parseStudentsFromExcelWithAi, AiStudentParseResult } from '../services/aiStudentExcelParser';
+import { generateDutyTemplateExcel } from '../utils/excelService';
+import { PermissionsManagementModal } from '../components/PermissionsManagementModal';
+import { FloatingMessageBubble } from '../components/FloatingMessageBubble';
+import { markAllMessagesAsRead, setCachedUnreadCount } from '../services/messageNotificationService';
+import { CURRENT_APP_VERSION, CURRENT_VERSION_CODE } from '../services/appUpdateService';
 import { analyzeUploadedDocument, convertRowsWithMapping, DocumentAnalysisResult, ColumnMappingSelection, generateYearlyPlanTemplateExcel } from '../utils/columnMappingService';
 import {
   exportTeachersReport,
@@ -91,8 +99,52 @@ import {
   GeminiUsageStats,
 } from '../utils/geminiScheduleService';
 import { extractPhotosFromPdf, PdfExtractedStudentPhoto } from '../utils/pdfPhotoExtractor';
+import * as XLSX from 'xlsx';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { isTeacherMatch } from '../utils/teacherUtils';
+import { formatDateToTR } from '../utils/dateUtils';
+import {
+  SchoolSnapshotData,
+  saveSchoolSnapshotToStorage,
+  loadSchoolSnapshotFromStorage,
+  getSchoolSnapshotLastSyncTime,
+  fetchAndCacheSchoolSnapshot,
+  patchLocalSchoolSnapshot,
+  formatSyncTime,
+} from '../services/schoolSnapshotService';
+import {
+  getTeacherCounselorClass,
+  getClassCounselorTeacher,
+  isRehberlikLesson,
+  getAvailableDutyTeachersForHour,
+  normalizeTeacherName,
+  isSameTeacher,
+} from '../utils/counselorService';
+import { printDutyAssignments, DutyPrintSlot } from '../utils/dutyPrintService';
 
-type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'logs' | 'messages' | 'reports' | 'ai_settings';
+type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'duty_assignment' | 'logs' | 'messages' | 'reports' | 'ai_settings' | 'radar';
+
+const HtmlSelect = 'select' as any;
+
+export function generateDefaultTeacherUsername(fullName?: string): string {
+  if (!fullName || !fullName.trim()) return 'ogretmen';
+  const clean = fullName.trim().toLowerCase()
+    .replace(/ı/g, 'i')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ş/g, 's')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z\s]/g, ' ')
+    .trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'ogretmen';
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]}.${parts[1]}`;
+  const firstName = parts.slice(0, -1).join('');
+  const lastName = parts[parts.length - 1];
+  return `${firstName}.${lastName}`;
+}
 
 export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Okul ve Genel State
@@ -102,12 +154,19 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Offline-First Snapshot State (Telefona Veri Eşitleme)
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [syncingSnapshot, setSyncingSnapshot] = useState(false);
+
   // Oturum Açan Kullanıcı & Rol Durumu
   const [currentUserSession, setCurrentUserSession] = useState<any>(null);
-  const isStaff = currentUserSession?.role === 'STAFF';
+  const isStaff = currentUserSession?.role === 'STAFF' || (currentUserSession?.role === 'SCHOOL_ADMIN' && !!currentUserSession?.schoolId && !currentUserSession?.isInstitutionAdmin);
+  const adminDisplayName = currentUserSession?.fullName || currentUserSession?.username || '';
+  const [permissionsModalVisible, setPermissionsModalVisible] = useState(false);
 
   // Veri Listeleri
   const [teachers, setTeachers] = useState<any[]>([]);
+  const [studentVisibleCount, setStudentVisibleCount] = useState(30);
   const [classes, setClasses] = useState<any[]>([]);
   const [lessons, setLessons] = useState<any[]>([]);
   const [lessonGradeFilter, setLessonGradeFilter] = useState<'all' | '9' | '10' | '11' | '12' | 'common'>('all');
@@ -119,6 +178,16 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [messageSearch, setMessageSearch] = useState('');
   const [selectedMessageFilter, setSelectedMessageFilter] = useState<'all' | 'students' | 'teachers' | 'parents'>('all');
+  const [adminMessageScope, setAdminMessageScope] = useState<'personal' | 'all' | 'sent'>('personal');
+  const [adminReplyModalVisible, setAdminReplyModalVisible] = useState(false);
+  const [adminReplyingMessage, setAdminReplyingMessage] = useState<any | null>(null);
+  const [adminReplyContent, setAdminReplyContent] = useState('');
+  const [sendingAdminReply, setSendingAdminReply] = useState(false);
+  const [adminNewMsgModalVisible, setAdminNewMsgModalVisible] = useState(false);
+  const [adminNewMsgTargetType, setAdminNewMsgTargetType] = useState<string>('TEACHER');
+  const [adminNewMsgTargetTeacher, setAdminNewMsgTargetTeacher] = useState<any | null>(null);
+  const [adminNewMsgContent, setAdminNewMsgContent] = useState('');
+  const [sendingAdminNewMsg, setSendingAdminNewMsg] = useState(false);
 
   // Sınıf Öğrencileri Detay Modalı State
   const [selectedClassForStudents, setSelectedClassForStudents] = useState<any>(null);
@@ -139,7 +208,29 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Öğrenci Filtre ve Arama
   const [studentSearch, setStudentSearch] = useState('');
   const [selectedClassFilter, setSelectedClassFilter] = useState('all');
+  const [classFilterModalVisible, setClassFilterModalVisible] = useState(false);
   const [photoUploadingId, setPhotoUploadingId] = useState<string | null>(null);
+
+  // Nöbetçi Öğretmen Atama & Gelmeyen Öğretmen Telafi Sistemi State
+  const [dutyAssignDay, setDutyAssignDay] = useState<number>(() => {
+    const d = new Date().getDay();
+    return (d >= 1 && d <= 5) ? d : 1;
+  });
+  const [absentTeachers, setAbsentTeachers] = useState<string[]>([]);
+  const [absentTeacherSearch, setAbsentTeacherSearch] = useState<string>('');
+  const [hiddenDutyTeachersBySlot, setHiddenDutyTeachersBySlot] = useState<Record<string, string[]>>({});
+  const [editingCounselorClass, setEditingCounselorClass] = useState<string>('');
+  const [savingCounselorClass, setSavingCounselorClass] = useState<boolean>(false);
+
+  // Öğrenci Detay Modalı State (Admin Öğrenci 360 Görünümü)
+  const [selectedAdminStudent, setSelectedAdminStudent] = useState<any>(null);
+  const [adminStudentModalVisible, setAdminStudentModalVisible] = useState(false);
+  const [loadingStudentDetail, setLoadingStudentDetail] = useState(false);
+  const [studentEvaluations, setStudentEvaluations] = useState<any[]>([]);
+  const [studentAssignments, setStudentAssignments] = useState<any[]>([]);
+  const [studentLocalNotes, setStudentLocalNotes] = useState<any[]>([]);
+  const [studentLocalGrades, setStudentLocalGrades] = useState<any>(null);
+  const [studentLocalQuizzes, setStudentLocalQuizzes] = useState<any[]>([]);
 
   // İşlem Logları & Denetim Raporu State
   const [logs, setLogs] = useState<any[]>([]);
@@ -224,9 +315,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Öğrenci & Veli Giriş ve Şifre Yönetimi Modalı
   const [credentialsModalVisible, setCredentialsModalVisible] = useState(false);
   const [selectedStudentForCreds, setSelectedStudentForCreds] = useState<any>(null);
-  const [customResetPassInput, setCustomResetPassInput] = useState('');
-  const [resettingPassword, setResettingPassword] = useState(false);
   const [showCredPassword, setShowCredPassword] = useState(false);
+  const [showParentCredPassword, setShowParentCredPassword] = useState(false);
+  const [customResetPassInput, setCustomResetPassInput] = useState('');
+  const [customParentResetPassInput, setCustomParentResetPassInput] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [resettingParentPassword, setResettingParentPassword] = useState(false);
 
   // 5. AI Çarşaf Program Analizi Modal ve Staging Durumu
   const [schedulePreOptionsModalVisible, setSchedulePreOptionsModalVisible] = useState(false);
@@ -970,6 +1064,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [aiStudentSaving, setAiStudentSaving] = useState(false);
   const [aiStudentResult, setAiStudentResult] = useState<AiStudentParseResult | null>(null);
 
+  // 6.2 Excel Öğretmen Yükleme State
+  const [teacherExcelModalVisible, setTeacherExcelModalVisible] = useState(false);
+  const [teacherExcelParsing, setTeacherExcelParsing] = useState(false);
+  const [teacherExcelSaving, setTeacherExcelSaving] = useState(false);
+  const [parsedExcelTeachers, setParsedExcelTeachers] = useState<ParsedExcelTeacher[]>([]);
+
   // 0. Admin Giriş ve Şifre Güncelleme State
   const [adminCredentialsModalVisible, setAdminCredentialsModalVisible] = useState(false);
   const [adminNewUsername, setAdminNewUsername] = useState('');
@@ -1040,7 +1140,13 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const normalizeTeacherMatch = (name1?: string | null, name2?: string | null): boolean => {
     if (!name1 || !name2) return false;
-    return normalizeSearchStr(name1) === normalizeSearchStr(name2);
+    const n1 = normalizeSearchStr(name1);
+    const n2 = normalizeSearchStr(name2);
+    if (n1 === n2) return true;
+    try {
+      if (isTeacherMatch(name1, name2)) return true;
+    } catch {}
+    return false;
   };
 
   const filteredTeacherWorkloads = useMemo(() => {
@@ -1107,6 +1213,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     });
   }, [lessons, lessonGradeFilter, lessonSearchQuery]);
 
+  // Benzersiz (Tekil) ders sayısı (Örn: Matematik 9, 10, 11 yerine tek bir 'Matematik' dersi olarak)
+  const uniqueLessonsCount = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of lessons) {
+      if (l.name) set.add(l.name.trim().toLocaleLowerCase('tr-TR'));
+    }
+    return set.size;
+  }, [lessons]);
+
   // 1.5 Canlı İnteraktif Program Düzenleyici State
   const [scheduleEditorMode, setScheduleEditorMode] = useState<'class' | 'teacher'>('class');
   const [selectedClassForEditor, setSelectedClassForEditor] = useState<string>('');
@@ -1135,11 +1250,512 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     return sortedTeachers.find((t: any) => t.fullName === activeName) || sortedTeachers[0] || null;
   }, [sortedTeachers, selectedTeacherForEditor]);
 
-  const getTeacherTotalHours = useCallback((teacherFullName: string) => {
-    if (!teacherFullName || !allSchoolSchedules) return 0;
-    const norm = normalizeSearchStr(teacherFullName);
-    return allSchoolSchedules.filter((s: any) => normalizeSearchStr(s.teacherName) === norm).length;
+  const teacherTotalHoursMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!allSchoolSchedules || allSchoolSchedules.length === 0) return map;
+    for (let i = 0; i < allSchoolSchedules.length; i++) {
+      const s = allSchoolSchedules[i];
+      const norm = normalizeSearchStr(s.teacherName);
+      if (norm) {
+        map.set(norm, (map.get(norm) || 0) + 1);
+      }
+    }
+    return map;
   }, [allSchoolSchedules]);
+
+  const getTeacherTotalHours = useCallback((teacherFullName: string) => {
+    if (!teacherFullName) return 0;
+    return teacherTotalHoursMap.get(normalizeSearchStr(teacherFullName)) || 0;
+  }, [teacherTotalHoursMap]);
+
+  // --- CANLI KONUM, BOŞ DERS RADARI & NÖBET MODÜLÜ STATE ---
+  const [radarSubTab, setRadarSubTab] = useState<'teacher' | 'class' | 'free_teachers' | 'duty'>('teacher');
+  const [radarTeacher, setRadarTeacher] = useState<string>('');
+  const [radarTeacherSearch, setRadarTeacherSearch] = useState<string>('');
+  const [radarClass, setRadarClass] = useState<string>('');
+  const [radarClassModalVisible, setRadarClassModalVisible] = useState<boolean>(false);
+  const [radarClassSearch, setRadarClassSearch] = useState<string>('');
+  const [radarClassGradeFilter, setRadarClassGradeFilter] = useState<'all' | '9' | '10' | '11' | '12'>('all');
+
+  const [dutyPlacesModalVisible, setDutyPlacesModalVisible] = useState<boolean>(false);
+  const [customDutyPlaces, setCustomDutyPlaces] = useState<string[]>([]);
+  const [newCustomPlaceInput, setNewCustomPlaceInput] = useState<string>('');
+
+  const [radarDay, setRadarDay] = useState<number>(() => {
+    const today = new Date().getDay();
+    return today >= 1 && today <= 5 ? today : 1;
+  });
+  const [radarHour, setRadarHour] = useState<number>(1);
+  const [dutiesList, setDutiesList] = useState<any[]>([]);
+  const [loadingDuties, setLoadingDuties] = useState(false);
+  const [dutyFilterDay, setDutyFilterDay] = useState<number>(0);
+  const [addDutyModalVisible, setAddDutyModalVisible] = useState(false);
+  const [newDutyTeacher, setNewDutyTeacher] = useState<string>('');
+  const [newDutyDay, setNewDutyDay] = useState<number>(1);
+  const [newDutyPlace, setNewDutyPlace] = useState<string>('');
+  const [newDutyNotes, setNewDutyNotes] = useState<string>('');
+  const [savingDuty, setSavingDuty] = useState(false);
+  const [importingDutyExcel, setImportingDutyExcel] = useState(false);
+  const [downloadingDutyTemplate, setDownloadingDutyTemplate] = useState(false);
+
+  const allKnownDutyPlaces = useMemo(() => {
+    const set = new Set<string>();
+    const defaults = [
+      'Bahçe ve Giriş Kapısı',
+      'Zemin Kat ve Kantin',
+      '1. Kat (İdari Kat)',
+      '2. Kat (Derslikler)',
+      '3. Kat (Derslikler)',
+      'Spor Salonu / Yemekhane',
+      'Pansiyon / Yurt',
+    ];
+    defaults.forEach(p => set.add(p));
+    customDutyPlaces.forEach(p => set.add(p));
+    dutiesList.forEach(d => {
+      const p = String(d.dutyPlace || d.duty_place || '').trim();
+      if (p) set.add(p);
+    });
+    return Array.from(set);
+  }, [dutiesList, customDutyPlaces]);
+
+  const normalizeDayNumber = (val: any): number => {
+    if (typeof val === 'number') return val;
+    const str = String(val || '').trim().toLowerCase();
+    const parsed = parseInt(str, 10);
+    if (!isNaN(parsed) && parsed >= 1 && parsed <= 7) return parsed;
+    if (str.includes('pazartesi') || str.includes('pzt')) return 1;
+    if (str.includes('salı') || str.includes('sali')) return 2;
+    if (str.includes('çarşamba') || str.includes('carsamba')) return 3;
+    if (str.includes('perşembe') || str.includes('persembe')) return 4;
+    if (str.includes('cuma') || str.includes('cum')) return 5;
+    if (str.includes('cumartesi')) return 6;
+    if (str.includes('pazar')) return 7;
+    return 1;
+  };
+
+  // ⚡ ANLIK BOŞ DERS RADARI (YÜKSEK PERFORMANSLI O(1) ÖNBELLEK)
+  // Eski kod 80.000 işlem yapıp telefonu kilitliyordu; bu optimize yapı 840 dersi tek seferde indeksleyip O(1) ile bitirir (0ms)
+  const freeTeachersList = useMemo(() => {
+    if (!teachers || teachers.length === 0) return [];
+
+    // 1. O gün ve o saatte dersi olan öğretmenler Set'i (O(1) lookup)
+    const busyTeacherNormSet = new Set<string>();
+    // 2. O gün öğretmenin toplam kaç dersi var (O(1) lookup)
+    const todayLessonCountMap = new Map<string, number>();
+
+    const schedulesLen = allSchoolSchedules.length;
+    for (let i = 0; i < schedulesLen; i++) {
+      const s = allSchoolSchedules[i];
+      if (s.dayOfWeek === radarDay) {
+        const sNorm = normalizeSearchStr(s.teacherName);
+        todayLessonCountMap.set(sNorm, (todayLessonCountMap.get(sNorm) || 0) + 1);
+        if (s.lessonHour === radarHour) {
+          busyTeacherNormSet.add(sNorm);
+        }
+      }
+    }
+
+    // 3. O gün nöbetçi olan öğretmenler Map'i (O(1) lookup)
+    const dutyTeacherMap = new Map<string, any>();
+    const dutiesLen = dutiesList.length;
+    for (let i = 0; i < dutiesLen; i++) {
+      const d = dutiesList[i];
+      if (normalizeDayNumber(d.dayOfWeek) === radarDay) {
+        dutyTeacherMap.set(normalizeSearchStr(d.teacherName), d);
+      }
+    }
+
+    // 4. Öğretmenleri O(1) ile işle (78.960 işlem yerine sadece 47 işlem!)
+    const result: any[] = [];
+    const teachersLen = teachers.length;
+    for (let i = 0; i < teachersLen; i++) {
+      const teacher = teachers[i];
+      const tName = teacher.fullName || '';
+      const tNorm = normalizeSearchStr(tName);
+
+      // O saatte dersi varsa meşguldür, listeye girmez
+      if (busyTeacherNormSet.has(tNorm)) continue;
+
+      let todayLessons = todayLessonCountMap.get(tNorm) || 0;
+      const todayFreeHours = Math.max(0, scheduleDailyHours - todayLessons);
+      const duty = dutyTeacherMap.get(tNorm);
+
+      result.push({
+        ...teacher,
+        todayLessons,
+        todayFreeHours,
+        duty,
+      });
+    }
+
+    // 5. Sıralama
+    result.sort((a: any, b: any) => {
+      // 1. KURAL: O gün nöbetçi olanlar listenin en tepesinde
+      if (a.duty && !b.duty) return -1;
+      if (!a.duty && b.duty) return 1;
+
+      // 2. KURAL: Bugünkü derslerinin tamamı boş olanlar en alta insin
+      const aAllDayFree = (a.todayLessons === 0);
+      const bAllDayFree = (b.todayLessons === 0);
+      if (!aAllDayFree && bAllDayFree) return -1;
+      if (aAllDayFree && !bAllDayFree) return 1;
+
+      // 3. KURAL: Bugün boş ders saati en çok olan öğretmen daha üstte çıksın
+      if ((a.todayFreeHours || 0) !== (b.todayFreeHours || 0)) {
+        return (b.todayFreeHours || 0) - (a.todayFreeHours || 0);
+      }
+      return (a.fullName || '').localeCompare(b.fullName || '', 'tr');
+    });
+
+    return result;
+  }, [teachers, allSchoolSchedules, dutiesList, radarDay, radarHour, scheduleDailyHours]);
+
+  // Seçilen öğretmenin haftalık matris tablosu için O(1) ders haritası
+  const activeRadarTeacherScheduleMap = useMemo(() => {
+    const activeTName = radarTeacher || sortedTeachers[0]?.fullName || '';
+    if (!activeTName || !allSchoolSchedules || allSchoolSchedules.length === 0) return new Map<string, any>();
+    const map = new Map<string, any>();
+    const activeNorm = normalizeSearchStr(activeTName);
+
+    for (let i = 0; i < allSchoolSchedules.length; i++) {
+      const s = allSchoolSchedules[i];
+      if (normalizeSearchStr(s.teacherName) === activeNorm || normalizeTeacherMatch(s.teacherName, activeTName)) {
+        map.set(`${s.dayOfWeek}_${s.lessonHour}`, s);
+      }
+    }
+    return map;
+  }, [allSchoolSchedules, radarTeacher, sortedTeachers]);
+
+  // Öğretmen Nerede sekmesinde listbox araması için memoized liste
+  const filteredRadarTeachers = useMemo(() => {
+    if (!radarTeacherSearch.trim()) return sortedTeachers;
+    const q = normalizeSearchStr(radarTeacherSearch);
+    return sortedTeachers.filter(t =>
+      normalizeSearchStr(t.fullName).includes(q) ||
+      normalizeSearchStr(t.branch || '').includes(q)
+    );
+  }, [sortedTeachers, radarTeacherSearch]);
+
+  const loadDuties = async (schoolId?: string) => {
+    const sid = schoolId || selectedSchool?.id;
+    if (!sid) return;
+
+    // 1. FAST OFFLINE: Hafızada zaten nöbetler varsa 0ms ile hemen dön
+    if (dutiesList && dutiesList.length > 0) {
+      setLoadingDuties(false);
+      return;
+    }
+
+    // 2. FAST OFFLINE: Önce yerel hafızadaki snapshot'tan anında getir (0ms)
+    try {
+      const cached = await loadSchoolSnapshotFromStorage(sid);
+      if (cached?.duties && cached.duties.length > 0) {
+        const normalized = cached.duties.map((d: any) => ({
+          ...d,
+          dayOfWeek: normalizeDayNumber(d.dayOfWeek),
+        }));
+        setDutiesList(normalized);
+        setLoadingDuties(false);
+        return; // Yerel veri mevcut, çevrimdışı 0ms olarak tamamla!
+      }
+    } catch {}
+
+    // 3. Yalnızca cihazda hiç nöbet verisi yoksa sunucudan çekmeyi dene
+    setLoadingDuties(true);
+    try {
+      const res = await apiRequest<any[]>(`schools/${sid}/duties`);
+      if (res.success && res.data) {
+        const normalized = res.data.map((d: any) => ({
+          ...d,
+          dayOfWeek: normalizeDayNumber(d.dayOfWeek),
+        }));
+        setDutiesList(normalized);
+        await patchLocalSchoolSnapshot(sid, { duties: normalized });
+      }
+    } catch (e) {
+      console.error('Nöbet listesi yüklenemedi:', e);
+    } finally {
+      setLoadingDuties(false);
+    }
+  };
+
+  const handleSaveDuty = async () => {
+    if (!selectedSchool) return;
+    if (!newDutyTeacher.trim()) {
+      Alert.alert('Eksik Bilgi', 'Lütfen öğretmen seçiniz veya adını yazınız.');
+      return;
+    }
+    if (!newDutyPlace.trim()) {
+      Alert.alert('Eksik Bilgi', 'Lütfen nöbet yerini belirtiniz (Örn: Bahçe, 1. Kat).');
+      return;
+    }
+    setSavingDuty(true);
+    try {
+      const res = await apiRequest(`schools/${selectedSchool.id}/duties`, 'POST', {
+        teacherName: newDutyTeacher.trim(),
+        dayOfWeek: newDutyDay,
+        dutyPlace: newDutyPlace.trim(),
+        notes: newDutyNotes.trim() || undefined,
+      });
+      if (res.success) {
+        Alert.alert('Başarılı', 'Nöbetçi öğretmen başarıyla kaydedildi.');
+        setAddDutyModalVisible(false);
+        setNewDutyTeacher('');
+        setNewDutyPlace('');
+        setNewDutyNotes('');
+        const savedItem = (res.data as any) || {
+          id: String(Date.now()),
+          teacherName: newDutyTeacher.trim(),
+          dayOfWeek: newDutyDay,
+          dutyPlace: newDutyPlace.trim(),
+          notes: newDutyNotes.trim(),
+        };
+        const updated = [...dutiesList, savedItem];
+        setDutiesList(updated);
+        await patchLocalSchoolSnapshot(selectedSchool.id, { duties: updated });
+      } else {
+        Alert.alert('Hata', res.message || 'Kayıt yapılamadı.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', 'Nöbetçi kaydedilirken hata oluştu: ' + (e?.message || e));
+    } finally {
+      setSavingDuty(false);
+    }
+  };
+
+  const handleDeleteDuty = async (id: string, teacherName: string) => {
+    if (!selectedSchool) return;
+    Alert.alert(
+      'Nöbet Kaydı Silinecek',
+      `"${teacherName}" isimli öğretmenin nöbet kaydını silmek istediğinize emin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await apiRequest(`schools/${selectedSchool.id}/duties/${id}`, 'DELETE');
+              if (res.success) {
+                const updated = dutiesList.filter(d => d.id !== id);
+                setDutiesList(updated);
+                await patchLocalSchoolSnapshot(selectedSchool.id, { duties: updated });
+              } else {
+                Alert.alert('Hata', res.message || 'Silinemedi.');
+              }
+            } catch (e: any) {
+              Alert.alert('Hata', 'Silinirken hata: ' + e?.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDownloadDutyTemplate = async () => {
+    try {
+      setDownloadingDutyTemplate(true);
+      const combinedDutiesForTemplate = [
+        ...dutiesList,
+        ...allKnownDutyPlaces.map(p => ({ dutyPlace: p, teacherName: '' }))
+      ];
+      const success = await generateDutyTemplateExcel(
+        teachers,
+        combinedDutiesForTemplate,
+        selectedSchool?.name || 'Okul'
+      );
+      if (success && Platform.OS !== 'web') {
+        Alert.alert('Şablon Hazır', 'Nöbet programı Excel şablonu oluşturuldu ve paylaşıldı.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', 'Şablon oluşturulurken bir hata oluştu: ' + (e?.message || e));
+    } finally {
+      setDownloadingDutyTemplate(false);
+    }
+  };
+
+  const handlePickAndParseDutyExcel = async () => {
+    if (!selectedSchool) return;
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets || res.assets.length === 0) return;
+
+      setImportingDutyExcel(true);
+      const file = res.assets[0];
+
+      let wb: XLSX.WorkBook;
+      if (Platform.OS === 'web') {
+        let arrayBuf: ArrayBuffer;
+        if (file.file && typeof (file.file as any).arrayBuffer === 'function') {
+          arrayBuf = await (file.file as File).arrayBuffer();
+        } else {
+          const resp = await fetch(file.uri);
+          const blob = await resp.blob();
+          arrayBuf = await blob.arrayBuffer();
+        }
+        wb = XLSX.read(arrayBuf, { type: 'array' });
+      } else {
+        const b64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+        wb = XLSX.read(b64, { type: 'base64' });
+      }
+
+      if (!wb.SheetNames || wb.SheetNames.length === 0) {
+        Alert.alert('Boş Belge', 'Excel dosyasında sayfa bulunamadı.');
+        return;
+      }
+
+      const mapDayToNum = (text: string): number => {
+        const t = (text || '').toLowerCase().trim();
+        if (t.includes('pazartesi') || t.includes('pzt')) return 1;
+        if (t.includes('salı') || t.includes('sali') || t.includes('sal')) return 2;
+        if (t.includes('çarşamba') || t.includes('carsamba') || t.includes('çar') || t.includes('car')) return 3;
+        if (t.includes('perşembe') || t.includes('persembe') || t.includes('per')) return 4;
+        if (t.includes('cuma') || t.includes('cum')) return 5;
+        if (t.includes('cumartesi') || t.includes('cts')) return 6;
+        if (t.includes('pazar')) return 7;
+        return 0;
+      };
+
+      const batch: { teacherName: string; dayOfWeek: number; dutyPlace: string; notes?: string }[] = [];
+
+      // İlgili sayfaları tara (önce 'nöbet'/'haftalık' içeren, yoksa sırayla tüm sayfalar)
+      const sortedSheetNames = [...wb.SheetNames].sort((a, b) => {
+        const aMatch = /nöbet|nobet|haftalık|haftalik|çizelge|cizelge/i.test(a) ? -1 : 1;
+        const bMatch = /nöbet|nobet|haftalık|haftalik|çizelge|cizelge/i.test(b) ? -1 : 1;
+        return aMatch - bMatch;
+      });
+
+      for (const sheetName of sortedSheetNames) {
+        const ws = wb.Sheets[sheetName];
+        if (!ws) continue;
+        const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+        if (!rows || rows.length === 0) continue;
+
+        // 1. Matris formatı kontrolü (Pazartesi, Salı, Çarşamba sütun başlıkları)
+        let dayCols: { colIndex: number; day: number }[] = [];
+        let headerRowIndex = -1;
+
+        for (let r = 0; r < Math.min(rows.length, 12); r++) {
+          const row = rows[r];
+          if (!row || !Array.isArray(row)) continue;
+          const matched: { colIndex: number; day: number }[] = [];
+          row.forEach((cell, cIdx) => {
+            const d = mapDayToNum(String(cell));
+            if (d > 0) matched.push({ colIndex: cIdx, day: d });
+          });
+          if (matched.length >= 3) {
+            dayCols = matched;
+            headerRowIndex = r;
+            break;
+          }
+        }
+
+        if (dayCols.length >= 3) {
+          // Matris Formatı
+          for (let r = headerRowIndex + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row || row.length === 0) continue;
+
+            const placeCandidates = row.slice(0, dayCols[0].colIndex).map(c => String(c || '').trim()).filter(Boolean);
+            const textCandidates = placeCandidates.filter(c => isNaN(Number(c)));
+            const dutyPlace = textCandidates.length > 0 
+              ? textCandidates[textCandidates.length - 1] 
+              : (placeCandidates[0] || 'Genel Nöbet');
+
+            dayCols.forEach(({ colIndex, day }) => {
+              const teacherCell = row[colIndex];
+              if (teacherCell && String(teacherCell).trim()) {
+                const raw = String(teacherCell).trim();
+                const parts = raw.split(/[\n,\/]+/).map(p => p.trim()).filter(Boolean);
+                parts.forEach(tName => {
+                  if (tName.length >= 2 && !/öğretmen|nöbetçi|imza|açıklama|toplam/i.test(tName)) {
+                    batch.push({
+                      teacherName: tName,
+                      dayOfWeek: day,
+                      dutyPlace: dutyPlace,
+                      notes: 'Excel matris aktarımı',
+                    });
+                  }
+                });
+              }
+            });
+          }
+        } else {
+          // 2. Tablo Sütun Formatı
+          let dayCol = -1;
+          let teacherCol = -1;
+          let placeCol = -1;
+          let noteCol = -1;
+          let startRow = 0;
+
+          for (let r = 0; r < Math.min(rows.length, 12); r++) {
+            const row = rows[r].map(c => String(c).toLowerCase().trim());
+            row.forEach((colStr, idx) => {
+              if (colStr.includes('gün') || colStr.includes('gun') || colStr.includes('tarih')) dayCol = idx;
+              if (colStr.includes('öğretmen') || colStr.includes('ogretmen') || colStr.includes('ad') || colStr.includes('isim') || colStr.includes('personel')) teacherCol = idx;
+              if (colStr.includes('yer') || colStr.includes('nöbet') || colStr.includes('nobet') || colStr.includes('bölge') || colStr.includes('kat') || colStr.includes('alan') || colStr.includes('görev')) placeCol = idx;
+              if (colStr.includes('not') || colStr.includes('açıklama') || colStr.includes('aciklama')) noteCol = idx;
+            });
+            if (teacherCol !== -1 && (dayCol !== -1 || placeCol !== -1)) {
+              startRow = r + 1;
+              break;
+            }
+          }
+
+          if (teacherCol !== -1) {
+            for (let r = startRow; r < rows.length; r++) {
+              const row = rows[r];
+              if (!row || row.length === 0) continue;
+              const teacherName = String(row[teacherCol] || '').trim();
+              if (!teacherName || teacherName.length < 2 || /öğretmen|personel|adı|ad/i.test(teacherName)) continue;
+
+              const dayNum = dayCol !== -1 ? mapDayToNum(String(row[dayCol] || '')) : 1;
+              const place = placeCol !== -1 ? (String(row[placeCol] || 'Genel Nöbet').trim() || 'Genel Nöbet') : 'Genel Nöbet';
+              const note = noteCol !== -1 ? String(row[noteCol] || '').trim() : undefined;
+
+              batch.push({
+                teacherName,
+                dayOfWeek: dayNum > 0 ? dayNum : 1,
+                dutyPlace: place,
+                notes: note,
+              });
+            }
+          }
+        }
+
+        if (batch.length > 0) break; // İlk veri bulunan sayfadan sonra dur
+      }
+
+      if (batch.length === 0) {
+        Alert.alert('Eşleşme Bulunamadı', 'Excel dosyasında nöbetçi öğretmen kaydı algılanamadı. Lütfen "Şablon İndir" ile örnek Excel tablosunu inceleyin.');
+        return;
+      }
+
+      const postRes = await apiRequest<any>(`schools/${selectedSchool.id}/duties/batch`, 'POST', {
+        overwriteExisting: true,
+        duties: batch,
+      });
+
+      if (postRes.success) {
+        Alert.alert('Başarılı', `Excel dosyasından ${batch.length} adet nöbetçi öğretmen başarıyla aktarıldı.`);
+        await loadDuties(selectedSchool.id);
+        await patchLocalSchoolSnapshot(selectedSchool.id, { duties: batch });
+      } else {
+        Alert.alert('Hata', postRes.error || postRes.message || 'Nöbetçiler kaydedilemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Excel Okuma Hatası', 'Dosya işlenirken hata oluştu: ' + (e?.message || e));
+    } finally {
+      setImportingDutyExcel(false);
+    }
+  };
 
   const handleSelectPrevTeacher = useCallback(() => {
     if (!sortedTeachers.length) return;
@@ -1191,14 +1807,32 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [photoReviewModalVisible, setPhotoReviewModalVisible] = useState(false);
   const [reviewPhotos, setReviewPhotos] = useState<PdfExtractedStudentPhoto[]>([]);
   const [reviewPageFilter, setReviewPageFilter] = useState<'all' | number>('all');
-  const [reviewMatchFilter, setReviewMatchFilter] = useState<'all' | 'matched' | 'unmatched'>('all');
+  const [reviewMatchFilter, setReviewMatchFilter] = useState<'all' | 'full' | 'number_only' | 'unmatched'>('all');
   const [reviewSearchQuery, setReviewSearchQuery] = useState('');
   const [savingReviewPhotos, setSavingReviewPhotos] = useState(false);
+
+  // PDF Önbellek, Geri Al (Undo) ve Yeniden Tarama State'leri
+  const [cachedPdfAsset, setCachedPdfAsset] = useState<any>(null);
+  const [cachedPdfPhotos, setCachedPdfPhotos] = useState<PdfExtractedStudentPhoto[]>([]);
+  const [initialReviewPhotos, setInitialReviewPhotos] = useState<PdfExtractedStudentPhoto[]>([]);
+  const [photoHistoryStack, setPhotoHistoryStack] = useState<PdfExtractedStudentPhoto[][]>([]);
+  const [rescanningPage, setRescanningPage] = useState(false);
 
   // Öğrenci Manuel Seçim / Eşleme Modalı
   const [studentPickerVisible, setStudentPickerVisible] = useState(false);
   const [studentPickerTargetId, setStudentPickerTargetId] = useState<string | null>(null);
   const [studentPickerSearch, setStudentPickerSearch] = useState('');
+
+  // PDF'ten Manuel Fotoğraf Galerisi Seçim Modalı
+  const [photoPickerVisible, setPhotoPickerVisible] = useState(false);
+  const [photoPickerTargetId, setPhotoPickerTargetId] = useState<string | null>(null);
+  const [photoPickerSearch, setPhotoPickerSearch] = useState('');
+
+  // Tekil Öğrenci için PDF Galerisinden Fotoğraf Seçme Modalı
+  const [singleStudentPdfModalVisible, setSingleStudentPdfModalVisible] = useState(false);
+  const [singleStudentPdfTarget, setSingleStudentPdfTarget] = useState<any>(null);
+  const [singleStudentPdfSearch, setSingleStudentPdfSearch] = useState('');
+  const [singleStudentPdfUploading, setSingleStudentPdfUploading] = useState(false);
 
   // Sunucu Görsel Kök Adresi (Fotoğraflar için)
   const serverBaseUrl = DEFAULT_API_URL.replace(/\/api\/?$/, '');
@@ -1465,9 +2099,33 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     try {
       setBulkPhotoModalVisible(true);
       setUploadingBulkPhotos(true);
-      setBulkPhotoProgress('e-Okul PDF belgesi seçiliyor ve taranıyor...');
 
-      const res = await extractPhotosFromPdf(students);
+      let currentStudents = students;
+      if (!currentStudents || currentStudents.length === 0) {
+        setBulkPhotoProgress('Okul öğrenci listesi yükleniyor...');
+        try {
+          const sRes = await apiRequest<any[]>(`sync/students?schoolId=${selectedSchool.id}`);
+          if (sRes.success && sRes.data) {
+            currentStudents = sRes.data;
+            setStudents(sRes.data);
+          }
+        } catch (loadErr) {
+          console.warn('[PDF Fotoğraf] Öğrenciler çekilemedi:', loadErr);
+        }
+      }
+
+      setBulkPhotoProgress('e-Okul PDF belgesi seçiliyor ve taranıyor...');
+      const pick = await DocumentPicker.getDocumentAsync({ type: ['application/pdf'], copyToCacheDirectory: true });
+      if (pick.canceled || !pick.assets?.length) {
+        setBulkPhotoModalVisible(false);
+        setUploadingBulkPhotos(false);
+        setBulkPhotoProgress('');
+        return;
+      }
+      const asset = pick.assets[0];
+      setCachedPdfAsset(asset);
+
+      const res = await extractPhotosFromPdf(currentStudents, asset);
       setBulkPhotoModalVisible(false);
       setUploadingBulkPhotos(false);
       setBulkPhotoProgress('');
@@ -1485,6 +2143,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         return;
       }
 
+      setCachedPdfPhotos(extracted);
+      setInitialReviewPhotos(extracted);
+      setPhotoHistoryStack([]);
       setReviewPhotos(extracted);
       setReviewPageFilter('all');
       setReviewMatchFilter('all');
@@ -1522,6 +2183,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       const file = pickerResult.assets[0];
       setBulkPhotoModalVisible(true);
       setUploadingBulkPhotos(true);
+
+      let currentStudents = students;
+      if (!currentStudents || currentStudents.length === 0) {
+        setBulkPhotoProgress('Okul öğrenci listesi yükleniyor...');
+        try {
+          const sRes = await apiRequest<any[]>(`sync/students?schoolId=${selectedSchool.id}`);
+          if (sRes.success && sRes.data) {
+            currentStudents = sRes.data;
+            setStudents(sRes.data);
+          }
+        } catch (loadErr) {
+          console.warn('[AI Fotoğraf] Öğrenciler çekilemedi:', loadErr);
+        }
+      }
+
       setBulkPhotoProgress('Yapay Zeka (Gemini Vision) ile öğrenci fotoğrafları taranıyor...');
 
       const apiKey = (selectedSchool.geminiApiKey || (await getGeminiApiKey()) || DEFAULT_GEMINI_API_KEY).trim();
@@ -1531,7 +2207,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         file.uri,
         file.name,
         file.mimeType || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
-        students,
+        currentStudents,
         selectedSchool.id,
         apiKey,
         model,
@@ -1554,17 +2230,31 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         return;
       }
 
-      const mappedPhotos: PdfExtractedStudentPhoto[] = found.map((p, idx) => ({
-        id: `ai_${idx}_${Date.now()}`,
-        index: idx,
-        tempUri: p.tempUri || p.photoBase64,
-        fileSize: p.photoBase64 ? Math.round(p.photoBase64.length * 0.75) : 0,
-        matchedStudent: p.matchedStudent || students.find(s => String(s.student_number || '').trim() === String(p.studentNumber || '').trim()) || null,
-        detectedNumber: p.studentNumber,
-        detectedName: p.studentName,
-        pageNumber: p.pageNumber || 1,
-      }));
+      const mappedPhotos: PdfExtractedStudentPhoto[] = found.map((p, idx) => {
+        const cleanPNum = String(p.studentNumber || '').trim();
+        const fallbackMatch = cleanPNum.length > 0
+          ? (students.find(s => {
+              const sNum = String(s.student_number || '').trim();
+              return sNum.length > 0 && (sNum === cleanPNum || sNum.replace(/^0+/, '') === cleanPNum.replace(/^0+/, ''));
+            }) || null)
+          : null;
 
+        return {
+          id: `ai_${idx}_${Date.now()}`,
+          index: idx,
+          tempUri: p.tempUri || p.photoBase64,
+          fileSize: p.photoBase64 ? Math.round(p.photoBase64.length * 0.75) : 0,
+          matchedStudent: p.matchedStudent || fallbackMatch,
+          detectedNumber: p.studentNumber,
+          detectedName: p.studentName,
+          pageNumber: p.pageNumber || 1,
+        };
+      });
+
+      setCachedPdfAsset(file);
+      setCachedPdfPhotos(mappedPhotos);
+      setInitialReviewPhotos(mappedPhotos);
+      setPhotoHistoryStack([]);
       setReviewPhotos(mappedPhotos);
       setReviewPageFilter('all');
       setReviewMatchFilter('all');
@@ -1590,21 +2280,58 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     );
   };
 
-  const handleOpenStudentPicker = (photoId: string) => {
+  const getPickerStudentInfo = (s: any) => {
+    const number = String(s.studentNumber || s.student_number || s.number || '').trim();
+    const fullName = String(
+      s.fullName ||
+      s.full_name ||
+      `${s.first_name || s.name || ''} ${s.last_name || ''}`.trim() ||
+      'İsimsiz Öğrenci'
+    ).trim();
+    const className = String(
+      s.className ||
+      s.class_name ||
+      (s.grade && s.section ? `${s.grade}/${s.section}` : s.grade || s.section || '-')
+    ).trim();
+    return { number, fullName, className };
+  };
+
+  const handleOpenStudentPicker = async (photoId: string) => {
     setStudentPickerTargetId(photoId);
     setStudentPickerSearch('');
     setStudentPickerVisible(true);
+
+    if ((!students || students.length === 0) && selectedSchool) {
+      try {
+        const sRes = await apiRequest<any[]>(`sync/students?schoolId=${selectedSchool.id}`);
+        if (sRes.success && sRes.data) {
+          setStudents(sRes.data);
+        }
+      } catch (err) {
+        console.warn('[Öğrenci Seçici] Öğrenciler yüklenemedi:', err);
+      }
+    }
   };
 
   const handleAssignStudentToPhoto = (student: any) => {
     if (!studentPickerTargetId) return;
+    const stdInfo = getPickerStudentInfo(student);
     setReviewPhotos(prev =>
       prev.map(p => {
         if (p.id === studentPickerTargetId) {
           return {
             ...p,
-            matchedStudent: student,
-            detectedNumber: student.student_number,
+            matchedStudent: {
+              ...student,
+              student_number: stdInfo.number,
+              studentNumber: stdInfo.number,
+              full_name: stdInfo.fullName,
+              fullName: stdInfo.fullName,
+              class_name: stdInfo.className,
+              first_name: stdInfo.fullName.split(' ')[0] || '',
+              last_name: stdInfo.fullName.split(' ').slice(1).join(' ') || '',
+            },
+            detectedNumber: stdInfo.number,
           };
         }
         return p;
@@ -1612,6 +2339,217 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     );
     setStudentPickerVisible(false);
     setStudentPickerTargetId(null);
+  };
+
+  const handleOpenPhotoPicker = (photoId: string) => {
+    Alert.alert(
+      'Fotoğraf Seç / Değiştir',
+      'Bu öğrenci kartı için fotoğrafı nereden almak istersiniz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: '🖼️ Cihaz Galerisinden Seç',
+          onPress: async () => {
+            try {
+              const picked = await pickSinglePhotoFromSource('gallery');
+              if (!picked) return;
+              const manip = await manipulateAsync(
+                picked.uri,
+                [{ resize: { width: 300, height: 300 } }],
+                { compress: 0.7, format: SaveFormat.JPEG, base64: true }
+              );
+              if (manip.base64) {
+                const dataUri = `data:image/jpeg;base64,${manip.base64}`;
+                setPhotoHistoryStack(prev => [...prev.slice(-9), reviewPhotos]);
+                setReviewPhotos(prev =>
+                  prev.map(p =>
+                    p.id === photoId
+                      ? { ...p, tempUri: dataUri, fileSize: Math.round((manip.base64?.length || 0) * 0.75) }
+                      : p
+                  )
+                );
+              }
+            } catch (err: any) {
+              Alert.alert('Hata', err.message || 'Fotoğraf seçilemedi.');
+            }
+          },
+        },
+        {
+          text: '📄 PDF Albümünden Seç',
+          onPress: () => {
+            setPhotoPickerTargetId(photoId);
+            setPhotoPickerSearch('');
+            setPhotoPickerVisible(true);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleAssignPhotoToTarget = (selectedPhoto: PdfExtractedStudentPhoto) => {
+    if (!photoPickerTargetId) return;
+    setPhotoHistoryStack(prev => [...prev.slice(-9), reviewPhotos]);
+    setReviewPhotos(prev =>
+      prev.map(p => {
+        if (p.id === photoPickerTargetId) {
+          return {
+            ...p,
+            tempUri: selectedPhoto.tempUri,
+            fileSize: selectedPhoto.fileSize,
+          };
+        }
+        return p;
+      })
+    );
+    setPhotoPickerVisible(false);
+    setPhotoPickerTargetId(null);
+  };
+
+  const handleShiftPhotos = (direction: -1 | 1) => {
+    Alert.alert(
+      direction === -1 ? '◀ Fotoğrafları 1 Geri Kaydır (-1)' : 'Fotoğrafları 1 İleri Kaydır (+1) ▶',
+      direction === -1
+        ? 'Tüm listedeki fotoğraflar 1 basamak GERİYE kaydırılacaktır (Fotoğraf dizisi 1 basamak geriye hizalanır). Devam edilsin mi?'
+        : 'Tüm listedeki fotoğraflar 1 basamak İLERİYE kaydırılacaktır (Fotoğraf dizisi 1 basamak ileriye hizalanır). Devam edilsin mi?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Kaydır',
+          onPress: () => {
+            setPhotoHistoryStack(prev => [...prev.slice(-9), reviewPhotos]);
+            setReviewPhotos(prev => {
+              if (prev.length <= 1) return prev;
+              const count = prev.length;
+              return prev.map((item, idx) => {
+                const srcIdx = (idx - direction + count) % count;
+                return {
+                  ...item,
+                  tempUri: prev[srcIdx].tempUri,
+                  fileSize: prev[srcIdx].fileSize,
+                };
+              });
+            });
+          },
+        },
+      ]
+    );
+  };
+
+  const handleShiftPhotosFromIndex = (photoId: string, direction: -1 | 1) => {
+    setPhotoHistoryStack(prev => [...prev.slice(-9), reviewPhotos]);
+    setReviewPhotos(prev => {
+      const targetIndex = prev.findIndex(p => p.id === photoId);
+      if (targetIndex === -1) return prev;
+
+      const updated = [...prev];
+      if (direction === -1) {
+        // 1 Geri: Bu kart ve sonraki her kart, bir sonraki kartın fotoğrafını buraya çeker
+        for (let i = targetIndex; i < updated.length - 1; i++) {
+          updated[i] = {
+            ...updated[i],
+            tempUri: updated[i + 1].tempUri,
+            fileSize: updated[i + 1].fileSize,
+          };
+        }
+        // Son kartın fotoğrafı temizlenir (asla son kart kopyalanıp çoğaltılmaz!)
+        updated[updated.length - 1] = {
+          ...updated[updated.length - 1],
+          tempUri: '',
+          fileSize: 0,
+        };
+      } else {
+        // 1 İleri: Bu karttan sonraki her kart, bir önceki kartın fotoğrafını ileriye doğru öteler
+        for (let i = updated.length - 1; i > targetIndex; i--) {
+          updated[i] = {
+            ...updated[i],
+            tempUri: updated[i - 1].tempUri,
+            fileSize: updated[i - 1].fileSize,
+          };
+        }
+        // Hedef kartın fotoğrafı temizlenir (ASLA aynı fotoğraf duplicate edilmez!)
+        updated[targetIndex] = {
+          ...updated[targetIndex],
+          tempUri: '',
+          fileSize: 0,
+        };
+      }
+      return updated;
+    });
+  };
+
+  const handleUndoShift = () => {
+    if (photoHistoryStack.length === 0) return;
+    const previousState = photoHistoryStack[photoHistoryStack.length - 1];
+    setPhotoHistoryStack(prev => prev.slice(0, -1));
+    setReviewPhotos(previousState);
+  };
+
+  const handleResetToInitial = () => {
+    if (initialReviewPhotos.length === 0) return;
+    Alert.alert(
+      'İlk Sıralamaya Dön',
+      'Tüm kaydırma ve manuel düzenlemeler iptal edilerek belgeden ilk taranan orijinal sıralamaya dönülecektir. Devam edilsin mi?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sıfırla',
+          style: 'destructive',
+          onPress: () => {
+            setPhotoHistoryStack(prev => [...prev.slice(-9), reviewPhotos]);
+            setReviewPhotos(initialReviewPhotos);
+            Alert.alert('Sıfırlandı', 'Orijinal fotoğraf eşleştirmeleri geri yüklendi.');
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRescanCurrentPage = async () => {
+    if (!cachedPdfAsset) {
+      Alert.alert('Belge Seçilmedi', 'Önbellekte PDF belgesi bulunamadı. Lütfen yeni bir PDF seçiniz.');
+      return;
+    }
+    setRescanningPage(true);
+    try {
+      let currentStudents = students;
+      if (!currentStudents || currentStudents.length === 0) {
+        const sRes = await apiRequest<any[]>(`sync/students?schoolId=${selectedSchool.id}`);
+        if (sRes.success && sRes.data) {
+          currentStudents = sRes.data;
+          setStudents(sRes.data);
+        }
+      }
+
+      const res = await extractPhotosFromPdf(currentStudents, cachedPdfAsset);
+      if (!res.success || !res.extractedPhotos.length) {
+        Alert.alert('Yeniden Tarama Hatası', res.error || 'Sayfa taranamadı.');
+        return;
+      }
+
+      setPhotoHistoryStack(prev => [...prev.slice(-9), reviewPhotos]);
+
+      if (reviewPageFilter !== 'all') {
+        const pagePhotos = res.extractedPhotos.filter(p => p.pageNumber === reviewPageFilter);
+        if (pagePhotos.length === 0) {
+          Alert.alert('Bilgi', `Sayfa ${reviewPageFilter} için yeni fotoğraf tespit edilemedi.`);
+          return;
+        }
+
+        setReviewPhotos(prev => {
+          const others = prev.filter(p => p.pageNumber !== reviewPageFilter);
+          return [...others, ...pagePhotos].sort((a, b) => a.index - b.index);
+        });
+        Alert.alert('Başarılı 🔄', `Sayfa ${reviewPageFilter} yeniden tarandı. Toplam ${pagePhotos.length} fotoğraf güncellendi.`);
+      } else {
+        setReviewPhotos(res.extractedPhotos);
+        setCachedPdfPhotos(res.extractedPhotos);
+        Alert.alert('Başarılı 🔄', `Tüm sayfalar baştan tarandı. Toplam ${res.extractedPhotos.length} fotoğraf güncellendi.`);
+      }
+    } catch (err: any) {
+      Alert.alert('Hata', err?.message || 'Yeniden tarama başarısız.');
+    } finally {
+      setRescanningPage(false);
+    }
   };
 
   const handleSaveConfirmedPhotos = async () => {
@@ -1711,16 +2649,135 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     return Array.from(pages).sort((a, b) => a - b);
   }, [reviewPhotos]);
 
+  // PDF Fotoğraf Eşleşme Durumu & Renk Tespiti (Yeşil: Tam Eşleşme, Sarı: Yalnızca Numara / Kısmi, Kırmızı: Eşleşmedi)
+  const getPhotoMatchStatus = (item: PdfExtractedStudentPhoto) => {
+    const matched = item.matchedStudent;
+    if (!matched) {
+      return {
+        status: 'none' as const,
+        color: '#DC2626',
+        bgColor: '#FEF2F2', // Açık kırmızı
+        borderColor: '#FCA5A5', // Kırmızı kenarlık
+        badgeBg: '#FEE2E2',
+        badgeText: '#B91C1C',
+        badgeLabel: 'Eşleşmedi',
+        isNameMatch: false,
+        isNumberMatch: false,
+        sysNumber: '-',
+        sysFullName: 'Öğrenci Atanmadı',
+        sysClassName: '-',
+      };
+    }
+
+    const sysNumber = String(matched.student_number || (matched as any).studentNumber || (matched as any).number || '').trim();
+    const pdfNumber = String(item.detectedNumber || '').trim();
+    const cleanSysNum = sysNumber.replace(/^0+/, '');
+    const cleanPdfNum = pdfNumber.replace(/^0+/, '');
+    const isNumberMatch = Boolean(cleanSysNum && cleanPdfNum && cleanSysNum === cleanPdfNum);
+
+    const norm = (s: string) =>
+      (s || '')
+        .replace(/Ý/g, 'İ')
+        .replace(/Ð/g, 'Ğ')
+        .replace(/Þ/g, 'Ş')
+        .replace(/ý/g, 'ı')
+        .replace(/ð/g, 'ğ')
+        .replace(/þ/g, 'ş')
+        .toLocaleLowerCase('tr-TR')
+        .replace(/[^a-zçğıöşü0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const pdfNameNorm = norm(item.detectedName || '');
+    const stdInfo = getPickerStudentInfo(matched);
+    const sysFullName = stdInfo.fullName !== 'İsimsiz Öğrenci'
+      ? stdInfo.fullName
+      : (matched.fullName || (matched as any).full_name || `${matched.first_name || (matched as any).name || ''} ${matched.last_name || ''}`.trim() || '-');
+    const sysNameNorm = norm(sysFullName);
+    const sysClassName = stdInfo.className !== '-'
+      ? stdInfo.className
+      : (matched.className || (matched as any).class_name || (matched.grade && matched.section ? `${matched.grade}/${matched.section}` : matched.grade || '-'));
+
+    let isNameMatch = false;
+    if (pdfNameNorm.length >= 3 && sysNameNorm.length >= 3) {
+      if (pdfNameNorm === sysNameNorm) {
+        isNameMatch = true;
+      } else {
+        const pTokens = pdfNameNorm.split(' ').filter(t => t.length >= 2);
+        const sTokens = sysNameNorm.split(' ').filter(t => t.length >= 2);
+        if (pTokens.length >= 2 && sTokens.length >= 2) {
+          const matchesCount = pTokens.filter(pt => sTokens.some(st => st === pt || st.includes(pt) || pt.includes(st))).length;
+          if (matchesCount >= 2) {
+            isNameMatch = true;
+          }
+        }
+      }
+    }
+
+    if (isNumberMatch && isNameMatch) {
+      return {
+        status: 'full' as const,
+        color: '#15803D',
+        bgColor: '#F0FDF4', // Yeşil zemin
+        borderColor: '#86EFAC', // Yeşil kenarlık
+        badgeBg: '#DCFCE7',
+        badgeText: '#15803D',
+        badgeLabel: 'Tam Eşleşti (Ad Soyad + No)',
+        isNameMatch: true,
+        isNumberMatch: true,
+        sysNumber,
+        sysFullName,
+        sysClassName,
+      };
+    }
+
+    if (isNumberMatch) {
+      return {
+        status: 'number_only' as const,
+        color: '#B45309',
+        bgColor: '#FFFBEB', // Sarı / Amber zemin
+        borderColor: '#FCD34D', // Sarı / Amber kenarlık
+        badgeBg: '#FEF3C7',
+        badgeText: '#B45309',
+        badgeLabel: 'Yalnızca Numara Eşleşti',
+        isNameMatch: false,
+        isNumberMatch: true,
+        sysNumber,
+        sysFullName,
+        sysClassName,
+      };
+    }
+
+    return {
+      status: 'number_only' as const,
+      color: '#D97706',
+      bgColor: '#FFFBEB', // Sarı zemin
+      borderColor: '#FCD34D',
+      badgeBg: '#FEF3C7',
+      badgeText: '#B45309',
+      badgeLabel: isNameMatch ? 'Yalnızca İsim Eşleşti' : 'Manuel Atandı',
+      isNameMatch,
+      isNumberMatch,
+      sysNumber,
+      sysFullName,
+      sysClassName,
+    };
+  };
+
   // Filtrelenmiş İnceleme Listesi
   const filteredReviewPhotos = useMemo(() => {
     return reviewPhotos.filter(item => {
       if (reviewPageFilter !== 'all' && item.pageNumber !== reviewPageFilter) {
         return false;
       }
-      if (reviewMatchFilter === 'matched' && item.matchedStudent === null) {
+      const matchInfo = getPhotoMatchStatus(item);
+      if (reviewMatchFilter === 'full' && matchInfo.status !== 'full') {
         return false;
       }
-      if (reviewMatchFilter === 'unmatched' && item.matchedStudent !== null) {
+      if (reviewMatchFilter === 'number_only' && matchInfo.status !== 'number_only') {
+        return false;
+      }
+      if (reviewMatchFilter === 'unmatched' && matchInfo.status !== 'none') {
         return false;
       }
       if (reviewSearchQuery.trim()) {
@@ -1739,15 +2796,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   // Manuel Öğrenci Seçici Filtresi
   const filteredPickerStudents = useMemo(() => {
-    if (!studentPickerSearch.trim()) return students.slice(0, 50);
-    const q = studentPickerSearch.toLowerCase().trim();
-    return students.filter(s => {
-      const num = String(s.student_number || '').toLowerCase();
-      const fn = String(s.first_name || s.name || '').toLowerCase();
-      const ln = String(s.last_name || '').toLowerCase();
-      const cls = String(s.class_name || '').toLowerCase();
-      return num.includes(q) || fn.includes(q) || ln.includes(q) || cls.includes(q);
-    }).slice(0, 50);
+    const list = students || [];
+    if (!studentPickerSearch.trim()) return list.slice(0, 100);
+    const q = studentPickerSearch.toLocaleLowerCase('tr-TR').trim();
+    return list.filter(s => {
+      const info = getPickerStudentInfo(s);
+      return (
+        info.number.toLowerCase().includes(q) ||
+        info.fullName.toLocaleLowerCase('tr-TR').includes(q) ||
+        info.className.toLowerCase().includes(q)
+      );
+    }).slice(0, 100);
   }, [students, studentPickerSearch]);
 
   // 1.4 Çarşaf Doğruluk, Doluluk & Sağlamlık Denetimi Fonksiyonları
@@ -1768,11 +2827,30 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const loadAllSchedules = async () => {
     if (!selectedSchool) return;
+
+    // 1. FAST OFFLINE: Hafızada zaten okulun programı varsa 0ms ile hemen dön
+    if (allSchoolSchedules && allSchoolSchedules.length > 0) {
+      setLoadingAllSchedules(false);
+      return;
+    }
+
+    // 2. FAST OFFLINE: Telefondaki yerel snapshot'tan anında yükle (0ms)
+    try {
+      const cached = await loadSchoolSnapshotFromStorage(selectedSchool.id);
+      if (cached?.schedules && cached.schedules.length > 0) {
+        setAllSchoolSchedules(cached.schedules);
+        setLoadingAllSchedules(false);
+        return; // Yerel veri mevcut, çevrimdışı 0ms olarak tamamla!
+      }
+    } catch {}
+
+    // 3. Yalnızca cihazda hiç program verisi yoksa sunucudan çekmeyi dene
     setLoadingAllSchedules(true);
     try {
       const res = await apiRequest<any[]>(`sync/schedules?schoolId=${selectedSchool.id}`);
       if (res.success && res.data) {
         setAllSchoolSchedules(res.data);
+        await patchLocalSchoolSnapshot(selectedSchool.id, { schedules: res.data });
       }
     } catch (e) {
       console.error('Error loading all schedules:', e);
@@ -2155,10 +3233,45 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // --- VERİ YÜKLEME FONKSİYONLARI ---
 
   const loadSchools = async () => {
+    let hasCached = false;
+    // 1. FAST OFFLINE: Önce cihazdaki kayıtlı okulları anında getir (0ms)
+    try {
+      const cachedSchoolsRaw = await AsyncStorage.getItem('@cached_admin_schools');
+      if (cachedSchoolsRaw) {
+        const cached = JSON.parse(cachedSchoolsRaw);
+        if (Array.isArray(cached) && cached.length > 0) {
+          hasCached = true;
+          setSchools(cached);
+          const current = selectedSchool ? cached.find(s => s.id === selectedSchool.id) || cached[0] : cached[0];
+          setSelectedSchool(current);
+          if (current.dailyLessonHours && current.dailyLessonHours > 0) {
+            setScheduleDailyHours(current.dailyLessonHours);
+          }
+          await loadAllSchoolData(current.id);
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    } catch {}
+
+    // 2. Canlı sunucudan arka planda oku (Yerelde veri varsa UI'yi asla kilitleme)
+    if (hasCached) {
+      // Arka planda sessizce dene, internet kapalıysa UI beklemesin
+      apiRequest<any[]>('schools/my-schools', 'GET', undefined, false, true).then(async (res) => {
+        if (res.success && res.data && res.data.length > 0) {
+          setSchools(res.data);
+          await AsyncStorage.setItem('@cached_admin_schools', JSON.stringify(res.data));
+        }
+      }).catch(() => {});
+      return;
+    }
+
+    // 3. İlk açılış ve yerelde okul yoksa sunucudan bekle
     try {
       const res = await apiRequest<any[]>('schools/my-schools');
       if (res.success && res.data) {
         setSchools(res.data);
+        await AsyncStorage.setItem('@cached_admin_schools', JSON.stringify(res.data));
         if (res.data.length > 0) {
           const current = selectedSchool ? res.data.find(s => s.id === selectedSchool.id) || res.data[0] : res.data[0];
           setSelectedSchool(current);
@@ -2179,22 +3292,83 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         }
       }
     } catch (e: any) {
-      Alert.alert('Hata', e.message);
+      if (!selectedSchool) {
+        Alert.alert('Hata', e.message);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
+  const applySnapshotData = (snap: SchoolSnapshotData) => {
+    if (snap.teachers) setTeachers(snap.teachers);
+    if (snap.classes && snap.classes.length > 0) setClasses(snap.classes);
+    if (snap.lessons && snap.lessons.length > 0) setLessons(snap.lessons);
+    if (snap.schedules && snap.schedules.length > 0) setAllSchoolSchedules(snap.schedules);
+    if (snap.duties && snap.duties.length > 0) {
+      const normalizedDuties = snap.duties.map((d: any) => ({
+        ...d,
+        dayOfWeek: normalizeDayNumber(d.dayOfWeek),
+      }));
+      setDutiesList(normalizedDuties);
+    }
+    if (snap.students && snap.students.length > 0) setStudents(snap.students);
+    if (snap.dailyLessonHours && snap.dailyLessonHours > 0) {
+      setScheduleDailyHours(snap.dailyLessonHours);
+    }
+    if (snap.syncedAt) setLastSyncTime(snap.syncedAt);
+  };
+
+  const handleManualSyncSnapshot = async () => {
+    if (!selectedSchool) return;
+    setSyncingSnapshot(true);
+    try {
+      const snap = await fetchAndCacheSchoolSnapshot(selectedSchool.id);
+      if (snap) {
+        applySnapshotData(snap);
+        Alert.alert(
+          'Veriler Eşitlendi 🎉',
+          `Sunucudaki güncel okul verileri telefona başarıyla indirildi:\n\n` +
+          `• Öğretmenler: ${snap.teachers.length}\n` +
+          `• Şubeler: ${snap.classes.length}\n` +
+          `• Dersler: ${snap.lessons.length}\n` +
+          `• Haftalık Ders Saatleri: ${snap.schedules.length}\n` +
+          `• Nöbetçi Kayıtları: ${snap.duties.length}\n` +
+          `• Öğrenciler: ${snap.students?.length || 0}\n\n` +
+          `Artık Boş Ders Radarı, Şubede Kim Var, Öğretmen Programı ve Fotoğraflı Öğrenci Listeleri telefondan anında (0ms) çalışacaktır.`
+        );
+      } else {
+        Alert.alert('Eşitleme Uyarısı', 'Sunucudan veri paketi alınamadı. İnternet bağlantınızı kontrol ediniz.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', 'Eşitleme sırasında hata oluştu: ' + (e?.message || e));
+    } finally {
+      setSyncingSnapshot(false);
+    }
+  };
+
   const loadAllSchoolData = async (schoolId: string) => {
-    await Promise.all([
-      loadTeachers(schoolId),
-      loadClasses(schoolId),
-      loadLessons(schoolId),
-      loadStudents(schoolId),
-      loadAuditLogs(schoolId),
-      loadSchoolBatches(schoolId),
-    ]);
+    // 1. FAST OFFLINE: Önce telefondaki yerel depodan anında yükle (0ms gecikme)
+    const cached = await loadSchoolSnapshotFromStorage(schoolId);
+    if (cached) {
+      applySnapshotData(cached);
+      setLoading(false);
+      setRefreshing(false);
+      return; // Yerel önbellek mevcut, 0ms anında hazır!
+    }
+
+    // 2. Yalnızca yerel önbellek yoksa ilk açılışta sunucudan snapshot paketini çek
+    setLoading(true);
+    try {
+      const snap = await fetchAndCacheSchoolSnapshot(schoolId);
+      if (snap) {
+        applySnapshotData(snap);
+      }
+    } catch {} finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
   const handleSelectSchool = async (s: any) => {
@@ -2263,14 +3437,19 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     if (res.success && res.data) setStudents(res.data);
   };
 
-  const loadSchoolMessages = async (targetSchoolId?: string) => {
+  const loadSchoolMessages = async (targetSchoolId?: string, customScope?: 'personal' | 'all' | 'sent') => {
     const sId = targetSchoolId || selectedSchool?.id;
     if (!sId) return;
+    const scopeToUse = customScope || adminMessageScope;
     setLoadingMessages(true);
     try {
-      const res = await apiRequest<any[]>(`messages?schoolId=${sId}`);
+      const scopeParam = scopeToUse ? `&scope=${scopeToUse}` : '';
+      const res = await apiRequest<any[]>(`messages?schoolId=${sId}${scopeParam}`);
       if (res.success && res.data) {
         setSchoolMessages(res.data);
+        // İdareci mesajları görüntülediğinde sunucuda okundu işaretle ve bildirim sayacını sıfırla
+        markAllMessagesAsRead(String(sId));
+        setCachedUnreadCount(0);
       }
     } catch (e: any) {
       console.log('Mesajlar yüklenirken hata:', e);
@@ -2279,10 +3458,145 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  const handleOpenAdminReply = (msg: any) => {
+    setAdminReplyingMessage(msg);
+    setAdminReplyContent('');
+    setAdminReplyModalVisible(true);
+  };
+
+  const handleSendAdminReply = async () => {
+    if (!adminReplyContent.trim()) {
+      Alert.alert('Uyarı', 'Lütfen yanıt mesajınızı yazınız.');
+      return;
+    }
+    if (!adminReplyingMessage || !selectedSchool) return;
+
+    setSendingAdminReply(true);
+    try {
+      const rRole = (adminReplyingMessage.senderRole || '').toUpperCase();
+      const targetRole = rRole === 'TEACHER' ? 'SPECIFIC_TEACHER' : (rRole === 'STUDENT' ? 'SPECIFIC_STUDENT' : 'PARENT');
+      
+      const payload = {
+        schoolId: selectedSchool.id,
+        receiverId: adminReplyingMessage.senderId,
+        receiverName: adminReplyingMessage.senderName,
+        targetRole,
+        targetDescription: `Yanıt: ${adminReplyingMessage.senderName}`,
+        content: adminReplyContent.trim(),
+        replyToMessageId: adminReplyingMessage.id,
+        replyToContent: adminReplyingMessage.content ? (adminReplyingMessage.content.length > 80 ? adminReplyingMessage.content.substring(0, 77) + '...' : adminReplyingMessage.content) : undefined,
+      };
+
+      const res = await apiRequest('messages', 'POST', payload);
+      if (res.success) {
+        Alert.alert('Başarılı 📨', `${adminReplyingMessage.senderName} kişisine yanıtınız iletildi.`);
+        setAdminReplyModalVisible(false);
+        setAdminReplyingMessage(null);
+        setAdminReplyContent('');
+        loadSchoolMessages(String(selectedSchool.id));
+      } else {
+        Alert.alert('Hata', res.error || 'Yanıt gönderilemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message || 'Yanıt gönderilemedi.');
+    } finally {
+      setSendingAdminReply(false);
+    }
+  };
+
+  const handleSendAdminNewMessage = async () => {
+    if (!adminNewMsgContent.trim()) {
+      Alert.alert('Uyarı', 'Lütfen mesaj metnini yazınız.');
+      return;
+    }
+    if (!selectedSchool) return;
+
+    setSendingAdminNewMsg(true);
+    try {
+      let targetDesc = 'Tüm Öğretmenler';
+      let recId = undefined;
+      let recName = undefined;
+
+      if (adminNewMsgTargetType === 'SPECIFIC_TEACHER') {
+        if (!adminNewMsgTargetTeacher) {
+          Alert.alert('Uyarı', 'Lütfen bir öğretmen seçiniz.');
+          setSendingAdminNewMsg(false);
+          return;
+        }
+        targetDesc = adminNewMsgTargetTeacher.fullName;
+        recId = adminNewMsgTargetTeacher.id;
+        recName = adminNewMsgTargetTeacher.fullName;
+      } else if (adminNewMsgTargetType === 'ALL') {
+        targetDesc = 'Tüm Okul (Genel Duyuru)';
+      }
+
+      const payload = {
+        schoolId: selectedSchool.id,
+        targetRole: adminNewMsgTargetType,
+        targetDescription: targetDesc,
+        receiverId: recId,
+        receiverName: recName,
+        content: adminNewMsgContent.trim(),
+      };
+
+      const res = await apiRequest('messages', 'POST', payload);
+      if (res.success) {
+        Alert.alert('Başarılı 📨', `Mesajınız "${targetDesc}" hedefine başarıyla iletildi.`);
+        setAdminNewMsgModalVisible(false);
+        setAdminNewMsgContent('');
+        setAdminNewMsgTargetTeacher(null);
+        loadSchoolMessages(String(selectedSchool.id));
+      } else {
+        Alert.alert('Hata', res.error || 'Mesaj iletilemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message || 'Mesaj gönderilemedi.');
+    } finally {
+      setSendingAdminNewMsg(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'messages' && selectedSchool?.id) {
+      loadSchoolMessages(String(selectedSchool.id));
+    }
+  }, [activeTab, selectedSchool?.id]);
+
+  // [PERF] Tıklama anını yakalayan referans
+  const tabPressTimestampRef = useRef<number>(0);
+
+  // [PERF] Sekme geçiş süresi logu (Metro/logcat: "[PERF]")
+  useEffect(() => {
+    const elapsed = tabPressTimestampRef.current > 0 ? (Date.now() - tabPressTimestampRef.current) : 0;
+    const h = InteractionManager.runAfterInteractions(() => {
+      console.log(`[PERF] sekme='${activeTab}' (tıklama->çizim: ${elapsed}ms) | öğretmen=${teachers.length} öğrenci=${students.length} program=${allSchoolSchedules.length}`);
+    });
+    return () => h.cancel();
+  }, [activeTab]);
+
+  // [PERF] Radar alt sekme ve saat/gün değişim süresi logu
+  useEffect(() => {
+    const elapsed = tabPressTimestampRef.current > 0 ? (Date.now() - tabPressTimestampRef.current) : 0;
+    const h = InteractionManager.runAfterInteractions(() => {
+      console.log(`[PERF] radarAltSekme='${radarSubTab}' boşÖğretmenler=${freeTeachersList.length} gün=${radarDay} saat=${radarHour} (tıklama->çizim: ${elapsed}ms)`);
+    });
+    return () => h.cancel();
+  }, [radarSubTab, radarDay, radarHour]);
+
+  // Öğrenci listesi sayfalı gösterilir; arama/filtre değişince ilk sayfaya dön
+  useEffect(() => {
+    setStudentVisibleCount(30);
+  }, [studentSearch, selectedClassFilter, activeTab]);
+
   useEffect(() => {
     loadSchools();
     getActiveUserSession().then((session) => {
       if (session) setCurrentUserSession(session);
+    });
+    getActiveTeacherName().then((name) => {
+      if (name) {
+        setCurrentUserSession((prev: any) => (prev ? { ...prev, fullName: prev.fullName || name } : { fullName: name }));
+      }
     });
   }, []);
 
@@ -2520,8 +3834,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       if (res.success) {
         Alert.alert('Başarılı', 'Öğretmen bilgileri ve yetkileri güncellendi.');
         setEditTeacherModalVisible(false);
+        const updated = teachers.map((t: any) =>
+          t.id === editingTeacher.id ? { ...t, ...editingTeacher } : t
+        );
+        setTeachers(updated);
+        if (selectedSchool) {
+          patchLocalSchoolSnapshot(selectedSchool.id, { teachers: updated });
+        }
         setEditingTeacher(null);
-        if (selectedSchool) loadTeachers(selectedSchool.id);
       } else {
         Alert.alert('Hata', res.error || 'Güncellenemedi.');
       }
@@ -2543,7 +3863,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             const res = await apiRequest(`schools/teachers/${teacherId}`, 'DELETE');
             if (res.success) {
               Alert.alert('Silindi', 'Öğretmen okul kadrosundan silindi.');
-              if (selectedSchool) loadTeachers(selectedSchool.id);
+              const updated = teachers.filter((t: any) => t.id !== teacherId);
+              setTeachers(updated);
+              if (selectedSchool) {
+                patchLocalSchoolSnapshot(selectedSchool.id, { teachers: updated });
+              }
             } else {
               Alert.alert('Hata', res.error || 'Silinemedi.');
             }
@@ -2553,10 +3877,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     );
   };
 
-  const handleResetTeacherPassword = (teacherId: string, teacherName: string) => {
+  const handleResetTeacherPassword = (teacherId: string, teacherName: string, teacherUsername?: string) => {
+    const uName = teacherUsername || generateDefaultTeacherUsername(teacherName);
     Alert.alert(
       'Şifreyi Sıfırla',
-      `"${teacherName}" öğretmeninin şifresini "1234" olarak sıfırlamak istiyor musunuz?`,
+      `"${teacherName}" öğretmeninin (${uName}) şifresini "1234" olarak sıfırlamak istiyor musunuz?`,
       [
         { text: 'Vazgeç', style: 'cancel' },
         {
@@ -2564,7 +3889,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           onPress: async () => {
             const res = await apiRequest(`schools/teachers/${teacherId}/reset-password`, 'POST', { newPassword: '1234' });
             if (res.success) {
-              Alert.alert('Başarılı 🔑', `Şifre 1234 olarak güncellendi.`);
+              Alert.alert('Başarılı 🔑', `Kullanıcı Adı: ${uName}\nŞifre: 1234\n\nŞifre başarıyla 1234 olarak güncellendi.`);
             } else {
               Alert.alert('Hata', res.error || 'Şifre güncellenemedi.');
             }
@@ -2601,7 +3926,18 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         Alert.alert('Başarılı', `${newClassGrade}-${newClassSection} sınıfı doğrudan sunucuya eklendi.`);
         setAddClassModalVisible(false);
         setNewClassSection('');
-        loadClasses(selectedSchool.id);
+        const newClassItem = (res.data as any) || {
+          id: String(Date.now()),
+          grade: newClassGrade.trim(),
+          section: newClassSection.trim(),
+          className: `${newClassGrade.trim()}-${newClassSection.trim()}`,
+          name: `${newClassGrade.trim()}/${newClassSection.trim()}`,
+        };
+        const updated = [...classes, newClassItem];
+        setClasses(updated);
+        if (selectedSchool) {
+          patchLocalSchoolSnapshot(selectedSchool.id, { classes: updated });
+        }
       } else {
         Alert.alert('Hata', res.error || 'Sınıf eklenemedi.');
       }
@@ -2625,7 +3961,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             const res = await apiRequest(`schools/classes/${classId}`, 'DELETE');
             if (res.success) {
               Alert.alert('Silindi', 'Sınıf silindi.');
-              if (selectedSchool) loadClasses(selectedSchool.id);
+              const updated = classes.filter((c: any) => c.id !== classId);
+              setClasses(updated);
+              if (selectedSchool) {
+                patchLocalSchoolSnapshot(selectedSchool.id, { classes: updated });
+              }
             } else {
               Alert.alert('Hata', res.error || 'Silinemedi.');
             }
@@ -2657,7 +3997,18 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setAddLessonModalVisible(false);
         setNewLessonName('');
         setNewLessonShortCode('');
-        loadLessons(selectedSchool.id);
+        const newLessonItem = (res.data as any) || {
+          id: String(Date.now()),
+          name: newLessonName.trim(),
+          shortCode: newLessonShortCode.trim() || '',
+          grade: newLessonGrade.trim() || '',
+          weeklyHours: parseInt(newLessonHours) || 2,
+        };
+        const updated = [...lessons, newLessonItem];
+        setLessons(updated);
+        if (selectedSchool) {
+          patchLocalSchoolSnapshot(selectedSchool.id, { lessons: updated });
+        }
       } else {
         Alert.alert('Hata', res.error || 'Ders eklenemedi.');
       }
@@ -2681,7 +4032,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             const res = await apiRequest(`schools/lessons/${lessonId}`, 'DELETE');
             if (res.success) {
               Alert.alert('Silindi', 'Ders silindi.');
-              if (selectedSchool) loadLessons(selectedSchool.id);
+              const updated = lessons.filter((l: any) => l.id !== lessonId);
+              setLessons(updated);
+              if (selectedSchool) {
+                patchLocalSchoolSnapshot(selectedSchool.id, { lessons: updated });
+              }
             } else {
               Alert.alert('Hata', res.error || 'Silinemedi.');
             }
@@ -2720,8 +4075,21 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setNewStudentParentName('');
         setNewStudentParentPhone('');
         setNewStudentPhone('');
-        loadStudents(selectedSchool.id);
-        loadClasses(selectedSchool.id);
+        const newStd = (res.data as any) || {
+          id: String(Date.now()),
+          studentNumber: newStudentNo.trim(),
+          fullName: newStudentName.trim(),
+          grade: newStudentGrade.trim(),
+          section: newStudentSection.trim().toUpperCase(),
+          parentName: newStudentParentName.trim(),
+          parentPhone: newStudentParentPhone.trim(),
+          studentPhone: newStudentPhone.trim(),
+        };
+        const updated = [...students, newStd];
+        setStudents(updated);
+        if (selectedSchool) {
+          patchLocalSchoolSnapshot(selectedSchool.id, { students: updated });
+        }
       } else {
         Alert.alert('Hata', res.error || 'Öğrenci eklenemedi.');
       }
@@ -2754,11 +4122,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       if (res.success) {
         Alert.alert('Başarılı', 'Öğrenci bilgileri doğrudan sunucuda güncellendi.');
         setEditStudentModalVisible(false);
-        setEditingStudent(null);
+        const updated = students.map((s: any) =>
+          s.id === editingStudent.id ? { ...s, ...editingStudent } : s
+        );
+        setStudents(updated);
         if (selectedSchool) {
-          loadStudents(selectedSchool.id);
-          loadClasses(selectedSchool.id);
+          patchLocalSchoolSnapshot(selectedSchool.id, { students: updated });
         }
+        setEditingStudent(null);
       } else {
         Alert.alert('Hata', res.error || 'Güncellenemedi.');
       }
@@ -2782,9 +4153,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             const res = await apiRequest(`sync/students/${studentId}`, 'DELETE');
             if (res.success) {
               Alert.alert('Silindi', 'Öğrenci sunucudan silindi.');
+              const updated = students.filter((s: any) => s.id !== studentId);
+              setStudents(updated);
               if (selectedSchool) {
-                loadStudents(selectedSchool.id);
-                loadClasses(selectedSchool.id);
+                patchLocalSchoolSnapshot(selectedSchool.id, { students: updated });
               }
             } else {
               Alert.alert('Hata', res.error || 'Silinemedi.');
@@ -2800,7 +4172,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const handleOpenCredentialsModal = (student: any) => {
     setSelectedStudentForCreds(student);
     setCustomResetPassInput('');
+    setCustomParentResetPassInput('');
     setShowCredPassword(false);
+    setShowParentCredPassword(false);
     setCredentialsModalVisible(true);
   };
 
@@ -2808,12 +4182,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     if (!selectedStudentForCreds || !selectedSchool) return;
 
     const studentName = selectedStudentForCreds.fullName;
-    const defaultPass = `aaaa_${selectedStudentForCreds.studentNumber}`;
+    const defaultPass = `ooo_${selectedStudentForCreds.studentNumber}`;
     const targetPass = customPass?.trim() || defaultPass;
 
     Alert.alert(
-      'Şifreyi Sıfırla',
-      `"${studentName}" öğrencisinin ve velisinin giriş şifresi:\n\n👉 "${targetPass}"\n\nolarak güncellenecektir. Onaylıyor musunuz?`,
+      'Öğrenci Şifresini Sıfırla',
+      `"${studentName}" öğrencisinin portal giriş şifresi:\n\n👉 "${targetPass}"\n\nolarak güncellenecektir. (Veli şifresi etkilenmez). Onaylıyor musunuz?`,
       [
         { text: 'Vazgeç', style: 'cancel' },
         {
@@ -2829,10 +4203,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
               if (res.success) {
                 Alert.alert(
-                  '✅ Şifre Sıfırlandı',
-                  `"${studentName}" için yeni giriş şifresi başarıyla kaydedildi:\n\n🔑 Şifre: ${res.data?.password || targetPass}\n\nBu şifre ile hem öğrenci hem veli portala giriş yapabilir.`
+                  '✅ Öğrenci Şifresi Güncellendi',
+                  `"${studentName}" için yeni öğrenci giriş şifresi:\n\n🔑 Şifre: ${res.data?.password || targetPass}\n\n(Veli şifresi korunmuştur).`
                 );
                 setCustomResetPassInput('');
+                // Local nesneyi güncelle
+                setSelectedStudentForCreds({
+                  ...selectedStudentForCreds,
+                  studentCustomPassword: res.data?.password || targetPass
+                });
               } else {
                 Alert.alert('Hata', res.error || 'Şifre sıfırlanamadı.');
               }
@@ -2847,6 +4226,54 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     );
   };
 
+  const handleResetParentPassword = async (customPass?: string) => {
+    if (!selectedStudentForCreds || !selectedSchool) return;
+
+    const studentName = selectedStudentForCreds.fullName;
+    const defaultPass = `vvv_${selectedStudentForCreds.studentNumber}`;
+    const targetPass = customPass?.trim() || defaultPass;
+
+    Alert.alert(
+      'Veli Şifresini Sıfırla',
+      `"${studentName}" öğrencisinin veli portalı giriş şifresi:\n\n👉 "${targetPass}"\n\nolarak güncellenecektir. (Öğrenci şifresi etkilenmez). Onaylıyor musunuz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Sıfırla',
+          onPress: async () => {
+            setResettingParentPassword(true);
+            try {
+              const res = await apiRequest<{ success: boolean; message: string; password: string }>(
+                `schools/${selectedSchool.id}/students/${selectedStudentForCreds.id}/reset-parent-password`,
+                'POST',
+                { newPassword: customPass?.trim() || undefined }
+              );
+
+              if (res.success) {
+                Alert.alert(
+                  '✅ Veli Şifresi Güncellendi',
+                  `"${studentName}" velisi için yeni giriş şifresi:\n\n🔑 Veli Şifresi: ${res.data?.password || targetPass}\n\n(Öğrencinin şifresi korunmuştur).`
+                );
+                setCustomParentResetPassInput('');
+                // Local nesneyi güncelle
+                setSelectedStudentForCreds({
+                  ...selectedStudentForCreds,
+                  parentCustomPassword: res.data?.password || targetPass
+                });
+              } else {
+                Alert.alert('Hata', res.error || 'Veli şifresi sıfırlanamadı.');
+              }
+            } catch (err: any) {
+              Alert.alert('Hata', err.message || 'İşlem başarısız.');
+            } finally {
+              setResettingParentPassword(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const getCredentialsMessage = (student: any) => {
     const sName = student.fullName;
     const sGrade = `${student.grade}-${student.section}`;
@@ -2854,9 +4281,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     const schoolCode = selectedSchool?.code || '';
     const schoolName = selectedSchool?.name || 'Okulumuz';
     const parentName = student.parentName || 'Sayın Velimiz';
-    const defPass = `aaaa_${sNo}`;
+    const stdPass = student.studentCustomPassword || `ooo_${sNo}`;
+    const parentPass = student.parentCustomPassword || `vvv_${sNo}`;
 
-    return `Sayın ${parentName},\n\n${schoolName} bünyesinde kayıtlı öğrencimiz ${sName} (${sGrade} - No: ${sNo}) için Öğrenci & Veli Portalı erişim bilgileriniz aşağıdadır:\n\n🏫 Okul Kodu: ${schoolCode}\n👤 Kullanıcı Adı: ${sNo} (veya kayıtlı veli cep telefonu)\n🔑 Giriş Şifresi: ${defPass}\n\nPortal üzerinden ödevleri, ders programını ve öğretmen değerlendirmelerini anlık olarak takip edebilirsiniz.`;
+    return `Sayın ${parentName},\n\n${schoolName} bünyesinde kayıtlı öğrencimiz ${sName} (${sGrade} - No: ${sNo}) için Öğrenci ve Veli Portalı erişim bilgileriniz:\n\n🏫 Okul Kodu: ${schoolCode}\n\n🎓 ÖĞRENCİ GİRİŞİ:\n• Kullanıcı Adı: ${sNo}\n• Şifre: ${stdPass}\n\n👨‍👩‍👧 VELİ GİRİŞİ:\n• Kullanıcı Adı: ${sNo} (veya veli cep telefonu)\n• Şifre: ${parentPass}\n\nPortal üzerinden ders programını, ödevleri, quizleri ve öğretmen görüşlerini anlık olarak takip edebilirsiniz.`;
   };
 
   const handleShareViaWhatsApp = async (student: any) => {
@@ -2914,22 +4342,331 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     Alert.alert('📋 Kopyalandı', 'Öğrenci ve veli portal giriş bilgilendirme metni panoya kopyalandı.');
   };
 
-  const handlePickAndUploadPhoto = async (student: any) => {
+  const handleOpenStudentDetail = async (student: any) => {
+    setSelectedAdminStudent(student);
+    setAdminStudentModalVisible(true);
+    setLoadingStudentDetail(true);
+    setStudentEvaluations([]);
+    setStudentAssignments([]);
+    setStudentLocalNotes([]);
+    setStudentLocalGrades(null);
+    setStudentLocalQuizzes([]);
+
+    try {
+      // 1. Sunucudan Öğrenci Akışı (Görüşler, Öğretmen değerlendirmeleri, Quizler)
+      try {
+        const feedRes = await apiRequest<any>(`sync/student-feed?studentId=${student.id}&role=ADMIN`);
+        if (feedRes.success && feedRes.data) {
+          if (Array.isArray(feedRes.data.evaluations)) {
+            setStudentEvaluations(feedRes.data.evaluations);
+          }
+          if (Array.isArray(feedRes.data.assignments)) {
+            setStudentAssignments(feedRes.data.assignments);
+          }
+        }
+      } catch (err) {
+        console.warn('[Admin Öğrenci Detay] Sunucu akışı alınamadı:', err);
+      }
+
+      // 2. Mobil / Yerel SQLite veritabanından veri çekme (varsa)
+      if (Platform.OS !== 'web') {
+        try {
+          const { getDB } = await import('../database/db');
+          const db = await getDB();
+
+          // Öğrenciyi SQLite'tan bulalım (öğrenci numarası veya id ile)
+          const stdRow = await db.getFirstAsync<any>(
+            'SELECT id FROM students WHERE student_number = ? OR id = ? LIMIT 1',
+            student.studentNumber || student.student_number || '',
+            student.id || 0
+          );
+
+          if (stdRow?.id) {
+            const localStdId = stdRow.id;
+
+            // a) Görüşler (student_notes)
+            const notes = await db.getAllAsync<any>(
+              `SELECT sn.id, sn.note, sn.note_date, sn.lesson_info, sn.created_at,
+                      c.name as class_name
+               FROM student_notes sn
+               LEFT JOIN classes c ON c.id = sn.class_id
+               WHERE sn.student_id = ?
+               ORDER BY sn.note_date DESC, sn.id DESC`,
+              localStdId
+            );
+            setStudentLocalNotes(notes || []);
+
+            // b) Sınav ve Performans Notları (student_grades)
+            const grades = await db.getFirstAsync<any>(
+              'SELECT * FROM student_grades WHERE student_id = ? ORDER BY term DESC LIMIT 1',
+              localStdId
+            );
+            setStudentLocalGrades(grades || null);
+
+            // c) Quizler ve Quiz Sonuçları (quizzes & quiz_scores)
+            const quizzes = await db.getAllAsync<any>(
+              `SELECT q.title, q.date, qs.score, c.name as class_name
+               FROM quiz_scores qs
+               JOIN quizzes q ON q.id = qs.quiz_id
+               LEFT JOIN classes c ON c.id = q.class_id
+               WHERE qs.student_id = ?
+               ORDER BY q.date DESC`,
+              localStdId
+            );
+            setStudentLocalQuizzes(quizzes || []);
+          }
+        } catch (sqliteErr) {
+          console.warn('[Admin Öğrenci Detay] SQLite verisi sorgulanamadı:', sqliteErr);
+        }
+      }
+    } catch (globalErr) {
+      console.warn('[Admin Öğrenci Detay] Genel hata:', globalErr);
+    } finally {
+      setLoadingStudentDetail(false);
+    }
+  };
+
+  const handleSendMessageToParent = (student: any) => {
+    if (!student?.parentPhone) {
+      Alert.alert(
+        'Veli Telefonu Eksik',
+        'Bu öğrencinin kayıtlı bir veli cep telefonu bulunmuyor. Düzenle butonunu kullanarak veli telefonu ekleyebilirsiniz.'
+      );
+      return;
+    }
+
+    let cleanPhone = student.parentPhone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '9' + cleanPhone;
+    } else if (cleanPhone.length === 10) {
+      cleanPhone = '90' + cleanPhone;
+    }
+
     Alert.alert(
-      'Öğrenci Fotoğrafı',
-      `${student.fullName} için fotoğraf kaynağını seçin:`,
+      '👨‍👩‍👧 Veli İletişimi',
+      `${student.parentName || student.fullName + ' Velisi'} (${student.parentPhone}) için işlem seçiniz:`,
       [
         { text: 'Vazgeç', style: 'cancel' },
         {
-          text: '📷 Kamera ile Çek',
-          onPress: () => processPhotoUpload(student, 'camera'),
+          text: '💬 WhatsApp ile Mesaj At',
+          onPress: async () => {
+            const url = `whatsapp://send?phone=${cleanPhone}`;
+            try {
+              const supported = await Linking.canOpenURL(url);
+              if (supported) {
+                await Linking.openURL(url);
+              } else {
+                await Linking.openURL(`https://wa.me/${cleanPhone}`);
+              }
+            } catch {
+              await Linking.openURL(`https://wa.me/${cleanPhone}`);
+            }
+          },
         },
         {
-          text: '🖼️ Galeriden Seç',
-          onPress: () => processPhotoUpload(student, 'gallery'),
+          text: '✉️ SMS Gönder',
+          onPress: async () => {
+            const separator = Platform.OS === 'ios' ? '&' : '?';
+            const url = `sms:${cleanPhone}`;
+            try {
+              await Linking.openURL(url);
+            } catch (e: any) {
+              Alert.alert('Hata', 'SMS uygulaması açılamadı: ' + e.message);
+            }
+          },
+        },
+        {
+          text: '📞 Telefonla Ara',
+          onPress: () => {
+            Linking.openURL(`tel:${cleanPhone}`).catch(() => {
+              Alert.alert('Hata', 'Arama başlatılamadı.');
+            });
+          },
         },
       ]
     );
+  };
+
+  const handleSendMessageToStudent = (student: any) => {
+    if (!student?.studentPhone) {
+      Alert.alert(
+        'Öğrenci Telefonu Eksik',
+        'Bu öğrencinin kayıtlı bir cep telefonu bulunmuyor. Düzenle butonunu kullanarak öğrenci telefonu ekleyebilirsiniz.'
+      );
+      return;
+    }
+
+    let cleanPhone = student.studentPhone.replace(/[^0-9]/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '9' + cleanPhone;
+    } else if (cleanPhone.length === 10) {
+      cleanPhone = '90' + cleanPhone;
+    }
+
+    Alert.alert(
+      '🎓 Öğrenci İletişimi',
+      `${student.fullName} (${student.studentPhone}) için işlem seçiniz:`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: '💬 WhatsApp ile Mesaj At',
+          onPress: async () => {
+            const url = `whatsapp://send?phone=${cleanPhone}`;
+            try {
+              const supported = await Linking.canOpenURL(url);
+              if (supported) {
+                await Linking.openURL(url);
+              } else {
+                await Linking.openURL(`https://wa.me/${cleanPhone}`);
+              }
+            } catch {
+              await Linking.openURL(`https://wa.me/${cleanPhone}`);
+            }
+          },
+        },
+        {
+          text: '✉️ SMS Gönder',
+          onPress: async () => {
+            const url = `sms:${cleanPhone}`;
+            try {
+              await Linking.openURL(url);
+            } catch (e: any) {
+              Alert.alert('Hata', 'SMS uygulaması açılamadı: ' + e.message);
+            }
+          },
+        },
+        {
+          text: '📞 Telefonla Ara',
+          onPress: () => {
+            Linking.openURL(`tel:${cleanPhone}`).catch(() => {
+              Alert.alert('Hata', 'Arama başlatılamadı.');
+            });
+          },
+        },
+      ]
+    );
+  };
+
+  const handlePickAndUploadPhoto = async (student: any) => {
+    const options: any[] = [
+      { text: 'Vazgeç', style: 'cancel' },
+      {
+        text: '📷 Kamera ile Çek',
+        onPress: () => processPhotoUpload(student, 'camera'),
+      },
+      {
+        text: '🖼️ Galeriden Seç',
+        onPress: () => processPhotoUpload(student, 'gallery'),
+      },
+    ];
+
+    options.push({
+      text: cachedPdfPhotos.length > 0 
+        ? `📄 PDF Albümünden Seç (${cachedPdfPhotos.length} Fotoğraf)` 
+        : '📄 PDF Dosyasından Seç',
+      onPress: () => handleOpenPdfPickerForStudent(student),
+    });
+
+    Alert.alert(
+      'Öğrenci Fotoğrafı',
+      `${student.fullName} için fotoğraf kaynağını seçin:`,
+      options
+    );
+  };
+
+  const handleOpenPdfPickerForStudent = async (student: any) => {
+    setSingleStudentPdfTarget(student);
+    setSingleStudentPdfSearch('');
+
+    if (cachedPdfPhotos.length > 0) {
+      setSingleStudentPdfModalVisible(true);
+    } else {
+      Alert.alert(
+        'PDF Belgesi Seçin',
+        'Öğrenci fotoğraflarını içeren e-Okul veya sınıf listesi PDF belgesini seçiniz.',
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: 'PDF Seç & Tara',
+            onPress: async () => {
+              try {
+                const pick = await DocumentPicker.getDocumentAsync({ type: ['application/pdf'], copyToCacheDirectory: true });
+                if (pick.canceled || !pick.assets?.length) return;
+                const asset = pick.assets[0];
+                setCachedPdfAsset(asset);
+                const res = await extractPhotosFromPdf(students, asset);
+                if (res.success && res.extractedPhotos.length > 0) {
+                  setCachedPdfPhotos(res.extractedPhotos);
+                  setSingleStudentPdfModalVisible(true);
+                } else {
+                  Alert.alert('Fotoğraf Bulunamadı', 'Seçilen PDF belgesinde vesikalık fotoğraf tespit edilemedi.');
+                }
+              } catch (e: any) {
+                Alert.alert('Hata', e.message || 'PDF okunamadı.');
+              }
+            },
+          },
+        ]
+      );
+    }
+  };
+
+  const handlePickNewPdfForSingleStudent = async () => {
+    try {
+      const pick = await DocumentPicker.getDocumentAsync({ type: ['application/pdf'], copyToCacheDirectory: true });
+      if (pick.canceled || !pick.assets?.length) return;
+      const asset = pick.assets[0];
+      setCachedPdfAsset(asset);
+      const res = await extractPhotosFromPdf(students, asset);
+      if (res.success && res.extractedPhotos.length > 0) {
+        setCachedPdfPhotos(res.extractedPhotos);
+        Alert.alert('PDF Güncellendi', `Yeni PDF'ten ${res.extractedPhotos.length} fotoğraf albüme yüklendi.`);
+      } else {
+        Alert.alert('Fotoğraf Bulunamadı', 'Seçilen PDF belgesinde vesikalık fotoğraf tespit edilemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message || 'PDF okunamadı.');
+    }
+  };
+
+  const handleSelectPdfPhotoForStudent = async (photo: PdfExtractedStudentPhoto) => {
+    if (!singleStudentPdfTarget || !selectedSchool) return;
+    setSingleStudentPdfUploading(true);
+    try {
+      const manip = await manipulateAsync(
+        photo.tempUri,
+        [{ resize: { width: 300, height: 300 } }],
+        { compress: 0.7, format: SaveFormat.JPEG, base64: true }
+      );
+
+      if (!manip.base64) {
+        Alert.alert('Hata', 'Görsel işlenemedi.');
+        return;
+      }
+
+      const uploadRes = await apiRequest<any>('uploads/student-photo-base64', 'POST', {
+        schoolCode: selectedSchool.code,
+        studentNumber: singleStudentPdfTarget.studentNumber,
+        base64Data: manip.base64,
+      });
+
+      if (uploadRes.success && uploadRes.data?.photoPath) {
+        await apiRequest(`sync/students/${singleStudentPdfTarget.id}/photo`, 'PUT', {
+          photoPath: uploadRes.data.photoPath,
+        });
+
+        Alert.alert('Başarılı 📸', `${singleStudentPdfTarget.fullName} öğrencisine fotoğraf PDF albümünden başarıyla atandı.`);
+        setSingleStudentPdfModalVisible(false);
+        setSingleStudentPdfTarget(null);
+        if (selectedSchool) loadStudents(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', uploadRes.error || 'Fotoğraf sunucuya kaydedilemedi.');
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message || 'Fotoğraf yüklenemedi.');
+    } finally {
+      setSingleStudentPdfUploading(false);
+    }
   };
 
   const processPhotoUpload = async (student: any, source: 'camera' | 'gallery') => {
@@ -3653,11 +5390,15 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     try {
       const res = await apiRequest('auth/update-credentials', 'POST', {
         newUsername: adminNewUsername.trim() || undefined,
+        oldPassword: adminOldPassword,
         currentPassword: adminOldPassword,
         newPassword: adminNewPassword || undefined,
       });
       if (res.success) {
         Alert.alert('Başarılı 🎉', 'Giriş bilgileriniz güncellendi.');
+        setAdminOldPassword('');
+        setAdminNewPassword('');
+        setAdminConfirmPassword('');
         setAdminCredentialsModalVisible(false);
       } else {
         Alert.alert('Hata', res.error || 'Bilgiler güncellenemedi.');
@@ -3736,7 +5477,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               const res = await apiRequest(`sync/schedules/clear?schoolId=${selectedSchool.id}&scope=all`, 'DELETE');
               if (res.success) {
                 Alert.alert('Temizlendi 🎉', res.data?.message || 'Tüm okul ders programı başarıyla silindi.');
-                await Promise.all([loadAllSchedules(), loadScheduleStats()]);
+                setAllSchoolSchedules([]);
+                await patchLocalSchoolSnapshot(selectedSchool.id, { schedules: [] });
+                loadScheduleStats();
               } else {
                 Alert.alert('Hata', res.error || 'Ders programı silinemedi.');
               }
@@ -3777,7 +5520,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               );
               if (res.success) {
                 Alert.alert('Temizlendi 🎉', res.data?.message || `${targetClass} şubesi temizlendi.`);
-                await Promise.all([loadAllSchedules(), loadScheduleStats()]);
+                const updated = allSchoolSchedules.filter(s => s.grade !== grade || s.section !== section);
+                setAllSchoolSchedules(updated);
+                await patchLocalSchoolSnapshot(selectedSchool.id, { schedules: updated });
+                loadScheduleStats();
               } else {
                 Alert.alert('Hata', res.error || 'Şube programı silinemedi.');
               }
@@ -3817,7 +5563,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               );
               if (res.success) {
                 Alert.alert('Temizlendi 🎉', res.data?.message || `${targetTeacher} programı temizlendi.`);
-                await Promise.all([loadAllSchedules(), loadScheduleStats()]);
+                const updated = allSchoolSchedules.filter(s => s.teacherName !== targetTeacher);
+                setAllSchoolSchedules(updated);
+                await patchLocalSchoolSnapshot(selectedSchool.id, { schedules: updated });
+                loadScheduleStats();
               } else {
                 Alert.alert('Hata', res.error || 'Öğretmen programı silinemedi.');
               }
@@ -3933,6 +5682,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       if (fileRes.canceled || !fileRes.assets?.[0]) return;
 
       const asset = fileRes.assets[0];
+      setPlanSheetPickerAsset(asset);
+      setPlanSheetPickerLesson(lesson);
+
       const fileName = (asset.name || '').toLowerCase();
 
       let targetSheet: string | undefined = undefined;
@@ -3942,8 +5694,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         if (sheetNames.length > 1) {
           // Birden fazla sheet varsa şık ve sınırsız seçim modalını aç
           setPlanSheetPickerSheets(sheetNames);
-          setPlanSheetPickerAsset(asset);
-          setPlanSheetPickerLesson(lesson);
           setPlanSheetPickerVisible(true);
           return;
         } else if (sheetNames.length === 1) {
@@ -3965,12 +5715,29 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  // Yıllık Plan Eşleştirme modalı içindeyken çalışma sayfaları (sheet) arası doğrudan geçiş
+  const handleSwitchPlanSheet = async (newSheet: string) => {
+    if (!planSheetPickerAsset) return;
+    setAnalyzingPlanFile(true);
+    try {
+      const analysis = await analyzeUploadedDocument(planSheetPickerAsset as any, newSheet);
+      setDocAnalysis(analysis);
+      setSelectedMapping(analysis.suggestedMapping);
+    } catch (e: any) {
+      Alert.alert('Hata', 'Seçilen çalışma sayfası okunamadı: ' + e.message);
+    } finally {
+      setAnalyzingPlanFile(false);
+    }
+  };
+
   // Sheet seçim modalından bir sayfa seçilince tetiklenir
   const handleProceedWithPlanSheet = async (selectedSheet: string) => {
     setPlanSheetPickerVisible(false);
-    if (!planSheetPickerAsset || !planSheetPickerLesson) return;
+    if (!planSheetPickerAsset) return;
 
-    setSelectedLessonForPlan(planSheetPickerLesson);
+    if (planSheetPickerLesson) {
+      setSelectedLessonForPlan(planSheetPickerLesson);
+    }
     setAnalyzingPlanFile(true);
     setYearlyPlanModalVisible(true);
 
@@ -4111,12 +5878,138 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
-  // Öğretmen Haftalık Ders Programını Görme
+  // Sınıf Rehberliği Değiştirme / Kaldırma İşlemi
+  const handleSaveTeacherCounselorClass = async (newClass: string) => {
+    if (!selectedTeacherForSchedule || !selectedSchool) return;
+    setSavingCounselorClass(true);
+    try {
+      const counselorValue = newClass ? newClass.trim() : 'NONE';
+      const updatedTeacher = {
+        ...selectedTeacherForSchedule,
+        counselorClass: counselorValue,
+      };
+      setSelectedTeacherForSchedule(updatedTeacher);
+      setEditingCounselorClass(newClass);
+
+      // 1. Öğretmenler listesini güncelle
+      const updatedTeachers = teachers.map((t: any) =>
+        t.id === selectedTeacherForSchedule.id ? updatedTeacher : t
+      );
+      setTeachers(updatedTeachers);
+
+      // 2. Yerel snapshot'a kaydet
+      await patchLocalSchoolSnapshot(selectedSchool.id, { teachers: updatedTeachers });
+
+      // 3. Sunucuya kaydet
+      await apiRequest(`schools/teachers/${selectedTeacherForSchedule.id}/details`, 'PUT', {
+        ...selectedTeacherForSchedule,
+        counselorClass: counselorValue,
+      });
+
+      Alert.alert('Başarılı', `${selectedTeacherForSchedule.fullName} için sınıf rehberliği "${newClass || 'Kaldırıldı'}" olarak güncellendi.`);
+    } catch (err: any) {
+      Alert.alert('Hata', 'Rehberlik bilgisi kaydedilemedi: ' + (err?.message || err));
+    } finally {
+      setSavingCounselorClass(false);
+    }
+  };
+
+  // Nöbetçi Öğretmen Görevlendirme Çizelgesini Yazdırma / PDF Çıktısı Alma
+  const handlePrintDutySchedule = () => {
+    if (!absentTeachers || absentTeachers.length === 0) {
+      Alert.alert('Uyarı', 'Lütfen önce listeden en az bir gelmeyen öğretmen seçiniz.');
+      return;
+    }
+
+    const absentDaySchedules = (allSchoolSchedules || [])
+      .filter(s => {
+        const sDay = Number(s.dayOfWeek);
+        if (sDay !== dutyAssignDay) return false;
+        return absentTeachers.some(absentName => isSameTeacher(absentName, s.teacherName));
+      })
+      .sort((a, b) => Number(a.lessonHour || 0) - Number(b.lessonHour || 0));
+
+    if (absentDaySchedules.length === 0) {
+      Alert.alert('Bilgi', 'Seçilen öğretmenlerin seçilen günde dersi bulunmamaktadır.');
+      return;
+    }
+
+    const dayNames = ['', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'];
+    const dayName = dayNames[dutyAssignDay] || 'Pazartesi';
+
+    const slots: DutyPrintSlot[] = absentDaySchedules.map((slotItem, sIdx) => {
+      const lHour = Number(slotItem.lessonHour || (sIdx + 1));
+      const slotKey = `${dutyAssignDay}_${lHour}_${normalizeTeacherName(slotItem.teacherName)}`;
+      const allAvailableDuty = getAvailableDutyTeachersForHour(
+        dutyAssignDay,
+        lHour,
+        dutiesList,
+        allSchoolSchedules,
+        absentTeachers
+      );
+      const hiddenList = hiddenDutyTeachersBySlot[slotKey] || [];
+      const visibleDutyTeachers = allAvailableDuty.filter(d => !hiddenList.includes(d.teacherName));
+
+      const classNameText = slotItem.className || (slotItem.grade && slotItem.section ? `${slotItem.grade}-${slotItem.section}` : slotItem.grade || slotItem.section || '—');
+
+      return {
+        lessonHour: lHour,
+        className: classNameText,
+        lessonName: slotItem.lessonName || 'Ders',
+        absentTeacherName: slotItem.teacherName,
+        assignedTeachers: visibleDutyTeachers.map(d => ({
+          teacherName: d.teacherName,
+          dutyPlace: d.dutyPlace || 'Nöbet Alanı',
+        })),
+      };
+    });
+
+    const printed = printDutyAssignments({
+      schoolName: selectedSchool?.name || 'Okul Müdürlüğü',
+      dayName,
+      slots,
+    });
+
+    if (!printed) {
+      Alert.alert('Uyarı', 'Yazdırma penceresi açılamadı. Lütfen tarayıcınızın açılır pencere (popup) engelleyicisini kontrol edip tekrar deneyiniz.');
+    }
+  };
+
+  // Öğretmen Haftalık Ders Programını Görme (100% Yerel / 0ms)
   const handleOpenTeacherSchedule = async (teacher: any) => {
-    if (!selectedSchool) return;
+    if (!selectedSchool || !teacher) return;
     setSelectedTeacherForSchedule(teacher);
-    setLoadingTeacherSchedule(true);
+    const initialCounselor = getTeacherCounselorClass(teacher, allSchoolSchedules);
+    setEditingCounselorClass(initialCounselor || '');
     setTeacherScheduleModalVisible(true);
+
+    // 1. FAST LOCAL: Zaten yerelde okulun tüm programı (allSchoolSchedules) varsa
+    if (allSchoolSchedules && allSchoolSchedules.length > 0) {
+      const localMatched = allSchoolSchedules.filter(s =>
+        normalizeTeacherMatch(s.teacherName, teacher.fullName)
+      );
+      // Öğretmenin 0 dersi de olsa yerel veritabanı/program tamdır, doğrudan 0ms ile göster (sunucuya gitme!)
+      setTeacherScheduleItems(localMatched);
+      setLoadingTeacherSchedule(false);
+      return;
+    }
+
+    // 2. Eğer allSchoolSchedules henüz yüklenmemişse cihazdaki yerel snapshot'tan al (0ms)
+    try {
+      const cached = await loadSchoolSnapshotFromStorage(selectedSchool.id);
+      if (cached?.schedules && cached.schedules.length > 0) {
+        setAllSchoolSchedules(cached.schedules);
+        const localMatched = cached.schedules.filter(s =>
+          normalizeTeacherMatch(s.teacherName, teacher.fullName)
+        );
+        setTeacherScheduleItems(localMatched);
+        setLoadingTeacherSchedule(false);
+        return;
+      }
+    } catch {}
+
+    // 3. Sadece ve sadece cihazda hiçbir yerel veri yoksa sunucuya git
+    setLoadingTeacherSchedule(true);
     try {
       const res = await apiRequest<any[]>(`sync/schedules?schoolId=${selectedSchool.id}&teacherName=${encodeURIComponent(teacher.fullName)}`);
       if (res.success && res.data) {
@@ -4134,9 +6027,101 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   // Öğrenci Excel Şablonu İndirme
   const handleDownloadStudentTemplate = async () => {
     try {
-      await generateStudentTemplateExcel();
+      let currentStudents = students;
+      if ((!currentStudents || currentStudents.length === 0) && selectedSchool?.id) {
+        const res = await apiRequest<any[]>(`sync/students?schoolId=${selectedSchool.id}`);
+        if (res.success && res.data) {
+          currentStudents = res.data;
+          setStudents(currentStudents);
+        }
+      }
+      await generateStudentTemplateExcel(currentStudents, selectedSchool?.name);
     } catch (e: any) {
       Alert.alert('Hata', 'Şablon oluşturulamadı: ' + e.message);
+    }
+  };
+
+  // Öğretmen Excel Şablonu İndirme (Tüm mevcut öğretmenleri içerir)
+  const handleDownloadTeacherTemplate = async () => {
+    try {
+      let currentTeachers = teachers;
+      if ((!currentTeachers || currentTeachers.length === 0) && selectedSchool?.id) {
+        const res = await apiRequest<any[]>(`schools/${selectedSchool.id}/teachers`);
+        if (res.success && res.data) {
+          currentTeachers = res.data;
+          setTeachers(currentTeachers);
+        }
+      }
+      await generateTeacherTemplateExcel(currentTeachers, selectedSchool?.name);
+    } catch (e: any) {
+      Alert.alert('Hata', 'Öğretmen şablonu oluşturulamadı: ' + e.message);
+    }
+  };
+
+  // Öğretmen Excel Dosyası Seçme ve Ayrıştırma
+  const handlePickAndParseTeacherExcel = async () => {
+    if (!selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçin.');
+      return;
+    }
+
+    try {
+      const pickerResult = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+
+      if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
+        return;
+      }
+
+      const file = pickerResult.assets[0];
+      setTeacherExcelModalVisible(true);
+      setTeacherExcelParsing(true);
+      setParsedExcelTeachers([]);
+
+      const result = await parseTeachersFromExcel(file.uri);
+      setTeacherExcelParsing(false);
+
+      if (result.success && result.teachers.length > 0) {
+        setParsedExcelTeachers(result.teachers);
+      } else {
+        Alert.alert('Excel Ayrıştırma Hatası', result.error || 'Excel dosyasında öğretmen verisi bulunamadı.');
+        setTeacherExcelModalVisible(false);
+      }
+    } catch (e: any) {
+      setTeacherExcelParsing(false);
+      Alert.alert('Hata', e.message || 'Excel dosyası okunamadı.');
+      setTeacherExcelModalVisible(false);
+    }
+  };
+
+  // Ayrıştırılan Öğretmenleri Onaylayıp Sunucuya Kaydetme (Kullanıcı adı ve şifre korunur!)
+  const handleConfirmAndSaveExcelTeachers = async () => {
+    if (!selectedSchool || parsedExcelTeachers.length === 0) return;
+
+    setTeacherExcelSaving(true);
+    try {
+      const saveRes = await saveParsedTeachersToServer(selectedSchool.id, parsedExcelTeachers);
+      if (saveRes.success) {
+        Alert.alert(
+          'Başarılı 🎉',
+          `${saveRes.message}\n\nMevcut öğretmenlerin şifreleri ve kullanıcı adları güvenle korunmuştur.`
+        );
+        setTeacherExcelModalVisible(false);
+        setParsedExcelTeachers([]);
+        loadSchoolTeachers(selectedSchool.id);
+      } else {
+        Alert.alert('Hata', saveRes.message);
+      }
+    } catch (e: any) {
+      Alert.alert('Hata', e.message);
+    } finally {
+      setTeacherExcelSaving(false);
     }
   };
 
@@ -4336,39 +6321,49 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     );
   };
 
-  // Filtrelenmiş ve Sıralanmış Öğretmen Listesi
-  const filteredTeachers = teachers
-    .filter((t) => {
-      if (teacherLoginFilter === 'logged_in') return !!t.lastLoginAt;
-      if (teacherLoginFilter === 'not_logged_in') return !t.lastLoginAt;
-      return true;
-    })
-    .filter((t) => {
-      if (!teacherSearchQuery.trim()) return true;
-      const q = teacherSearchQuery.trim().toLowerCase();
-      const matchName = (t.fullName || '').toLowerCase().includes(q);
-      const matchUser = (t.username || '').toLowerCase().includes(q);
-      const matchBranch = (t.branch || '').toLowerCase().includes(q);
-      return matchName || matchUser || matchBranch;
-    })
-    .sort((a, b) => {
-      const nameA = (a.fullName || a.username || '').trim();
-      const nameB = (b.fullName || b.username || '').trim();
-      if (teacherSortOrder === 'desc') {
-        return nameB.localeCompare(nameA, 'tr');
-      }
-      return nameA.localeCompare(nameB, 'tr');
+  // Filtrelenmiş ve Sıralanmış Öğretmen Listesi (Memoized)
+  const filteredTeachers = useMemo(() => {
+    return teachers
+      .filter((t) => {
+        if (teacherLoginFilter === 'logged_in') return !!t.lastLoginAt;
+        if (teacherLoginFilter === 'not_logged_in') return !t.lastLoginAt;
+        return true;
+      })
+      .filter((t) => {
+        if (!teacherSearchQuery.trim()) return true;
+        const q = teacherSearchQuery.trim().toLowerCase();
+        const matchName = (t.fullName || '').toLowerCase().includes(q);
+        const matchUser = (t.username || '').toLowerCase().includes(q);
+        const matchBranch = (t.branch || '').toLowerCase().includes(q);
+        return matchName || matchUser || matchBranch;
+      })
+      .sort((a, b) => {
+        const nameA = (a.fullName || a.username || '').trim();
+        const nameB = (b.fullName || b.username || '').trim();
+        if (teacherSortOrder === 'desc') {
+          return nameB.localeCompare(nameA, 'tr');
+        }
+        return nameA.localeCompare(nameB, 'tr');
+      });
+  }, [teachers, teacherLoginFilter, teacherSearchQuery, teacherSortOrder]);
+
+  // Filtrelenmiş Öğrenci Listesi (Memoized)
+  const filteredStudents = useMemo(() => {
+    const q = studentSearch.toLowerCase();
+    return students.filter(s => {
+      const matchesSearch =
+        s.fullName.toLowerCase().includes(q) ||
+        s.studentNumber.includes(studentSearch);
+
+      if (selectedClassFilter === 'all') return matchesSearch;
+      return (
+        matchesSearch &&
+        (`${s.grade}-${s.section}` === selectedClassFilter ||
+          s.className === selectedClassFilter ||
+          (s.grade && s.section && `${s.grade}/${s.section}` === selectedClassFilter))
+      );
     });
-
-  // Filtrelenmiş Öğrenci Listesi
-  const filteredStudents = students.filter(s => {
-    const matchesSearch =
-      s.fullName.toLowerCase().includes(studentSearch.toLowerCase()) ||
-      s.studentNumber.includes(studentSearch);
-
-    if (selectedClassFilter === 'all') return matchesSearch;
-    return matchesSearch && `${s.grade}-${s.section}` === selectedClassFilter;
-  });
+  }, [students, studentSearch, selectedClassFilter]);
 
   // İşlem Loglarını Sunucudan Çek (Filtrelerle)
   const loadAuditLogs = async (schoolId?: string, overrideFilters?: any) => {
@@ -4492,34 +6487,39 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Üst Bar */}
-      <View style={styles.header}>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>
-            {isStaff ? '🛡️ Okul İdarecisi Paneli' : 'Okul Yönetim Paneli'}
+      {/* 📌 Sabit Minimal Üst Çubuk (Sadece Sistemden Çıkış, Hamburger Menü ve Yetkiler Butonları) */}
+      <View style={styles.fixedTopBar}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+          <View style={styles.fixedBrandDot} />
+          <Text style={styles.fixedBrandText} numberOfLines={1}>
+            {selectedSchool?.name || 'Okul İdaresi'}
           </Text>
-          <TouchableOpacity
-            style={styles.headerSchoolDropdownBtn}
-            onPress={() => setSchoolSelectModalVisible(true)}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="business" size={13} color="#4F46E5" />
-            <Text style={styles.headerSchoolDropdownText} numberOfLines={1}>
-              {selectedSchool?.name || 'Okul Seçiniz'}
-            </Text>
-            <Ionicons name="chevron-down" size={13} color="#4F46E5" />
-          </TouchableOpacity>
         </View>
 
-        {/* Sağ Butonlar: Çıkış ve Menü */}
+        {/* Sağ Butonlar: Yetkiler, Çıkış ve Menü */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {!isStaff && (
+            <TouchableOpacity
+              onPress={() => setPermissionsModalVisible(true)}
+              style={[
+                styles.hamburgerBtn,
+                { backgroundColor: '#EDE9FE', borderColor: '#C4B5FD', paddingHorizontal: 9, width: 'auto', flexDirection: 'row', gap: 4 }
+              ]}
+              activeOpacity={0.7}
+              accessibilityLabel="Yetki ve Erişim Yönetimi"
+            >
+              <Ionicons name="shield-checkmark" size={15} color="#7C3AED" />
+              <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#6D28D9' }}>Yetkiler</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             onPress={handleLogout}
             style={[styles.hamburgerBtn, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}
             activeOpacity={0.7}
             accessibilityLabel="Oturumu Kapat / Rol Değiştir"
           >
-            <Ionicons name="log-out-outline" size={20} color="#DC2626" />
+            <Ionicons name="log-out-outline" size={19} color="#DC2626" />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -4528,7 +6528,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             activeOpacity={0.7}
             accessibilityLabel="Menü"
           >
-            <Ionicons name="menu" size={24} color="#4F46E5" />
+            <Ionicons name="menu" size={22} color="#4F46E5" />
           </TouchableOpacity>
         </View>
       </View>
@@ -4537,114 +6537,141 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSchools(); }} />}
       >
+        {/* 📜 Sayfa İle Birlikte Kayan İdareci Başlık & Okul Dropdown Paneli */}
+        <View style={styles.scrollableHeaderCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, flex: 1 }}>
+            <Text style={styles.headerTitle}>
+              {isStaff ? '🛡️ Okul İdarecisi Paneli' : 'Okul Yönetim Paneli'}
+            </Text>
+            {adminDisplayName ? (
+              <View style={styles.headerAdminPill}>
+                <Ionicons name="person-circle" size={13} color="#4F46E5" />
+                <Text style={styles.headerAdminPillText} numberOfLines={1}>
+                  {adminDisplayName}
+                </Text>
+              </View>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.headerSchoolDropdownBtn, { marginTop: 0 }]}
+              onPress={() => setSchoolSelectModalVisible(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="business" size={13} color="#4F46E5" />
+              <Text style={styles.headerSchoolDropdownText} numberOfLines={1}>
+                {selectedSchool?.name || 'Okul Seçiniz'}
+              </Text>
+              <Ionicons name="chevron-down" size={13} color="#4F46E5" />
+            </TouchableOpacity>
+          </View>
+        </View>
         {/* 🏫 BİRLEŞTİRİLMİŞ OKUL VE ÖĞRETMEN BAĞLANTI KODU KARTI */}
         <View style={styles.combinedSchoolCard}>
-          {!isStaff && (
-            <>
-              <View style={styles.schoolSelectorHeader}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                  <Ionicons name="business" size={13} color="#4F46E5" />
-                  <Text style={styles.schoolSelectorLabel}>
-                    YÖNETTİĞİNİZ OKULLAR {schools.length > 0 ? `(${schools.length})` : ''}
-                  </Text>
-                </View>
+          <View style={styles.schoolSelectorHeader}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+              <Ionicons name="business" size={13} color="#4F46E5" />
+              <Text style={styles.schoolSelectorLabel}>
+                {isStaff ? 'YETKİLİ OLDUĞUNUZ OKULLAR' : 'YÖNETTİĞİNİZ OKULLAR'} {schools.length > 0 ? `(${schools.length})` : ''}
+              </Text>
+            </View>
 
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  {selectedSchool && (
-                    <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {!isStaff && selectedSchool && (
+                <>
+                  <TouchableOpacity
+                    onPress={() => handleOpenEditSchool(selectedSchool)}
+                    style={styles.editSchoolSmallBtn}
+                    activeOpacity={0.7}
+                    accessibilityLabel="Seçili Okulu Düzenle"
+                  >
+                    <Ionicons name="pencil" size={12} color="#4F46E5" />
+                    <Text style={styles.editSchoolSmallBtnText}>Düzenle</Text>
+                  </TouchableOpacity>
+                  {schools.length > 1 && (
+                    <TouchableOpacity
+                      onPress={() => handleDeleteSchool(selectedSchool)}
+                      style={styles.deleteSchoolSmallBtn}
+                      activeOpacity={0.7}
+                      accessibilityLabel="Seçili Okulu Sil"
+                    >
+                      <Ionicons name="trash-outline" size={12} color="#DC2626" />
+                      <Text style={styles.deleteSchoolSmallBtnText}>Sil</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+              {!isStaff && (
+                <TouchableOpacity
+                  onPress={() => setCreateModalVisible(true)}
+                  style={styles.addSchoolSmallBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="add-circle" size={12} color="#166534" />
+                  <Text style={styles.addSchoolSmallBtnText}>Yeni Okul</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
+            {schools.map(s => {
+              const isSelected = selectedSchool?.id === s.id;
+              return (
+                <TouchableOpacity
+                  key={s.id}
+                  onPress={() => handleSelectSchool(s)}
+                  style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name={isSelected ? "checkmark-circle" : "business-outline"} size={13} color={isSelected ? "#fff" : "#4F46E5"} />
+                  <Text style={[styles.schoolChipText, isSelected && styles.schoolChipTextSelected]}>
+                    {s.name}
+                  </Text>
+                  <View style={[styles.schoolCodeTag, isSelected && styles.schoolCodeTagSelected]}>
+                    <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
+                      {s.code}
+                    </Text>
+                  </View>
+                  {!isStaff && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 2 }}>
                       <TouchableOpacity
-                        onPress={() => handleOpenEditSchool(selectedSchool)}
-                        style={styles.editSchoolSmallBtn}
-                        activeOpacity={0.7}
-                        accessibilityLabel="Seçili Okulu Düzenle"
+                        onPress={(e) => {
+                          e.stopPropagation?.();
+                          handleOpenEditSchool(s);
+                        }}
+                        style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#E2E8F0' }}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        accessibilityLabel={`${s.name} Düzenle`}
                       >
-                        <Ionicons name="pencil" size={12} color="#4F46E5" />
-                        <Text style={styles.editSchoolSmallBtnText}>Düzenle</Text>
+                        <Ionicons name="pencil" size={11} color={isSelected ? '#fff' : '#4F46E5'} />
                       </TouchableOpacity>
                       {schools.length > 1 && (
                         <TouchableOpacity
-                          onPress={() => handleDeleteSchool(selectedSchool)}
-                          style={styles.deleteSchoolSmallBtn}
-                          activeOpacity={0.7}
-                          accessibilityLabel="Seçili Okulu Sil"
-                        >
-                          <Ionicons name="trash-outline" size={12} color="#DC2626" />
-                          <Text style={styles.deleteSchoolSmallBtnText}>Sil</Text>
-                        </TouchableOpacity>
-                      )}
-                    </>
-                  )}
-                  <TouchableOpacity
-                    onPress={() => setCreateModalVisible(true)}
-                    style={styles.addSchoolSmallBtn}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="add-circle" size={12} color="#166534" />
-                    <Text style={styles.addSchoolSmallBtnText}>Yeni Okul</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
-                {schools.map(s => {
-                  const isSelected = selectedSchool?.id === s.id;
-                  return (
-                    <TouchableOpacity
-                      key={s.id}
-                      onPress={() => handleSelectSchool(s)}
-                      style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name={isSelected ? "checkmark-circle" : "business-outline"} size={13} color={isSelected ? "#fff" : "#4F46E5"} />
-                      <Text style={[styles.schoolChipText, isSelected && styles.schoolChipTextSelected]}>
-                        {s.name}
-                      </Text>
-                      <View style={[styles.schoolCodeTag, isSelected && styles.schoolCodeTagSelected]}>
-                        <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
-                          {s.code}
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 2 }}>
-                        <TouchableOpacity
                           onPress={(e) => {
                             e.stopPropagation?.();
-                            handleOpenEditSchool(s);
+                            handleDeleteSchool(s);
                           }}
-                          style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#E2E8F0' }}
+                          style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#FEE2E2' }}
                           hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          accessibilityLabel={`${s.name} Düzenle`}
+                          accessibilityLabel={`${s.name} Sil`}
                         >
-                          <Ionicons name="pencil" size={11} color={isSelected ? '#fff' : '#4F46E5'} />
+                          <Ionicons name="trash-outline" size={11} color={isSelected ? '#fff' : '#DC2626'} />
                         </TouchableOpacity>
-                        {schools.length > 1 && (
-                          <TouchableOpacity
-                            onPress={(e) => {
-                              e.stopPropagation?.();
-                              handleDeleteSchool(s);
-                            }}
-                            style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#FEE2E2' }}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                            accessibilityLabel={`${s.name} Sil`}
-                          >
-                            <Ionicons name="trash-outline" size={11} color={isSelected ? '#fff' : '#DC2626'} />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-                {schools.length === 0 && (
-                  <TouchableOpacity
-                    onPress={() => setCreateModalVisible(true)}
-                    style={[styles.schoolChip, { borderColor: '#166534', backgroundColor: '#F0FDF4' }]}
-                  >
-                    <Ionicons name="add" size={14} color="#166534" />
-                    <Text style={[styles.schoolChipText, { color: '#166534' }]}>Henüz Okul Yok - İlk Okulu Ekle</Text>
-                  </TouchableOpacity>
-                )}
-              </ScrollView>
-            </>
-          )}
+                      )}
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+            {!isStaff && schools.length === 0 && (
+              <TouchableOpacity
+                onPress={() => setCreateModalVisible(true)}
+                style={[styles.schoolChip, { borderColor: '#166534', backgroundColor: '#F0FDF4' }]}
+              >
+                <Ionicons name="add" size={14} color="#166534" />
+                <Text style={[styles.schoolChipText, { color: '#166534' }]}>Henüz Okul Yok - İlk Okulu Ekle</Text>
+              </TouchableOpacity>
+            )}
+          </ScrollView>
 
           {/* Entegre Öğretmen Bağlantı Kodu Şeridi */}
           {selectedSchool && (
@@ -4663,6 +6690,63 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               >
                 <Ionicons name="copy-outline" size={13} color="#4F46E5" />
                 <Text style={styles.integratedCopyBtnText}>Kopyala</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* OFFLINE-FIRST VERİ EŞİTLEME ŞERİDİ */}
+          {selectedSchool && (
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#F8FAFC',
+              borderWidth: 1,
+              borderColor: '#E2E8F0',
+              borderRadius: 10,
+              paddingVertical: 7,
+              paddingHorizontal: 12,
+              marginTop: 6,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                <Ionicons name="cloud-done-outline" size={16} color="#059669" />
+                <View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
+                      Yerel Çevrimdışı Bellek (0ms Hız)
+                    </Text>
+                    <View style={{ backgroundColor: '#E0E7FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#4338CA' }}>v{CURRENT_APP_VERSION}</Text>
+                    </View>
+                  </View>
+                  <Text style={{ fontSize: 10, color: '#64748B' }}>
+                    Son Eşitleme: {formatSyncTime(lastSyncTime)} • Kod: {CURRENT_VERSION_CODE}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  backgroundColor: '#4F46E5',
+                  paddingVertical: 6,
+                  paddingHorizontal: 11,
+                  borderRadius: 7,
+                }}
+                onPress={handleManualSyncSnapshot}
+                disabled={syncingSnapshot}
+                activeOpacity={0.7}
+              >
+                {syncingSnapshot ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Ionicons name="sync" size={13} color="#FFFFFF" />
+                )}
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>
+                  {syncingSnapshot ? 'Eşitleniyor...' : 'Verileri Güncelle'}
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -4696,7 +6780,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           >
             <Ionicons name="book" size={15} color={activeTab === 'lessons' ? '#4F46E5' : '#64748B'} />
             <Text style={[styles.tabButtonText, activeTab === 'lessons' && styles.tabButtonTextActive]}>
-              Dersler ({lessons.length})
+              Dersler ({uniqueLessonsCount > 0 ? uniqueLessonsCount : lessons.length})
             </Text>
           </TouchableOpacity>
 
@@ -4714,8 +6798,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             style={[styles.tabButton, activeTab === 'schedule' && styles.tabButtonActive]}
             onPress={() => {
               setActiveTab('schedule');
-              loadScheduleStats();
-              loadAllSchedules();
+              if (allSchoolSchedules.length === 0) {
+                loadAllSchedules();
+              }
+              if (!scheduleStats) {
+                loadScheduleStats();
+              }
             }}
           >
             <Ionicons name="sparkles" size={15} color={activeTab === 'schedule' ? '#4F46E5' : '#64748B'} />
@@ -4732,48 +6820,40 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'logs' && styles.tabButtonActive]}
+            style={[styles.tabButton, activeTab === 'radar' && styles.tabButtonActive]}
             onPress={() => {
-              setActiveTab('logs');
-              loadAuditLogs();
+              tabPressTimestampRef.current = Date.now();
+              setActiveTab('radar');
+              // Yerel hafızada zaten veri varsa 0ms gecikmeyle anında göster, sunucu bekleme yapma
+              if (allSchoolSchedules.length === 0) {
+                loadAllSchedules();
+              }
+              if (dutiesList.length === 0) {
+                loadDuties();
+              }
             }}
           >
-            <Ionicons name="document-text" size={15} color={activeTab === 'logs' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'logs' && styles.tabButtonTextActive]}>
-              📜 Loglar {logStats.total > 0 ? `(${logStats.total})` : ''}
+            <Ionicons name="compass" size={15} color={activeTab === 'radar' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'radar' && styles.tabButtonTextActive]}>
+              📍 Canlı Radar & Nöbet
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'messages' && styles.tabButtonActive]}
+            style={[styles.tabButton, activeTab === 'duty_assignment' && styles.tabButtonActive]}
             onPress={() => {
-              setActiveTab('messages');
-              loadSchoolMessages();
+              setActiveTab('duty_assignment');
+              if (allSchoolSchedules.length === 0) {
+                loadAllSchedules();
+              }
+              if (dutiesList.length === 0) {
+                loadDuties();
+              }
             }}
           >
-            <Ionicons name="chatbubbles" size={15} color={activeTab === 'messages' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'messages' && styles.tabButtonTextActive]}>
-              💬 Mesajlar {schoolMessages.length > 0 ? `(${schoolMessages.length})` : ''}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'reports' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('reports')}
-          >
-            <Ionicons name="stats-chart" size={15} color={activeTab === 'reports' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'reports' && styles.tabButtonTextActive]}>
-              📊 Raporlar
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'ai_settings' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('ai_settings')}
-          >
-            <Ionicons name="hardware-chip" size={15} color={activeTab === 'ai_settings' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'ai_settings' && styles.tabButtonTextActive]}>
-              🤖 AI & API {selectedSchool?.geminiApiKey ? '✅' : '⚙️'}
+            <Ionicons name="shield-checkmark" size={15} color={activeTab === 'duty_assignment' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'duty_assignment' && styles.tabButtonTextActive]}>
+              🛡️ Nöbetçi Atama
             </Text>
           </TouchableOpacity>
         </View>
@@ -4846,11 +6926,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </View>
                 </View>
 
-                <View style={styles.sectionHeader}>
+                <View style={[styles.sectionHeader, { flexWrap: 'wrap', gap: 8, alignItems: 'center' }]}>
                   <Text style={styles.sectionTitle}>
                     Bağlı Öğretmen Kadrosu ({filteredTeachers.length}{filteredTeachers.length !== teachers.length ? ` / ${teachers.length}` : ''})
                   </Text>
-                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                     {teachers.length > 0 && (
                       <TouchableOpacity
                         style={styles.dangerHeaderBtn}
@@ -4860,6 +6940,22 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         <Text style={styles.dangerHeaderBtnText}>Tümünü Sil</Text>
                       </TouchableOpacity>
                     )}
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#475569' }]}
+                      onPress={handleDownloadTeacherTemplate}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="download-outline" size={13} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>Şablon</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#059669' }]}
+                      onPress={handlePickAndParseTeacherExcel}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="document-text" size={13} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>Excel</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.primaryAddBtn}
                       onPress={() => setAddTeacherModalVisible(true)}
@@ -4940,9 +7036,31 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 </Text>
                               </View>
                             </View>
-                            <Text style={styles.cardSub}>
-                              @{teacher.username}
-                            </Text>
+                            {/* 👤 Belirgin Kullanıcı Adı Rozeti */}
+                            {(() => {
+                              const displayUsername = (teacher.username || teacher.userName || generateDefaultTeacherUsername(teacher.fullName)).trim();
+                              return (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4, marginBottom: 4 }}>
+                                  <View style={styles.teacherUsernameBadge}>
+                                    <Ionicons name="person" size={11} color="#4F46E5" />
+                                    <Text style={styles.teacherUsernameLabel}>Kullanıcı Adı: </Text>
+                                    <Text style={styles.teacherUsernameValue} selectable>
+                                      {displayUsername}
+                                    </Text>
+                                    <TouchableOpacity
+                                      onPress={() => {
+                                        Clipboard.setStringAsync(displayUsername);
+                                        Alert.alert('Kopyalandı', `"${displayUsername}" kullanıcı adı panoya kopyalandı.`);
+                                      }}
+                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                      style={{ marginLeft: 4 }}
+                                    >
+                                      <Ionicons name="copy-outline" size={12} color="#4F46E5" />
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                              );
+                            })()}
 
                             {/* Güvenlik & Son Giriş Rozeti */}
                             {teacher.lastLoginAt ? (
@@ -4963,6 +7081,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                             {teacher.branch && (
                               <Text style={styles.teacherBranchText}>📚 Branş: {teacher.branch}</Text>
                             )}
+                            {(() => {
+                              const cClass = getTeacherCounselorClass(teacher, allSchoolSchedules);
+                              return (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: cClass ? '#ECFDF5' : '#F8FAFC', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, marginVertical: 3, borderWidth: 1, borderColor: cClass ? '#A7F3D0' : '#E2E8F0', alignSelf: 'flex-start' }}>
+                                  <Ionicons name="ribbon-outline" size={12} color={cClass ? '#059669' : '#94A3B8'} style={{ marginRight: 4 }} />
+                                  <Text style={{ fontSize: 11, fontWeight: '700', color: cClass ? '#047857' : '#64748B' }}>
+                                    Sınıf Rehberliği: {cClass || '—'}
+                                  </Text>
+                                </View>
+                              );
+                            })()}
                             {teacher.assignedClassesJson && (
                               <Text style={styles.teacherClassesText} numberOfLines={2}>🏫 Sınıflar: {teacher.assignedClassesJson}</Text>
                             )}
@@ -5054,7 +7183,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
                           <TouchableOpacity
                             style={[styles.cardActionBtn, { borderColor: '#FDE68A', backgroundColor: '#FEF3C7' }]}
-                            onPress={() => handleResetTeacherPassword(teacher.id, teacher.fullName)}
+                            onPress={() => handleResetTeacherPassword(teacher.id, teacher.fullName, teacher.username || teacher.userName)}
                           >
                             <Ionicons name="key-outline" size={14} color="#D97706" />
                             <Text style={[styles.cardActionBtnText, { color: '#D97706' }]}>Şifre (1234)</Text>
@@ -5077,9 +7206,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             {/* 2. SINIFLAR VE ŞUBELER SEKMESİ */}
             {activeTab === 'classes' && (
               <View>
-                <View style={styles.sectionHeader}>
+                <View style={[styles.sectionHeader, { flexWrap: 'wrap', gap: 8, alignItems: 'center' }]}>
                   <Text style={styles.sectionTitle}>Sınıflar & Şubeler ({classes.length})</Text>
-                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                     {classes.length > 0 && (
                       <TouchableOpacity
                         style={styles.dangerHeaderBtn}
@@ -5106,39 +7235,59 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </View>
                 ) : (
                   <View style={styles.gridContainer}>
-                    {classes.map((cls) => (
-                      <TouchableOpacity
-                        key={cls.id}
-                        style={styles.classCard}
-                        activeOpacity={0.85}
-                        onPress={() => {
-                          setSelectedClassForStudents(cls);
-                          setClassStudentsModalVisible(true);
-                        }}
-                      >
-                        <View style={styles.classCardTopRow}>
-                          <View style={styles.classBadge}>
-                            <Text style={styles.classBadgeText}>{cls.className || `${cls.grade}-${cls.section}`}</Text>
-                          </View>
-                          <TouchableOpacity
-                            style={styles.deleteMiniBtn}
-                            onPress={() => handleDeleteClass(cls.id, cls.className || `${cls.grade}-${cls.section}`)}
-                          >
-                            <Ionicons name="trash-outline" size={14} color="#DC2626" />
-                          </TouchableOpacity>
-                        </View>
-                        <Text style={styles.classStudentCount}>
-                          👥 {cls.studentCount || 0} Öğrenci
-                        </Text>
-                        <Text style={styles.classYearText}>Dönem: {cls.academicYear || '2026-2027'}</Text>
+                    {classes.map((cls) => {
+                      const currentClassName = cls.className || `${cls.grade}-${cls.section}`;
+                      const actualCount = (students || []).filter((s: any) => {
+                        if (s.classId === cls.id || s.class_id === cls.id) return true;
+                        const sName = (s.className || `${s.grade || ''}-${s.section || ''}`).trim().toLowerCase();
+                        return sName === currentClassName.trim().toLowerCase();
+                      }).length;
+                      const studentCountDisplay = actualCount > 0 ? actualCount : (cls.studentCount || 0);
+                      const counselorTeacher = getClassCounselorTeacher(currentClassName, teachers, allSchoolSchedules);
 
-                        <View style={styles.classCardActionBtn}>
-                          <Ionicons name="people" size={13} color="#4F46E5" />
-                          <Text style={styles.classCardActionBtnText}>Öğrencileri Gör & Yönet</Text>
-                          <Ionicons name="chevron-forward" size={13} color="#4F46E5" />
-                        </View>
-                      </TouchableOpacity>
-                    ))}
+                      return (
+                        <TouchableOpacity
+                          key={cls.id}
+                          style={styles.classCard}
+                          activeOpacity={0.85}
+                          onPress={() => {
+                            setSelectedClassForStudents(cls);
+                            setClassStudentsModalVisible(true);
+                          }}
+                        >
+                          <View style={styles.classCardTopRow}>
+                            <View style={styles.classBadge}>
+                              <Text style={styles.classBadgeText}>{currentClassName}</Text>
+                            </View>
+                            <TouchableOpacity
+                              style={styles.deleteMiniBtn}
+                              onPress={() => handleDeleteClass(cls.id, currentClassName)}
+                            >
+                              <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                            </TouchableOpacity>
+                          </View>
+                          <Text style={styles.classStudentCount}>
+                            👥 {studentCountDisplay} Öğrenci
+                          </Text>
+
+                          {/* Sınıf Rehber Öğretmeni */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: counselorTeacher ? '#F0FDF4' : '#F8FAFC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, marginTop: 4, marginBottom: 4, borderWidth: 1, borderColor: counselorTeacher ? '#BBF7D0' : '#E2E8F0' }}>
+                            <Ionicons name="ribbon-outline" size={12} color={counselorTeacher ? '#16A34A' : '#94A3B8'} style={{ marginRight: 4 }} />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: counselorTeacher ? '#15803D' : '#64748B' }} numberOfLines={1}>
+                              Rehber: {counselorTeacher || 'Atanmadı'}
+                            </Text>
+                          </View>
+
+                          <Text style={styles.classYearText}>Dönem: {cls.academicYear || '2026-2027'}</Text>
+
+                          <View style={styles.classCardActionBtn}>
+                            <Ionicons name="people" size={13} color="#4F46E5" />
+                            <Text style={styles.classCardActionBtnText}>Öğrencileri Gör & Yönet</Text>
+                            <Ionicons name="chevron-forward" size={13} color="#4F46E5" />
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
                   </View>
                 )}
               </View>
@@ -5147,39 +7296,41 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             {/* 3. DERSLER SEKMESİ */}
             {activeTab === 'lessons' && (
               <View>
-                <View style={styles.sectionHeader}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={styles.sectionTitle}>Okul Müfredat Dersleri ({filteredLessons.length}/{lessons.length})</Text>
-                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
-                      Her sınıf düzeyi için yıllık planlar ayrı yüklenir ve programla otomatik eşleşir.
+                <View style={{ marginBottom: 12 }}>
+                  <View style={[styles.sectionHeader, { flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 4 }]}>
+                    <Text style={styles.sectionTitle}>
+                      Okul Müfredat Dersleri ({filteredLessons.length}/{lessons.length})
                     </Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    {lessons.length > 0 && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                      {lessons.length > 0 && (
+                        <TouchableOpacity
+                          style={styles.dangerHeaderBtn}
+                          onPress={handleDeleteAllLessons}
+                        >
+                          <Ionicons name="trash-outline" size={13} color="#DC2626" />
+                          <Text style={styles.dangerHeaderBtnText}>Tümünü Sil</Text>
+                        </TouchableOpacity>
+                      )}
                       <TouchableOpacity
-                        style={styles.dangerHeaderBtn}
-                        onPress={handleDeleteAllLessons}
+                        style={[styles.primaryAddBtn, { backgroundColor: '#0284C7' }]}
+                        onPress={() => handleDownloadYearlyPlanTemplate()}
+                        activeOpacity={0.8}
                       >
-                        <Ionicons name="trash-outline" size={13} color="#DC2626" />
-                        <Text style={styles.dangerHeaderBtnText}>Tümünü Sil</Text>
+                        <Ionicons name="download-outline" size={14} color="#fff" />
+                        <Text style={styles.primaryAddBtnText}>Plan Şablonu</Text>
                       </TouchableOpacity>
-                    )}
-                    <TouchableOpacity
-                      style={[styles.primaryAddBtn, { backgroundColor: '#0284C7' }]}
-                      onPress={() => handleDownloadYearlyPlanTemplate()}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="download-outline" size={14} color="#fff" />
-                      <Text style={styles.primaryAddBtnText}>Plan Şablonu</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.primaryAddBtn}
-                      onPress={() => setAddLessonModalVisible(true)}
-                    >
-                      <Ionicons name="book" size={15} color="#fff" />
-                      <Text style={styles.primaryAddBtnText}>+ Ders Ekle</Text>
-                    </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.primaryAddBtn}
+                        onPress={() => setAddLessonModalVisible(true)}
+                      >
+                        <Ionicons name="book" size={15} color="#fff" />
+                        <Text style={styles.primaryAddBtnText}>+ Ders Ekle</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
+                  <Text style={{ fontSize: 11.5, color: '#475569', marginTop: 3 }}>
+                    Okulunuzda <Text style={{ fontWeight: '800', color: '#1E293B' }}>{uniqueLessonsCount} farklı ders</Text> bulunmaktadır (kademelere göre ayrılmış toplam {lessons.length} müfredat kaydı).
+                  </Text>
                 </View>
 
                 {/* Arama & Kademe Filtreleri */}
@@ -5211,7 +7362,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       onPress={() => setLessonGradeFilter('all')}
                     >
                       <Text style={[{ fontSize: 12, fontWeight: '700', color: '#475569' }, lessonGradeFilter === 'all' && { color: '#FFFFFF' }]}>
-                        Tüm Kademeler ({lessons.length})
+                        Tüm Kademeler ({lessons.length} Kademe / {uniqueLessonsCount} Ders)
                       </Text>
                     </TouchableOpacity>
 
@@ -5459,32 +7610,67 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </View>
                 </View>
 
-                {/* Sınıf Filtre Çipleri */}
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.classFilterScroll}>
-                  <TouchableOpacity
-                    style={[styles.filterChip, selectedClassFilter === 'all' && styles.filterChipSelected]}
-                    onPress={() => setSelectedClassFilter('all')}
-                  >
-                    <Text style={[styles.filterChipText, selectedClassFilter === 'all' && styles.filterChipTextSelected]}>
-                      Tüm Sınıflar ({students.length})
-                    </Text>
-                  </TouchableOpacity>
-                  {classes.map(c => {
-                    const tag = c.className || `${c.grade}-${c.section}`;
-                    const isSel = selectedClassFilter === tag;
-                    return (
+                {/* 🏫 Şube / Sınıf Filtresi (Listbox / Dropdown) */}
+                <View style={styles.classSelectContainer}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="filter" size={14} color="#4F46E5" />
+                      <Text style={styles.classSelectHeaderTitle}>Şube / Sınıf Filtresi (Listbox):</Text>
+                    </View>
+                    {selectedClassFilter !== 'all' && (
                       <TouchableOpacity
-                        key={c.id}
-                        style={[styles.filterChip, isSel && styles.filterChipSelected]}
-                        onPress={() => setSelectedClassFilter(tag)}
+                        onPress={() => setSelectedClassFilter('all')}
+                        style={styles.clearFilterChip}
                       >
-                        <Text style={[styles.filterChipText, isSel && styles.filterChipTextSelected]}>
-                          {tag}
-                        </Text>
+                        <Ionicons name="close-circle" size={13} color="#4F46E5" />
+                        <Text style={styles.clearFilterChipText}>Tüm Sınıfları Göster ({students.length})</Text>
                       </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
+                    )}
+                  </View>
+
+                  {Platform.OS === 'web' ? (
+                    <View style={styles.webSelectWrapper}>
+                      <Ionicons name="school" size={16} color="#4F46E5" style={styles.webSelectIcon} />
+                      <HtmlSelect
+                        value={selectedClassFilter}
+                        onChange={(e: any) => setSelectedClassFilter(e.target.value)}
+                        style={styles.webSelectBox}
+                      >
+                        <option value="all">🏫 Tüm Sınıflar ve Şubeler ({students.length} Kayıtlı Öğrenci)</option>
+                        {classes.map((c) => {
+                          const tag = c.className || `${c.grade}-${c.section}`;
+                          const count = students.filter(
+                            (s) =>
+                              `${s.grade}-${s.section}` === tag ||
+                              s.className === tag ||
+                              (String(s.grade) === String(c.grade) && String(s.section).toUpperCase() === String(c.section).toUpperCase())
+                          ).length;
+                          return (
+                            <option key={c.id} value={tag}>
+                              📚 {tag} Şubesi ({count} Öğrenci)
+                            </option>
+                          );
+                        })}
+                      </HtmlSelect>
+                    </View>
+                  ) : (
+                    <TouchableOpacity
+                      style={styles.mobileSelectPickerBtn}
+                      onPress={() => setClassFilterModalVisible(true)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                        <Ionicons name="school" size={16} color="#4F46E5" />
+                        <Text style={styles.mobileSelectPickerText}>
+                          {selectedClassFilter === 'all'
+                            ? `Tüm Sınıflar (${students.length} Öğrenci)`
+                            : `${selectedClassFilter} Şubesi`}
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-down" size={16} color="#64748B" />
+                    </TouchableOpacity>
+                  )}
+                </View>
 
                 {/* Öğrenci Arama Çubuğu */}
                 <View style={styles.searchBox}>
@@ -5509,13 +7695,17 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     <Text style={styles.emptyText}>Bu filtreye uygun öğrenci bulunamadı.</Text>
                   </View>
                 ) : (
-                  filteredStudents.map((student) => {
+                  filteredStudents.slice(0, studentVisibleCount).map((student) => {
                     const photoUrl = student.photoPath ? `${serverBaseUrl}${student.photoPath}` : null;
                     const isUploading = photoUploadingId === student.id;
 
                     return (
                       <View key={student.id} style={styles.studentCard}>
-                        <View style={styles.studentCardTop}>
+                        <TouchableOpacity
+                          style={styles.studentCardTop}
+                          onPress={() => handleOpenStudentDetail(student)}
+                          activeOpacity={0.7}
+                        >
                           {/* Fotoğraf / Avatar */}
                           <TouchableOpacity
                             style={styles.studentPhotoContainer}
@@ -5552,26 +7742,39 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 👨‍👩‍👧 Veli: {student.parentName} {student.parentPhone ? `(${student.parentPhone})` : ''}
                               </Text>
                             )}
+                            {student.studentPhone && (
+                              <Text style={[styles.parentText, { color: '#0369A1', marginTop: 2 }]}>
+                                📱 Öğr Tel: {student.studentPhone}
+                              </Text>
+                            )}
 
                             {/* Giriş Bilgileri Önizleme */}
                             <View style={styles.cardCredPreviewBox}>
                               <View style={styles.cardCredItem}>
-                                <Ionicons name="key" size={11} color="#4F46E5" />
-                                <Text style={styles.cardCredLabel}>Şifre:</Text>
-                                <Text style={styles.cardCredValue}>aaaa_{student.studentNumber}</Text>
+                                <Ionicons name="school" size={11} color="#059669" />
+                                <Text style={styles.cardCredLabel}>Öğr:</Text>
+                                <Text style={[styles.cardCredValue, { color: '#059669' }]}>ooo_{student.studentNumber}</Text>
                               </View>
                               <View style={styles.cardCredDivider} />
                               <View style={styles.cardCredItem}>
-                                <Ionicons name="school" size={11} color="#059669" />
-                                <Text style={styles.cardCredLabel}>Okul:</Text>
-                                <Text style={styles.cardCredValue}>{selectedSchool?.code || '-'}</Text>
+                                <Ionicons name="people" size={11} color="#2563EB" />
+                                <Text style={styles.cardCredLabel}>Veli:</Text>
+                                <Text style={[styles.cardCredValue, { color: '#2563EB' }]}>vvv_{student.studentNumber}</Text>
                               </View>
                             </View>
                           </View>
-                        </View>
+                        </TouchableOpacity>
 
                         {/* Aksiyon Butonları */}
                         <View style={styles.studentActionsRow}>
+                          <TouchableOpacity
+                            style={[styles.cardActionBtn, { borderColor: '#10B981', backgroundColor: '#ECFDF5' }]}
+                            onPress={() => handleOpenStudentDetail(student)}
+                          >
+                            <Ionicons name="person-circle" size={13} color="#059669" />
+                            <Text style={[styles.cardActionBtnText, { color: '#059669', fontWeight: '700' }]}>Detay & Notlar</Text>
+                          </TouchableOpacity>
+
                           <TouchableOpacity
                             style={[styles.cardActionBtn, { borderColor: '#818CF8', backgroundColor: '#EEF2FF' }]}
                             onPress={() => handleOpenCredentialsModal(student)}
@@ -5620,6 +7823,16 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       </View>
                     );
                   })
+                )}
+                {filteredStudents.length > studentVisibleCount && (
+                  <TouchableOpacity
+                    style={{ alignItems: 'center', paddingVertical: 14, marginVertical: 8, borderRadius: 12, backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE' }}
+                    onPress={() => setStudentVisibleCount(c => c + 40)}
+                  >
+                    <Text style={{ color: '#4F46E5', fontWeight: '800', fontSize: 13 }}>
+                      Daha fazla göster ({filteredStudents.length - studentVisibleCount} öğrenci daha)
+                    </Text>
+                  </TouchableOpacity>
                 )}
               </View>
             )}
@@ -7066,48 +9279,123 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     const isCreate = item.actionType.includes('CREATE') || item.actionType.includes('REGISTER');
                     const isSchedule = item.actionType.includes('SCHEDULE') || item.actionType.includes('PLAN');
                     const isLogin = item.actionType.includes('LOGIN');
+                    const isSecurity = item.actionType.includes('PASSWORD') || item.actionType.includes('RESET');
 
-                    const badgeBg = isDelete ? '#FEE2E2' : isCreate ? '#DCFCE7' : isSchedule ? '#EDE9FE' : isLogin ? '#E0F2FE' : '#F1F5F9';
-                    const badgeColor = isDelete ? '#DC2626' : isCreate ? '#16A34A' : isSchedule ? '#7C3AED' : isLogin ? '#0284C7' : '#475569';
+                    const badgeBg = isDelete ? '#FEE2E2' : isCreate ? '#DCFCE7' : isSchedule ? '#EDE9FE' : isLogin ? '#E0F2FE' : isSecurity ? '#FEF3C7' : '#F1F5F9';
+                    const badgeColor = isDelete ? '#DC2626' : isCreate ? '#16A34A' : isSchedule ? '#7C3AED' : isLogin ? '#0284C7' : isSecurity ? '#D97706' : '#475569';
+                    const displayTitle = item.actionTitle || item.actionType;
+
+                    let parsedDetailsObj: any = null;
+                    if (item.detailsJson) {
+                      try {
+                        if (item.detailsJson.trim().startsWith('{')) {
+                          parsedDetailsObj = JSON.parse(item.detailsJson);
+                        }
+                      } catch {}
+                    }
 
                     return (
                       <TouchableOpacity
                         key={item.id}
-                        style={styles.logCard}
+                        style={[styles.logCard, isExpanded && { borderColor: '#94A3B8' }]}
                         onPress={() => setExpandedLogId(isExpanded ? null : item.id)}
                         activeOpacity={0.8}
                       >
-                        {/* Üst Satır: İşlem Türü ve Tarih */}
+                        {/* 1. Üst Satır: İşlem Başlığı ve Zaman */}
                         <View style={styles.logCardTop}>
-                          <View style={[styles.logActionBadge, { backgroundColor: badgeBg }]}>
-                            <Text style={[styles.logActionBadgeText, { color: badgeColor }]}>
-                              {item.actionType}
-                            </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
+                            <View style={[styles.logActionBadge, { backgroundColor: badgeBg }]}>
+                              <Text style={[styles.logActionBadgeText, { color: badgeColor }]}>
+                                {displayTitle}
+                              </Text>
+                            </View>
+                            {item.entityName ? (
+                              <View style={{ backgroundColor: '#F8FAFC', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                                <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '600' }}>
+                                  {item.entityName}
+                                </Text>
+                              </View>
+                            ) : null}
                           </View>
-                          <Text style={styles.logTimestamp}>{item.localTimeString}</Text>
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={styles.logTimestamp}>
+                              {item.relativeTime || item.localTimeString}
+                            </Text>
+                            {item.formattedDate ? (
+                              <Text style={{ fontSize: 9, color: '#94A3B8', marginTop: 1 }}>
+                                {item.formattedDate.split(',')[1]?.trim() || item.localTimeString}
+                              </Text>
+                            ) : null}
+                          </View>
                         </View>
 
-                        {/* Açıklama */}
+                        {/* 2. Açıklama (Ne Yapıldı) */}
                         <Text style={styles.logDescription}>{item.description || item.actionType}</Text>
 
-                        {/* Kullanıcı ve Rol Bilgisi */}
-                        <View style={styles.logUserRow}>
-                          <Ionicons name="person-circle-outline" size={15} color="#64748B" />
-                          <Text style={styles.logUserName}>
-                            {item.userFullName || item.userName || 'Sistem'}
-                          </Text>
-                          <View style={styles.logRoleBadge}>
-                            <Text style={styles.logRoleBadgeText}>{item.userRole}</Text>
+                        {/* 3. Kim Yaptı ve Ne Zaman Bilgi Kutusu */}
+                        <View style={{ backgroundColor: '#F8FAFC', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#F1F5F9', marginTop: 2 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <Ionicons name="person-circle" size={17} color="#4F46E5" />
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                                {item.userFullName || item.userName || 'Sistem'}
+                              </Text>
+                              {item.userName && item.userName !== item.userFullName ? (
+                                <Text style={{ fontSize: 11, color: '#64748B', fontWeight: '500' }}>
+                                  (@{item.userName})
+                                </Text>
+                              ) : null}
+                              <View style={[styles.logRoleBadge, { backgroundColor: '#EEF2FF' }]}>
+                                <Text style={[styles.logRoleBadgeText, { color: '#4F46E5' }]}>
+                                  {item.roleLabel || item.userRole}
+                                </Text>
+                              </View>
+                            </View>
+
+                            {item.ipAddress ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                <Ionicons name="globe-outline" size={11} color="#94A3B8" />
+                                <Text style={{ fontSize: 10, color: '#64748B' }}>IP: {item.ipAddress}</Text>
+                              </View>
+                            ) : null}
                           </View>
-                          {item.ipAddress ? (
-                            <Text style={styles.logIpAddress}>• IP: {item.ipAddress}</Text>
+
+                          {/* Tam Tarih Bilgisi */}
+                          {item.formattedDate ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                              <Ionicons name="calendar-outline" size={11} color="#94A3B8" />
+                              <Text style={{ fontSize: 10, color: '#64748B' }}>
+                                {item.formattedDate}
+                              </Text>
+                            </View>
                           ) : null}
                         </View>
 
-                        {/* Genişletilebilir Detay (DetailsJson) */}
-                        {isExpanded && item.detailsJson ? (
-                          <View style={styles.logDetailsBox}>
-                            <Text style={styles.logDetailsText}>{item.detailsJson}</Text>
+                        {/* 4. Detaylar Butonu ve Genişletilebilir Kutu */}
+                        {item.detailsJson ? (
+                          <View style={{ marginTop: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '600' }}>
+                                {isExpanded ? 'Detayları Gizle ▲' : 'Teknik Detayları Göster ▼'}
+                              </Text>
+                            </View>
+
+                            {isExpanded ? (
+                              <View style={styles.logDetailsBox}>
+                                {parsedDetailsObj ? (
+                                  <View style={{ gap: 4 }}>
+                                    {Object.entries(parsedDetailsObj).map(([k, v]) => (
+                                      <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>{k}:</Text>
+                                        <Text style={{ fontSize: 11, color: '#0F172A', flexShrink: 1 }}>{String(v)}</Text>
+                                      </View>
+                                    ))}
+                                  </View>
+                                ) : (
+                                  <Text style={styles.logDetailsText}>{item.detailsJson}</Text>
+                                )}
+                              </View>
+                            ) : null}
                           </View>
                         ) : null}
                       </TouchableOpacity>
@@ -7121,16 +9409,114 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             {activeTab === 'messages' && (
               <View>
                 <View style={styles.sectionHeader}>
-                  <View>
-                    <Text style={styles.sectionTitle}>💬 Okul İçi Mesajlaşmalar ({schoolMessages.length})</Text>
-                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>Tüm öğretmen, öğrenci ve veli iletişimini buradan denetleyebilirsiniz.</Text>
+                  <View style={{ flex: 1, marginRight: 10 }}>
+                    <Text style={styles.sectionTitle}>
+                      💬 {adminMessageScope === 'personal' ? 'Şahsıma / İdareye Gelenler' : adminMessageScope === 'sent' ? 'İdareden Gönderilenler' : 'Tüm Okul Mesaj Trafiği'} ({schoolMessages.length})
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                      {adminMessageScope === 'personal'
+                        ? 'Doğrudan şahsınıza ve idareye gelen mesajları görüp hemen yanıtlayabilirsiniz.'
+                        : adminMessageScope === 'sent'
+                        ? 'İdare olarak öğretmen, öğrenci ve velilere ilettiğiniz mesajlar.'
+                        : 'Okul genelindeki tüm öğretmen, öğrenci ve veli mesaj trafiği (denetim amaçlı).'}
+                    </Text>
                   </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#059669', paddingHorizontal: 12 }]}
+                      onPress={() => setAdminNewMsgModalVisible(true)}
+                    >
+                      <Ionicons name="paper-plane" size={14} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>Yeni Mesaj</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#4F46E5', paddingHorizontal: 10 }]}
+                      onPress={() => loadSchoolMessages()}
+                    >
+                      <Ionicons name="refresh" size={14} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>Yenile</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* 3 Ana Görünüm Sekmesi (Scope Tabs) */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
                   <TouchableOpacity
-                    style={[styles.primaryAddBtn, { backgroundColor: '#4F46E5' }]}
-                    onPress={() => loadSchoolMessages()}
+                    style={{
+                      flex: 1.2,
+                      minWidth: 160,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      backgroundColor: adminMessageScope === 'personal' ? '#4F46E5' : '#FFFFFF',
+                      borderWidth: 1.5,
+                      borderColor: adminMessageScope === 'personal' ? '#4F46E5' : '#E2E8F0',
+                      elevation: adminMessageScope === 'personal' ? 2 : 0,
+                    }}
+                    onPress={() => {
+                      setAdminMessageScope('personal');
+                      loadSchoolMessages(undefined, 'personal');
+                    }}
                   >
-                    <Ionicons name="refresh" size={14} color="#fff" />
-                    <Text style={styles.primaryAddBtnText}>Yenile</Text>
+                    <Ionicons name="mail" size={15} color={adminMessageScope === 'personal' ? '#FFFFFF' : '#4F46E5'} />
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: adminMessageScope === 'personal' ? '#FFFFFF' : '#1E293B' }}>
+                      📥 Şahsıma Gelenler
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={{
+                      flex: 1.2,
+                      minWidth: 160,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      backgroundColor: adminMessageScope === 'all' ? '#4F46E5' : '#FFFFFF',
+                      borderWidth: 1.5,
+                      borderColor: adminMessageScope === 'all' ? '#4F46E5' : '#E2E8F0',
+                      elevation: adminMessageScope === 'all' ? 2 : 0,
+                    }}
+                    onPress={() => {
+                      setAdminMessageScope('all');
+                      loadSchoolMessages(undefined, 'all');
+                    }}
+                  >
+                    <Ionicons name="globe-outline" size={15} color={adminMessageScope === 'all' ? '#FFFFFF' : '#64748B'} />
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: adminMessageScope === 'all' ? '#FFFFFF' : '#334155' }}>
+                      🌐 Tüm Okul Trafiği
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={{
+                      flex: 1,
+                      minWidth: 130,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      paddingVertical: 10,
+                      borderRadius: 10,
+                      backgroundColor: adminMessageScope === 'sent' ? '#4F46E5' : '#FFFFFF',
+                      borderWidth: 1.5,
+                      borderColor: adminMessageScope === 'sent' ? '#4F46E5' : '#E2E8F0',
+                      elevation: adminMessageScope === 'sent' ? 2 : 0,
+                    }}
+                    onPress={() => {
+                      setAdminMessageScope('sent');
+                      loadSchoolMessages(undefined, 'sent');
+                    }}
+                  >
+                    <Ionicons name="paper-plane-outline" size={15} color={adminMessageScope === 'sent' ? '#FFFFFF' : '#64748B'} />
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: adminMessageScope === 'sent' ? '#FFFFFF' : '#334155' }}>
+                      📤 Gönderdiklerim
+                    </Text>
                   </TouchableOpacity>
                 </View>
 
@@ -7151,51 +9537,60 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   )}
                 </View>
 
-                <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
-                  <TouchableOpacity
-                    style={[styles.logFilterChip, selectedMessageFilter === 'all' && styles.logFilterChipActive]}
-                    onPress={() => setSelectedMessageFilter('all')}
-                  >
-                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'all' && styles.logFilterChipTextActive]}>
-                      Tümü ({schoolMessages.length})
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.logFilterChip, selectedMessageFilter === 'students' && styles.logFilterChipActive]}
-                    onPress={() => setSelectedMessageFilter('students')}
-                  >
-                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'students' && styles.logFilterChipTextActive]}>
-                      Öğrenciye
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.logFilterChip, selectedMessageFilter === 'teachers' && styles.logFilterChipActive]}
-                    onPress={() => setSelectedMessageFilter('teachers')}
-                  >
-                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'teachers' && styles.logFilterChipTextActive]}>
-                      Öğretmenlere
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.logFilterChip, selectedMessageFilter === 'parents' && styles.logFilterChipActive]}
-                    onPress={() => setSelectedMessageFilter('parents')}
-                  >
-                    <Text style={[styles.logFilterChipText, selectedMessageFilter === 'parents' && styles.logFilterChipTextActive]}>
-                      Velilere
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+                {adminMessageScope === 'all' && (
+                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+                    <TouchableOpacity
+                      style={[styles.logFilterChip, selectedMessageFilter === 'all' && styles.logFilterChipActive]}
+                      onPress={() => setSelectedMessageFilter('all')}
+                    >
+                      <Text style={[styles.logFilterChipText, selectedMessageFilter === 'all' && styles.logFilterChipTextActive]}>
+                        Tümü ({schoolMessages.length})
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.logFilterChip, selectedMessageFilter === 'students' && styles.logFilterChipActive]}
+                      onPress={() => setSelectedMessageFilter('students')}
+                    >
+                      <Text style={[styles.logFilterChipText, selectedMessageFilter === 'students' && styles.logFilterChipTextActive]}>
+                        Öğrenciye
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.logFilterChip, selectedMessageFilter === 'teachers' && styles.logFilterChipActive]}
+                      onPress={() => setSelectedMessageFilter('teachers')}
+                    >
+                      <Text style={[styles.logFilterChipText, selectedMessageFilter === 'teachers' && styles.logFilterChipTextActive]}>
+                        Öğretmenlere
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.logFilterChip, selectedMessageFilter === 'parents' && styles.logFilterChipActive]}
+                      onPress={() => setSelectedMessageFilter('parents')}
+                    >
+                      <Text style={[styles.logFilterChipText, selectedMessageFilter === 'parents' && styles.logFilterChipTextActive]}>
+                        Velilere
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
 
                 {loadingMessages ? (
                   <ActivityIndicator size="small" color="#4F46E5" style={{ marginVertical: 20 }} />
                 ) : schoolMessages.length === 0 ? (
                   <View style={styles.emptyContainer}>
                     <Ionicons name="chatbubble-ellipses-outline" size={48} color={Colors.textMuted} />
-                    <Text style={styles.emptyText}>Henüz kayıtlı bir okul mesajı bulunamadı.</Text>
+                    <Text style={styles.emptyText}>
+                      {adminMessageScope === 'personal'
+                        ? 'Şahsınıza veya idareye gelen bir mesaj bulunmuyor.'
+                        : adminMessageScope === 'sent'
+                        ? 'Henüz gönderdiğiniz bir mesaj bulunmuyor.'
+                        : 'Henüz kayıtlı bir okul mesajı bulunamadı.'}
+                    </Text>
                   </View>
                 ) : (
                   schoolMessages
                     .filter((m) => {
+                      if (adminMessageScope !== 'all') return true;
                       if (selectedMessageFilter === 'students') {
                         const t = (m.targetRole || '').toUpperCase();
                         return t.includes('STUDENT') || t === 'GRADE' || t === 'SECTION' || t === 'MY_STUDENTS';
@@ -7249,12 +9644,245 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           </Text>
                         </View>
 
+                        {/* Varsa yanıtlanan mesaj alıntısı */}
+                        {msg.replyToContent && (
+                          <View style={{ backgroundColor: '#EEF2FF', borderLeftWidth: 3, borderLeftColor: '#4F46E5', padding: 8, borderRadius: 6, marginBottom: 8 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Ionicons name="return-down-forward" size={12} color="#4F46E5" />
+                              <Text style={{ fontSize: 11, color: '#4338CA', fontWeight: '800' }}>Yanıtlanan Mesaj:</Text>
+                            </View>
+                            <Text style={{ fontSize: 12, color: '#334155', fontStyle: 'italic', marginTop: 2 }} numberOfLines={2}>
+                              "{msg.replyToContent}"
+                            </Text>
+                          </View>
+                        )}
+
                         <Text style={{ fontSize: 13, color: '#334155', lineHeight: 18 }}>
                           {msg.content}
                         </Text>
+
+                        {/* Buton: Doğrudan Cevapla */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+                          <TouchableOpacity
+                            onPress={() => handleOpenAdminReply(msg)}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 5,
+                              backgroundColor: '#EEF2FF',
+                              borderWidth: 1.5,
+                              borderColor: '#C7D2FE',
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              borderRadius: 8,
+                            }}
+                          >
+                            <Ionicons name="arrow-undo" size={14} color="#4F46E5" />
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#4F46E5' }}>Yanıtla</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     ))
                 )}
+
+                {/* Admin Mesaj Yanıtlama Modalı */}
+                <Modal visible={adminReplyModalVisible} animationType="fade" transparent onRequestClose={() => setAdminReplyModalVisible(false)}>
+                  <View style={styles.promptOverlay}>
+                    <View style={[styles.promptCard, { maxWidth: 520, width: '92%' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="arrow-undo" size={20} color="#4F46E5" />
+                          </View>
+                          <View>
+                            <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>Mesajı Yanıtla</Text>
+                            <Text style={{ fontSize: 12, color: '#64748B' }}>
+                              Alıcı: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{adminReplyingMessage?.senderName || 'İsimsiz'}</Text>
+                            </Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity onPress={() => setAdminReplyModalVisible(false)}>
+                          <Ionicons name="close-circle" size={24} color="#94A3B8" />
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Orijinal Mesaj Kutusu */}
+                      <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, padding: 10, marginBottom: 12 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B', marginBottom: 4 }}>Gelen Mesaj:</Text>
+                        <Text style={{ fontSize: 13, color: '#334155', fontStyle: 'italic', lineHeight: 18 }}>
+                          "{adminReplyingMessage?.content}"
+                        </Text>
+                      </View>
+
+                      <Text style={[styles.inputLabel, { marginBottom: 6 }]}>İdare Yanıtı:</Text>
+                      <TextInput
+                        style={{
+                          backgroundColor: '#FFFFFF',
+                          borderWidth: 1.5,
+                          borderColor: '#CBD5E1',
+                          borderRadius: 10,
+                          padding: 12,
+                          fontSize: 13,
+                          color: '#0F172A',
+                          minHeight: 110,
+                          textAlignVertical: 'top',
+                        }}
+                        placeholder="Yanıtınızı buraya yazınız..."
+                        placeholderTextColor="#94A3B8"
+                        value={adminReplyContent}
+                        onChangeText={setAdminReplyContent}
+                        multiline
+                      />
+
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+                        <TouchableOpacity
+                          style={[styles.cancelBtn, { paddingHorizontal: 16 }]}
+                          onPress={() => setAdminReplyModalVisible(false)}
+                        >
+                          <Text style={styles.cancelBtnText}>Vazgeç</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.confirmBtn, { backgroundColor: '#4F46E5', paddingHorizontal: 20 }]}
+                          onPress={handleSendAdminReply}
+                          disabled={sendingAdminReply}
+                        >
+                          {sendingAdminReply ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="send" size={14} color="#fff" />
+                              <Text style={styles.confirmBtnText}>Yanıtı Gönder</Text>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </Modal>
+
+                {/* Admin Yeni Mesaj / Duyuru Modalı */}
+                <Modal visible={adminNewMsgModalVisible} animationType="fade" transparent onRequestClose={() => setAdminNewMsgModalVisible(false)}>
+                  <View style={styles.promptOverlay}>
+                    <View style={[styles.promptCard, { maxWidth: 520, width: '92%' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="paper-plane" size={20} color="#059669" />
+                          </View>
+                          <View>
+                            <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>Yeni İdari Mesaj / Duyuru</Text>
+                            <Text style={{ fontSize: 12, color: '#64748B' }}>Öğretmenlere veya tüm okula mesaj gönderin</Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity onPress={() => setAdminNewMsgModalVisible(false)}>
+                          <Ionicons name="close-circle" size={24} color="#94A3B8" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <Text style={[styles.inputLabel, { marginBottom: 6 }]}>Hedef Alıcı:</Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                        <TouchableOpacity
+                          style={[styles.logFilterChip, adminNewMsgTargetType === 'TEACHER' && styles.logFilterChipActive]}
+                          onPress={() => { setAdminNewMsgTargetType('TEACHER'); setAdminNewMsgTargetTeacher(null); }}
+                        >
+                          <Text style={[styles.logFilterChipText, adminNewMsgTargetType === 'TEACHER' && styles.logFilterChipTextActive]}>
+                            Tüm Öğretmenler
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.logFilterChip, adminNewMsgTargetType === 'ALL' && styles.logFilterChipActive]}
+                          onPress={() => { setAdminNewMsgTargetType('ALL'); setAdminNewMsgTargetTeacher(null); }}
+                        >
+                          <Text style={[styles.logFilterChipText, adminNewMsgTargetType === 'ALL' && styles.logFilterChipTextActive]}>
+                            Tüm Okul (Duyuru)
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.logFilterChip, adminNewMsgTargetType === 'SPECIFIC_TEACHER' && styles.logFilterChipActive]}
+                          onPress={() => setAdminNewMsgTargetType('SPECIFIC_TEACHER')}
+                        >
+                          <Text style={[styles.logFilterChipText, adminNewMsgTargetType === 'SPECIFIC_TEACHER' && styles.logFilterChipTextActive]}>
+                            Belirli Bir Öğretmen
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {adminNewMsgTargetType === 'SPECIFIC_TEACHER' && (
+                        <View style={{ marginBottom: 12 }}>
+                          <Text style={[styles.inputLabel, { marginBottom: 4 }]}>Öğretmen Seçin:</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 4 }}>
+                            {teachers.map(t => {
+                              const isSel = adminNewMsgTargetTeacher?.id === t.id;
+                              return (
+                                <TouchableOpacity
+                                  key={t.id}
+                                  onPress={() => setAdminNewMsgTargetTeacher(t)}
+                                  style={{
+                                    paddingHorizontal: 10,
+                                    paddingVertical: 6,
+                                    borderRadius: 8,
+                                    backgroundColor: isSel ? '#4F46E5' : '#F1F5F9',
+                                    borderWidth: 1,
+                                    borderColor: isSel ? '#4F46E5' : '#CBD5E1',
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 12, fontWeight: '700', color: isSel ? '#fff' : '#334155' }}>
+                                    {t.fullName}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </ScrollView>
+                        </View>
+                      )}
+
+                      <Text style={[styles.inputLabel, { marginBottom: 6 }]}>Mesaj Metni:</Text>
+                      <TextInput
+                        style={{
+                          backgroundColor: '#FFFFFF',
+                          borderWidth: 1.5,
+                          borderColor: '#CBD5E1',
+                          borderRadius: 10,
+                          padding: 12,
+                          fontSize: 13,
+                          color: '#0F172A',
+                          minHeight: 110,
+                          textAlignVertical: 'top',
+                        }}
+                        placeholder="İletmek istediğiniz duyuru veya mesajı yazınız..."
+                        placeholderTextColor="#94A3B8"
+                        value={adminNewMsgContent}
+                        onChangeText={setAdminNewMsgContent}
+                        multiline
+                      />
+
+                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+                        <TouchableOpacity
+                          style={[styles.cancelBtn, { paddingHorizontal: 16 }]}
+                          onPress={() => setAdminNewMsgModalVisible(false)}
+                        >
+                          <Text style={styles.cancelBtnText}>Vazgeç</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.confirmBtn, { backgroundColor: '#059669', paddingHorizontal: 20 }]}
+                          onPress={handleSendAdminNewMessage}
+                          disabled={sendingAdminNewMsg}
+                        >
+                          {sendingAdminNewMsg ? (
+                            <ActivityIndicator size="small" color="#fff" />
+                          ) : (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Ionicons name="send" size={14} color="#fff" />
+                              <Text style={styles.confirmBtnText}>Mesajı Gönder</Text>
+                            </View>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+                </Modal>
               </View>
             )}
 
@@ -8154,9 +10782,1438 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 </View>
               </View>
             )}
+
+            {/* 10. CANLI KONUM, BOŞ DERS RADARI & NÖBET MODÜLÜ */}
+            {activeTab === 'radar' && (
+              <View style={styles.radarContainer}>
+                {/* Radar Hero Banner */}
+                <View style={styles.radarHeaderCard}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="compass" size={24} color="#4F46E5" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#1E293B' }}>
+                        Canlı Personel Konumu & Boş Ders Radarı
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                        Öğretmenlerin nerede olduğunu görün, şubedeki dersi takip edin, anlık boş öğretmenleri ve nöbetçileri listeleyin.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Sub Tab Navigation */}
+                <View style={styles.radarSubTabsRow}>
+                  {[
+                    { id: 'teacher', label: '👤 Öğretmen Nerede?', icon: 'person' },
+                    { id: 'class', label: '🏫 Şubede Kim Var?', icon: 'school' },
+                    { id: 'free_teachers', label: '⚡ Anlık Boş Ders Radarı', icon: 'flash' },
+                    { id: 'duty', label: '🚨 Nöbetçi Öğretmenler', icon: 'shield-checkmark' },
+                  ].map(tab => (
+                    <TouchableOpacity
+                      key={tab.id}
+                      style={[styles.radarSubTabBtn, radarSubTab === tab.id && styles.radarSubTabBtnActive]}
+                      onPress={() => {
+                        tabPressTimestampRef.current = Date.now();
+                        setRadarSubTab(tab.id as any);
+                      }}
+                    >
+                      <Ionicons name={tab.icon as any} size={15} color={radarSubTab === tab.id ? '#FFFFFF' : '#475569'} />
+                      <Text style={[styles.radarSubTabText, radarSubTab === tab.id && styles.radarSubTabTextActive]}>
+                        {tab.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* SUB-TAB 1: ÖĞRETMEN NEREDE? (PERSONEL MATRİSİ) */}
+                {radarSubTab === 'teacher' && (
+                  <View>
+                    {/* Öğretmen Arama & Seçim */}
+                    <View style={styles.radarGridCard}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#334155', marginBottom: 8 }}>
+                        Öğretmen Seçiniz / Arayınız:
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10 }}>
+                        <Ionicons name="search" size={16} color="#64748B" />
+                        <TextInput
+                          style={{ flex: 1, marginLeft: 8, fontSize: 13, color: '#0F172A' }}
+                          placeholder="Öğretmen adı veya branş yazın..."
+                          placeholderTextColor="#94A3B8"
+                          value={radarTeacherSearch}
+                          onChangeText={setRadarTeacherSearch}
+                        />
+                        {radarTeacherSearch.length > 0 && (
+                          <TouchableOpacity onPress={() => setRadarTeacherSearch('')}>
+                            <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {/* Öğretmen Dikey Listbox (Listeden Seçim) */}
+                      <View style={{
+                        maxHeight: 180,
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0',
+                        overflow: 'hidden',
+                      }}>
+                        <ScrollView
+                          nestedScrollEnabled={true}
+                          showsVerticalScrollIndicator={true}
+                          contentContainerStyle={{ padding: 4 }}
+                        >
+                          {filteredRadarTeachers
+                            .map(t => {
+                              const isSel = (radarTeacher || sortedTeachers[0]?.fullName) === t.fullName;
+                              return (
+                                <TouchableOpacity
+                                  key={t.id || t.fullName}
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    paddingVertical: 8,
+                                    paddingHorizontal: 10,
+                                    borderRadius: 8,
+                                    marginBottom: 3,
+                                    backgroundColor: isSel ? '#EEF2FF' : 'transparent',
+                                    borderWidth: 1,
+                                    borderColor: isSel ? '#C7D2FE' : 'transparent',
+                                  }}
+                                  onPress={() => setRadarTeacher(t.fullName)}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                                    <View style={{
+                                      width: 26,
+                                      height: 26,
+                                      borderRadius: 13,
+                                      backgroundColor: isSel ? '#4F46E5' : '#F1F5F9',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      marginRight: 9,
+                                    }}>
+                                      <Ionicons name="person" size={13} color={isSel ? '#FFFFFF' : '#64748B'} />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={{
+                                        fontSize: 13,
+                                        fontWeight: isSel ? '700' : '600',
+                                        color: isSel ? '#312E81' : '#1E293B',
+                                      }} numberOfLines={1}>
+                                        {t.fullName}
+                                      </Text>
+                                      {t.branch ? (
+                                        <Text style={{ fontSize: 11, color: isSel ? '#4F46E5' : '#64748B' }} numberOfLines={1}>
+                                          {t.branch}
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                  </View>
+                                  {isSel ? (
+                                    <View style={{
+                                      width: 20,
+                                      height: 20,
+                                      borderRadius: 10,
+                                      backgroundColor: '#4F46E5',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}>
+                                      <Ionicons name="checkmark" size={13} color="#FFFFFF" />
+                                    </View>
+                                  ) : (
+                                    <View style={{
+                                      width: 18,
+                                      height: 18,
+                                      borderRadius: 9,
+                                      borderWidth: 1.5,
+                                      borderColor: '#CBD5E1',
+                                    }} />
+                                  )}
+                                </TouchableOpacity>
+                              );
+                            })}
+                        </ScrollView>
+                      </View>
+                    </View>
+
+                    {/* Seçilen Öğretmen Bilgi Kartı */}
+                    {(() => {
+                      const activeTName = radarTeacher || sortedTeachers[0]?.fullName || '';
+                      const activeTObj = teachers.find(t => normalizeTeacherMatch(t.fullName, activeTName));
+                      const totalHours = getTeacherTotalHours(activeTName);
+                      const tDuties = dutiesList.filter(d => normalizeTeacherMatch(d.teacherName, activeTName));
+                      const dayLabels: Record<number, string> = { 1: 'Pazartesi', 2: 'Salı', 3: 'Çarşamba', 4: 'Perşembe', 5: 'Cuma' };
+
+                      return (
+                        <View style={styles.radarGridCard}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, borderBottomWidth: 1, borderBottomColor: '#F1F5F9', paddingBottom: 10, marginBottom: 12 }}>
+                            <View>
+                              <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                                {activeTName || 'Öğretmen Seçilmedi'}
+                              </Text>
+                              <Text style={{ fontSize: 12, color: '#64748B' }}>
+                                Branş: {activeTObj?.branch || 'Belirtilmedi'} • Haftalık Ders: <Text style={{ fontWeight: '700', color: '#4F46E5' }}>{totalHours} Saat</Text>
+                              </Text>
+                            </View>
+                            {tDuties.length > 0 && (
+                              <View style={styles.radarDutyBadgeRed}>
+                                <Ionicons name="shield-checkmark" size={14} color="#DC2626" />
+                                <Text style={styles.radarDutyBadgeRedText}>
+                                  NÖBET GÜNLERİ: {tDuties.map(d => `${dayLabels[d.dayOfWeek] || d.dayOfWeek} (${d.dutyPlace})`).join(', ')}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+
+                          {/* 5 Günlük Haftalık Konum / Sınıf Tablosu */}
+                          <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                            <View style={styles.radarTable}>
+                              {/* Header: Saatler */}
+                              <View style={styles.radarTableHeaderRow}>
+                                <View style={[styles.radarTableHeadCell, { width: 95 }]}>
+                                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>GÜNLER</Text>
+                                </View>
+                                {Array.from({ length: scheduleDailyHours }, (_, i) => i + 1).map(h => (
+                                  <View key={h} style={[styles.radarTableHeadCell, { width: 90 }]}>
+                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>{h}. Ders</Text>
+                                  </View>
+                                  ))}
+                                </View>
+
+                              {/* Rows: Pazartesi -> Cuma */}
+                              {[1, 2, 3, 4, 5].map(day => {
+                                const dayDuty = tDuties.find(d => normalizeDayNumber(d.dayOfWeek) === day);
+                                return (
+                                  <View key={day} style={styles.radarTableRow}>
+                                    <View style={[styles.radarTableCell, { width: 95, backgroundColor: '#F8FAFC' }]}>
+                                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                                        {dayLabels[day]}
+                                      </Text>
+                                      {dayDuty && (
+                                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626', marginTop: 2 }}>
+                                          🚨 {dayDuty.dutyPlace}
+                                        </Text>
+                                      )}
+                                    </View>
+                                    {Array.from({ length: scheduleDailyHours }, (_, i) => i + 1).map(hour => {
+                                      const slot = activeRadarTeacherScheduleMap.get(`${day}_${hour}`);
+                                      const slotBranch = slot
+                                        ? (slot.className || (slot.grade && slot.section ? `${slot.grade}-${slot.section}` : slot.grade || slot.section || ''))
+                                        : '';
+                                      return (
+                                        <View key={hour} style={[styles.radarTableCell, { width: 90 }]}>
+                                          {slot ? (
+                                            <View style={styles.radarCellOccupied}>
+                                              <Text style={styles.radarCellOccupiedText} numberOfLines={1}>
+                                                {slotBranch || slot.lessonCode || 'Ders'}
+                                              </Text>
+                                              <Text style={styles.radarCellSubText} numberOfLines={1}>
+                                                {slot.lessonName || '-'}
+                                              </Text>
+                                            </View>
+                                          ) : (
+                                            <View style={styles.radarCellEmpty}>
+                                              <Text style={styles.radarCellEmptyText}>— BOŞ —</Text>
+                                            </View>
+                                          )}
+                                        </View>
+                                      );
+                                    })}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          </ScrollView>
+                        </View>
+                      );
+                    })()}
+                  </View>
+                )}
+
+                {/* SUB-TAB 2: ŞUBEDE KİM VAR? (SINIF / ŞUBE PROGRAMI) */}
+                {radarSubTab === 'class' && (
+                  <View>
+                    {(() => {
+                      const getFormattedClassName = (cls: any): string => {
+                        if (!cls) return '';
+                        if (typeof cls === 'string') return cls.trim();
+                        if (cls.className) return String(cls.className).trim();
+                        if (cls.name) return String(cls.name).trim();
+                        if (cls.grade && cls.section) return `${cls.grade}-${cls.section}`.trim();
+                        return String(cls.grade || cls.section || '').trim();
+                      };
+
+                      const isScheduleMatchingClass = (s: any, targetClassName: string): boolean => {
+                        if (!s || !targetClassName) return false;
+                        const target = targetClassName.trim().toLowerCase().replace('/', '-');
+                        const sCls = (s.className || (s.grade && s.section ? `${s.grade}-${s.section}` : `${s.grade || ''}-${s.section || ''}`)).trim().toLowerCase().replace('/', '-');
+                        if (sCls === target) return true;
+                        const parts = target.split('-');
+                        if (parts.length === 2) {
+                          const [tGrade, tSection] = parts;
+                          if (String(s.grade).trim().toLowerCase() === tGrade && String(s.section).trim().toLowerCase() === tSection) {
+                            return true;
+                          }
+                        }
+                        return false;
+                      };
+
+                      // Hem classes listesinden hem de programdaki tüm şubelerden eksiksiz liste oluştur
+                      const radarAvailableClasses: Array<{ id: string; name: string; grade: number; section: string }> = [];
+                      const seen = new Set<string>();
+
+                      (classes || []).forEach((c: any) => {
+                        const cName = getFormattedClassName(c);
+                        if (cName && !seen.has(cName.toLowerCase())) {
+                          seen.add(cName.toLowerCase());
+                          const gNum = parseInt(String(c.grade || cName).replace(/\D/g, '') || '0', 10);
+                          radarAvailableClasses.push({ id: c.id || cName, name: cName, grade: gNum, section: String(c.section || '') });
+                        }
+                      });
+
+                      (allSchoolSchedules || []).forEach((s: any) => {
+                        const sName = getFormattedClassName(s);
+                        if (sName && !seen.has(sName.toLowerCase())) {
+                          seen.add(sName.toLowerCase());
+                          const gNum = parseInt(String(s.grade || sName).replace(/\D/g, '') || '0', 10);
+                          radarAvailableClasses.push({ id: sName, name: sName, grade: gNum, section: String(s.section || '') });
+                        }
+                      });
+
+                      radarAvailableClasses.sort((a, b) => {
+                        if (a.grade !== b.grade) return a.grade - b.grade;
+                        return a.name.localeCompare(b.name, 'tr');
+                      });
+
+                      const activeCName = radarClass || radarAvailableClasses[0]?.name || '';
+                      const dayLabels: Record<number, string> = { 1: 'Pazartesi', 2: 'Salı', 3: 'Çarşamba', 4: 'Perşembe', 5: 'Cuma' };
+
+                      return (
+                        <View>
+                          {/* Sınıf Seçimi - Dropdown */}
+                          <View style={styles.radarGridCard}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: '#334155' }}>
+                                Sınıf / Şube Seçiniz:
+                              </Text>
+                              <Text style={{ fontSize: 11, color: '#64748B' }}>
+                                Toplam {radarAvailableClasses.length} Şube
+                              </Text>
+                            </View>
+
+                            {radarAvailableClasses.length === 0 ? (
+                              <Text style={{ fontSize: 12, color: '#94A3B8', fontStyle: 'italic', paddingVertical: 4 }}>
+                                Henüz kayıtlı sınıf/şube verisi bulunamadı.
+                              </Text>
+                            ) : (
+                              <>
+                                <TouchableOpacity
+                                  style={styles.radarDropdownButton}
+                                  onPress={() => {
+                                    setRadarClassSearch('');
+                                    setRadarClassGradeFilter('all');
+                                    setRadarClassModalVisible(true);
+                                  }}
+                                  activeOpacity={0.8}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                                    <View style={styles.radarDropdownIconWrap}>
+                                      <Ionicons name="school" size={18} color="#4F46E5" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                      <Text style={{ fontSize: 10.5, fontWeight: '600', color: '#64748B' }}>
+                                        Görüntülenen Şube
+                                      </Text>
+                                      <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A' }}>
+                                        {activeCName ? `${activeCName} Şubesi` : 'Şube Seçmek İçin Dokunun...'}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                  <View style={styles.radarDropdownActionTag}>
+                                    <Text style={styles.radarDropdownActionText}>Şube Değiştir</Text>
+                                    <Ionicons name="chevron-down" size={15} color="#4F46E5" />
+                                  </View>
+                                </TouchableOpacity>
+
+                                {/* Hızlı Sık Kullanılan Şubeler Şeridi */}
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 8 }}>
+                                  {radarAvailableClasses.slice(0, 8).map(c => {
+                                    const isSel = activeCName.trim().toLowerCase() === c.name.trim().toLowerCase();
+                                    return (
+                                      <TouchableOpacity
+                                        key={c.id || c.name}
+                                        style={[styles.reportFilterChip, isSel && styles.reportFilterChipActive]}
+                                        onPress={() => setRadarClass(c.name)}
+                                      >
+                                        <Text style={[styles.reportFilterChipText, isSel && styles.reportFilterChipTextActive]}>
+                                          {c.name}
+                                        </Text>
+                                      </TouchableOpacity>
+                                    );
+                                  })}
+                                  {radarAvailableClasses.length > 8 && (
+                                    <TouchableOpacity
+                                      style={[styles.reportFilterChip, { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' }]}
+                                      onPress={() => {
+                                        setRadarClassSearch('');
+                                        setRadarClassGradeFilter('all');
+                                        setRadarClassModalVisible(true);
+                                      }}
+                                    >
+                                      <Text style={[styles.reportFilterChipText, { color: '#4F46E5', fontWeight: '800' }]}>
+                                        +{radarAvailableClasses.length - 8} Diğer...
+                                      </Text>
+                                    </TouchableOpacity>
+                                  )}
+                                </ScrollView>
+                              </>
+                            )}
+                          </View>
+
+                          {/* Sınıf Haftalık Programı */}
+                          <View style={styles.radarGridCard}>
+                            <View style={{ borderBottomWidth: 1, borderBottomColor: '#F1F5F9', paddingBottom: 10, marginBottom: 12 }}>
+                              <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                                {activeCName ? `${activeCName} Şubesi Haftalık Ders Dağılımı` : 'Şube Seçilmedi'}
+                              </Text>
+                              <Text style={{ fontSize: 12, color: '#64748B' }}>
+                                Her saatte sınıfta hangi öğretmenin bulunduğunu ve dersi canlı görüntüleyin.
+                              </Text>
+                            </View>
+
+                            <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+                              <View style={styles.radarTable}>
+                                <View style={styles.radarTableHeaderRow}>
+                                  <View style={[styles.radarTableHeadCell, { width: 95 }]}>
+                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>GÜNLER</Text>
+                                  </View>
+                                  {Array.from({ length: scheduleDailyHours }, (_, i) => i + 1).map(h => (
+                                    <View key={h} style={[styles.radarTableHeadCell, { width: 105 }]}>
+                                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>{h}. Ders</Text>
+                                    </View>
+                                  ))}
+                                </View>
+                                {(() => {
+                                  const classScheduleMap = new Map<string, any>();
+                                  for (let i = 0; i < allSchoolSchedules.length; i++) {
+                                    const s = allSchoolSchedules[i];
+                                    if (isScheduleMatchingClass(s, activeCName)) {
+                                      classScheduleMap.set(`${s.dayOfWeek}_${s.lessonHour}`, s);
+                                    }
+                                  }
+                                  return [1, 2, 3, 4, 5].map(day => (
+                                    <View key={day} style={styles.radarTableRow}>
+                                      <View style={[styles.radarTableCell, { width: 95, backgroundColor: '#F8FAFC' }]}>
+                                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                                          {dayLabels[day]}
+                                        </Text>
+                                      </View>
+                                      {Array.from({ length: scheduleDailyHours }, (_, i) => i + 1).map(hour => {
+                                        const slot = classScheduleMap.get(`${day}_${hour}`);
+                                        return (
+                                          <View key={hour} style={[styles.radarTableCell, { width: 105 }]}>
+                                          {slot ? (
+                                            <View style={[styles.radarCellOccupied, { backgroundColor: '#F0FDF4' }]}>
+                                              <Text style={[styles.radarCellOccupiedText, { color: '#166534' }]} numberOfLines={1}>
+                                                {slot.teacherName || 'Öğretmen'}
+                                              </Text>
+                                              <Text style={[styles.radarCellSubText, { color: '#15803D' }]} numberOfLines={1}>
+                                                {slot.lessonName || '-'}
+                                              </Text>
+                                            </View>
+                                          ) : (
+                                            <View style={styles.radarCellEmpty}>
+                                              <Text style={styles.radarCellEmptyText}>— BOŞ —</Text>
+                                            </View>
+                                          )}
+                                        </View>
+                                      );
+                                    })}
+                                  </View>
+                                  ));
+                                })()}
+                              </View>
+                            </ScrollView>
+                          </View>
+                        </View>
+                      );
+                    })()}
+                  </View>
+                )}
+
+                {/* SUB-TAB 3: ANLIK BOŞ DERS RADARI (KİMİN DERSİ BOŞ?) */}
+                {radarSubTab === 'free_teachers' && (
+                  <View>
+                    {/* Gün ve Saat Seçimi */}
+                    <View style={styles.radarGridCard}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#334155', marginBottom: 8 }}>
+                        Hedef Günü Seçiniz:
+                      </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                        {[
+                          { day: 1, label: 'Pazartesi' },
+                          { day: 2, label: 'Salı' },
+                          { day: 3, label: 'Çarşamba' },
+                          { day: 4, label: 'Perşembe' },
+                          { day: 5, label: 'Cuma' },
+                        ].map(d => (
+                          <TouchableOpacity
+                            key={d.day}
+                            style={[styles.reportSegmentBtn, radarDay === d.day && styles.reportSegmentBtnActive]}
+                            onPress={() => {
+                              tabPressTimestampRef.current = Date.now();
+                              setRadarDay(d.day);
+                            }}
+                          >
+                            <Text style={[styles.reportSegmentText, radarDay === d.day && styles.reportSegmentTextActive]}>
+                              {d.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#334155', marginBottom: 8 }}>
+                        Ders Saatini Seçiniz:
+                      </Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                        {Array.from({ length: scheduleDailyHours }, (_, i) => i + 1).map(h => (
+                          <TouchableOpacity
+                            key={h}
+                            style={[
+                              styles.reportFilterChip,
+                              radarHour === h && { backgroundColor: '#4F46E5', borderColor: '#4338CA' },
+                              { paddingHorizontal: 14 }
+                            ]}
+                            onPress={() => {
+                              tabPressTimestampRef.current = Date.now();
+                              setRadarHour(h);
+                            }}
+                          >
+                            <Text style={[styles.reportFilterChipText, radarHour === h && { color: '#FFFFFF', fontWeight: '800' }]}>
+                              {h}. Saat
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Boş Olan Öğretmenler Listesi */}
+                    {(() => {
+                      const dayLabels: Record<number, string> = { 1: 'Pazartesi', 2: 'Salı', 3: 'Çarşamba', 4: 'Perşembe', 5: 'Cuma' };
+                      const dutyCount = freeTeachersList.filter((t: any) => t.duty).length;
+                      const inSchoolCount = freeTeachersList.filter((t: any) => !t.duty && t.todayLessons > 0).length;
+                      const allDayFreeCount = freeTeachersList.filter((t: any) => !t.duty && t.todayLessons === 0).length;
+
+                      return (
+                        <View>
+                          {/* İstatistik Çubuğu */}
+                          <View style={[styles.radarGridCard, { backgroundColor: '#EEF2FF', borderColor: '#C7D2FE' }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                              <View>
+                                <Text style={{ fontSize: 15, fontWeight: '800', color: '#1E1B4B' }}>
+                                  {dayLabels[radarDay]} • {radarHour}. Saat Boş Öğretmenler ({freeTeachersList.length})
+                                </Text>
+                                <Text style={{ fontSize: 12, color: '#4338CA', marginTop: 2 }}>
+                                  {dutyCount > 0 ? `🚨 ${dutyCount} Nöbetçi • ` : ''}
+                                  {inSchoolCount > 0 ? `🏫 ${inSchoolCount} Okulda Dersi Olan • ` : ''}
+                                  {allDayFreeCount > 0 ? `🏠 ${allDayFreeCount} Bugün Dersi Olmayan` : ''}
+                                </Text>
+                              </View>
+                              {dutyCount > 0 && (
+                                <View style={styles.radarDutyBadgeRed}>
+                                  <Ionicons name="alert-circle" size={14} color="#DC2626" />
+                                  <Text style={styles.radarDutyBadgeRedText}>
+                                    {dutyCount} NÖBETÇİ ÖĞRETMEN MÜSAİT
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+
+                          {/* Kartlar */}
+                          {freeTeachersList.length === 0 ? (
+                            <View style={[styles.radarGridCard, { alignItems: 'center', paddingVertical: 32 }]}>
+                              <Ionicons name="checkmark-done-circle" size={40} color="#10B981" />
+                              <Text style={{ fontSize: 15, fontWeight: '700', color: '#1E293B', marginTop: 8 }}>
+                                Tüm Öğretmenler Derste
+                              </Text>
+                              <Text style={{ fontSize: 12, color: '#64748B', marginTop: 4 }}>
+                                Seçilen gün ve saatte okuldaki tüm personelin aktif dersi bulunmaktadır.
+                              </Text>
+                            </View>
+                          ) : (
+                            freeTeachersList.map((t: any) => {
+                              const isAllDayFree = t.todayLessons === 0;
+                              return (
+                                <TouchableOpacity
+                                  key={t.id || t.fullName}
+                                  activeOpacity={0.72}
+                                  onPress={() => handleOpenTeacherSchedule(t)}
+                                  style={[
+                                    styles.radarFreeCard,
+                                    t.duty && styles.radarFreeCardDuty,
+                                    isAllDayFree && !t.duty && { opacity: 0.88, backgroundColor: '#F8FAFC', borderColor: '#E2E8F0' },
+                                    { position: 'relative' }
+                                  ]}
+                                >
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                                    <View style={{ flex: 1 }}>
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                        <Text style={[{ fontSize: 15, fontWeight: '800' }, isAllDayFree && !t.duty ? { color: '#475569' } : { color: '#0F172A' }]}>
+                                          {t.fullName}
+                                        </Text>
+                                        {t.duty ? (
+                                          <View style={styles.radarDutyBadgeRed}>
+                                            <Ionicons name="shield-checkmark" size={12} color="#DC2626" />
+                                            <Text style={styles.radarDutyBadgeRedText}>
+                                              NÖBETÇİ: {t.duty.dutyPlace}
+                                            </Text>
+                                          </View>
+                                        ) : isAllDayFree ? (
+                                          <View style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#CBD5E1' }}>
+                                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>
+                                              🏠 Bugün Dersi Yok (Okulda Olmayabilir)
+                                            </Text>
+                                          </View>
+                                        ) : (
+                                          <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#166534' }}>
+                                              ✅ Okulda / Bu Saat Boş
+                                            </Text>
+                                          </View>
+                                        )}
+                                      </View>
+                                      <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                                        Branş: {t.branch || 'Genel'}
+                                        {t.duty?.notes ? ` • Not: ${t.duty.notes}` : ''}
+                                      </Text>
+                                    </View>
+
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                      {isAllDayFree ? (
+                                        <View style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B' }}>
+                                            Tüm Gün Boş
+                                          </Text>
+                                        </View>
+                                      ) : (
+                                        <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#334155' }}>
+                                            Bugün Boş: <Text style={{ color: '#4F46E5' }}>{t.todayFreeHours} Saat</Text>
+                                          </Text>
+                                        </View>
+                                      )}
+                                      <Text style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
+                                        Bugünkü Dersi: {t.todayLessons} Saat
+                                      </Text>
+                                    </View>
+                                  </View>
+
+                                  {/* Tıklama İpucu & Hızlı Program Buton Çubuğu */}
+                                  <View style={{ marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F1F5F9', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                      <Ionicons name="calendar" size={13} color="#4F46E5" />
+                                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>
+                                        Haftalık Ders Programını Gör
+                                      </Text>
+                                    </View>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                                      <Text style={{ fontSize: 10, color: '#94A3B8', fontWeight: '600' }}>Detay Çizelge</Text>
+                                      <Ionicons name="chevron-forward" size={13} color="#94A3B8" />
+                                    </View>
+                                  </View>
+                                </TouchableOpacity>
+                              );
+                            })
+                          )}
+                        </View>
+                      );
+                    })()}
+                  </View>
+                )}
+
+                {/* SUB-TAB 4: NÖBETÇİ ÖĞRETMEN YÖNETİMİ */}
+                {radarSubTab === 'duty' && (
+                  <View>
+                    {/* Eylemler ve Butonlar */}
+                    <View style={styles.radarGridCard}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A' }}>
+                            Okul Nöbetçi Öğretmen Çizelgesi
+                          </Text>
+                          <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                            Haftalık nöbet yerlerini (Bahçe, 1. Kat vb.) Excel ile toplu aktarın veya manuel ekleyin.
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                          <TouchableOpacity
+                            style={[styles.exportActionBtn, { backgroundColor: '#0284C7', paddingVertical: 8, paddingHorizontal: 12 }]}
+                            onPress={handleDownloadDutyTemplate}
+                            disabled={downloadingDutyTemplate}
+                          >
+                            {downloadingDutyTemplate ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <>
+                                <Ionicons name="download-outline" size={16} color="#fff" />
+                                <Text style={[styles.exportActionBtnText, { fontSize: 12 }]}>Şablon İndir</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.exportActionBtn, { backgroundColor: '#10B981', paddingVertical: 8, paddingHorizontal: 12 }]}
+                            onPress={handlePickAndParseDutyExcel}
+                            disabled={importingDutyExcel}
+                          >
+                            {importingDutyExcel ? (
+                              <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                              <>
+                                <Ionicons name="document-text-outline" size={16} color="#fff" />
+                                <Text style={[styles.exportActionBtnText, { fontSize: 12 }]}>Excel ile Nöbet Yükle</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.exportActionBtn, { backgroundColor: '#7C3AED', paddingVertical: 8, paddingHorizontal: 12 }]}
+                            onPress={() => setDutyPlacesModalVisible(true)}
+                          >
+                            <Ionicons name="location" size={16} color="#fff" />
+                            <Text style={[styles.exportActionBtnText, { fontSize: 12 }]}>Nöbet Alanları</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.exportActionBtn, { backgroundColor: '#4F46E5', paddingVertical: 8, paddingHorizontal: 12 }]}
+                            onPress={() => setAddDutyModalVisible(true)}
+                          >
+                            <Ionicons name="add" size={16} color="#fff" />
+                            <Text style={[styles.exportActionBtnText, { fontSize: 12 }]}>Yeni Nöbetçi</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      {/* Gün Filtresi */}
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                        {[
+                          { day: 0, label: 'Tüm Hafta' },
+                          { day: 1, label: 'Pazartesi' },
+                          { day: 2, label: 'Salı' },
+                          { day: 3, label: 'Çarşamba' },
+                          { day: 4, label: 'Perşembe' },
+                          { day: 5, label: 'Cuma' },
+                        ].map(d => (
+                          <TouchableOpacity
+                            key={d.day}
+                            style={[styles.reportSegmentBtn, dutyFilterDay === d.day && styles.reportSegmentBtnActive]}
+                            onPress={() => setDutyFilterDay(d.day)}
+                          >
+                            <Text style={[styles.reportSegmentText, dutyFilterDay === d.day && styles.reportSegmentTextActive]}>
+                              {d.label}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {/* Nöbetçi Listesi */}
+                    {loadingDuties ? (
+                      <ActivityIndicator size="large" color={Colors.primary} style={{ marginVertical: 24 }} />
+                    ) : (
+                      (() => {
+                        const dayLabels: Record<number, string> = { 1: 'Pazartesi', 2: 'Salı', 3: 'Çarşamba', 4: 'Perşembe', 5: 'Cuma', 6: 'Cumartesi', 7: 'Pazar' };
+                        const filteredDuties = dutiesList.filter(d => dutyFilterDay === 0 || normalizeDayNumber(d.dayOfWeek) === dutyFilterDay);
+
+                        if (filteredDuties.length === 0) {
+                          return (
+                            <View style={[styles.radarGridCard, { alignItems: 'center', paddingVertical: 32 }]}>
+                              <Ionicons name="shield-outline" size={40} color="#94A3B8" />
+                              <Text style={{ fontSize: 14, fontWeight: '700', color: '#334155', marginTop: 8 }}>
+                                Kayıtlı Nöbetçi Bulunamadı
+                              </Text>
+                              <Text style={{ fontSize: 12, color: '#64748B', textAlign: 'center', marginTop: 4, maxWidth: 300 }}>
+                                Okulunuzun nöbet listesini Excel tablosu (.xlsx) olarak yükleyebilir veya "Yeni Nöbetçi" butonuyla ekleyebilirsiniz.
+                              </Text>
+                            </View>
+                          );
+                        }
+
+                        return (
+                          <View style={{ gap: 8 }}>
+                            {filteredDuties.map(d => (
+                              <View key={d.id} style={styles.radarGridCard}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <View style={{ flex: 1 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                      <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A' }}>
+                                        {d.teacherName}
+                                      </Text>
+                                      <View style={styles.radarDutyBadgeRed}>
+                                        <Ionicons name="location" size={12} color="#DC2626" />
+                                        <Text style={styles.radarDutyBadgeRedText}>
+                                          {d.dutyPlace}
+                                        </Text>
+                                      </View>
+                                    </View>
+                                    <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                                      {dayLabels[d.dayOfWeek] || `${d.dayOfWeek}. Gün`}
+                                      {d.notes ? ` • ${d.notes}` : ''}
+                                    </Text>
+                                  </View>
+
+                                  <TouchableOpacity
+                                    onPress={() => handleDeleteDuty(d.id, d.teacherName)}
+                                    style={{ padding: 8, borderRadius: 8, backgroundColor: '#FEE2E2' }}
+                                  >
+                                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                                  </TouchableOpacity>
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        );
+                      })()
+                    )}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* 7. NÖBETÇİ ATAMA & GELMEYEN ÖĞRETMEN TELAFİ DAĞITIMI SEKMESİ */}
+            {activeTab === 'duty_assignment' && (
+              <View style={{ gap: 14 }}>
+                {/* 1. Üst Banner & Açıklama Kartı */}
+                <View style={{
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 14,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.05,
+                  shadowRadius: 6,
+                  elevation: 2,
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
+                      <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="shield-checkmark" size={24} color="#4F46E5" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                          Nöbetçi Atama & Telafi Dersi Dağıtımı
+                        </Text>
+                        <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2, lineHeight: 17 }}>
+                          Bugün gelmeyen veya izinli olan öğretmenleri seçin. O günkü dersleri saat saat listelenir ve yanlarında boşta olan nöbetçi öğretmenler aday olarak gösterilir.
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      onPress={handlePrintDutySchedule}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: '#4F46E5',
+                        paddingHorizontal: 14,
+                        paddingVertical: 10,
+                        borderRadius: 10,
+                        shadowColor: '#4F46E5',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.15,
+                        shadowRadius: 4,
+                        elevation: 2,
+                      }}
+                    >
+                      <Ionicons name="print-outline" size={17} color="#FFFFFF" />
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#FFFFFF' }}>
+                        Çizelgeyi Yazdır / PDF
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* 2. Gün Seçim Çubuğu */}
+                <View style={{
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 14,
+                  padding: 14,
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                }}>
+                  <Text style={{ fontSize: 12, fontWeight: '800', color: '#334155', marginBottom: 8 }}>
+                    📅 İşlem Yapılacak Günü Seçin:
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {[
+                      { day: 1, name: 'Pazartesi' },
+                      { day: 2, name: 'Salı' },
+                      { day: 3, name: 'Çarşamba' },
+                      { day: 4, name: 'Perşembe' },
+                      { day: 5, name: 'Cuma' },
+                    ].map(d => {
+                      const isSelected = dutyAssignDay === d.day;
+                      return (
+                        <TouchableOpacity
+                          key={d.day}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                            paddingHorizontal: 14,
+                            paddingVertical: 9,
+                            borderRadius: 10,
+                            backgroundColor: isSelected ? '#4F46E5' : '#F8FAFC',
+                            borderWidth: 1.5,
+                            borderColor: isSelected ? '#4F46E5' : '#E2E8F0',
+                          }}
+                          onPress={() => setDutyAssignDay(d.day)}
+                        >
+                          <Ionicons
+                            name="calendar"
+                            size={14}
+                            color={isSelected ? '#FFFFFF' : '#64748B'}
+                          />
+                          <Text style={{
+                            fontSize: 12,
+                            fontWeight: '800',
+                            color: isSelected ? '#FFFFFF' : '#334155',
+                          }}>
+                            {d.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+
+                {/* 3. Gelmeyen Öğretmenleri Seçin Kartı (Checkbox Listesi) */}
+                <View style={{
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 14,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="checkbox" size={18} color="#DC2626" />
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#0F172A' }}>
+                        🚫 Bugün Gelmeyen Öğretmenleri Seçin
+                      </Text>
+                      {absentTeachers.length > 0 && (
+                        <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>
+                            {absentTeachers.length} Kişi Seçildi
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+
+                    {absentTeachers.length > 0 && (
+                      <TouchableOpacity
+                        onPress={() => setAbsentTeachers([])}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+                      >
+                        <Ionicons name="trash-outline" size={13} color="#64748B" />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B' }}>Seçimleri Temizle</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Arama Kutusu */}
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: '#F8FAFC',
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: '#E2E8F0',
+                    paddingHorizontal: 10,
+                    height: 38,
+                    marginBottom: 10,
+                  }}>
+                    <Ionicons name="search" size={16} color="#94A3B8" />
+                    <TextInput
+                      style={{ flex: 1, marginLeft: 8, fontSize: 12, color: '#0F172A' }}
+                      placeholder="Öğretmen adı veya branş ara..."
+                      placeholderTextColor="#94A3B8"
+                      value={absentTeacherSearch}
+                      onChangeText={setAbsentTeacherSearch}
+                    />
+                    {absentTeacherSearch.length > 0 && (
+                      <TouchableOpacity onPress={() => setAbsentTeacherSearch('')}>
+                        <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Öğretmen Checkbox Seçim Alanı */}
+                  <ScrollView
+                    nestedScrollEnabled
+                    style={{ maxHeight: 220 }}
+                    showsVerticalScrollIndicator={true}
+                    contentContainerStyle={{ gap: 6 }}
+                  >
+                    {(() => {
+                      const q = absentTeacherSearch.trim().toLowerCase();
+                      const list = sortedTeachers.filter(t => {
+                        if (!q) return true;
+                        return (t.fullName || '').toLowerCase().includes(q) || (t.branch || '').toLowerCase().includes(q);
+                      });
+
+                      if (list.length === 0) {
+                        return (
+                          <Text style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', paddingVertical: 14 }}>
+                            Aramaya uygun öğretmen bulunamadı.
+                          </Text>
+                        );
+                      }
+
+                      return (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {list.map(t => {
+                            const isAbsent = absentTeachers.includes(t.fullName);
+                            return (
+                              <TouchableOpacity
+                                key={t.id || t.fullName}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  backgroundColor: isAbsent ? '#FEF2F2' : '#FFFFFF',
+                                  borderWidth: 1.5,
+                                  borderColor: isAbsent ? '#EF4444' : '#E2E8F0',
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 7,
+                                  borderRadius: 8,
+                                  minWidth: 160,
+                                }}
+                                onPress={() => {
+                                  setAbsentTeachers(prev =>
+                                    prev.includes(t.fullName)
+                                      ? prev.filter(name => name !== t.fullName)
+                                      : [...prev, t.fullName]
+                                  );
+                                }}
+                              >
+                                <Ionicons
+                                  name={isAbsent ? 'checkbox' : 'square-outline'}
+                                  size={18}
+                                  color={isAbsent ? '#EF4444' : '#94A3B8'}
+                                />
+                                <View style={{ flex: 1 }}>
+                                  <Text style={{ fontSize: 12, fontWeight: '800', color: isAbsent ? '#DC2626' : '#1E293B' }} numberOfLines={1}>
+                                    {t.fullName}
+                                  </Text>
+                                  {t.branch && (
+                                    <Text style={{ fontSize: 10, color: isAbsent ? '#B91C1C' : '#64748B' }} numberOfLines={1}>
+                                      {t.branch}
+                                    </Text>
+                                  )}
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      );
+                    })()}
+                  </ScrollView>
+                </View>
+
+                {/* 4. Ders Programı ve Eşleştirme Kartları (Gelmeyen Öğretmen Dersi ➔ Müsait Nöbetçi) */}
+                <View style={{
+                  backgroundColor: '#FFFFFF',
+                  borderRadius: 14,
+                  padding: 16,
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="git-compare-outline" size={18} color="#4F46E5" />
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: '#0F172A' }}>
+                        Ders Dağıtım & Nöbetçi Eşleştirme Çizelgesi
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={handlePrintDutySchedule}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 5,
+                        backgroundColor: '#EEF2FF',
+                        borderWidth: 1.5,
+                        borderColor: '#C7D2FE',
+                        paddingHorizontal: 12,
+                        paddingVertical: 6,
+                        borderRadius: 8,
+                      }}
+                    >
+                      <Ionicons name="print" size={14} color="#4F46E5" />
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#4338CA' }}>
+                        Yazdır / PDF
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {absentTeachers.length === 0 ? (
+                    <View style={{ paddingVertical: 36, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="person-remove-outline" size={44} color="#CBD5E1" />
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#64748B', marginTop: 10 }}>
+                        Henüz Gelmeyen Öğretmen Seçilmedi
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#94A3B8', textAlign: 'center', marginTop: 4, maxWidth: 360 }}>
+                        Yukarıdaki listeden bugün gelmeyen öğretmenleri işaretleyin. O günkü dersleri ve yerine girebilecek müsait nöbetçiler burada yan yana gösterilecektir.
+                      </Text>
+                    </View>
+                  ) : (() => {
+                    // Seçilen gelmeyen öğretmenlerin seçilen gündeki dersleri
+                    const absentDaySchedules = (allSchoolSchedules || [])
+                      .filter(s => {
+                        const sDay = Number(s.dayOfWeek);
+                        if (sDay !== dutyAssignDay) return false;
+                        return absentTeachers.some(absentName => isSameTeacher(absentName, s.teacherName));
+                      })
+                      .sort((a, b) => Number(a.lessonHour || 0) - Number(b.lessonHour || 0));
+
+                    if (absentDaySchedules.length === 0) {
+                      const dayNames = ['', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'];
+                      return (
+                        <View style={{ paddingVertical: 30, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                          <Ionicons name="checkmark-done-circle" size={40} color="#10B981" />
+                          <Text style={{ fontSize: 14, fontWeight: '800', color: '#1E293B', marginTop: 8 }}>
+                            Seçilen Öğretmenlerin Bu Gün Dersi Yok
+                          </Text>
+                          <Text style={{ fontSize: 12, color: '#64748B', textAlign: 'center', marginTop: 4 }}>
+                            Seçtiğiniz öğretmenlerin {dayNames[dutyAssignDay]} gününde boşluğu bulunmaktadır.
+                          </Text>
+                        </View>
+                      );
+                    }
+
+                    return (
+                      <View style={{ gap: 12 }}>
+                        {absentDaySchedules.map((slotItem, sIdx) => {
+                          const lHour = Number(slotItem.lessonHour || (sIdx + 1));
+                          const slotKey = `${dutyAssignDay}_${lHour}_${normalizeTeacherName(slotItem.teacherName)}`;
+                          const allAvailableDuty = getAvailableDutyTeachersForHour(
+                            dutyAssignDay,
+                            lHour,
+                            dutiesList,
+                            allSchoolSchedules,
+                            absentTeachers
+                          );
+                          const hiddenList = hiddenDutyTeachersBySlot[slotKey] || [];
+                          const visibleDutyTeachers = allAvailableDuty.filter(d => !hiddenList.includes(d.teacherName));
+                          const hiddenDutyTeachers = allAvailableDuty.filter(d => hiddenList.includes(d.teacherName));
+
+                          const classNameText = slotItem.className || (slotItem.grade && slotItem.section ? `${slotItem.grade}-${slotItem.section}` : slotItem.grade || slotItem.section || '—');
+
+                          return (
+                            <View
+                              key={slotKey + '_' + sIdx}
+                              style={{
+                                backgroundColor: '#F8FAFC',
+                                borderWidth: 1,
+                                borderColor: '#E2E8F0',
+                                borderRadius: 12,
+                                padding: 12,
+                              }}
+                            >
+                              <View style={{ flexDirection: 'row', alignItems: 'stretch', flexWrap: 'wrap', gap: 10 }}>
+                                {/* SOL KART: GELMEYEN ÖĞRETMEN VE DERS */}
+                                <View style={{
+                                  flex: 1,
+                                  minWidth: 260,
+                                  backgroundColor: '#FFF1F2',
+                                  borderWidth: 1.5,
+                                  borderColor: '#FECDD3',
+                                  borderRadius: 10,
+                                  padding: 12,
+                                  justifyContent: 'space-between',
+                                }}>
+                                  <View>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 8 }}>
+                                      <View style={{ backgroundColor: '#E11D48', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 }}>
+                                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#FFFFFF' }}>
+                                          ⏰ {lHour}. Ders Saati
+                                        </Text>
+                                      </View>
+                                      <View style={{ backgroundColor: '#FFE4E6', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#FDA4AF' }}>
+                                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#BE123C' }}>
+                                          🏫 Şube: {classNameText}
+                                        </Text>
+                                      </View>
+                                    </View>
+
+                                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#881337', marginBottom: 4 }}>
+                                      📚 {slotItem.lessonName || 'Ders'}
+                                    </Text>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#9F1239' }}>
+                                      ❌ Gelmeyen: {slotItem.teacherName}
+                                    </Text>
+                                  </View>
+
+                                  <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#FFE4E6', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <Ionicons name="arrow-forward-circle" size={14} color="#E11D48" />
+                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#E11D48' }}>
+                                      Yerine Nöbetçi Görevlendirilecek ➔
+                                    </Text>
+                                  </View>
+                                </View>
+
+                                {/* SAĞ KART: MÜSAİT NÖBETÇİ ÖĞRETMENLER */}
+                                <View style={{
+                                  flex: 1.2,
+                                  minWidth: 280,
+                                  backgroundColor: '#F0FDF4',
+                                  borderWidth: 1.5,
+                                  borderColor: '#BBF7D0',
+                                  borderRadius: 10,
+                                  padding: 12,
+                                }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                      <Ionicons name="shield-checkmark" size={16} color="#16A34A" />
+                                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#166534' }}>
+                                        Bu Saatte Müsait Nöbetçiler ({visibleDutyTeachers.length})
+                                      </Text>
+                                    </View>
+                                    {hiddenDutyTeachers.length > 0 && (
+                                      <TouchableOpacity
+                                        onPress={() => {
+                                          setHiddenDutyTeachersBySlot(prev => {
+                                            const copy = { ...prev };
+                                            delete copy[slotKey];
+                                            return copy;
+                                          });
+                                        }}
+                                        style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}
+                                      >
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#15803D' }}>
+                                          Gizlenenleri Aç ({hiddenDutyTeachers.length})
+                                        </Text>
+                                      </TouchableOpacity>
+                                    )}
+                                  </View>
+
+                                  {visibleDutyTeachers.length === 0 ? (
+                                    <View style={{ paddingVertical: 14, alignItems: 'center', justifyContent: 'center' }}>
+                                      <Ionicons name="alert-circle-outline" size={24} color="#D97706" />
+                                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309', marginTop: 4, textAlign: 'center' }}>
+                                        {allAvailableDuty.length === 0
+                                          ? 'Bu ders saatinde dersi boş olan nöbetçi öğretmen bulunmuyor.'
+                                          : 'Tüm nöbetçi öğretmenler gizlendi.'}
+                                      </Text>
+                                    </View>
+                                  ) : (
+                                    <ScrollView
+                                      horizontal
+                                      showsHorizontalScrollIndicator={false}
+                                      contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
+                                    >
+                                      {visibleDutyTeachers.map((d, dIdx) => (
+                                        <View
+                                          key={d.teacherName + '_' + dIdx}
+                                          style={{
+                                            backgroundColor: '#FFFFFF',
+                                            borderWidth: 1.5,
+                                            borderColor: '#86EFAC',
+                                            borderRadius: 8,
+                                            padding: 8,
+                                            minWidth: 145,
+                                            maxWidth: 180,
+                                            justifyContent: 'space-between',
+                                            elevation: 1,
+                                            shadowColor: '#000',
+                                            shadowOffset: { width: 0, height: 1 },
+                                            shadowOpacity: 0.05,
+                                            shadowRadius: 2,
+                                          }}
+                                        >
+                                          {/* Üst Satır: Öğretmen Adı ve Minik Göz Simgesi */}
+                                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#0F172A', flex: 1 }} numberOfLines={1}>
+                                              {d.teacherName}
+                                            </Text>
+                                            {/* 👁️ Minik Göz Simgesi (Tıklayınca Gizle / Sağa At) */}
+                                            <TouchableOpacity
+                                              onPress={() => {
+                                                setHiddenDutyTeachersBySlot(prev => {
+                                                  const curr = prev[slotKey] || [];
+                                                  return { ...prev, [slotKey]: [...curr, d.teacherName] };
+                                                });
+                                              }}
+                                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                              style={{
+                                                backgroundColor: '#EEF2FF',
+                                                padding: 3,
+                                                borderRadius: 6,
+                                                borderWidth: 1,
+                                                borderColor: '#C7D2FE',
+                                              }}
+                                              title="Kartı gizle / en sağa at"
+                                            >
+                                              <Ionicons name="eye-off-outline" size={13} color="#4F46E5" />
+                                            </TouchableOpacity>
+                                          </View>
+
+                                          <View style={{ marginTop: 6 }}>
+                                            <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
+                                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#166534' }} numberOfLines={1}>
+                                                📍 {d.dutyPlace}
+                                              </Text>
+                                            </View>
+                                          </View>
+
+                                          <View style={{ marginTop: 8, paddingTop: 4, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+                                            <Text style={{ fontSize: 9, color: '#15803D', fontWeight: '800' }}>
+                                              ✓ Bu saat dersi BOŞ
+                                            </Text>
+                                          </View>
+                                        </View>
+                                      ))}
+                                    </ScrollView>
+                                  )}
+                                </View>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    );
+                  })()}
+                </View>
+              </View>
+            )}
           </>
         )}
       </ScrollView>
+
+      {/* NÖBETÇİ EKLEME MODALI */}
+      <Modal visible={addDutyModalVisible} animationType="slide" transparent onRequestClose={() => setAddDutyModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 520, width: '92%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="shield-checkmark" size={22} color="#4F46E5" />
+                <Text style={styles.modalTitle}>Yeni Nöbetçi Öğretmen Ekle</Text>
+              </View>
+              <TouchableOpacity onPress={() => setAddDutyModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 12, gap: 14 }}>
+              <View>
+                <Text style={styles.reportFilterLabel}>Öğretmen Adı:</Text>
+                <TextInput
+                  style={[styles.input, { marginTop: 4 }]}
+                  placeholder="Öğretmen adı yazın..."
+                  placeholderTextColor="#94A3B8"
+                  value={newDutyTeacher}
+                  onChangeText={setNewDutyTeacher}
+                />
+                {/* Hızlı öğretmen seçici */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, marginTop: 6 }}>
+                  {sortedTeachers.slice(0, 15).map(t => (
+                    <TouchableOpacity
+                      key={t.id || t.fullName}
+                      style={[styles.reportSegmentBtn, newDutyTeacher === t.fullName && styles.reportSegmentBtnActive]}
+                      onPress={() => setNewDutyTeacher(t.fullName)}
+                    >
+                      <Text style={[styles.reportSegmentText, newDutyTeacher === t.fullName && styles.reportSegmentTextActive]}>
+                        {t.fullName}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+
+              <View>
+                <Text style={styles.reportFilterLabel}>Nöbet Günü:</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                  {[
+                    { day: 1, label: 'Pazartesi' },
+                    { day: 2, label: 'Salı' },
+                    { day: 3, label: 'Çarşamba' },
+                    { day: 4, label: 'Perşembe' },
+                    { day: 5, label: 'Cuma' },
+                  ].map(d => (
+                    <TouchableOpacity
+                      key={d.day}
+                      style={[styles.reportSegmentBtn, newDutyDay === d.day && styles.reportSegmentBtnActive]}
+                      onPress={() => setNewDutyDay(d.day)}
+                    >
+                      <Text style={[styles.reportSegmentText, newDutyDay === d.day && styles.reportSegmentTextActive]}>
+                        {d.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View>
+                <Text style={styles.reportFilterLabel}>Nöbet Yeri / Kat:</Text>
+                <TextInput
+                  style={[styles.input, { marginTop: 4 }]}
+                  placeholder="Örn: Bahçe, 1. Kat, 2. Kat, Zemin..."
+                  placeholderTextColor="#94A3B8"
+                  value={newDutyPlace}
+                  onChangeText={setNewDutyPlace}
+                />
+                {/* Hızlı yer butonları */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                  {allKnownDutyPlaces.map(place => (
+                    <TouchableOpacity
+                      key={place}
+                      style={[styles.reportFilterChip, newDutyPlace === place && styles.reportFilterChipActive]}
+                      onPress={() => setNewDutyPlace(place)}
+                    >
+                      <Text style={[styles.reportFilterChipText, newDutyPlace === place && styles.reportFilterChipTextActive]}>
+                        {place}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View>
+                <Text style={styles.reportFilterLabel}>Açıklama / Not (Opsiyonel):</Text>
+                <TextInput
+                  style={[styles.input, { marginTop: 4 }]}
+                  placeholder="Ek not..."
+                  placeholderTextColor="#94A3B8"
+                  value={newDutyNotes}
+                  onChangeText={setNewDutyNotes}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.exportActionBtn, { backgroundColor: '#4F46E5', marginTop: 10 }]}
+                onPress={handleSaveDuty}
+                disabled={savingDuty}
+              >
+                {savingDuty ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
+                    <Text style={styles.exportActionBtnText}>Nöbetçiyi Kaydet</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* AI Model Seçim Modalı (Dropdown List) */}
       <Modal visible={modelDropdownModalVisible} animationType="slide" transparent>
@@ -8400,6 +12457,30 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </Text>
                 </View>
               )}
+
+              <Text style={styles.inputLabel}>Sistem Kullanıcı Adı (Giriş için)</Text>
+              {(() => {
+                const editUsername = (editingTeacher?.username || editingTeacher?.userName || generateDefaultTeacherUsername(editingTeacher?.fullName)).trim();
+                return (
+                  <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', justifyContent: 'space-between', marginBottom: 12 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="person" size={15} color="#4F46E5" />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B' }}>
+                        {editUsername}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Clipboard.setStringAsync(editUsername);
+                        Alert.alert('Kopyalandı', `"${editUsername}" kullanıcı adı panoya kopyalandı.`);
+                      }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Ionicons name="copy-outline" size={16} color="#4F46E5" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()}
 
               <Text style={styles.inputLabel}>Adı Soyadı</Text>
               <TextInput
@@ -9022,6 +13103,434 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
+      {/* 4.1.5 Yönetici Öğrenci Detay Modalı (Büyük Fotoğraf, Bilgiler, Görüşler, Kimin Ne Zaman Girdiği, Ders Notları, Quizler, Mesajlaşma) */}
+      <Modal visible={adminStudentModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxHeight: '92%', padding: 16 }]}>
+            {/* Modal Header */}
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center' }}>
+                  <Ionicons name="person-circle" size={24} color="#059669" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle} numberOfLines={1}>
+                    {selectedAdminStudent?.fullName || 'Öğrenci Profili'}
+                  </Text>
+                  <Text style={{ fontSize: 11, color: Colors.textMuted }}>
+                    Okul No: {selectedAdminStudent?.studentNumber} • {selectedAdminStudent?.grade}-{selectedAdminStudent?.section}
+                  </Text>
+                  {(() => {
+                    const sClass = selectedAdminStudent?.className || (selectedAdminStudent?.grade && selectedAdminStudent?.section ? `${selectedAdminStudent.grade}-${selectedAdminStudent.section}` : '');
+                    const counselor = getClassCounselorTeacher(sClass, teachers, allSchoolSchedules);
+                    return (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginTop: 3, borderWidth: 1, borderColor: '#A7F3D0', alignSelf: 'flex-start' }}>
+                        <Ionicons name="ribbon-outline" size={11} color="#059669" style={{ marginRight: 3 }} />
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#047857' }}>
+                          Sınıf Rehberi: {counselor || 'Atanmadı'}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                </View>
+              </View>
+              <TouchableOpacity
+                onPress={() => setAdminStudentModalVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingStudentDetail ? (
+              <View style={{ paddingVertical: 40, alignItems: 'center', justifyContent: 'center' }}>
+                <ActivityIndicator size="large" color="#4F46E5" />
+                <Text style={{ marginTop: 12, fontSize: 13, color: Colors.textMuted, fontWeight: '600' }}>
+                  Öğrenci detayları, görüşler ve notlar yükleniyor...
+                </Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+                {/* 1. BÜYÜK FOTOĞRAF VE ÖĞRENCİ BİLGİLERİ */}
+                {(() => {
+                  const rawPhoto = selectedAdminStudent?.photoPath || selectedAdminStudent?.photo_uri;
+                  const photoUri = rawPhoto
+                    ? (rawPhoto.startsWith('http') || rawPhoto.startsWith('file://') || rawPhoto.startsWith('data:image')
+                        ? rawPhoto
+                        : `${serverBaseUrl}${rawPhoto.startsWith('/') ? '' : '/'}${rawPhoto}`)
+                    : null;
+
+                  return (
+                    <View style={styles.adminDetailProfileCard}>
+                      <View style={styles.adminDetailPhotoWrap}>
+                        {photoUri ? (
+                          <Image source={{ uri: photoUri }} style={styles.adminDetailBigPhoto} />
+                        ) : (
+                          <View style={styles.adminDetailBigPhotoPlaceholder}>
+                            <Text style={styles.adminDetailBigPhotoInitial}>
+                              {(selectedAdminStudent?.fullName || 'ÖG').slice(0, 2).toUpperCase()}
+                            </Text>
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          style={styles.adminDetailCameraBadge}
+                          onPress={() => handlePickAndUploadPhoto(selectedAdminStudent)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="camera" size={14} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={{ alignItems: 'center', marginTop: 10 }}>
+                        <Text style={styles.adminDetailNameText}>{selectedAdminStudent?.fullName}</Text>
+                        
+                        <View style={styles.adminDetailBadgeRow}>
+                          <View style={styles.adminDetailTag}>
+                            <Ionicons name="id-card-outline" size={12} color="#4F46E5" />
+                            <Text style={styles.adminDetailTagText}>No: {selectedAdminStudent?.studentNumber}</Text>
+                          </View>
+                          <View style={[styles.adminDetailTag, { backgroundColor: '#F0FDF4' }]}>
+                            <Ionicons name="school-outline" size={12} color="#16A34A" />
+                            <Text style={[styles.adminDetailTagText, { color: '#16A34A' }]}>
+                              {selectedAdminStudent?.grade}-{selectedAdminStudent?.section} Şubesi
+                            </Text>
+                          </View>
+                          {selectedSchool?.name && (
+                            <View style={[styles.adminDetailTag, { backgroundColor: '#F8FAFC' }]}>
+                              <Ionicons name="business-outline" size={12} color="#64748B" />
+                              <Text style={[styles.adminDetailTagText, { color: '#64748B' }]} numberOfLines={1}>
+                                {selectedSchool.name}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+
+                      {/* İletişim & Veli Bilgi Kartı */}
+                      <View style={styles.adminDetailContactBox}>
+                        <View style={styles.adminDetailContactItem}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons name="people" size={14} color="#4F46E5" />
+                            <Text style={styles.adminDetailContactLabel}>Veli Adı & Telefonu:</Text>
+                          </View>
+                          <Text style={styles.adminDetailContactValue}>
+                            {selectedAdminStudent?.parentName || 'Tanımlı Değil'} {selectedAdminStudent?.parentPhone ? `(${selectedAdminStudent.parentPhone})` : ''}
+                          </Text>
+                        </View>
+
+                        <View style={styles.adminDetailContactDivider} />
+
+                        <View style={styles.adminDetailContactItem}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons name="call" size={14} color="#059669" />
+                            <Text style={styles.adminDetailContactLabel}>Öğrenci Telefonu:</Text>
+                          </View>
+                          <Text style={styles.adminDetailContactValue}>
+                            {selectedAdminStudent?.studentPhone || 'Kayıtlı Değil'}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })()}
+
+                {/* 2. DOĞRUDAN MESAJ ATMA BUTONLARI */}
+                <View style={styles.adminDetailMessagingRow}>
+                  <TouchableOpacity
+                    style={[styles.adminDetailMsgBtn, { backgroundColor: '#16A34A' }]}
+                    onPress={() => handleSendMessageToParent(selectedAdminStudent)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="logo-whatsapp" size={16} color="#fff" />
+                    <Text style={styles.adminDetailMsgBtnText}>Veliye Mesaj Yolla</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.adminDetailMsgBtn, { backgroundColor: '#4F46E5' }]}
+                    onPress={() => handleSendMessageToStudent(selectedAdminStudent)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="chatbubble-ellipses" size={16} color="#fff" />
+                    <Text style={styles.adminDetailMsgBtnText}>Öğrenciye Mesaj Yolla</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* 3. ÖĞRETMEN GÖRÜŞLERİ VE GÖZLEMLERİ */}
+                {(() => {
+                  const combinedObservations: Array<{
+                    id: string;
+                    author: string;
+                    date: string;
+                    content: string;
+                    title?: string;
+                  }> = [];
+
+                  for (const e of studentEvaluations) {
+                    if (e.type !== 'QUIZ') {
+                      combinedObservations.push({
+                        id: `srv_${e.id}`,
+                        author: e.teacherName || 'Öğretmen',
+                        date: e.createdAt,
+                        content: e.content,
+                        title: e.title,
+                      });
+                    }
+                  }
+
+                  for (const n of studentLocalNotes) {
+                    if (!combinedObservations.some(x => x.content?.trim() === n.note?.trim())) {
+                      combinedObservations.push({
+                        id: `loc_${n.id}`,
+                        author: n.lesson_info || n.class_name || 'Ders Öğretmeni',
+                        date: n.note_date || n.created_at,
+                        content: n.note,
+                      });
+                    }
+                  }
+
+                  return (
+                    <View style={styles.adminSectionCard}>
+                      <View style={styles.adminSectionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="chatbox-ellipses" size={16} color="#4F46E5" />
+                          <Text style={styles.adminSectionTitle}>Girilen Görüşler & Gözlemler</Text>
+                        </View>
+                        <View style={styles.adminSectionCountBadge}>
+                          <Text style={styles.adminSectionCountText}>{combinedObservations.length}</Text>
+                        </View>
+                      </View>
+
+                      {combinedObservations.length === 0 ? (
+                        <View style={styles.adminDetailEmptyBox}>
+                          <Ionicons name="document-text-outline" size={28} color="#94A3B8" />
+                          <Text style={styles.adminDetailEmptyText}>Bu öğrenciye henüz bir görüş veya gözlem notu girilmemiş.</Text>
+                        </View>
+                      ) : (
+                        combinedObservations.map((obs) => (
+                          <View key={obs.id} style={styles.adminObservationItem}>
+                            {obs.title && (
+                              <Text style={styles.adminObservationTitle}>📌 {obs.title}</Text>
+                            )}
+                            <Text style={styles.adminObservationContent}>{obs.content}</Text>
+                            <View style={styles.adminObservationMetaRow}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="person" size={12} color="#4F46E5" />
+                                <Text style={styles.adminObservationAuthor}>
+                                  Kimin Girdiği: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{obs.author}</Text>
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="time-outline" size={12} color="#64748B" />
+                                <Text style={styles.adminObservationDate}>{formatDateToTR(obs.date)}</Text>
+                              </View>
+                            </View>
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  );
+                })()}
+
+                {/* 4. DERS VE SINAV NOTLARI (YAZILI & PERFORMANS) */}
+                {(() => {
+                  const grades = studentLocalGrades;
+                  const validMainGrades = [
+                    grades?.exam1,
+                    grades?.exam2,
+                    grades?.exam3,
+                    grades?.perf1,
+                    grades?.perf2,
+                    grades?.perf3,
+                  ].filter((n): n is number => n !== null && n !== undefined && !isNaN(n));
+
+                  const calcAvg = (items: (number | null | undefined)[]) => {
+                    const valid = items.filter((n): n is number => n !== null && n !== undefined && !isNaN(n));
+                    if (valid.length === 0) return null;
+                    const sum = valid.reduce((a, b) => a + b, 0);
+                    return Math.round((sum / valid.length) * 10) / 10;
+                  };
+
+                  const examAvg = calcAvg([grades?.exam1, grades?.exam2, grades?.exam3]);
+                  const perfAvg = calcAvg([grades?.perf1, grades?.perf2, grades?.perf3]);
+                  const overallAvg = calcAvg(validMainGrades);
+
+                  return (
+                    <View style={styles.adminSectionCard}>
+                      <View style={styles.adminSectionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="school" size={16} color="#059669" />
+                          <Text style={styles.adminSectionTitle}>Ders Notları (Yazılı & Performans)</Text>
+                        </View>
+                        {overallAvg !== null && (
+                          <View style={[styles.adminSectionCountBadge, { backgroundColor: '#ECFDF5' }]}>
+                            <Text style={[styles.adminSectionCountText, { color: '#059669' }]}>Ort: {overallAvg}</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {!grades && validMainGrades.length === 0 ? (
+                        <View style={styles.adminDetailEmptyBox}>
+                          <Ionicons name="bar-chart-outline" size={28} color="#94A3B8" />
+                          <Text style={styles.adminDetailEmptyText}>Bu öğrenciye ait kayıtlı yazılı veya performans notu bulunamadı.</Text>
+                        </View>
+                      ) : (
+                        <View>
+                          <View style={styles.adminGradeGrid}>
+                            <View style={styles.adminGradeCell}>
+                              <Text style={styles.adminGradeCellLabel}>1. Yazılı</Text>
+                              <Text style={[styles.adminGradeCellValue, grades?.exam1 !== null && grades?.exam1 !== undefined && { color: '#4F46E5' }]}>
+                                {grades?.exam1 ?? '-'}
+                              </Text>
+                            </View>
+                            <View style={styles.adminGradeCell}>
+                              <Text style={styles.adminGradeCellLabel}>2. Yazılı</Text>
+                              <Text style={[styles.adminGradeCellValue, grades?.exam2 !== null && grades?.exam2 !== undefined && { color: '#4F46E5' }]}>
+                                {grades?.exam2 ?? '-'}
+                              </Text>
+                            </View>
+                            <View style={styles.adminGradeCell}>
+                              <Text style={styles.adminGradeCellLabel}>3. Yazılı</Text>
+                              <Text style={[styles.adminGradeCellValue, grades?.exam3 !== null && grades?.exam3 !== undefined && { color: '#4F46E5' }]}>
+                                {grades?.exam3 ?? '-'}
+                              </Text>
+                            </View>
+                            <View style={styles.adminGradeCell}>
+                              <Text style={styles.adminGradeCellLabel}>1. Perf.</Text>
+                              <Text style={[styles.adminGradeCellValue, grades?.perf1 !== null && grades?.perf1 !== undefined && { color: '#059669' }]}>
+                                {grades?.perf1 ?? '-'}
+                              </Text>
+                            </View>
+                            <View style={styles.adminGradeCell}>
+                              <Text style={styles.adminGradeCellLabel}>2. Perf.</Text>
+                              <Text style={[styles.adminGradeCellValue, grades?.perf2 !== null && grades?.perf2 !== undefined && { color: '#059669' }]}>
+                                {grades?.perf2 ?? '-'}
+                              </Text>
+                            </View>
+                            <View style={styles.adminGradeCell}>
+                              <Text style={styles.adminGradeCellLabel}>3. Perf.</Text>
+                              <Text style={[styles.adminGradeCellValue, grades?.perf3 !== null && grades?.perf3 !== undefined && { color: '#059669' }]}>
+                                {grades?.perf3 ?? '-'}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.adminGradeSummaryRow}>
+                            <View style={styles.adminGradeSummaryItem}>
+                              <Text style={styles.adminGradeSummaryLabel}>Yazılı Ortalaması</Text>
+                              <Text style={[styles.adminGradeSummaryVal, { color: '#4F46E5' }]}>{examAvg ?? '-'}</Text>
+                            </View>
+                            <View style={styles.adminGradeSummaryDivider} />
+                            <View style={styles.adminGradeSummaryItem}>
+                              <Text style={styles.adminGradeSummaryLabel}>Performans Ort.</Text>
+                              <Text style={[styles.adminGradeSummaryVal, { color: '#059669' }]}>{perfAvg ?? '-'}</Text>
+                            </View>
+                            <View style={styles.adminGradeSummaryDivider} />
+                            <View style={styles.adminGradeSummaryItem}>
+                              <Text style={styles.adminGradeSummaryLabel}>Genel Ortalama</Text>
+                              <Text style={[styles.adminGradeSummaryVal, { color: '#7C3AED' }]}>{overallAvg ?? '-'}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
+
+                {/* 5. QUİZ VE TEST NOTLARI */}
+                {(() => {
+                  const combinedQuizzes: Array<{
+                    id: string;
+                    title: string;
+                    score: number | string;
+                    date?: string;
+                    teacherName?: string;
+                  }> = [];
+
+                  for (const e of studentEvaluations) {
+                    if (e.type === 'QUIZ') {
+                      combinedQuizzes.push({
+                        id: `srv_q_${e.id}`,
+                        title: e.title || 'Quiz',
+                        score: e.score !== null && e.score !== undefined ? e.score : '-',
+                        date: e.createdAt,
+                        teacherName: e.teacherName,
+                      });
+                    }
+                  }
+
+                  for (const q of studentLocalQuizzes) {
+                    if (!combinedQuizzes.some(x => x.title === q.title && String(x.score) === String(q.score))) {
+                      combinedQuizzes.push({
+                        id: `loc_q_${q.title}_${q.date}`,
+                        title: q.title || 'Quiz',
+                        score: q.score !== null && q.score !== undefined ? q.score : '-',
+                        date: q.date,
+                        teacherName: q.class_name,
+                      });
+                    }
+                  }
+
+                  return (
+                    <View style={styles.adminSectionCard}>
+                      <View style={styles.adminSectionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="checkbox" size={16} color="#7C3AED" />
+                          <Text style={styles.adminSectionTitle}>Quiz & Test Notları</Text>
+                        </View>
+                        <View style={[styles.adminSectionCountBadge, { backgroundColor: '#F3E8FF' }]}>
+                          <Text style={[styles.adminSectionCountText, { color: '#7C3AED' }]}>{combinedQuizzes.length}</Text>
+                        </View>
+                      </View>
+
+                      {combinedQuizzes.length === 0 ? (
+                        <View style={styles.adminDetailEmptyBox}>
+                          <Ionicons name="help-circle-outline" size={28} color="#94A3B8" />
+                          <Text style={styles.adminDetailEmptyText}>Bu öğrenciye ait kayıtlı bir quiz veya test notu bulunmuyor.</Text>
+                        </View>
+                      ) : (
+                        combinedQuizzes.map((quiz) => {
+                          const numScore = Number(quiz.score);
+                          const scoreColor = isNaN(numScore)
+                            ? '#64748B'
+                            : numScore >= 85
+                            ? '#059669'
+                            : numScore >= 70
+                            ? '#2563EB'
+                            : numScore >= 50
+                            ? '#D97706'
+                            : '#DC2626';
+
+                          return (
+                            <View key={quiz.id} style={styles.adminQuizItem}>
+                              <View style={{ flex: 1 }}>
+                                <Text style={styles.adminQuizTitle}>{quiz.title}</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                                  {quiz.teacherName && (
+                                    <Text style={styles.adminQuizSub}>👤 {quiz.teacherName}</Text>
+                                  )}
+                                  {quiz.date && (
+                                    <Text style={styles.adminQuizSub}>🕒 {formatDateToTR(quiz.date)}</Text>
+                                  )}
+                                </View>
+                              </View>
+                              <View style={[styles.adminQuizScoreBadge, { backgroundColor: `${scoreColor}15`, borderColor: scoreColor }]}>
+                                <Text style={[styles.adminQuizScoreText, { color: scoreColor }]}>
+                                  {quiz.score} Puan
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })
+                      )}
+                    </View>
+                  );
+                })()}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
       {/* 4.2 Öğrenci & Veli Giriş ve Şifre Yönetimi Modalı */}
       <Modal visible={credentialsModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -9093,15 +13602,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                     {/* Kullanıcı Adı */}
                     <View style={styles.credDetailRow}>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.credFieldLabel}>Kullanıcı Adı (Öğrenci No)</Text>
+                        <Text style={styles.credFieldLabel}>🎓 Öğrenci Kullanıcı Adı (Okul No)</Text>
                         <Text style={styles.credFieldValueBold}>{selectedStudentForCreds.studentNumber}</Text>
-                        <Text style={styles.credFieldHint}>* Veli ayrıca kayıtlı cep telefonu ile de giriş yapabilir.</Text>
                       </View>
                       <TouchableOpacity
                         style={styles.credCopyBtn}
                         onPress={() => {
                           Clipboard.setStringAsync(selectedStudentForCreds.studentNumber);
-                          Alert.alert('Kopyalandı', 'Kullanıcı adı panoya kopyalandı.');
+                          Alert.alert('Kopyalandı', 'Öğrenci kullanıcı adı panoya kopyalandı.');
                         }}
                       >
                         <Ionicons name="copy-outline" size={14} color="#4F46E5" />
@@ -9109,14 +13617,16 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       </TouchableOpacity>
                     </View>
 
-                    {/* Giriş Şifresi */}
+                    {/* Öğrenci Giriş Şifresi */}
                     <View style={styles.credDetailRow}>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.credFieldLabel}>Varsayılan / Giriş Şifresi</Text>
-                        <Text style={[styles.credFieldValueBold, { color: '#4F46E5' }]}>
-                          {showCredPassword ? `aaaa_${selectedStudentForCreds.studentNumber}` : '••••••••••••'}
+                        <Text style={styles.credFieldLabel}>🎓 Öğrenci Şifresi</Text>
+                        <Text style={[styles.credFieldValueBold, { color: '#059669' }]}>
+                          {showCredPassword
+                            ? (selectedStudentForCreds.studentCustomPassword || `ooo_${selectedStudentForCreds.studentNumber}`)
+                            : '••••••••••••'}
                         </Text>
-                        <Text style={styles.credFieldHint}>* Varsayılan format: aaaa_öğrencino</Text>
+                        <Text style={styles.credFieldHint}>* Varsayılan format: ooo_öğrencino</Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: 6 }}>
                         <TouchableOpacity
@@ -9128,8 +13638,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         <TouchableOpacity
                           style={styles.credCopyBtn}
                           onPress={() => {
-                            Clipboard.setStringAsync(`aaaa_${selectedStudentForCreds.studentNumber}`);
-                            Alert.alert('Kopyalandı', 'Giriş şifresi panoya kopyalandı.');
+                            const p = selectedStudentForCreds.studentCustomPassword || `ooo_${selectedStudentForCreds.studentNumber}`;
+                            Clipboard.setStringAsync(p);
+                            Alert.alert('Kopyalandı', 'Öğrenci şifresi panoya kopyalandı.');
                           }}
                         >
                           <Ionicons name="copy-outline" size={14} color="#4F46E5" />
@@ -9137,13 +13648,159 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         </TouchableOpacity>
                       </View>
                     </View>
+
+                    {/* Öğrenci Şifre Sıfırlama */}
+                    <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}>
+                      <TouchableOpacity
+                        style={[styles.credResetDefaultBtn, { backgroundColor: '#059669', marginBottom: 6 }]}
+                        onPress={() => handleResetStudentPassword()}
+                        disabled={resettingPassword}
+                        activeOpacity={0.85}
+                      >
+                        {resettingPassword ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="refresh" size={15} color="#fff" />
+                            <Text style={styles.credResetDefaultBtnText}>
+                              Varsayılan Öğrenci Şifresine Döndür (ooo_{selectedStudentForCreds.studentNumber})
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                        <TextInput
+                          style={[styles.modalInput, { flex: 1, marginBottom: 0, backgroundColor: '#fff', fontSize: 12, height: 38 }]}
+                          placeholder="Özel yeni öğrenci şifresi..."
+                          value={customResetPassInput}
+                          onChangeText={setCustomResetPassInput}
+                          placeholderTextColor={Colors.textMuted}
+                        />
+                        <TouchableOpacity
+                          style={[styles.credCustomPassSaveBtn, { backgroundColor: '#059669' }, (!customResetPassInput.trim() || resettingPassword) && { opacity: 0.5 }]}
+                          onPress={() => {
+                            if (!customResetPassInput.trim()) return;
+                            handleResetStudentPassword(customResetPassInput.trim());
+                          }}
+                          disabled={!customResetPassInput.trim() || resettingPassword}
+                        >
+                          <Ionicons name="checkmark" size={15} color="#fff" />
+                          <Text style={styles.credCustomPassSaveBtnText}>Uygula</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                   </View>
 
-                  {/* KART 2: VELİ BİLGİLERİ VE TEK TIKLA PAYLAŞIM */}
+                  {/* KART 2: VELİ GİRİŞ VE ŞİFRE BİLGİLERİ */}
+                  <View style={[styles.credSectionBox, { borderColor: '#BFDBFE', backgroundColor: '#EFF6FF' }]}>
+                    <View style={styles.credSectionHeaderRow}>
+                      <Ionicons name="people" size={16} color="#2563EB" />
+                      <Text style={[styles.credSectionTitle, { color: '#1E40AF' }]}>👨‍👩‍👧 Veli Portalı Giriş Bilgileri</Text>
+                    </View>
+
+                    {/* Veli Kullanıcı Adı */}
+                    <View style={styles.credDetailRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.credFieldLabel}>👨‍👩‍👧 Veli Kullanıcı Adı</Text>
+                        <Text style={[styles.credFieldValueBold, { color: '#1E40AF' }]}>
+                          {selectedStudentForCreds.studentNumber}
+                          {selectedStudentForCreds.parentPhone ? ` (veya ${selectedStudentForCreds.parentPhone})` : ''}
+                        </Text>
+                        <Text style={styles.credFieldHint}>* Veli portala öğrenci no veya kayıtlı veli telefonuyla girer.</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.credCopyBtn, { borderColor: '#93C5FD' }]}
+                        onPress={() => {
+                          Clipboard.setStringAsync(selectedStudentForCreds.studentNumber);
+                          Alert.alert('Kopyalandı', 'Veli kullanıcı adı panoya kopyalandı.');
+                        }}
+                      >
+                        <Ionicons name="copy-outline" size={14} color="#2563EB" />
+                        <Text style={[styles.credCopyBtnText, { color: '#2563EB' }]}>Kopyala</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Veli Giriş Şifresi */}
+                    <View style={styles.credDetailRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.credFieldLabel}>🔑 Veli Giriş Şifresi</Text>
+                        <Text style={[styles.credFieldValueBold, { color: '#2563EB' }]}>
+                          {showParentCredPassword
+                            ? (selectedStudentForCreds.parentCustomPassword || `vvv_${selectedStudentForCreds.studentNumber}`)
+                            : '••••••••••••'}
+                        </Text>
+                        <Text style={styles.credFieldHint}>* Varsayılan format: vvv_öğrencino</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 6 }}>
+                        <TouchableOpacity
+                          style={styles.credIconBtn}
+                          onPress={() => setShowParentCredPassword(!showParentCredPassword)}
+                        >
+                          <Ionicons name={showParentCredPassword ? "eye-off-outline" : "eye-outline"} size={16} color="#64748B" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[styles.credCopyBtn, { borderColor: '#93C5FD' }]}
+                          onPress={() => {
+                            const p = selectedStudentForCreds.parentCustomPassword || `vvv_${selectedStudentForCreds.studentNumber}`;
+                            Clipboard.setStringAsync(p);
+                            Alert.alert('Kopyalandı', 'Veli giriş şifresi panoya kopyalandı.');
+                          }}
+                        >
+                          <Ionicons name="copy-outline" size={14} color="#2563EB" />
+                          <Text style={[styles.credCopyBtnText, { color: '#2563EB' }]}>Kopyala</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    {/* Veli Şifre Sıfırlama */}
+                    <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#DBEAFE' }}>
+                      <TouchableOpacity
+                        style={[styles.credResetDefaultBtn, { backgroundColor: '#2563EB', marginBottom: 6 }]}
+                        onPress={() => handleResetParentPassword()}
+                        disabled={resettingParentPassword}
+                        activeOpacity={0.85}
+                      >
+                        {resettingParentPassword ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="refresh" size={15} color="#fff" />
+                            <Text style={styles.credResetDefaultBtnText}>
+                              Varsayılan Veli Şifresine Döndür (vvv_{selectedStudentForCreds.studentNumber})
+                            </Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 4 }}>
+                        <TextInput
+                          style={[styles.modalInput, { flex: 1, marginBottom: 0, backgroundColor: '#fff', fontSize: 12, height: 38 }]}
+                          placeholder="Özel yeni veli şifresi..."
+                          value={customParentResetPassInput}
+                          onChangeText={setCustomParentResetPassInput}
+                          placeholderTextColor={Colors.textMuted}
+                        />
+                        <TouchableOpacity
+                          style={[styles.credCustomPassSaveBtn, { backgroundColor: '#2563EB' }, (!customParentResetPassInput.trim() || resettingParentPassword) && { opacity: 0.5 }]}
+                          onPress={() => {
+                            if (!customParentResetPassInput.trim()) return;
+                            handleResetParentPassword(customParentResetPassInput.trim());
+                          }}
+                          disabled={!customParentResetPassInput.trim() || resettingParentPassword}
+                        >
+                          <Ionicons name="checkmark" size={15} color="#fff" />
+                          <Text style={styles.credCustomPassSaveBtnText}>Uygula</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* KART 3: VELİ İLETİŞİMİ VE TEK TIKLA PAYLAŞIM */}
                   <View style={[styles.credSectionBox, { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' }]}>
                     <View style={styles.credSectionHeaderRow}>
-                      <Ionicons name="people-outline" size={16} color="#16A34A" />
-                      <Text style={[styles.credSectionTitle, { color: '#166534' }]}>Veli İletişimi & Bilgi Gönderimi</Text>
+                      <Ionicons name="chatbubbles-outline" size={16} color="#16A34A" />
+                      <Text style={[styles.credSectionTitle, { color: '#166534' }]}>📱 Veliye Giriş Bilgilerini Gönder</Text>
                     </View>
 
                     <View style={{ marginBottom: 10 }}>
@@ -9183,66 +13840,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         >
                           <Ionicons name="copy-outline" size={16} color="#fff" />
                           <Text style={styles.credShareBtnText}>Tümünü Kopyala</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* KART 3: ŞİFRE SIFIRLAMA */}
-                  <View style={[styles.credSectionBox, { borderColor: '#FED7AA', backgroundColor: '#FFFBEB' }]}>
-                    <View style={styles.credSectionHeaderRow}>
-                      <Ionicons name="refresh-circle-outline" size={18} color="#D97706" />
-                      <Text style={[styles.credSectionTitle, { color: '#B45309' }]}>Şifre Sıfırlama (Öğrenci & Veli)</Text>
-                    </View>
-                    <Text style={styles.credResetHelpText}>
-                      Öğrenci veya veli şifresini unuttuysa ya da erişim sorunu yaşıyorsa tek tıkla varsayılan şifreye döndürebilir veya yeni bir şifre belirleyebilirsiniz.
-                    </Text>
-
-                    {/* Hızlı Varsayılana Sıfırla Butonu */}
-                    <TouchableOpacity
-                      style={styles.credResetDefaultBtn}
-                      onPress={() => handleResetStudentPassword()}
-                      disabled={resettingPassword}
-                      activeOpacity={0.85}
-                    >
-                      {resettingPassword ? (
-                        <ActivityIndicator size="small" color="#fff" />
-                      ) : (
-                        <>
-                          <Ionicons name="refresh" size={16} color="#fff" />
-                          <Text style={styles.credResetDefaultBtnText}>
-                            Varsayılan Şifreye Döndür (aaaa_{selectedStudentForCreds.studentNumber})
-                          </Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-
-                    {/* Ya da Özel Şifre Belirleme */}
-                    <View style={{ marginTop: 12 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#92400E', marginBottom: 4 }}>
-                        Veya Özel Yeni Şifre Belirle:
-                      </Text>
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <TextInput
-                          style={[styles.modalInput, { flex: 1, marginBottom: 0, backgroundColor: '#fff', fontSize: 13 }]}
-                          placeholder="Yeni özel şifre (örn: 123456)"
-                          value={customResetPassInput}
-                          onChangeText={setCustomResetPassInput}
-                          placeholderTextColor={Colors.textMuted}
-                        />
-                        <TouchableOpacity
-                          style={[styles.credCustomPassSaveBtn, (!customResetPassInput.trim() || resettingPassword) && { opacity: 0.5 }]}
-                          onPress={() => {
-                            if (!customResetPassInput.trim()) {
-                              Alert.alert('Uyarı', 'Lütfen yeni şifreyi giriniz.');
-                              return;
-                            }
-                            handleResetStudentPassword(customResetPassInput.trim());
-                          }}
-                          disabled={!customResetPassInput.trim() || resettingPassword}
-                        >
-                          <Ionicons name="checkmark" size={16} color="#fff" />
-                          <Text style={styles.credCustomPassSaveBtnText}>Uygula</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -12392,6 +16989,76 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         </View>
       </Modal>
 
+      {/* 6.2 Excel Öğretmen Kadrosu Yükleme Onay Modalı */}
+      <Modal visible={teacherExcelModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📊 Excel Öğretmen Kadrosu Aktarımı</Text>
+              <TouchableOpacity onPress={() => setTeacherExcelModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {teacherExcelParsing ? (
+              <View style={styles.aiLoadingContainer}>
+                <ActivityIndicator size="large" color="#059669" />
+                <Text style={styles.aiLoadingText}>Öğretmen Excel dosyası inceleniyor...</Text>
+                <Text style={styles.aiLoadingSub}>Öğretmen kadrosu, branş ve unvan kayıtları ayrıştırılıyor.</Text>
+              </View>
+            ) : parsedExcelTeachers.length > 0 ? (
+              <View style={styles.parsedPreview}>
+                <Text style={styles.previewSuccessTitle}>🎉 Excel Ayrıştırma Başarılı!</Text>
+
+                <View style={styles.previewGrid}>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#059669' }]}>{parsedExcelTeachers.length}</Text>
+                    <Text style={styles.previewLbl}>Toplam Öğretmen</Text>
+                  </View>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#2563EB' }]}>
+                      {parsedExcelTeachers.filter(t => teachers.some(et => (t.username && et.username?.toLowerCase() === t.username.toLowerCase()) || et.fullName?.toLowerCase() === t.fullName?.toLowerCase())).length}
+                    </Text>
+                    <Text style={styles.previewLbl}>Güncellenecek</Text>
+                  </View>
+                  <View style={styles.previewItem}>
+                    <Text style={[styles.previewVal, { color: '#7C3AED' }]}>
+                      {parsedExcelTeachers.filter(t => !teachers.some(et => (t.username && et.username?.toLowerCase() === t.username.toLowerCase()) || et.fullName?.toLowerCase() === t.fullName?.toLowerCase())).length}
+                    </Text>
+                    <Text style={styles.previewLbl}>Yeni Eklenecek</Text>
+                  </View>
+                </View>
+
+                <View style={{ backgroundColor: '#F8FAFC', padding: 12, borderRadius: 10, marginVertical: 12, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <Ionicons name="shield-checkmark" size={16} color="#059669" />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>Kullanıcı Giriş Güvenliği Korunur</Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: '#475569', lineHeight: 17 }}>
+                    Mevcut öğretmenlerin şifresi ve kullanıcı adı kesinlikle korunur, asla sıfırlanmaz. Yeni eklenen öğretmenlere sistem otomatik kullanıcı adı ve varsayılan 1234 şifresi tanımlar.
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.confirmSaveButton, { backgroundColor: '#059669' }]}
+                  onPress={handleConfirmAndSaveExcelTeachers}
+                  disabled={teacherExcelSaving}
+                >
+                  {teacherExcelSaving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="cloud-upload" size={18} color="#fff" />
+                      <Text style={styles.confirmSaveText}>Onayla & Kadroya Aktar</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {/* 6.1 AI ile Excel Öğrenci Yükleme Onay Modalı */}
       <Modal visible={aiStudentModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -12623,7 +17290,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
                   return (
                     <View key={student.id} style={styles.classStudentItemCard}>
-                      <View style={styles.classStudentItemTop}>
+                      <TouchableOpacity
+                        style={styles.classStudentItemTop}
+                        onPress={() => handleOpenStudentDetail(student)}
+                        activeOpacity={0.7}
+                      >
                         {/* Fotoğraf / Avatar */}
                         <TouchableOpacity
                           style={styles.studentPhotoContainer}
@@ -12665,22 +17336,30 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           {/* Giriş Bilgileri Önizleme */}
                           <View style={styles.cardCredPreviewBox}>
                             <View style={styles.cardCredItem}>
-                              <Ionicons name="key" size={11} color="#4F46E5" />
-                              <Text style={styles.cardCredLabel}>Şifre:</Text>
-                              <Text style={styles.cardCredValue}>aaaa_{student.studentNumber}</Text>
+                              <Ionicons name="school" size={11} color="#059669" />
+                              <Text style={styles.cardCredLabel}>Öğr:</Text>
+                              <Text style={[styles.cardCredValue, { color: '#059669' }]}>ooo_{student.studentNumber}</Text>
                             </View>
                             <View style={styles.cardCredDivider} />
                             <View style={styles.cardCredItem}>
-                              <Ionicons name="school" size={11} color="#059669" />
-                              <Text style={styles.cardCredLabel}>Okul:</Text>
-                              <Text style={styles.cardCredValue}>{selectedSchool?.code || '-'}</Text>
+                              <Ionicons name="people" size={11} color="#2563EB" />
+                              <Text style={styles.cardCredLabel}>Veli:</Text>
+                              <Text style={[styles.cardCredValue, { color: '#2563EB' }]}>vvv_{student.studentNumber}</Text>
                             </View>
                           </View>
                         </View>
-                      </View>
+                      </TouchableOpacity>
 
                       {/* Aksiyon Butonları */}
                       <View style={styles.studentActionsRow}>
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { borderColor: '#10B981', backgroundColor: '#ECFDF5' }]}
+                          onPress={() => handleOpenStudentDetail(student)}
+                        >
+                          <Ionicons name="person-circle" size={13} color="#059669" />
+                          <Text style={[styles.cardActionBtnText, { color: '#059669', fontWeight: '700' }]}>Detay & Notlar</Text>
+                        </TouchableOpacity>
+
                         <TouchableOpacity
                           style={[styles.cardActionBtn, { borderColor: '#818CF8', backgroundColor: '#EEF2FF' }]}
                           onPress={() => handleOpenCredentialsModal(student)}
@@ -13022,10 +17701,103 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               </View>
             ) : docAnalysis ? (
               <ScrollView showsVerticalScrollIndicator={false}>
+                {/* 📑 Çalışma Sayfası (Sheet) Seçici Barı (Çok Sheet'li Excel Dosyaları İçin) */}
+                {docAnalysis.availableSheets && docAnalysis.availableSheets.length > 1 ? (
+                  <View style={{
+                    backgroundColor: '#F8FAFC',
+                    borderWidth: 1,
+                    borderColor: '#E2E8F0',
+                    borderRadius: 10,
+                    padding: 12,
+                    marginBottom: 12,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="layers" size={17} color="#4F46E5" />
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#1E293B' }}>
+                          Çalışma Sayfası (Sheet) Seçimi:
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setPlanSheetPickerSheets(docAnalysis.availableSheets || []);
+                          setPlanSheetPickerVisible(true);
+                        }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: '#EEF2FF',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3.5,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <Ionicons name="swap-horizontal" size={13} color="#4F46E5" />
+                        <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#4F46E5' }}>Tüm Sayfalar ({docAnalysis.availableSheets.length})</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+                      {docAnalysis.availableSheets.map((sName) => {
+                        const isActive = docAnalysis.sheetName === sName;
+                        return (
+                          <TouchableOpacity
+                            key={sName}
+                            onPress={() => handleSwitchPlanSheet(sName)}
+                            activeOpacity={0.7}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 5,
+                              paddingHorizontal: 12,
+                              paddingVertical: 7,
+                              borderRadius: 8,
+                              backgroundColor: isActive ? '#4F46E5' : '#FFFFFF',
+                              borderWidth: 1,
+                              borderColor: isActive ? '#4338CA' : '#CBD5E1',
+                            }}
+                          >
+                            {isActive && <Ionicons name="checkmark-circle" size={15} color="#FFFFFF" />}
+                            <Text style={{
+                              fontSize: 12.5,
+                              fontWeight: isActive ? '800' : '600',
+                              color: isActive ? '#FFFFFF' : '#334155',
+                            }}>
+                              {sName}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </View>
+                ) : docAnalysis.sheetName ? (
+                  <View style={{
+                    backgroundColor: '#F8FAFC',
+                    borderWidth: 1,
+                    borderColor: '#E2E8F0',
+                    borderRadius: 10,
+                    padding: 10,
+                    marginBottom: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="layers-outline" size={16} color="#4F46E5" />
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                        Çalışma Sayfası (Sheet): <Text style={{ color: '#4F46E5', fontWeight: '800' }}>{docAnalysis.sheetName}</Text>
+                      </Text>
+                    </View>
+                    <View style={{ backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#4338CA' }}>Tek Sayfa (Otomatik Seçildi)</Text>
+                    </View>
+                  </View>
+                ) : null}
+
                 <View style={styles.mappingInfoBox}>
                   <Ionicons name="information-circle" size={18} color="#4F46E5" />
                   <Text style={styles.mappingInfoText}>
-                    Excel/Word dosyanızdan {docAnalysis.rawRows.length} satır tespit edildi. Sütunların yıllık plan alanlarıyla doğru eşleştiğini kontrol edip gerekiyorsa değiştiriniz:
+                    Excel/Word dosyanızdan {docAnalysis.sheetName ? `"${docAnalysis.sheetName}" sayfasında ` : ''}{docAnalysis.rawRows.length} satır tespit edildi. Sütunların yıllık plan alanlarıyla doğru eşleştiğini kontrol edip gerekiyorsa değiştiriniz:
                   </Text>
                 </View>
 
@@ -13511,6 +18283,68 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               </TouchableOpacity>
             </View>
 
+            {/* 🎯 Sınıf Rehber Öğretmenliği Yönetim Paneli */}
+            <View style={{ backgroundColor: '#F0FDF4', borderWidth: 1.5, borderColor: '#86EFAC', borderRadius: 12, padding: 12, marginTop: 4, marginBottom: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="ribbon" size={18} color="#16A34A" />
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#166534' }}>
+                    Sınıf Rehber Öğretmenliği:
+                  </Text>
+                  <View style={{ backgroundColor: editingCounselorClass ? '#DCFCE7' : '#F1F5F9', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: editingCounselorClass ? '#86EFAC' : '#CBD5E1' }}>
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: editingCounselorClass ? '#15803D' : '#64748B' }}>
+                      {editingCounselorClass ? `${editingCounselorClass} Şubesi` : 'Atanmamış (Yok)'}
+                    </Text>
+                  </View>
+                </View>
+
+                {savingCounselorClass && (
+                  <ActivityIndicator size="small" color="#16A34A" />
+                )}
+              </View>
+
+              <Text style={{ fontSize: 11, color: '#475569', marginTop: 6, marginBottom: 8, lineHeight: 16 }}>
+                💡 Bu öğretmen için haftalık programdaki "Rehberlik" dersinden sınıf otomatik tespit edilir. Dilerseniz aşağıdan şubeyi manuel seçip değiştirebilir veya kaldırabilirsiniz:
+              </Text>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingVertical: 2 }}>
+                {editingCounselorClass ? (
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FEE2E2', borderWidth: 1, borderColor: '#FCA5A5', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}
+                    onPress={() => handleSaveTeacherCounselorClass('')}
+                    disabled={savingCounselorClass}
+                  >
+                    <Ionicons name="close-circle" size={14} color="#DC2626" />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>Rehberliği Kaldır</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {classes.map((cls) => {
+                  const cName = cls.className || `${cls.grade}-${cls.section}`;
+                  const isSelected = editingCounselorClass.trim().toLowerCase() === cName.trim().toLowerCase();
+                  return (
+                    <TouchableOpacity
+                      key={cls.id}
+                      style={{
+                        backgroundColor: isSelected ? '#16A34A' : '#FFFFFF',
+                        borderWidth: 1,
+                        borderColor: isSelected ? '#16A34A' : '#CBD5E1',
+                        paddingHorizontal: 10,
+                        paddingVertical: 5,
+                        borderRadius: 8,
+                      }}
+                      onPress={() => handleSaveTeacherCounselorClass(cName)}
+                      disabled={savingCounselorClass}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: isSelected ? '#FFFFFF' : '#334155' }}>
+                        {isSelected ? `✓ ${cName}` : cName}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
             {loadingTeacherSchedule ? (
               <View style={{ paddingVertical: 40, alignItems: 'center' }}>
                 <ActivityIndicator size="large" color="#4F46E5" />
@@ -13538,17 +18372,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               </View>
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 10 }}>
-                {['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'].map((day) => {
-                  const dayItems = teacherScheduleItems
-                    .filter(i => (i.dayName || i.dayOfWeek || '').toLowerCase().includes(day.toLowerCase().slice(0, 3)))
-                    .sort((a, b) => (a.periodNumber || 0) - (b.periodNumber || 0));
-
-                  let dayNum = 1;
-                  const dLower = day.toLowerCase();
-                  if (dLower.startsWith('sal')) dayNum = 2;
-                  else if (dLower.startsWith('çar')) dayNum = 3;
-                  else if (dLower.startsWith('per')) dayNum = 4;
-                  else if (dLower.startsWith('cum')) dayNum = 5;
+                {[
+                  { dayNum: 1, name: 'Pazartesi' },
+                  { dayNum: 2, name: 'Salı' },
+                  { dayNum: 3, name: 'Çarşamba' },
+                  { dayNum: 4, name: 'Perşembe' },
+                  { dayNum: 5, name: 'Cuma' }
+                ].map(({ dayNum, name: day }) => {
+                  const dayItems = (teacherScheduleItems || [])
+                    .filter(i => {
+                      if (Number(i.dayOfWeek) === dayNum) return true;
+                      const dStr = String(i.dayName || '').toLowerCase();
+                      return dStr.includes(day.toLowerCase().slice(0, 3));
+                    })
+                    .sort((a, b) => Number(a.lessonHour || a.periodNumber || 0) - Number(b.lessonHour || b.periodNumber || 0));
 
                   return (
                     <View key={day} style={styles.scheduleDayCard}>
@@ -13567,7 +18404,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                             onPress={() =>
                               handleOpenSlotModal({
                                 dayOfWeek: dayNum,
-                                lessonHour: item.periodNumber || item.lessonHour || (idx + 1),
+                                lessonHour: Number(item.lessonHour || item.periodNumber || (idx + 1)),
                                 teacherName: selectedTeacherForSchedule?.fullName,
                                 existingItem: item,
                               })
@@ -13575,7 +18412,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                             activeOpacity={0.7}
                           >
                             <View style={styles.schedulePeriodBadge}>
-                              <Text style={styles.schedulePeriodText}>{item.periodNumber || idx + 1}. Ders</Text>
+                              <Text style={styles.schedulePeriodText}>{item.lessonHour || item.periodNumber || idx + 1}. Ders</Text>
                             </View>
                             <View style={{ flex: 1, marginLeft: 8 }}>
                               <Text style={styles.scheduleLessonName}>{item.lessonName || 'Ders'}</Text>
@@ -14165,13 +19002,39 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
             {/* Filtre ve Arama Alanı */}
             <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
-              {/* Sayfa Filtresi (Varsa) */}
-              {reviewAvailablePages.length > 1 && (
+              {/* Sayfa Filtresi ve Yeniden Tarama */}
+              {reviewAvailablePages.length > 0 && (
                 <View style={{ marginBottom: 10 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B', marginBottom: 6, textTransform: 'uppercase' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>
                     📄 Sayfa Seçimi:
                   </Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  <TouchableOpacity
+                    disabled={rescanningPage}
+                    onPress={handleRescanCurrentPage}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: '#F0FDF4',
+                      paddingHorizontal: 8,
+                      paddingVertical: 3.5,
+                      borderRadius: 6,
+                      borderWidth: 1,
+                      borderColor: '#86EFAC',
+                    }}
+                  >
+                    {rescanningPage ? (
+                      <ActivityIndicator size="small" color="#16A34A" />
+                    ) : (
+                      <Ionicons name="reload" size={12} color="#16A34A" />
+                    )}
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#15803D' }}>
+                      {reviewPageFilter === 'all' ? 'Tüm Belgeyi Tekrar Tara' : `Sayfa ${reviewPageFilter}'i Tekrar Tara`}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                     <TouchableOpacity
                       onPress={() => setReviewPageFilter('all')}
                       style={{
@@ -14210,66 +19073,205 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               )}
 
               {/* Durum Filtreleri ve Arama */}
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <TouchableOpacity
-                    onPress={() => setReviewMatchFilter('all')}
-                    style={{
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                      backgroundColor: reviewMatchFilter === 'all' ? '#0F172A' : '#F1F5F9',
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: reviewMatchFilter === 'all' ? '#fff' : '#475569' }}>
-                      Tümü ({reviewPhotos.length})
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => setReviewMatchFilter('matched')}
-                    style={{
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                      backgroundColor: reviewMatchFilter === 'matched' ? '#059669' : '#ECFDF5',
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: reviewMatchFilter === 'matched' ? '#fff' : '#059669' }}>
-                      Eşleşen ({reviewPhotos.filter(p => p.matchedStudent !== null).length})
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => setReviewMatchFilter('unmatched')}
-                    style={{
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                      backgroundColor: reviewMatchFilter === 'unmatched' ? '#D97706' : '#FFFBEB',
-                    }}
-                  >
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: reviewMatchFilter === 'unmatched' ? '#fff' : '#D97706' }}>
-                      Eşleşmeyen ({reviewPhotos.filter(p => p.matchedStudent === null).length})
-                    </Text>
-                  </TouchableOpacity>
-                </View>
+              {(() => {
+                const fullCount = reviewPhotos.filter(p => getPhotoMatchStatus(p).status === 'full').length;
+                const numOnlyCount = reviewPhotos.filter(p => getPhotoMatchStatus(p).status === 'number_only').length;
+                const noneCount = reviewPhotos.filter(p => getPhotoMatchStatus(p).status === 'none').length;
 
-                {/* Arama Inputu */}
-                <View style={{ flex: 1, minWidth: 160, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 32 }}>
-                  <Ionicons name="search" size={14} color="#64748B" style={{ marginRight: 6 }} />
-                  <TextInput
-                    style={{ flex: 1, fontSize: 12, color: '#0F172A', paddingVertical: 0 }}
-                    placeholder="Ad, no veya şube ara..."
-                    placeholderTextColor="#94A3B8"
-                    value={reviewSearchQuery}
-                    onChangeText={setReviewSearchQuery}
-                  />
-                  {reviewSearchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setReviewSearchQuery('')}>
-                      <Ionicons name="close-circle" size={14} color="#94A3B8" />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
+                return (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      <TouchableOpacity
+                        onPress={() => setReviewMatchFilter('all')}
+                        style={{
+                          paddingHorizontal: 9,
+                          paddingVertical: 5,
+                          borderRadius: 12,
+                          backgroundColor: reviewMatchFilter === 'all' ? '#0F172A' : '#F1F5F9',
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: reviewMatchFilter === 'all' ? '#fff' : '#475569' }}>
+                          Tümü ({reviewPhotos.length})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => setReviewMatchFilter('full')}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          paddingHorizontal: 9,
+                          paddingVertical: 5,
+                          borderRadius: 12,
+                          backgroundColor: reviewMatchFilter === 'full' ? '#15803D' : '#F0FDF4',
+                          borderWidth: 1,
+                          borderColor: '#86EFAC',
+                        }}
+                      >
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: reviewMatchFilter === 'full' ? '#fff' : '#15803D' }} />
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: reviewMatchFilter === 'full' ? '#fff' : '#15803D' }}>
+                          Tam Eşleşen ({fullCount})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => setReviewMatchFilter('number_only')}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          paddingHorizontal: 9,
+                          paddingVertical: 5,
+                          borderRadius: 12,
+                          backgroundColor: reviewMatchFilter === 'number_only' ? '#B45309' : '#FFFBEB',
+                          borderWidth: 1,
+                          borderColor: '#FCD34D',
+                        }}
+                      >
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: reviewMatchFilter === 'number_only' ? '#fff' : '#B45309' }} />
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: reviewMatchFilter === 'number_only' ? '#fff' : '#B45309' }}>
+                          Yalnızca No ({numOnlyCount})
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        onPress={() => setReviewMatchFilter('unmatched')}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          paddingHorizontal: 9,
+                          paddingVertical: 5,
+                          borderRadius: 12,
+                          backgroundColor: reviewMatchFilter === 'unmatched' ? '#B91C1C' : '#FEF2F2',
+                          borderWidth: 1,
+                          borderColor: '#FCA5A5',
+                        }}
+                      >
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: reviewMatchFilter === 'unmatched' ? '#fff' : '#B91C1C' }} />
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: reviewMatchFilter === 'unmatched' ? '#fff' : '#B91C1C' }}>
+                          Eşleşmeyen ({noneCount})
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Arama Inputu */}
+                    <View style={{ flex: 1, minWidth: 160, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 8, height: 32 }}>
+                      <Ionicons name="search" size={14} color="#64748B" style={{ marginRight: 6 }} />
+                      <TextInput
+                        style={{ flex: 1, fontSize: 12, color: '#0F172A', paddingVertical: 0 }}
+                        placeholder="Ad, no veya şube ara..."
+                        placeholderTextColor="#94A3B8"
+                        value={reviewSearchQuery}
+                        onChangeText={setReviewSearchQuery}
+                      />
+                      {reviewSearchQuery.length > 0 && (
+                        <TouchableOpacity onPress={() => setReviewSearchQuery('')}>
+                          <Ionicons name="close-circle" size={14} color="#94A3B8" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {/* Hızlı Dizi Kayması Düzeltme Aracı */}
+                    <View style={{ width: '100%', marginTop: 8, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F1F5F9', gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons name="swap-horizontal" size={14} color="#6366F1" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>
+                            Dizi Kayması:
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                          <TouchableOpacity
+                            onPress={() => handleShiftPhotos(-1)}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              borderRadius: 6,
+                              backgroundColor: '#EEF2FF',
+                              borderWidth: 1,
+                              borderColor: '#C7D2FE',
+                            }}
+                          >
+                            <Ionicons name="arrow-back-outline" size={12} color="#4F46E5" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>
+                              1 Geri Kaydır (-1)
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            onPress={() => handleShiftPhotos(1)}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              borderRadius: 6,
+                              backgroundColor: '#EEF2FF',
+                              borderWidth: 1,
+                              borderColor: '#C7D2FE',
+                            }}
+                          >
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>
+                              1 İleri Kaydır (+1)
+                            </Text>
+                            <Ionicons name="arrow-forward-outline" size={12} color="#4F46E5" />
+                          </TouchableOpacity>
+
+                          {photoHistoryStack.length > 0 && (
+                            <TouchableOpacity
+                              onPress={handleUndoShift}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 3,
+                                paddingHorizontal: 7,
+                                paddingVertical: 4,
+                                borderRadius: 6,
+                                backgroundColor: '#FEF3C7',
+                                borderWidth: 1,
+                                borderColor: '#FDE68A',
+                              }}
+                            >
+                              <Ionicons name="arrow-undo" size={12} color="#D97706" />
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309' }}>
+                                Geri Al
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+
+                          {initialReviewPhotos.length > 0 && (
+                            <TouchableOpacity
+                              onPress={handleResetToInitial}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 3,
+                                paddingHorizontal: 7,
+                                paddingVertical: 4,
+                                borderRadius: 6,
+                                backgroundColor: '#FEE2E2',
+                                borderWidth: 1,
+                                borderColor: '#FECACA',
+                              }}
+                            >
+                              <Ionicons name="refresh" size={12} color="#DC2626" />
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>
+                                Sıfırla
+                              </Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })()}
             </View>
 
             {/* Fotoğraflar Listesi */}
@@ -14284,51 +19286,92 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               ) : (
                 filteredReviewPhotos.map((item, idx) => {
                   const matched = item.matchedStudent;
-                  const pdfDetectedStr = item.detectedNumber
-                    ? `PDF Okul No: ${item.detectedNumber}`
-                    : item.detectedName
-                    ? `PDF Metin: ${item.detectedName}`
-                    : 'PDF / OCR numara okunamadı';
+                  const matchInfo = getPhotoMatchStatus(item);
+
+                  const pdfNo = item.detectedNumber && item.detectedNumber.trim() ? item.detectedNumber.trim() : 'Okunamadı';
+                  const pdfName = item.detectedName && item.detectedName.trim() ? item.detectedName.trim() : 'İsim Yok';
 
                   return (
                     <View
                       key={item.id || idx}
                       style={{
                         flexDirection: 'row',
-                        backgroundColor: '#fff',
-                        borderRadius: 12,
+                        backgroundColor: matchInfo.bgColor,
+                        borderRadius: 14,
                         padding: 10,
-                        borderWidth: 1,
-                        borderColor: matched ? '#E2E8F0' : '#FED7AA',
+                        borderWidth: 1.5,
+                        borderColor: matchInfo.borderColor,
                         shadowColor: '#000',
-                        shadowOpacity: 0.03,
-                        shadowRadius: 4,
-                        elevation: 1,
+                        shadowOpacity: 0.04,
+                        shadowRadius: 5,
+                        elevation: 2,
                         gap: 12,
                         alignItems: 'center',
                       }}
                     >
-                      {/* Vesikalık Görsel */}
-                      <View style={{ position: 'relative' }}>
-                        <Image
-                          source={{ uri: item.tempUri }}
+                      {/* Vesikalık Görsel (Dokunarak Değiştirilebilir) */}
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => handleOpenPhotoPicker(item.id)}
+                        style={{ position: 'relative' }}
+                      >
+                        {item.tempUri ? (
+                          <Image
+                            source={{ uri: item.tempUri }}
+                            style={{
+                              width: 76,
+                              height: 98,
+                              borderRadius: 8,
+                              backgroundColor: '#E2E8F0',
+                              borderWidth: 1.5,
+                              borderColor: matchInfo.borderColor,
+                            }}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View
+                            style={{
+                              width: 76,
+                              height: 98,
+                              borderRadius: 8,
+                              backgroundColor: '#F8FAFC',
+                              borderWidth: 1.5,
+                              borderColor: '#CBD5E1',
+                              borderStyle: 'dashed',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Ionicons name="camera-outline" size={24} color="#94A3B8" />
+                            <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#64748B', marginTop: 4 }}>
+                              Foto Seç
+                            </Text>
+                          </View>
+                        )}
+                        <View
                           style={{
-                            width: 68,
-                            height: 82,
-                            borderRadius: 8,
-                            backgroundColor: '#E2E8F0',
-                            borderWidth: 1,
-                            borderColor: '#CBD5E1',
+                            position: 'absolute',
+                            top: 3,
+                            left: 3,
+                            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                            borderRadius: 4,
+                            paddingHorizontal: 4,
+                            paddingVertical: 2,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 2,
                           }}
-                          resizeMode="cover"
-                        />
-                        {item.pageNumber && (
+                        >
+                          <Ionicons name="camera" size={9} color="#fff" />
+                          <Text style={{ fontSize: 8.5, fontWeight: '700', color: '#fff' }}>Seç</Text>
+                        </View>
+                        {item.pageNumber ? (
                           <View
                             style={{
                               position: 'absolute',
                               bottom: 2,
                               right: 2,
-                              backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                              backgroundColor: 'rgba(15, 23, 42, 0.8)',
                               borderRadius: 4,
                               paddingHorizontal: 4,
                               paddingVertical: 1,
@@ -14338,85 +19381,256 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                               S.{item.pageNumber}
                             </Text>
                           </View>
-                        )}
-                      </View>
+                        ) : null}
+                      </TouchableOpacity>
 
-                      {/* Bilgiler ve Butonlar */}
+                      {/* Bilgiler ve Karşılaştırma Alanı */}
                       <View style={{ flex: 1, justifyContent: 'center' }}>
-                        {/* Sıra & Rozet */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#334155' }}>
+                        {/* Sıra & Durum Rozeti */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B' }}>
                             #{item.index + 1}. Fotoğraf {item.pageNumber ? `(Sayfa ${item.pageNumber})` : ''}
                           </Text>
-                          {matched ? (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                              <Ionicons name="checkmark-circle" size={12} color="#059669" />
-                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#059669' }}>Eşleşti</Text>
-                            </View>
-                          ) : (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FEF3C7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
-                              <Ionicons name="alert-circle" size={12} color="#D97706" />
-                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#D97706' }}>Eşleşmedi</Text>
-                            </View>
-                          )}
-                        </View>
-
-                        {/* PDF Algılanan Bilgi */}
-                        <Text style={{ fontSize: 11, fontWeight: '600', color: '#4F46E5', marginTop: 1 }}>
-                          📄 {pdfDetectedStr}
-                        </Text>
-
-                        {/* Sistem Öğrenci Bilgisi */}
-                        {matched ? (
-                          <View style={{ marginTop: 2 }}>
-                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#0F172A' }}>
-                              👤 Sistem: {matched.first_name || matched.name} {matched.last_name || ''}
-                            </Text>
-                            <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
-                              Okul No: <Text style={{ fontWeight: '700', color: '#334155' }}>{matched.student_number || '-'}</Text> • Şube: <Text style={{ fontWeight: '700', color: '#334155' }}>{matched.class_name || '-'}</Text>
+                          <View
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 4,
+                              backgroundColor: matchInfo.badgeBg,
+                              paddingHorizontal: 7,
+                              paddingVertical: 2,
+                              borderRadius: 6,
+                              borderWidth: 1,
+                              borderColor: matchInfo.borderColor,
+                            }}
+                          >
+                            <Ionicons
+                              name={
+                                matchInfo.status === 'full'
+                                  ? 'checkmark-circle'
+                                  : matchInfo.status === 'number_only'
+                                  ? 'alert-circle'
+                                  : 'close-circle'
+                              }
+                              size={12}
+                              color={matchInfo.badgeText}
+                            />
+                            <Text style={{ fontSize: 10.5, fontWeight: '800', color: matchInfo.badgeText }}>
+                              {matchInfo.badgeLabel}
                             </Text>
                           </View>
-                        ) : (
-                          <Text style={{ fontSize: 11, fontStyle: 'italic', color: '#DC2626', marginTop: 2 }}>
-                            ⚠️ Sistemde bu fotoğrafla eşleşen öğrenci atanmadı.
-                          </Text>
-                        )}
+                        </View>
+
+                        {/* Karşılaştırma Kutusu (PDF vs Sistem - Alt Üst Stacked Bloklar) */}
+                        <View style={{ gap: 6 }}>
+                          {/* 1. Blok: PDF'ten Okunan Veri */}
+                          <View
+                            style={{
+                              backgroundColor: '#EEF2FF',
+                              borderRadius: 8,
+                              padding: 6,
+                              borderWidth: 1,
+                              borderColor: '#C7D2FE',
+                              gap: 2,
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="document-text" size={12} color="#4F46E5" />
+                                <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#4338CA', textTransform: 'uppercase' }}>
+                                  PDF'ten Okunan:
+                                </Text>
+                              </View>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#312E81' }}>
+                                Okul No: <Text style={{ fontWeight: '800', color: '#1E1B4B' }}>{pdfNo}</Text>
+                              </Text>
+                            </View>
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: '700',
+                                color: '#1E293B',
+                                paddingLeft: 16,
+                              }}
+                              numberOfLines={1}
+                            >
+                              {pdfName}
+                            </Text>
+                          </View>
+
+                          {/* 2. Blok: Sistemdeki Öğrenci Kaydı */}
+                          <View
+                            style={{
+                              backgroundColor: matched ? '#F0FDF4' : '#FEF2F2',
+                              borderRadius: 8,
+                              padding: 6,
+                              borderWidth: 1,
+                              borderColor: matched ? '#86EFAC' : '#FCA5A5',
+                              gap: 2,
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Ionicons name="person" size={12} color={matched ? '#15803D' : '#DC2626'} />
+                                <Text
+                                  style={{
+                                    fontSize: 10.5,
+                                    fontWeight: '800',
+                                    color: matched ? '#15803D' : '#DC2626',
+                                    textTransform: 'uppercase',
+                                  }}
+                                >
+                                  Sistemdeki Kayıt:
+                                </Text>
+                              </View>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: matched ? '#14532D' : '#7F1D1D' }}>
+                                Okul No: <Text style={{ fontWeight: '800', color: matched ? '#0F172A' : '#DC2626' }}>{matchInfo.sysNumber}</Text>
+                              </Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 16 }}>
+                              <Text
+                                style={{
+                                  fontSize: 11.5,
+                                  fontWeight: '800',
+                                  color: matched ? '#0F172A' : '#DC2626',
+                                  flex: 1,
+                                }}
+                                numberOfLines={1}
+                              >
+                                {matched ? matchInfo.sysFullName : 'Eşleşen Öğrenci Yok'}
+                              </Text>
+                              {matched && matchInfo.sysClassName !== '-' && (
+                                <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '800', color: '#15803D' }}>
+                                    {matchInfo.sysClassName}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Bu Öğrenciden İtibaren Sonrakileri Kaydır */}
+                        <View
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: '#F8FAFC',
+                            borderWidth: 1,
+                            borderColor: '#E2E8F0',
+                            borderRadius: 7,
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            marginTop: 6,
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="shuffle-outline" size={12} color="#6366F1" />
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#475569' }}>
+                              Buradan Sonrasını Kaydır:
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', gap: 5 }}>
+                            <TouchableOpacity
+                              onPress={() => handleShiftPhotosFromIndex(item.id, -1)}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 2,
+                                backgroundColor: '#EEF2FF',
+                                borderWidth: 1,
+                                borderColor: '#C7D2FE',
+                                paddingHorizontal: 7,
+                                paddingVertical: 2.5,
+                                borderRadius: 5,
+                              }}
+                            >
+                              <Ionicons name="arrow-back" size={10} color="#4F46E5" />
+                              <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#4F46E5' }}>
+                                1 Geri (-1)
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => handleShiftPhotosFromIndex(item.id, 1)}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 2,
+                                backgroundColor: '#EEF2FF',
+                                borderWidth: 1,
+                                borderColor: '#C7D2FE',
+                                paddingHorizontal: 7,
+                                paddingVertical: 2.5,
+                                borderRadius: 5,
+                              }}
+                            >
+                              <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#4F46E5' }}>
+                                1 İleri (+1)
+                              </Text>
+                              <Ionicons name="arrow-forward" size={10} color="#4F46E5" />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
 
                         {/* Satır İçi İşlem Butonları */}
-                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6, justifyContent: 'flex-end' }}>
                           {matched && (
                             <TouchableOpacity
                               onPress={() => handleRemovePhotoMatch(item.id)}
                               style={{
                                 flexDirection: 'row',
                                 alignItems: 'center',
-                                gap: 4,
+                                gap: 3,
                                 backgroundColor: '#FEE2E2',
                                 paddingHorizontal: 8,
                                 paddingVertical: 4,
                                 borderRadius: 6,
                               }}
                             >
-                              <Ionicons name="close-circle-outline" size={13} color="#DC2626" />
+                              <Ionicons name="close-circle-outline" size={12} color="#DC2626" />
                               <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>
-                                Hatalı / Kaldır
+                                Kaldır
                               </Text>
                             </TouchableOpacity>
                           )}
+
+                          <TouchableOpacity
+                            onPress={() => handleOpenPhotoPicker(item.id)}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 3,
+                              backgroundColor: '#F1F5F9',
+                              borderWidth: 1,
+                              borderColor: '#CBD5E1',
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
+                              borderRadius: 6,
+                            }}
+                          >
+                            <Ionicons name="images-outline" size={12} color="#334155" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#334155' }}>
+                              Fotoğraf Değiştir
+                            </Text>
+                          </TouchableOpacity>
 
                           <TouchableOpacity
                             onPress={() => handleOpenStudentPicker(item.id)}
                             style={{
                               flexDirection: 'row',
                               alignItems: 'center',
-                              gap: 4,
+                              gap: 3,
                               backgroundColor: '#EEF2FF',
+                              borderWidth: 1,
+                              borderColor: '#C7D2FE',
                               paddingHorizontal: 8,
                               paddingVertical: 4,
                               borderRadius: 6,
                             }}
                           >
-                            <Ionicons name="person-add-outline" size={13} color="#4F46E5" />
+                            <Ionicons name="person-add-outline" size={12} color="#4F46E5" />
                             <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>
                               {matched ? 'Öğrenci Değiştir' : 'Öğrenci Seç'}
                             </Text>
@@ -14539,37 +19753,319 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <Text style={{ fontSize: 13, color: '#94A3B8' }}>Eşleşen öğrenci bulunamadı.</Text>
                 </View>
               ) : (
-                filteredPickerStudents.map((std, sIdx) => (
-                  <TouchableOpacity
-                    key={std.id || sIdx}
-                    onPress={() => handleAssignStudentToPhoto(std)}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      paddingHorizontal: 12,
-                      paddingVertical: 10,
-                      borderRadius: 8,
-                      borderBottomWidth: 1,
-                      borderBottomColor: '#F1F5F9',
-                      gap: 12,
-                    }}
-                  >
-                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#4F46E5' }}>
-                        {(std.first_name || std.name || 'Ö').charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
-                        {std.first_name || std.name} {std.last_name || ''}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
-                        No: <Text style={{ fontWeight: '700', color: '#334155' }}>{std.student_number || '-'}</Text> • Sınıf/Şube: <Text style={{ fontWeight: '700', color: '#334155' }}>{std.class_name || '-'}</Text>
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                filteredPickerStudents.map((std, sIdx) => {
+                  const info = getPickerStudentInfo(std);
+                  return (
+                    <TouchableOpacity
+                      key={std.id || sIdx}
+                      onPress={() => handleAssignStudentToPhoto(std)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingHorizontal: 12,
+                        paddingVertical: 10,
+                        borderRadius: 8,
+                        borderBottomWidth: 1,
+                        borderBottomColor: '#F1F5F9',
+                        gap: 12,
+                      }}
+                    >
+                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#4F46E5' }}>
+                          {info.fullName.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                          {info.fullName}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
+                          No: <Text style={{ fontWeight: '700', color: '#334155' }}>{info.number || '-'}</Text> • Sınıf/Şube: <Text style={{ fontWeight: '700', color: '#334155' }}>{info.className || '-'}</Text>
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 4.5 Manuel PDF Fotoğraf Galerisi Seçici Modalı */}
+      <Modal
+        visible={photoPickerVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setPhotoPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 640, width: '95%', maxHeight: '85%', padding: 0, overflow: 'hidden' }]}>
+            {/* Başlık */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
+              <View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="images" size={18} color="#4F46E5" />
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                    PDF Fotoğraf Galerisi
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                  Öğrenciye atamak istediğiniz fotoğrafa dokunun ({reviewPhotos.length} fotoğraf mevcut)
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setPhotoPickerVisible(false)}
+                style={{ padding: 4, borderRadius: 6, backgroundColor: '#E2E8F0' }}
+              >
+                <Ionicons name="close" size={18} color="#475569" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Arama Inputu */}
+            <View style={{ padding: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 36 }}>
+                <Ionicons name="search" size={15} color="#64748B" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={{ flex: 1, fontSize: 12, color: '#0F172A', paddingVertical: 0 }}
+                  placeholder="Fotoğraf no, sayfa veya tespit edilen isim..."
+                  placeholderTextColor="#94A3B8"
+                  value={photoPickerSearch}
+                  onChangeText={setPhotoPickerSearch}
+                />
+                {photoPickerSearch.length > 0 && (
+                  <TouchableOpacity onPress={() => setPhotoPickerSearch('')}>
+                    <Ionicons name="close-circle" size={15} color="#94A3B8" />
                   </TouchableOpacity>
-                ))
+                )}
+              </View>
+            </View>
+
+            {/* Fotoğraf Galerisi Izgarası */}
+            <ScrollView style={{ flex: 1, backgroundColor: '#F8FAFC' }} contentContainerStyle={{ padding: 12 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+                {reviewPhotos
+                  .filter(p => {
+                    if (!photoPickerSearch.trim()) return true;
+                    const q = photoPickerSearch.toLowerCase().trim();
+                    const no = String(p.index + 1);
+                    const pg = String(p.pageNumber || '');
+                    const det = String(p.detectedNumber || '').toLowerCase();
+                    const detNm = String(p.detectedName || '').toLowerCase();
+                    return no.includes(q) || pg.includes(q) || det.includes(q) || detNm.includes(q);
+                  })
+                  .map((pItem, pIdx) => (
+                    <TouchableOpacity
+                      key={pItem.id || pIdx}
+                      activeOpacity={0.7}
+                      onPress={() => handleAssignPhotoToTarget(pItem)}
+                      style={{
+                        width: 100,
+                        backgroundColor: '#fff',
+                        borderRadius: 10,
+                        padding: 6,
+                        borderWidth: 1.5,
+                        borderColor: '#E2E8F0',
+                        alignItems: 'center',
+                        shadowColor: '#000',
+                        shadowOpacity: 0.04,
+                        shadowRadius: 3,
+                        elevation: 1,
+                      }}
+                    >
+                      <Image
+                        source={{ uri: pItem.tempUri }}
+                        style={{
+                          width: 86,
+                          height: 110,
+                          borderRadius: 6,
+                          backgroundColor: '#E2E8F0',
+                        }}
+                        resizeMode="cover"
+                      />
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#0F172A', marginTop: 4 }}>
+                        #{pItem.index + 1}
+                      </Text>
+                      {pItem.pageNumber ? (
+                        <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#6366F1' }}>
+                          Sayfa {pItem.pageNumber}
+                        </Text>
+                      ) : null}
+                      {pItem.detectedNumber ? (
+                        <Text style={{ fontSize: 9, color: '#059669', fontWeight: '700' }} numberOfLines={1}>
+                          No: {pItem.detectedNumber}
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 4.6 Tekil Öğrenci İçin PDF'ten Fotoğraf Seçme Modalı */}
+      <Modal
+        visible={singleStudentPdfModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => {
+          if (!singleStudentPdfUploading) {
+            setSingleStudentPdfModalVisible(false);
+            setSingleStudentPdfTarget(null);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 640, width: '95%', maxHeight: '88%', padding: 0, overflow: 'hidden' }]}>
+            {/* Başlık */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="document-text" size={18} color="#4F46E5" />
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                    PDF Albümünden Fotoğraf Seç
+                  </Text>
+                </View>
+                <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                  Hedef: <Text style={{ fontWeight: '800', color: '#1E293B' }}>{singleStudentPdfTarget?.fullName}</Text> (No: {singleStudentPdfTarget?.studentNumber}) • Toplam {cachedPdfPhotos.length} fotoğraf
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={handlePickNewPdfForSingleStudent}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    backgroundColor: '#EEF2FF',
+                    paddingHorizontal: 8,
+                    paddingVertical: 5,
+                    borderRadius: 6,
+                    borderWidth: 1,
+                    borderColor: '#C7D2FE',
+                  }}
+                >
+                  <Ionicons name="folder-open-outline" size={12} color="#4F46E5" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>Farklı PDF</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  disabled={singleStudentPdfUploading}
+                  onPress={() => {
+                    setSingleStudentPdfModalVisible(false);
+                    setSingleStudentPdfTarget(null);
+                  }}
+                  style={{ padding: 4, borderRadius: 6, backgroundColor: '#E2E8F0' }}
+                >
+                  <Ionicons name="close" size={18} color="#475569" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Arama Inputu */}
+            <View style={{ padding: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 10, height: 36 }}>
+                <Ionicons name="search" size={15} color="#64748B" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={{ flex: 1, fontSize: 12, color: '#0F172A', paddingVertical: 0 }}
+                  placeholder="Fotoğraf no, sayfa veya isim ara..."
+                  placeholderTextColor="#94A3B8"
+                  value={singleStudentPdfSearch}
+                  onChangeText={setSingleStudentPdfSearch}
+                />
+                {singleStudentPdfSearch.length > 0 && (
+                  <TouchableOpacity onPress={() => setSingleStudentPdfSearch('')}>
+                    <Ionicons name="close-circle" size={15} color="#94A3B8" />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* Fotoğraf Izgarası */}
+            <ScrollView style={{ flex: 1, backgroundColor: '#F8FAFC' }} contentContainerStyle={{ padding: 12 }}>
+              {singleStudentPdfUploading ? (
+                <View style={{ paddingVertical: 40, alignItems: 'center', justifyContent: 'center' }}>
+                  <ActivityIndicator size="large" color="#4F46E5" />
+                  <Text style={{ marginTop: 12, fontSize: 14, fontWeight: '700', color: '#1E293B' }}>
+                    Fotoğraf sunucuya yükleniyor...
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'center' }}>
+                  {cachedPdfPhotos
+                    .filter(p => {
+                      if (!singleStudentPdfSearch.trim()) return true;
+                      const q = singleStudentPdfSearch.toLowerCase().trim();
+                      const no = String(p.index + 1);
+                      const pg = String(p.pageNumber || '');
+                      const det = String(p.detectedNumber || '').toLowerCase();
+                      const detNm = String(p.detectedName || '').toLowerCase();
+                      return no.includes(q) || pg.includes(q) || det.includes(q) || detNm.includes(q);
+                    })
+                    .map((pItem, pIdx) => (
+                      <TouchableOpacity
+                        key={pItem.id || pIdx}
+                        activeOpacity={0.7}
+                        onPress={() => handleSelectPdfPhotoForStudent(pItem)}
+                        style={{
+                          width: 105,
+                          backgroundColor: '#fff',
+                          borderRadius: 10,
+                          padding: 6,
+                          borderWidth: 1.5,
+                          borderColor: '#E2E8F0',
+                          alignItems: 'center',
+                          shadowColor: '#000',
+                          shadowOpacity: 0.04,
+                          shadowRadius: 3,
+                          elevation: 1,
+                        }}
+                      >
+                        <Image
+                          source={{ uri: pItem.tempUri }}
+                          style={{
+                            width: 90,
+                            height: 115,
+                            borderRadius: 6,
+                            backgroundColor: '#E2E8F0',
+                          }}
+                          resizeMode="cover"
+                        />
+                        <View style={{ width: '100%', marginTop: 5, alignItems: 'center' }}>
+                          <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#1E293B' }} numberOfLines={1}>
+                            #{pItem.index + 1} {pItem.pageNumber ? `(S.${pItem.pageNumber})` : ''}
+                          </Text>
+                          {pItem.detectedNumber ? (
+                            <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#4F46E5' }} numberOfLines={1}>
+                              No: {pItem.detectedNumber}
+                            </Text>
+                          ) : null}
+                          {pItem.detectedName ? (
+                            <Text style={{ fontSize: 9, color: '#64748B' }} numberOfLines={1}>
+                              {pItem.detectedName}
+                            </Text>
+                          ) : null}
+                          <View
+                            style={{
+                              marginTop: 4,
+                              backgroundColor: '#EEF2FF',
+                              paddingHorizontal: 8,
+                              paddingVertical: 2,
+                              borderRadius: 4,
+                              borderWidth: 1,
+                              borderColor: '#C7D2FE',
+                              width: '100%',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#4F46E5' }}>Seç ve Ata</Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                </View>
               )}
             </ScrollView>
           </View>
@@ -14616,25 +20112,47 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
               </TouchableOpacity>
 
-              {/* 1. Okul Bilgilerini Düzenle */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  if (selectedSchool) {
-                    handleOpenEditSchool(selectedSchool);
-                  }
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
-                  <Ionicons name="pencil" size={18} color="#4F46E5" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>Okul Bilgilerini Düzenle</Text>
-                  <Text style={styles.hamburgerMenuSub}>Okul adı, adres ve iletişim bilgilerini güncelle</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
-              </TouchableOpacity>
+              {/* 1. Yetki & Erişim Yönetimi (Sadece Kurum Admini) */}
+              {!isStaff && (
+                <TouchableOpacity
+                  style={styles.hamburgerMenuItem}
+                  onPress={() => {
+                    setMenuDrawerVisible(false);
+                    setPermissionsModalVisible(true);
+                  }}
+                >
+                  <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                    <Ionicons name="shield-checkmark" size={18} color="#7C3AED" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.hamburgerMenuLabel, { color: '#7C3AED' }]}>Yetki & Erişim Yönetimi</Text>
+                    <Text style={styles.hamburgerMenuSub}>İdarecilerin ve öğretmenlerin yetki ve okul atamaları</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                </TouchableOpacity>
+              )}
+
+              {/* 1.1 Okul Bilgilerini Düzenle (Sadece Kurum Admini) */}
+              {!isStaff && (
+                <TouchableOpacity
+                  style={styles.hamburgerMenuItem}
+                  onPress={() => {
+                    setMenuDrawerVisible(false);
+                    if (selectedSchool) {
+                      handleOpenEditSchool(selectedSchool);
+                    }
+                  }}
+                >
+                  <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                    <Ionicons name="pencil" size={18} color="#4F46E5" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.hamburgerMenuLabel}>Okul Bilgilerini Düzenle</Text>
+                    <Text style={styles.hamburgerMenuSub}>Okul adı, adres ve iletişim bilgilerini güncelle</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                </TouchableOpacity>
+              )}
 
               {/* 2. Yeni Okul Ekle (Sadece yetkili) */}
               {!isStaff && (
@@ -14710,6 +20228,32 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.hamburgerMenuLabel}>Müşteri & Lisans Detayları</Text>
                   <Text style={styles.hamburgerMenuSub}>Müşteri No, İlişki ID ve Lisans durumu</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              <View style={styles.hamburgerMenuDivider} />
+
+              {/* Canlı Konum, Boş Ders Radarı & Nöbet */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('radar');
+                  if (allSchoolSchedules.length === 0) {
+                    loadAllSchedules();
+                  }
+                  if (dutiesList.length === 0) {
+                    loadDuties();
+                  }
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#F0FDF4' }]}>
+                  <Ionicons name="compass" size={18} color="#16A34A" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Canlı Konum & Boş Ders Radarı</Text>
+                  <Text style={styles.hamburgerMenuSub}>Personel nerede, şubede kim var, anlık boş dersler ve nöbetçiler</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
               </TouchableOpacity>
@@ -14912,12 +20456,498 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           </View>
         </View>
       </Modal>
+
+      {/* 🛡️ Kurum Admini Yetki ve Erişim Yönetimi Modalı */}
+      <PermissionsManagementModal
+        visible={permissionsModalVisible}
+        onClose={() => setPermissionsModalVisible(false)}
+        onPermissionsUpdated={() => {
+          loadSchools();
+        }}
+      />
+
+      {/* 🏫 Canlı Radar Şube Seçim Dropdown Modalı */}
+      <Modal visible={radarClassModalVisible} animationType="slide" transparent onRequestClose={() => setRadarClassModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 520, width: '92%', maxHeight: '82%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="school" size={22} color="#4F46E5" />
+                <Text style={styles.modalTitle}>Sınıf / Şube Seçiniz</Text>
+              </View>
+              <TouchableOpacity onPress={() => setRadarClassModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Arama Kutusu */}
+            <View style={[styles.searchBarContainer, { marginHorizontal: 0, marginTop: 8, marginBottom: 8 }]}>
+              <Ionicons name="search" size={16} color="#64748B" />
+              <TextInput
+                style={[styles.searchBarInput, { fontSize: 13 }]}
+                placeholder="Şube ara (Örn: 9/A, 11-C, 12)..."
+                placeholderTextColor="#94A3B8"
+                value={radarClassSearch}
+                onChangeText={setRadarClassSearch}
+              />
+              {radarClassSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setRadarClassSearch('')}>
+                  <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Kademe Filtre Çipleri */}
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+              {[
+                { id: 'all', label: 'Tümü' },
+                { id: '9', label: '9. Sınıf' },
+                { id: '10', label: '10. Sınıf' },
+                { id: '11', label: '11. Sınıf' },
+                { id: '12', label: '12. Sınıf' },
+              ].map(f => (
+                <TouchableOpacity
+                  key={f.id}
+                  style={[styles.reportSegmentBtn, radarClassGradeFilter === f.id && styles.reportSegmentBtnActive, { flex: 1, paddingVertical: 6 }]}
+                  onPress={() => setRadarClassGradeFilter(f.id as any)}
+                >
+                  <Text style={[styles.reportSegmentText, radarClassGradeFilter === f.id && styles.reportSegmentTextActive, { fontSize: 11 }]}>
+                    {f.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Şube Kartları Listesi */}
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 10 }}>
+              {(() => {
+                const query = radarClassSearch.trim().toLowerCase();
+                const filtered = classes.filter(c => {
+                  const cName = `${c.grade || ''}/${c.section || c.name || ''}`.trim();
+                  const matchesSearch = !query || cName.toLowerCase().includes(query) || (c.name || '').toLowerCase().includes(query);
+                  const matchesGrade = radarClassGradeFilter === 'all' || String(c.grade) === radarClassGradeFilter;
+                  return matchesSearch && matchesGrade;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <View style={{ alignItems: 'center', paddingVertical: 28 }}>
+                      <Ionicons name="search-outline" size={32} color="#94A3B8" />
+                      <Text style={{ fontSize: 13, color: '#64748B', marginTop: 8 }}>Eşleşen şube bulunamadı.</Text>
+                    </View>
+                  );
+                }
+
+                return (
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {filtered.map(c => {
+                      const cName = c.name || `${c.grade}/${c.section}`;
+                      const isSelected = (radarClass || '').trim().toLowerCase() === cName.trim().toLowerCase();
+                      return (
+                        <TouchableOpacity
+                          key={c.id || cName}
+                          style={{
+                            width: '31%',
+                            backgroundColor: isSelected ? '#4F46E5' : '#F8FAFC',
+                            borderRadius: 10,
+                            paddingVertical: 12,
+                            paddingHorizontal: 8,
+                            alignItems: 'center',
+                            borderWidth: 1.5,
+                            borderColor: isSelected ? '#4338CA' : '#E2E8F0',
+                          }}
+                          onPress={() => {
+                            setRadarClass(cName);
+                            setRadarClassModalVisible(false);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name={isSelected ? "checkmark-circle" : "school-outline"} size={16} color={isSelected ? "#fff" : "#4F46E5"} />
+                          <Text style={{ fontSize: 14, fontWeight: '800', color: isSelected ? '#fff' : '#1E293B', marginTop: 4 }}>
+                            {cName}
+                          </Text>
+                          {c.studentCount ? (
+                            <Text style={{ fontSize: 10, color: isSelected ? 'rgba(255,255,255,0.8)' : '#64748B', marginTop: 2 }}>
+                              {c.studentCount} Öğrenci
+                            </Text>
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                );
+              })()}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 📍 Okul Nöbet Alanları Bilgilendirme ve Yönetim Modalı */}
+      <Modal visible={dutyPlacesModalVisible} animationType="slide" transparent onRequestClose={() => setDutyPlacesModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 540, width: '92%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location" size={22} color="#7C3AED" />
+                <Text style={styles.modalTitle}>Okul Nöbet Alanları</Text>
+              </View>
+              <TouchableOpacity onPress={() => setDutyPlacesModalVisible(false)}>
+                <Ionicons name="close" size={24} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 12, gap: 14 }}>
+              {/* Bilgilendirme Kutusu */}
+              <View style={{ backgroundColor: '#F5F3FF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#DDD6FE' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <Ionicons name="information-circle" size={18} color="#7C3AED" />
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#5B21B6' }}>Nöbet Alanları Nasıl Belirlenir?</Text>
+                </View>
+                <Text style={{ fontSize: 12, color: '#4C1D95', lineHeight: 18 }}>
+                  • <Text style={{ fontWeight: '700' }}>Excel Şablonu Üzerinden:</Text> "Şablon İndir" butonuyla indireceğiniz Excel'deki "Haftalık Nöbet Çizelgesi" tablosunda en sol sütuna okulunuzun nöbet yerlerini (örn: Bahçe, Kantin, 1. Kat vb.) satır satır yazabilirsiniz. Excel'i yüklediğinizde sistem bu alanları ve öğretmenleri birebir otomatik olarak algılar.{"\n\n"}
+                  • <Text style={{ fontWeight: '700' }}>Uygulama İçinden:</Text> Aşağıdaki hazır alanları kullanabilir veya "Yeni Alan Ekle" bölümünden okulunuza özel nöbet yeri tanımlayabilirsiniz.
+                </Text>
+              </View>
+
+              {/* Yeni Alan Ekleme */}
+              <View>
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: '#1E293B', marginBottom: 6 }}>Yeni Nöbet Alanı Tanımla:</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    placeholder="Örn: Pansiyon, Doğu Merdivenleri, Spor Salonu..."
+                    placeholderTextColor="#94A3B8"
+                    value={newCustomPlaceInput}
+                    onChangeText={setNewCustomPlaceInput}
+                  />
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#7C3AED', borderRadius: 10, paddingHorizontal: 16, justifyContent: 'center', alignItems: 'center' }}
+                    onPress={() => {
+                      if (newCustomPlaceInput.trim()) {
+                        const val = newCustomPlaceInput.trim();
+                        if (!customDutyPlaces.includes(val)) {
+                          setCustomDutyPlaces(prev => [...prev, val]);
+                        }
+                        setNewCustomPlaceInput('');
+                      }
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 12.5 }}>Ekle</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Tanımlı Alanlar */}
+              <View>
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: '#1E293B', marginBottom: 8 }}>
+                  Mevcut Nöbet Alanları ({allKnownDutyPlaces.length}):
+                </Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {allKnownDutyPlaces.map((p, idx) => (
+                    <View
+                      key={idx}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: '#F8FAFC',
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0',
+                        borderRadius: 8,
+                        paddingVertical: 6,
+                        paddingHorizontal: 10,
+                      }}
+                    >
+                      <Ionicons name="pin" size={13} color="#7C3AED" />
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#334155' }}>{p}</Text>
+                      {customDutyPlaces.includes(p) && (
+                        <TouchableOpacity
+                          onPress={() => setCustomDutyPlaces(prev => prev.filter(x => x !== p))}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        >
+                          <Ionicons name="close-circle" size={14} color="#94A3B8" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.createSubmitButton, { marginTop: 12, backgroundColor: '#7C3AED' }]}
+              onPress={() => setDutyPlacesModalVisible(false)}
+            >
+              <Text style={styles.createSubmitText}>Kapat</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 🏫 Şube / Sınıf Filtresi Seçim Modalı (Mobil Uyumlu) */}
+      <Modal
+        visible={classFilterModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setClassFilterModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setClassFilterModalVisible(false)}
+        >
+          <View style={[styles.modalContent, { maxHeight: '80%', width: Platform.OS === 'web' ? 450 : '90%' }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="school" size={20} color="#4F46E5" />
+                <Text style={styles.modalTitle}>Şube / Sınıf Seçiniz</Text>
+              </View>
+              <TouchableOpacity onPress={() => setClassFilterModalVisible(false)}>
+                <Ionicons name="close" size={22} color={Colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={true}>
+              <TouchableOpacity
+                style={[
+                  styles.classFilterModalItem,
+                  selectedClassFilter === 'all' && styles.classFilterModalItemSelected,
+                ]}
+                onPress={() => {
+                  setSelectedClassFilter('all');
+                  setClassFilterModalVisible(false);
+                }}
+              >
+                <Ionicons
+                  name={selectedClassFilter === 'all' ? 'radio-button-on' : 'radio-button-off'}
+                  size={18}
+                  color={selectedClassFilter === 'all' ? '#4F46E5' : '#94A3B8'}
+                />
+                <Text
+                  style={[
+                    styles.classFilterModalItemText,
+                    selectedClassFilter === 'all' && styles.classFilterModalItemTextSelected,
+                  ]}
+                >
+                  🏫 Tüm Sınıflar ve Şubeler ({students.length} Kayıtlı Öğrenci)
+                </Text>
+              </TouchableOpacity>
+
+              {classes.map((c) => {
+                const tag = c.className || `${c.grade}-${c.section}`;
+                const isSel = selectedClassFilter === tag;
+                const count = students.filter(
+                  (s) =>
+                    `${s.grade}-${s.section}` === tag ||
+                    s.className === tag ||
+                    (String(s.grade) === String(c.grade) && String(s.section).toUpperCase() === String(c.section).toUpperCase())
+                ).length;
+
+                return (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={[
+                      styles.classFilterModalItem,
+                      isSel && styles.classFilterModalItemSelected,
+                    ]}
+                    onPress={() => {
+                      setSelectedClassFilter(tag);
+                      setClassFilterModalVisible(false);
+                    }}
+                  >
+                    <Ionicons
+                      name={isSel ? 'radio-button-on' : 'radio-button-off'}
+                      size={18}
+                      color={isSel ? '#4F46E5' : '#94A3B8'}
+                    />
+                    <Text
+                      style={[
+                        styles.classFilterModalItemText,
+                        isSel && styles.classFilterModalItemTextSelected,
+                      ]}
+                    >
+                      📚 {tag} Şubesi ({count} Öğrenci)
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 💬 Okunmamış Mesajlar Yüzen Bildirim Baloncuğu */}
+      {activeTab !== 'messages' && (
+        <FloatingMessageBubble
+          onPress={() => {
+            setActiveTab('messages');
+            loadSchoolMessages();
+          }}
+          schoolId={selectedSchool?.id ? String(selectedSchool.id) : undefined}
+          bottomOffset={24}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
+  classSelectContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  classSelectHeaderTitle: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  clearFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  clearFilterChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  webSelectWrapper: {
+    position: 'relative',
+    width: '100%',
+    justifyContent: 'center',
+  },
+  webSelectIcon: {
+    position: 'absolute',
+    left: 12,
+    zIndex: 1,
+    pointerEvents: 'none',
+  },
+  webSelectBox: {
+    width: '100%',
+    height: 42,
+    paddingLeft: 38,
+    paddingRight: 16,
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#1E293B',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    outline: 'none',
+    cursor: 'pointer',
+  } as any,
+  mobileSelectPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 42,
+  },
+  mobileSelectPickerText: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#1E293B',
+  },
+  classFilterModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  classFilterModalItemSelected: {
+    backgroundColor: '#EEF2FF',
+  },
+  classFilterModalItemText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  classFilterModalItemTextSelected: {
+    fontWeight: '800',
+    color: '#4F46E5',
+  },
+  fixedTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    minHeight: 46,
+  },
+  fixedBrandDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10B981',
+    marginRight: 6,
+  },
+  fixedBrandText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  scrollableHeaderCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  teacherUsernameBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    alignSelf: 'flex-start',
+  },
+  teacherUsernameLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4338CA',
+    marginLeft: 3,
+  },
+  teacherUsernameValue: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#1E1B4B',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -15085,6 +21115,23 @@ const styles = StyleSheet.create({
   },
   headerTitleContainer: { flex: 1, marginLeft: 10 },
   headerTitle: { fontSize: 15, fontWeight: '800', color: Colors.text },
+  headerAdminPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  headerAdminPillText: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    color: '#4338CA',
+    maxWidth: 180,
+  },
   headerSubtitle: { fontSize: 11, color: Colors.textMuted },
   headerSchoolDropdownBtn: {
     flexDirection: 'row',
@@ -19568,6 +25615,488 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#475569',
     fontWeight: '600',
+  },
+  // --- CANLI RADAR & NÖBET MODÜLÜ STİLLERİ ---
+  radarContainer: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  radarHeaderCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  radarSubTabsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 16,
+  },
+  radarSubTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  radarSubTabBtnActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4338CA',
+  },
+  radarSubTabText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  radarSubTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  radarGridCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 16,
+  },
+  radarDropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginTop: 4,
+  },
+  radarDropdownIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EEF2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radarDropdownActionTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  radarDropdownActionText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  radarTable: {
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginTop: 10,
+  },
+  radarTableHeaderRow: {
+    flexDirection: 'row',
+    backgroundColor: '#F8FAFC',
+    borderBottomWidth: 1,
+    borderBottomColor: '#CBD5E1',
+  },
+  radarTableHeadCell: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#E2E8F0',
+  },
+  radarTableRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  radarTableCell: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#F1F5F9',
+  },
+  radarCellOccupied: {
+    backgroundColor: '#EEF2FF',
+    borderRadius: 6,
+    padding: 4,
+    width: '100%',
+    alignItems: 'center',
+  },
+  radarCellOccupiedText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4338CA',
+  },
+  radarCellSubText: {
+    fontSize: 9,
+    color: '#6366F1',
+    marginTop: 1,
+  },
+  radarCellEmpty: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  radarCellEmptyText: {
+    fontSize: 10,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  radarDutyBadgeRed: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#EF4444',
+    borderWidth: 1.5,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  radarDutyBadgeRedText: {
+    color: '#DC2626',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  radarFreeCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    padding: 12,
+    marginBottom: 10,
+  },
+  radarFreeCardDuty: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#EF4444',
+  },
+  // Admin Öğrenci Detay Modalı Stilleri
+  adminDetailProfileCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 14,
+  },
+  adminDetailPhotoWrap: {
+    position: 'relative',
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 3,
+    borderColor: '#4F46E5',
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  adminDetailBigPhoto: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+  },
+  adminDetailBigPhotoPlaceholder: {
+    width: 104,
+    height: 104,
+    borderRadius: 52,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adminDetailBigPhotoInitial: {
+    fontSize: 34,
+    fontWeight: '900',
+    color: '#4F46E5',
+  },
+  adminDetailCameraBadge: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    backgroundColor: '#4F46E5',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    elevation: 3,
+  },
+  adminDetailNameText: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  adminDetailBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'center',
+    marginTop: 8,
+  },
+  adminDetailTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  adminDetailTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  adminDetailContactBox: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginTop: 12,
+  },
+  adminDetailContactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  adminDetailContactLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  adminDetailContactValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  adminDetailContactDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginVertical: 8,
+  },
+  adminDetailMessagingRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+  },
+  adminDetailMsgBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 46,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  adminDetailMsgBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  adminSectionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 14,
+  },
+  adminSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  adminSectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  adminSectionCountBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  adminSectionCountText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  adminDetailEmptyBox: {
+    alignItems: 'center',
+    paddingVertical: 18,
+    gap: 6,
+  },
+  adminDetailEmptyText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  adminObservationItem: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 10,
+    borderLeftWidth: 3.5,
+    borderLeftColor: '#4F46E5',
+    marginBottom: 8,
+  },
+  adminObservationTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
+    marginBottom: 2,
+  },
+  adminObservationContent: {
+    fontSize: 13,
+    color: '#1E293B',
+    lineHeight: 18,
+  },
+  adminObservationMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#EEF2F6',
+  },
+  adminObservationAuthor: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  adminObservationDate: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  adminGradeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  adminGradeCell: {
+    flex: 1,
+    minWidth: 80,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  adminGradeCellLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    marginBottom: 2,
+  },
+  adminGradeCellValue: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  adminGradeSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    padding: 8,
+  },
+  adminGradeSummaryItem: {
+    alignItems: 'center',
+  },
+  adminGradeSummaryLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  adminGradeSummaryVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    marginTop: 1,
+  },
+  adminGradeSummaryDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#CBD5E1',
+  },
+  adminQuizItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    gap: 8,
+  },
+  adminQuizTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  adminQuizSub: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  adminQuizScoreBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  adminQuizScoreText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
 });
 

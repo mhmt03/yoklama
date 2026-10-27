@@ -1319,6 +1319,10 @@ export async function saveMasterScheduleToServer(
 
   if (res.success) {
     console.log('[Çarşaf Kayıt BAŞARILI 🎉]:', res.data?.message);
+    try {
+      const { fetchAndCacheSchoolSnapshot } = await import('./schoolSnapshotService');
+      await fetchAndCacheSchoolSnapshot(schoolId);
+    } catch {}
     return {
       success: true,
       message: res.data?.message || (opts.overwriteAll

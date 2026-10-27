@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -18,6 +18,7 @@ import { Colors } from '../theme/colors';
 import { School } from '../types';
 import { UserRole, setActiveUserRole, logoutUserRole } from '../utils/roleService';
 import { TeacherSchoolModal } from './TeacherSchoolModal';
+import { subscribeUnreadCount } from '../services/messageNotificationService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.82, 320);
@@ -43,6 +44,11 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   const [teacherModalVisible, setTeacherModalVisible] = useState(false);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  useEffect(() => {
+    return subscribeUnreadCount(setUnreadCount);
+  }, []);
 
   const handleCopyCode = async () => {
     if (activeSchool?.code) {
@@ -80,6 +86,47 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
         },
       ]);
     }
+  };
+
+  const handleClearDatabase = () => {
+    const doClear = async () => {
+      try {
+        const { clearLocalDatabase } = await import('../database/operations/cleanupOperations');
+        const res = await clearLocalDatabase();
+        if (res.success) {
+          Alert.alert(
+            'Temizlik Tamamlandı',
+            'Telefonunuzdaki yerel veritabanı tamamen temizlendi. Kurumunuza ait güncel şube ve ders programınız sistemden yeniden yüklenecektir.',
+            [
+              {
+                text: 'Tamam',
+                onPress: () => {
+                  onClose();
+                  onSchoolUpdated();
+                },
+              },
+            ]
+          );
+        } else {
+          Alert.alert('Hata', res.message || 'Veri temizleme sırasında bir hata oluştu.');
+        }
+      } catch (err: any) {
+        Alert.alert('Hata', err?.message || 'Temizleme başarısız oldu.');
+      }
+    };
+
+    Alert.alert(
+      'Yerel Verileri Temizle',
+      'Telefonunuzda kayıtlı tüm yerel sınıflar, öğrenciler, ders programı ve önbellek tamamen silinecektir.\n\nSistemde (sunucuda) olan kurumsal kayıtlarınız bundan etkilenmez.\n\nEski/artık verilerden arınmak için devam etmek istiyor musunuz?',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Evet, Verileri Temizle',
+          style: 'destructive',
+          onPress: doClear,
+        },
+      ]
+    );
   };
 
   const navigateToScreen = (screenName: string) => {
@@ -204,7 +251,14 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                     <Ionicons name="chatbubbles" size={18} color="#DC2626" />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.menuItemTitle}>Kurum İçi Mesajlar</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.menuItemTitle}>Kurum İçi Mesajlar</Text>
+                      {unreadCount > 0 && (
+                        <View style={styles.unreadDrawerBadge}>
+                          <Text style={styles.unreadDrawerBadgeText}>{unreadCount}</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={styles.menuItemSub}>Öğretmenler & İdare duyuru panosu</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
@@ -259,6 +313,24 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                     <Text style={styles.menuItemSub}>Nöbet ve görev takvimi</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                </TouchableOpacity>
+
+                {/* VERİ TEMİZLE (YEREL DB SIFIRLAMA) */}
+                <TouchableOpacity
+                  style={[styles.menuItem, { backgroundColor: '#FEF2F2', borderRadius: 10, marginTop: 4 }]}
+                  onPress={handleClearDatabase}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.menuIconWrap, { backgroundColor: '#FEE2E2' }]}>
+                    <Ionicons name="trash-bin-outline" size={18} color="#DC2626" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.menuItemTitle, { color: '#DC2626' }]}>Veri Temizle</Text>
+                    <Text style={[styles.menuItemSub, { color: '#B91C1C' }]}>
+                      Yerel şube, öğrenci ve program önbelleğini sıfırla
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#DC2626" />
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -499,5 +571,19 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     textAlign: 'center',
     marginTop: 8,
+  },
+  unreadDrawerBadge: {
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  unreadDrawerBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
   },
 });

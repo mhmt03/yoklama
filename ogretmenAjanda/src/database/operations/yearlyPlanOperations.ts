@@ -274,27 +274,50 @@ export const bulkCreateYearlyPlanItems = async (
  * dersin haftalık kaçıncı saat olduğuna bakarak o saate denk gelen konuyu gösterir.
  */
 export const getCurrentTopicForClass = async (
-  classId: number,
-  courseId?: number,
+  classId?: number | null,
+  courseId?: number | null,
   dayOfWeek?: number,
-  slotId?: number
+  slotId?: number,
+  fallbackClassName?: string | null,
+  fallbackCourseName?: string | null
 ): Promise<YearlyPlanItem | null> => {
   const db = await getDB();
   const today = getTodayDateString();
 
-  // Şube adını alıp sınıf düzeyini çıkar (Örn: "11-A" -> 11)
-  const classRow = await db.getFirstAsync<{ id: number; name: string }>(
-    'SELECT id, name FROM classes WHERE id = ?',
-    classId
-  );
   let gradeLevel: number | null = null;
-  if (classRow) {
-    const m = classRow.name.match(/\d+/);
+  let targetClassName = fallbackClassName || '';
+
+  if (classId && classId > 0) {
+    const classRow = await db.getFirstAsync<{ id: number; name: string }>(
+      'SELECT id, name FROM classes WHERE id = ?',
+      classId
+    );
+    if (classRow?.name) {
+      targetClassName = classRow.name;
+    }
+  }
+
+  if (targetClassName) {
+    const m = targetClassName.match(/\d+/);
     if (m) gradeLevel = parseInt(m[0], 10);
   }
 
-  // O haftaya denk gelen tüm plan satırlarını çek (aynı haftada birden fazla alt konu olabilir: Kuvvet 2 saat, Hareket 2 saat)
-  let query = `
+  // Course ID veya İsim Çözümleme
+  let effectiveCourseId = courseId && courseId > 0 ? courseId : undefined;
+  if (!effectiveCourseId && fallbackCourseName) {
+    const cleanCourse = fallbackCourseName.trim().toLowerCase();
+    const courseRow = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM courses WHERE LOWER(TRIM(name)) = ? OR LOWER(TRIM(code)) = ?',
+      cleanCourse,
+      cleanCourse
+    );
+    if (courseRow?.id) {
+      effectiveCourseId = courseRow.id;
+    }
+  }
+
+  // 1. ADIM: Tam Tarih Aralığı Eşleşmesi (substr ile saat/dakika temizliği)
+  let baseQuery = `
     SELECT 
       yp.id,
       yp.course_id,
@@ -313,57 +336,91 @@ export const getCurrentTopicForClass = async (
     LEFT JOIN courses cr ON cr.id = yp.course_id
     LEFT JOIN classes c ON c.id = yp.class_id
     WHERE (
-      yp.class_id = ? 
-      OR (yp.class_id IS NULL AND (yp.grade_level = ? OR (yp.grade_level IS NULL AND ? IS NULL)))
+      (yp.class_id IS NOT NULL AND yp.class_id = ?)
+      OR (yp.class_id IS NULL AND (? IS NOT NULL AND yp.grade_level = ?))
+      OR (yp.class_id IS NULL AND yp.grade_level IS NULL)
     )
-    ${courseId ? 'AND yp.course_id = ?' : ''}
-    AND yp.date_start <= ? AND yp.date_end >= ?
+    ${effectiveCourseId ? 'AND yp.course_id = ?' : ''}
+  `;
+
+  const dateMatchQuery = `${baseQuery}
+    AND (
+      (substr(yp.date_start, 1, 10) <= ? AND substr(yp.date_end, 1, 10) >= ?)
+      OR (? BETWEEN substr(yp.date_start, 1, 10) AND substr(yp.date_end, 1, 10))
+    )
     ORDER BY yp.class_id DESC, yp.grade_level DESC, yp.id ASC;
   `;
 
-  const params: any[] = [classId, gradeLevel, gradeLevel];
-  if (courseId) params.push(courseId);
-  params.push(today, today);
+  const params: any[] = [classId || 0, gradeLevel, gradeLevel];
+  if (effectiveCourseId) params.push(effectiveCourseId);
+  const dateParams = [...params, today, today, today];
 
-  const items = await db.getAllAsync<YearlyPlanItem>(query, ...params);
+  let items = await db.getAllAsync<YearlyPlanItem>(dateMatchQuery, ...dateParams);
+
+  // 2. ADIM: Eğer günün tarihine denk gelen kayıt bulunamadıysa:
+  // Bu derse ve sınıfa ait tüm planı çekip bugüne en yakın haftayı bul:
+  if (!items || items.length === 0) {
+    const allPlansQuery = `${baseQuery} ORDER BY yp.week_number ASC, yp.id ASC;`;
+    const allItems = await db.getAllAsync<YearlyPlanItem>(allPlansQuery, ...params);
+
+    if (allItems && allItems.length > 0) {
+      const todayTime = new Date(today).getTime();
+      let closestWeekNumber = 1;
+      let minDiff = Infinity;
+
+      for (const p of allItems) {
+        if (p.date_start) {
+          const startTime = new Date(p.date_start.substring(0, 10)).getTime();
+          const diff = Math.abs(todayTime - startTime);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestWeekNumber = p.week_number;
+          }
+        }
+      }
+
+      items = allItems.filter((p) => p.week_number === closestWeekNumber);
+      if (items.length === 0) {
+        items = [allItems[0]];
+      }
+    }
+  }
+
   if (!items || items.length === 0) {
     return null;
   }
 
-  // Eğer bu haftada sadece 1 konu varsa doğrudan o konuyu döndür
   if (items.length === 1) {
     return items[0];
   }
 
-  // Eğer bu haftada birden fazla konu varsa (örneğin Kuvvet 2 saat, Hareket 2 saat):
-  // Bu ders saatinin haftalık kaçıncı ders saati olduğunu haftalık programdan tespit et
-  if (dayOfWeek && slotId && courseId) {
-    const scheduleSlots = await db.getAllAsync<{ day_of_week: number; slot_id: number }>(`
-      SELECT s.day_of_week, s.slot_id
-      FROM schedules s
-      JOIN lesson_slots ls ON ls.id = s.slot_id
-      WHERE s.class_id = ? AND s.course_id = ?
-      ORDER BY s.day_of_week ASC, ls.slot_number ASC
-    `, classId, courseId);
+  // Birden fazla konu varsa ders saatine göre seç
+  if (dayOfWeek && slotId && effectiveCourseId && classId) {
+    try {
+      const scheduleSlots = await db.getAllAsync<{ day_of_week: number; slot_id: number }>(`
+        SELECT s.day_of_week, s.slot_id
+        FROM schedules s
+        JOIN lesson_slots ls ON ls.id = s.slot_id
+        WHERE s.class_id = ? AND s.course_id = ?
+        ORDER BY s.day_of_week ASC, ls.slot_number ASC
+      `, classId, effectiveCourseId);
 
-    const matchIndex = scheduleSlots.findIndex(
-      (s) => s.day_of_week === dayOfWeek && s.slot_id === slotId
-    );
+      const matchIndex = scheduleSlots.findIndex(
+        (s) => s.day_of_week === dayOfWeek && s.slot_id === slotId
+      );
 
-    if (matchIndex >= 0) {
-      const currentLessonHourInWeek = matchIndex + 1; // 1, 2, 3, 4...
-
-      // Konuların ders saati sınırlarına göre kümülatif olarak hangi konuya denk geldiğini bul:
-      let accumulatedHours = 0;
-      for (const item of items) {
-        const hours = item.lesson_hours && item.lesson_hours > 0 ? item.lesson_hours : 2;
-        accumulatedHours += hours;
-        if (currentLessonHourInWeek <= accumulatedHours) {
-          return item;
+      if (matchIndex >= 0) {
+        const currentLessonHourInWeek = matchIndex + 1;
+        let accumulatedHours = 0;
+        for (const item of items) {
+          const hours = item.lesson_hours && item.lesson_hours > 0 ? item.lesson_hours : 2;
+          accumulatedHours += hours;
+          if (currentLessonHourInWeek <= accumulatedHours) {
+            return item;
+          }
         }
       }
-      return items[items.length - 1];
-    }
+    } catch { }
   }
 
   return items[0];

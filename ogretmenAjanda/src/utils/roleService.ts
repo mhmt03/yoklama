@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDB } from '../database/db';
 import { clearAuthSession } from '../services/apiClient';
 
-export type UserRole = 'superadmin' | 'admin' | 'teacher' | 'student' | 'staff';
+export type UserRole = 'superadmin' | 'admin' | 'teacher' | 'student' | 'staff' | 'parent';
 
 export const ROLE_STORAGE_KEY = '@ogretmen_ajanda_active_role';
 
@@ -25,7 +25,7 @@ export const getActiveUserRole = async (): Promise<UserRole | null> => {
   // 1. AsyncStorage kontrolü (Web ve React Native genelinde anında ve kilitlenmesiz)
   try {
     const asyncRole = await AsyncStorage.getItem(ROLE_STORAGE_KEY);
-    if (asyncRole && ['superadmin', 'admin', 'teacher', 'student', 'staff'].includes(asyncRole)) {
+    if (asyncRole && ['superadmin', 'admin', 'teacher', 'student', 'staff', 'parent'].includes(asyncRole)) {
       return asyncRole as UserRole;
     }
   } catch {}
@@ -36,7 +36,7 @@ export const getActiveUserRole = async (): Promise<UserRole | null> => {
     const row = await db.getFirstAsync<{ value: string }>(
       "SELECT value FROM app_settings WHERE key = 'active_user_role'"
     );
-    if (row && ['superadmin', 'admin', 'teacher', 'student', 'staff'].includes(row.value)) {
+    if (row && ['superadmin', 'admin', 'teacher', 'student', 'staff', 'parent'].includes(row.value)) {
       try {
         await AsyncStorage.setItem(ROLE_STORAGE_KEY, row.value);
       } catch {}

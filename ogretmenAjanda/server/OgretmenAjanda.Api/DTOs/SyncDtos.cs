@@ -14,6 +14,9 @@ namespace OgretmenAjanda.Api.DTOs
         public string? ParentName { get; set; }
         public string? ParentPhone { get; set; }
         public string? StudentPhone { get; set; }
+        public string? ParentUsername { get; set; }
+        public string? ParentCustomPassword { get; set; }
+        public string? StudentCustomPassword { get; set; }
     }
 
     public class BatchStudentSyncRequest
@@ -129,6 +132,8 @@ namespace OgretmenAjanda.Api.DTOs
         public string? Title { get; set; }
         public string Content { get; set; } = string.Empty;
         public double? Score { get; set; }
-        public bool IsSharedWithParent { get; set; }
+        public bool IsSharedWithParent { get; set; } = true;
+        public bool IsSharedWithStudent { get; set; } = true;
+        public string? TargetAudience { get; set; } = "BOTH";
     }
 }

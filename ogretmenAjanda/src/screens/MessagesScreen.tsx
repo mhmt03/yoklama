@@ -19,7 +19,8 @@ import { Colors } from '../theme/colors';
 import { apiRequest, getActiveUserSession, saveAuthToken } from '../services/apiClient';
 import { getClasses } from '../database/operations/classOperations';
 import { getAllStudentsWithClass, StudentWithClass } from '../database/operations/studentOperations';
-import { getActiveSchool, School } from '../database/operations/schoolOperations';
+import { markAllMessagesAsRead, setCachedUnreadCount } from '../services/messageNotificationService';
+import { getActiveSchool } from '../database/operations/schoolOperations';
 
 export type MessageTargetType =
   | 'MY_STUDENTS'
@@ -32,15 +33,20 @@ export type MessageTargetType =
 
 interface MessageItem {
   id: string;
+  senderId?: string;
   senderName: string;
   senderRole: string;
   content: string;
   createdAt: string;
   targetRole?: string;
   targetDescription?: string;
+  receiverId?: string;
   receiverName?: string;
   targetGrade?: string;
   targetSection?: string;
+  replyToMessageId?: string;
+  replyToContent?: string;
+  subject?: string;
 }
 
 export function MessagesScreen({ navigation }: any) {
@@ -50,6 +56,9 @@ export function MessagesScreen({ navigation }: any) {
   const [newContent, setNewContent] = useState('');
   const [sending, setSending] = useState(false);
   const [schoolId, setSchoolId] = useState<string | null>(null);
+  const [activeScope, setActiveScope] = useState<'personal' | 'sent'>('personal');
+  const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
+  const [currentSession, setCurrentSession] = useState<any | null>(null);
 
   // --- KİME HEDEF SEÇİM STATE'LERİ ---
   const [targetType, setTargetType] = useState<MessageTargetType>('MY_STUDENTS');
@@ -77,9 +86,9 @@ export function MessagesScreen({ navigation }: any) {
 
   // Okula Bağlanma Modal State
   const [connectModalVisible, setConnectModalVisible] = useState(false);
-  const [connectSchoolCode, setConnectSchoolCode] = useState('OKL-10001');
-  const [connectUsername, setConnectUsername] = useState('mehmetogretmen');
-  const [connectPassword, setConnectPassword] = useState('1234');
+  const [connectSchoolCode, setConnectSchoolCode] = useState('');
+  const [connectUsername, setConnectUsername] = useState('');
+  const [connectPassword, setConnectPassword] = useState('');
   const [connectLoading, setConnectLoading] = useState(false);
 
   // Öğretmen, sınıf ve öğrenci verilerini yükle
@@ -118,10 +127,11 @@ export function MessagesScreen({ navigation }: any) {
     }
   };
 
-  const loadMessages = async () => {
+  const loadMessages = async (scopeOverride?: 'personal' | 'sent') => {
     try {
       const active = await getActiveSchool();
       const session = await getActiveUserSession();
+      setCurrentSession(session);
       let effectiveSchoolId = session?.schoolId;
 
       if (!effectiveSchoolId && session?.affiliatedSchools && session.affiliatedSchools.length > 0) {
@@ -146,11 +156,14 @@ export function MessagesScreen({ navigation }: any) {
 
       setSchoolId(effectiveSchoolId || null);
 
+      const targetScope = scopeOverride || activeScope;
       if (effectiveSchoolId) {
         await loadLocalAndSchoolData(effectiveSchoolId);
-        const res = await apiRequest<MessageItem[]>(`messages?schoolId=${effectiveSchoolId}`);
+        const res = await apiRequest<MessageItem[]>(`messages?schoolId=${effectiveSchoolId}&scope=${targetScope}`);
         if (res.success && res.data) {
           setMessages(res.data);
+          markAllMessagesAsRead(effectiveSchoolId);
+          setCachedUnreadCount(0);
         }
       } else {
         await loadLocalAndSchoolData();
@@ -160,6 +173,21 @@ export function MessagesScreen({ navigation }: any) {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      if (schoolId) {
+        await markAllMessagesAsRead(schoolId);
+      } else {
+        await markAllMessagesAsRead();
+      }
+      setCachedUnreadCount(0);
+      Alert.alert('Tamamlandı', 'Tüm mesajlar okundu olarak işaretlendi.');
+      loadMessages();
+    } catch (e: any) {
+      console.warn('Okundu işaretleme hatası:', e);
     }
   };
 
@@ -196,6 +224,26 @@ export function MessagesScreen({ navigation }: any) {
     }
   };
 
+  const handleStartReply = (msg: MessageItem) => {
+    setReplyingTo(msg);
+    if (msg.senderRole === 'ADMIN' || msg.senderRole === 'STAFF' || msg.senderRole === 'SCHOOL_ADMIN') {
+      setTargetType('STAFF');
+      setTargetDescription('Okul İdaresi (Yanıt)');
+      setSelectedTeacher(null);
+    } else {
+      setTargetType('SPECIFIC_TEACHER');
+      setTargetDescription(`${msg.senderName} (Yanıt)`);
+      setSelectedTeacher({
+        id: msg.senderId,
+        fullName: msg.senderName,
+      });
+    }
+  };
+
+  const handleCancelReply = () => {
+    setReplyingTo(null);
+  };
+
   const handleSendMessage = async () => {
     if (!newContent.trim()) return;
 
@@ -215,6 +263,8 @@ export function MessagesScreen({ navigation }: any) {
         targetGrade: selectedGrade ? String(selectedGrade) : selectedClass?.grade_level ? String(selectedClass.grade_level) : undefined,
         targetSection: selectedClass?.name,
         content: newContent.trim(),
+        replyToMessageId: replyingTo?.id,
+        replyToContent: replyingTo ? (replyingTo.content.length > 100 ? replyingTo.content.substring(0, 100) + '...' : replyingTo.content) : undefined,
       };
 
       const res = await apiRequest<MessageItem>('messages', 'POST', payload);
@@ -222,21 +272,25 @@ export function MessagesScreen({ navigation }: any) {
       if (res.success && res.data) {
         const newMsg = res.data;
         setNewContent('');
+        setReplyingTo(null);
         setMessages((prev) => [newMsg, ...prev]);
         Alert.alert('Mesaj Gönderildi 📨', `Mesajınız "${targetDescription}" alıcısına başarıyla iletildi.`);
       } else {
         // Çevrimdışı / yerel önizleme ekleme
         const offlineMsg: MessageItem = {
           id: `local-${Date.now()}`,
-          senderName: 'Mehmet Öğretmen',
-          senderRole: 'TEACHER',
+          senderName: currentSession?.fullName || currentSession?.username || 'Öğretmen',
+          senderRole: currentSession?.role || 'TEACHER',
           content: newContent.trim(),
           createdAt: new Date().toISOString(),
           targetRole: targetType,
           targetDescription,
+          replyToMessageId: replyingTo?.id,
+          replyToContent: replyingTo ? (replyingTo.content.length > 100 ? replyingTo.content.substring(0, 100) + '...' : replyingTo.content) : undefined,
         };
         setMessages((prev) => [offlineMsg, ...prev]);
         setNewContent('');
+        setReplyingTo(null);
         Alert.alert('Mesaj İletildi 📨', `Mesajınız "${targetDescription}" alıcısına kaydedildi.`);
       }
     } catch (e: any) {
@@ -271,9 +325,19 @@ export function MessagesScreen({ navigation }: any) {
           <Text style={styles.headerTitle}>💬 Kurum İçi İletişim</Text>
           <Text style={styles.headerSubtitle}>Öğretmen, İdare & Öğrenci Mesajlaşması</Text>
         </View>
-        <TouchableOpacity onPress={loadMessages} style={styles.refreshButton}>
-          <Ionicons name="refresh" size={20} color={Colors.primary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <TouchableOpacity
+            onPress={handleMarkAllAsRead}
+            style={styles.markAllReadHeaderBtn}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="checkmark-done" size={16} color="#16A34A" />
+            <Text style={styles.markAllReadHeaderBtnText}>Okundu Yap</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={loadMessages} style={styles.refreshButton}>
+            <Ionicons name="refresh" size={20} color={Colors.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {!schoolId ? (
@@ -308,6 +372,53 @@ export function MessagesScreen({ navigation }: any) {
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
+          {/* Kapsam Seçici: Bana Gelenler vs Gönderdiklerim */}
+          <View style={styles.scopeTabsContainer}>
+            <TouchableOpacity
+              style={[styles.scopeTab, activeScope === 'personal' && styles.scopeTabActive]}
+              onPress={() => {
+                setActiveScope('personal');
+                loadMessages('personal');
+              }}
+            >
+              <Ionicons
+                name="mail"
+                size={14}
+                color={activeScope === 'personal' ? '#fff' : '#4F46E5'}
+              />
+              <Text
+                style={[
+                  styles.scopeTabText,
+                  activeScope === 'personal' && styles.scopeTabTextActive,
+                ]}
+              >
+                📥 Bana Gelenler
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.scopeTab, activeScope === 'sent' && styles.scopeTabActive]}
+              onPress={() => {
+                setActiveScope('sent');
+                loadMessages('sent');
+              }}
+            >
+              <Ionicons
+                name="paper-plane"
+                size={14}
+                color={activeScope === 'sent' ? '#fff' : '#64748B'}
+              />
+              <Text
+                style={[
+                  styles.scopeTabText,
+                  activeScope === 'sent' && styles.scopeTabTextActive,
+                ]}
+              >
+                📤 Gönderdiklerim
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Mesaj Akışı Listesi */}
           <ScrollView
             contentContainerStyle={styles.scrollContent}
@@ -359,7 +470,31 @@ export function MessagesScreen({ navigation }: any) {
                     </View>
                   </View>
 
+                  {item.replyToContent ? (
+                    <View style={styles.quoteCard}>
+                      <View style={styles.quoteHeader}>
+                        <Ionicons name="return-down-forward" size={12} color="#6366F1" />
+                        <Text style={styles.quoteLabel}>Yanıtlanan Mesaj:</Text>
+                      </View>
+                      <Text style={styles.quoteText} numberOfLines={2}>
+                        "{item.replyToContent}"
+                      </Text>
+                    </View>
+                  ) : null}
+
                   <Text style={styles.messageContent}>{item.content}</Text>
+
+                  {/* Yanıtla Butonu */}
+                  <View style={styles.cardActionsRow}>
+                    <TouchableOpacity
+                      style={styles.replyButton}
+                      onPress={() => handleStartReply(item)}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="arrow-undo" size={13} color="#4F46E5" />
+                      <Text style={styles.replyButtonText}>Yanıtla</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))
             )}
@@ -367,6 +502,26 @@ export function MessagesScreen({ navigation }: any) {
 
           {/* Mesaj Gönderme Paneli */}
           <View style={styles.inputContainer}>
+            {/* Yanıt Banner'ı */}
+            {replyingTo && (
+              <View style={styles.replyBanner}>
+                <View style={styles.replyBannerLeft}>
+                  <Ionicons name="arrow-undo" size={15} color="#4F46E5" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.replyBannerTitle}>
+                      {replyingTo.senderName} adlı kullanıcıya yanıt veriyorsunuz
+                    </Text>
+                    <Text style={styles.replyBannerSnippet} numberOfLines={1}>
+                      "{replyingTo.content}"
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity onPress={handleCancelReply} style={styles.replyCancelBtn}>
+                  <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+              </View>
+            )}
+
             {/* Kime Hedef Başlığı ve Aktif Seçim Rozeti */}
             <View style={styles.targetHeaderRow}>
               <Text style={styles.targetLabel}>🎯 Kime Gönderilecek:</Text>
@@ -821,7 +976,7 @@ export function MessagesScreen({ navigation }: any) {
             <Text style={styles.inputLabel}>Okul Kodu</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Örn: OKL-10001"
+              placeholder="Okul Kodu"
               placeholderTextColor={Colors.textMuted}
               value={connectSchoolCode}
               onChangeText={setConnectSchoolCode}
@@ -831,7 +986,7 @@ export function MessagesScreen({ navigation }: any) {
             <Text style={styles.inputLabel}>Kullanıcı Adı</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="Örn: mehmetogretmen"
+              placeholder="Kullanıcı Adı"
               placeholderTextColor={Colors.textMuted}
               value={connectUsername}
               onChangeText={setConnectUsername}
@@ -882,6 +1037,55 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 17, fontWeight: '800', color: Colors.text },
   headerSubtitle: { fontSize: 12, color: Colors.textMuted },
   refreshButton: { padding: 8 },
+  markAllReadHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  markAllReadHeaderBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#059669',
+  },
+  scopeTabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    gap: 8,
+  },
+  scopeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
+  },
+  scopeTabActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4338CA',
+  },
+  scopeTabText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  scopeTabTextActive: {
+    color: '#fff',
+  },
   scrollContent: { padding: 16, paddingBottom: 20 },
   emptyContainer: { alignItems: 'center', paddingVertical: 40 },
   emptyText: { fontSize: 13, color: Colors.textMuted, marginTop: 8 },
@@ -926,7 +1130,53 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   targetBadgeText: { fontSize: 11, fontWeight: '700', color: '#4F46E5' },
+  quoteCard: {
+    backgroundColor: '#F8FAFC',
+    borderLeftWidth: 3,
+    borderLeftColor: '#6366F1',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+  },
+  quoteHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 2,
+  },
+  quoteLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#6366F1',
+  },
+  quoteText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontStyle: 'italic',
+  },
   messageContent: { fontSize: 14, color: Colors.textSecondary, lineHeight: 21 },
+  cardActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  replyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    gap: 4,
+  },
+  replyButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
 
   // Giriş Paneli
   inputContainer: {
@@ -935,6 +1185,36 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: '#E2E8F0',
+  },
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#4F46E5',
+  },
+  replyBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 8,
+  },
+  replyBannerTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  replyBannerSnippet: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  replyCancelBtn: {
+    padding: 4,
   },
   targetHeaderRow: {
     flexDirection: 'row',

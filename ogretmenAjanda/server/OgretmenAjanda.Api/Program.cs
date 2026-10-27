@@ -34,6 +34,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // 2. Bağımlılıklar (Services)
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddSingleton<IAuditLogService, AuditLogService>();
+builder.Services.AddScoped<ISchoolPurgeService, SchoolPurgeService>();
 
 // 3. JWT Kimlik Doğrulama
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "OgretmenAjandaUltraSecureJWTSecretKey2026!MehmetG!XYZ987";

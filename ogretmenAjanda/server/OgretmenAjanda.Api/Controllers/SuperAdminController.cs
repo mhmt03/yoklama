@@ -17,21 +17,49 @@ namespace OgretmenAjanda.Api.Controllers
     public class SuperAdminController : ControllerBase
     {
         private readonly AppDbContext _context;
+        private readonly Services.ISchoolPurgeService _purgeService;
 
-        public SuperAdminController(AppDbContext context)
+        public SuperAdminController(AppDbContext context, Services.ISchoolPurgeService purgeService)
         {
             _context = context;
+            _purgeService = purgeService;
         }
 
         [HttpGet("stats")]
         public async Task<IActionResult> GetSystemStats()
         {
-            var totalSchools = await _context.Schools.CountAsync();
-            var totalCustomers = await _context.Users.CountAsync(u => u.Role == UserRoles.SchoolAdmin);
-            var totalUsers = await _context.Users.CountAsync();
-            var totalTeachers = await _context.Users.CountAsync(u => u.Role == UserRoles.Teacher);
-            var totalStudents = await _context.Students.CountAsync();
-            var totalAssignments = await _context.Assignments.CountAsync();
+            // Eğer sistemde silinmiş/pasif okullar veya yetim öğretmenler varsa arka planda temizle
+            var hasInactiveSchools = await _context.Schools.AnyAsync(s => !s.IsActive);
+            if (hasInactiveSchools)
+            {
+                try
+                {
+                    await _purgeService.CleanupOrphanDataAsync(_context);
+                }
+                catch { }
+            }
+
+            var activeSchoolIds = await _context.Schools.Where(s => s.IsActive).Select(s => s.Id).ToListAsync();
+            var activeSchoolIdStrings = activeSchoolIds.Select(id => id.ToString()).ToList();
+
+            var totalSchools = activeSchoolIds.Count;
+            var totalCustomers = await _context.Users.CountAsync(u => u.Role == UserRoles.SchoolAdmin && u.IsActive);
+            var totalUsers = await _context.Users.CountAsync(u => u.IsActive);
+
+            // Öğretmenler: Sadece aktif bir okula bağlı olan ve kendisi de aktif olan öğretmenler
+            var totalTeachers = await _context.Users
+                .Where(u => u.Role == UserRoles.Teacher && u.IsActive &&
+                            ((u.SchoolId.HasValue && activeSchoolIds.Contains(u.SchoolId.Value)) ||
+                             (!string.IsNullOrEmpty(u.AssignedSchoolIdsJson) && activeSchoolIdStrings.Any(asId => u.AssignedSchoolIdsJson.Contains(asId)))))
+                .CountAsync();
+
+            var totalStudents = await _context.Students
+                .Where(st => activeSchoolIds.Contains(st.SchoolId))
+                .CountAsync();
+
+            var totalAssignments = await _context.Assignments
+                .Where(a => activeSchoolIds.Contains(a.SchoolId))
+                .CountAsync();
 
             return Ok(new
             {
@@ -42,6 +70,13 @@ namespace OgretmenAjanda.Api.Controllers
                 totalStudents,
                 totalAssignments
             });
+        }
+
+        [HttpPost("cleanup-orphans")]
+        public async Task<IActionResult> CleanupOrphanData()
+        {
+            var result = await _purgeService.CleanupOrphanDataAsync(_context);
+            return Ok(result);
         }
 
         // Tüm Müşterileri (Okul Adminleri) Listele - Çoklu Okul & İlişki ID Bağlantısı
@@ -98,6 +133,7 @@ namespace OgretmenAjanda.Api.Controllers
         public async Task<IActionResult> GetAllSchools()
         {
             var schools = await _context.Schools
+                .Where(s => s.IsActive)
                 .Select(s => new
                 {
                     s.Id,
@@ -109,7 +145,7 @@ namespace OgretmenAjanda.Api.Controllers
                     s.CreatedAt,
                     s.LicenseExpiresAt,
                     s.IsActive,
-                    TeacherCount = _context.Users.Count(u => u.SchoolId == s.Id && u.Role == UserRoles.Teacher),
+                    TeacherCount = _context.Users.Count(u => u.IsActive && u.Role == UserRoles.Teacher && (u.SchoolId == s.Id || (u.AssignedSchoolIdsJson != null && u.AssignedSchoolIdsJson.Contains(s.Id.ToString())))),
                     StudentCount = _context.Students.Count(st => st.SchoolId == s.Id)
                 })
                 .OrderByDescending(s => s.CreatedAt)
@@ -637,9 +673,13 @@ namespace OgretmenAjanda.Api.Controllers
                 return NotFound(new { message = "Okul bulunamadı." });
             }
 
-            _context.Schools.Remove(school);
-            await _context.SaveChangesAsync();
-            return Ok(new { message = $"Okul ({school.Name}) sistemden silindi." });
+            var schoolName = school.Name;
+            var purgeResult = await _purgeService.PurgeSchoolAsync(_context, id);
+
+            return Ok(new { 
+                message = $"Okul ({schoolName}) ve bağlı tüm verileri sistemden tamamen silindi.",
+                details = purgeResult
+            });
         }
     }
 }

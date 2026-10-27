@@ -887,24 +887,69 @@ export const pickAndParseAllSchoolStudentsWithAi = async (
 };
 
 // 3. TEMPLATE: Generate multi-sheet sample Excel template with registered classes
-export const generateStudentTemplateExcel = async (): Promise<boolean> => {
+export const generateStudentTemplateExcel = async (existingStudents?: any[]): Promise<boolean> => {
   const existingClasses = await getClasses();
 
   const workbook = XLSX.utils.book_new();
 
   // SHEET 1: Öğrenci Listesi
-  const sampleClass1 = existingClasses.length > 0 ? existingClasses[0].name : '9-A';
-  const sampleClass2 = existingClasses.length > 1 ? existingClasses[1].name : (existingClasses.length > 0 ? existingClasses[0].name : '10-B');
-  const sampleGrade1 = existingClasses.length > 0 && existingClasses[0].grade_level ? existingClasses[0].grade_level : (sampleClass1.match(/^(\d{1,2})/)?.[1] ? parseInt(sampleClass1.match(/^(\d{1,2})/)![1], 10) : 9);
-  const sampleGrade2 = existingClasses.length > 1 && existingClasses[1].grade_level ? existingClasses[1].grade_level : (sampleClass2.match(/^(\d{1,2})/)?.[1] ? parseInt(sampleClass2.match(/^(\d{1,2})/)![1], 10) : 10);
+  const header = ['Sınıf Düzeyi', 'Şube', 'Okul No', 'Ad', 'Soyad', 'Notlar'];
+  const templateData: (string | number)[][] = [header];
 
-  const templateData = [
-    ['Sınıf Düzeyi', 'Şube', 'Okul No', 'Ad', 'Soyad', 'Notlar'],
-    [sampleGrade1, sampleClass1, '101', 'Ahmet', 'Yılmaz', ''],
-    [sampleGrade1, sampleClass1, '102', 'Ayşe', 'Kaya', ''],
-    [sampleGrade2, sampleClass2, '201', 'Mehmet', 'Demir', ''],
-    [sampleGrade2, sampleClass2, '202', 'Zeynep', 'Çelik', ''],
-  ];
+  if (existingStudents && existingStudents.length > 0) {
+    const sorted = [...existingStudents].sort((a, b) => {
+      const gA = parseInt(String(a.grade || a.grade_level || 0), 10) || 0;
+      const gB = parseInt(String(b.grade || b.grade_level || 0), 10) || 0;
+      if (gA !== gB) return gA - gB;
+      const secA = String(a.section || a.class_name || '').localeCompare(String(b.section || b.class_name || ''), 'tr');
+      if (secA !== 0) return secA;
+      const noA = parseInt(String(a.studentNumber || a.student_number || 0), 10) || 0;
+      const noB = parseInt(String(b.studentNumber || b.student_number || 0), 10) || 0;
+      return noA - noB;
+    });
+
+    for (const s of sorted) {
+      const studentNo = String(s.studentNumber || s.student_number || s.number || '').trim();
+      let firstName = String(s.first_name || '').trim();
+      let lastName = String(s.last_name || '').trim();
+
+      if (!firstName && !lastName && s.fullName) {
+        const parts = String(s.fullName).trim().split(/\s+/);
+        if (parts.length > 1) {
+          lastName = parts.pop() || '';
+          firstName = parts.join(' ');
+        } else {
+          firstName = parts[0] || '';
+          lastName = '';
+        }
+      }
+
+      let grade = String(s.grade !== undefined && s.grade !== null ? s.grade : (s.grade_level !== undefined && s.grade_level !== null ? s.grade_level : '')).trim();
+      let section = String(s.section || s.class_name || '').trim();
+
+      if ((!grade || !section) && s.class_name) {
+        const m = String(s.class_name).match(/^(\d{1,2})[-/]?([a-zA-ZçğıöşüÇĞİÖŞÜ]+)/i);
+        if (m) {
+          if (!grade) grade = m[1];
+          if (!section) section = m[2].toUpperCase();
+        }
+      }
+
+      templateData.push([grade, section, studentNo, firstName, lastName, s.notes || '']);
+    }
+  } else {
+    const sampleClass1 = existingClasses.length > 0 ? existingClasses[0].name : '9-A';
+    const sampleClass2 = existingClasses.length > 1 ? existingClasses[1].name : (existingClasses.length > 0 ? existingClasses[0].name : '10-B');
+    const sampleGrade1 = existingClasses.length > 0 && existingClasses[0].grade_level ? existingClasses[0].grade_level : (sampleClass1.match(/^(\d{1,2})/)?.[1] ? parseInt(sampleClass1.match(/^(\d{1,2})/)![1], 10) : 9);
+    const sampleGrade2 = existingClasses.length > 1 && existingClasses[1].grade_level ? existingClasses[1].grade_level : (sampleClass2.match(/^(\d{1,2})/)?.[1] ? parseInt(sampleClass2.match(/^(\d{1,2})/)![1], 10) : 10);
+
+    templateData.push(
+      [sampleGrade1, sampleClass1, '101', 'Ahmet', 'Yılmaz', ''],
+      [sampleGrade1, sampleClass1, '102', 'Ayşe', 'Kaya', ''],
+      [sampleGrade2, sampleClass2, '201', 'Mehmet', 'Demir', ''],
+      [sampleGrade2, sampleClass2, '202', 'Zeynep', 'Çelik', '']
+    );
+  }
 
   const worksheet = XLSX.utils.aoa_to_sheet(templateData);
   worksheet['!cols'] = [
@@ -2251,4 +2296,161 @@ export const exportYearlyPlanToExcel = async (
   const fileName = `Yillik_Plan_${gradeLevel}_Sinif_${safeCourse}.xlsx`;
   return await saveAndShareWorkbook(workbook, fileName);
 };
+
+/**
+ * Okul Haftalık Nöbet Çizelgesi için Excel Şablonu Üretir
+ * Hem MEB standart Matris formatını (Nöbet Yeri / Günler) hem de Liste formatını destekler.
+ * Okuldaki kayıtlı öğretmenlerin isim listesini 3. sayfaya rehber olarak ekler.
+ */
+export const generateDutyTemplateExcel = async (
+  existingTeachers?: any[],
+  existingDuties?: any[],
+  schoolName?: string
+): Promise<boolean> => {
+  const workbook = XLSX.utils.book_new();
+
+  // 1. SAYFA: Matris Formatı (En çok kullanılan haftalık nöbet tablosu)
+  const matrixHeader = ['Nöbet Yeri / Görev Alanı', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'];
+  const matrixRows: (string | number)[][] = [
+    matrixHeader,
+  ];
+
+  // Standart nöbet yerleri
+  const defaultPlaces = [
+    'Bahçe ve Giriş Kapısı',
+    'Zemin Kat ve Kantin',
+    '1. Kat (İdari Kat)',
+    '2. Kat (Derslikler)',
+    '3. Kat (Derslikler)',
+    'Spor Salonu / Yemekhane',
+  ];
+
+  // Eğer okulda tanımlı nöbetler varsa onların yerlerini topla, yoksa varsayılanları kullan
+  const dutyPlacesSet = new Set<string>();
+  if (existingDuties && existingDuties.length > 0) {
+    existingDuties.forEach(d => {
+      const p = String(d.dutyPlace || d.duty_place || '').trim();
+      if (p) dutyPlacesSet.add(p);
+    });
+  }
+  defaultPlaces.forEach(p => dutyPlacesSet.add(p));
+
+  const dutyPlaces = Array.from(dutyPlacesSet);
+
+  // Matris satırlarını oluştur
+  dutyPlaces.forEach(place => {
+    const row: string[] = [place, '', '', '', '', ''];
+    if (existingDuties && existingDuties.length > 0) {
+      for (let day = 1; day <= 5; day++) {
+        const matches = existingDuties.filter(d => {
+          const dPlace = String(d.dutyPlace || d.duty_place || '').trim();
+          const dDay = Number(d.dayOfWeek || d.day_of_week || 0);
+          return dPlace.toLowerCase() === place.toLowerCase() && dDay === day;
+        });
+        if (matches.length > 0) {
+          row[day] = matches.map(m => String(m.teacherName || m.teacher_name || '').trim()).filter(Boolean).join('\n');
+        }
+      }
+    }
+    matrixRows.push(row);
+  });
+
+  // Eğer okulda henüz hiç nöbet kaydı yoksa, kullanıcının yapıyı görebilmesi için örnek öğretmen isimleri yerleştir
+  const hasExistingData = existingDuties && existingDuties.length > 0;
+  if (!hasExistingData) {
+    const sampleNames = existingTeachers && existingTeachers.length > 0
+      ? existingTeachers.map(t => String(t.fullName || t.name || '').trim()).filter(Boolean)
+      : ['Ahmet Yılmaz', 'Ayşe Demir', 'Mehmet Kaya', 'Fatma Şahin', 'Ali Çelik'];
+
+    if (matrixRows.length > 1 && sampleNames.length > 0) {
+      matrixRows[1][1] = sampleNames[0] || 'Ahmet Yılmaz';
+      matrixRows[1][2] = sampleNames[1 % sampleNames.length] || 'Ayşe Demir';
+      matrixRows[1][3] = sampleNames[2 % sampleNames.length] || 'Mehmet Kaya';
+      matrixRows[1][4] = sampleNames[3 % sampleNames.length] || 'Fatma Şahin';
+      matrixRows[1][5] = sampleNames[4 % sampleNames.length] || 'Ali Çelik';
+    }
+    if (matrixRows.length > 2 && sampleNames.length > 1) {
+      matrixRows[2][1] = sampleNames[1 % sampleNames.length] || 'Ayşe Demir';
+      matrixRows[2][2] = sampleNames[2 % sampleNames.length] || 'Mehmet Kaya';
+      matrixRows[2][3] = sampleNames[3 % sampleNames.length] || 'Fatma Şahin';
+      matrixRows[2][4] = sampleNames[4 % sampleNames.length] || 'Ali Çelik';
+      matrixRows[2][5] = sampleNames[0] || 'Ahmet Yılmaz';
+    }
+  }
+
+  const matrixSheet = XLSX.utils.aoa_to_sheet(matrixRows);
+  matrixSheet['!cols'] = [
+    { wch: 30 }, // Nöbet Yeri
+    { wch: 24 }, // Pazartesi
+    { wch: 24 }, // Salı
+    { wch: 24 }, // Çarşamba
+    { wch: 24 }, // Perşembe
+    { wch: 24 }, // Cuma
+  ];
+  XLSX.utils.book_append_sheet(workbook, matrixSheet, 'Haftalık Nöbet Çizelgesi');
+
+  // 2. SAYFA: Liste Formatı (Alternatif Sütun Formatı)
+  const listRows: (string | number)[][] = [
+    ['Gün', 'Nöbet Yeri', 'Öğretmen Adı Soyadı', 'Açıklama / Not'],
+    ['Pazartesi', 'Bahçe ve Giriş Kapısı', existingTeachers?.[0]?.fullName || 'Ahmet Yılmaz', 'Sabahçı'],
+    ['Pazartesi', '1. Kat (İdari Kat)', existingTeachers?.[1]?.fullName || 'Ayşe Demir', ''],
+    ['Salı', 'Bahçe ve Giriş Kapısı', existingTeachers?.[2]?.fullName || 'Mehmet Kaya', ''],
+    ['Çarşamba', 'Zemin Kat ve Kantin', existingTeachers?.[3]?.fullName || 'Fatma Şahin', ''],
+    ['Perşembe', '2. Kat (Derslikler)', existingTeachers?.[4]?.fullName || 'Ali Çelik', ''],
+    ['Cuma', 'Bahçe ve Giriş Kapısı', existingTeachers?.[0]?.fullName || 'Ahmet Yılmaz', 'Öğlenci'],
+  ];
+  const listSheet = XLSX.utils.aoa_to_sheet(listRows);
+  listSheet['!cols'] = [
+    { wch: 16 }, // Gün
+    { wch: 28 }, // Nöbet Yeri
+    { wch: 26 }, // Öğretmen Adı Soyadı
+    { wch: 22 }, // Açıklama / Not
+  ];
+  XLSX.utils.book_append_sheet(workbook, listSheet, 'Liste Formatı (Alternatif)');
+
+  // 3. SAYFA: Okuldaki Öğretmenler ve Kılavuz
+  const infoRows: (string | number)[][] = [
+    ['OKUL NÖBET PROGRAMI EXCEL AKTARIM KILAVUZU'],
+    [],
+    ['1.', 'Bu şablonu bilgisayarınızda veya telefonunuzda Excel / Google E-Tablolar ile açınız.'],
+    ['2.', '1. Sayfadaki (Haftalık Nöbet Çizelgesi) matris tablosuna gün ve nöbet yerine göre öğretmen isimlerini yazınız.'],
+    ['3.', 'Aynı yere birden fazla öğretmen yazmak isterseniz hücre içine Alt+Enter ile alt alta veya virgül (,) ile ayırarak yazabilirsiniz.'],
+    ['4.', 'Alternatif olarak 2. sayfadaki Liste Formatını da kullanabilirsiniz; sistem iki formatı da otomatik tanır.'],
+    ['5.', 'Dosyayı kaydedip Yönetim Paneli -> Öğretmen Nöbet Programı altındaki "Excel ile Nöbet Yükle" butonuyla sisteme yükleyiniz.'],
+    [],
+    ['SİSTEMDE KAYITLI ÖĞRETMENLER (Kopyalayıp Yapıştırabilirsiniz):'],
+    ['Sıra', 'Öğretmen Adı Soyadı', 'Branş', 'Kullanıcı Adı'],
+  ];
+
+  if (existingTeachers && existingTeachers.length > 0) {
+    const sorted = [...existingTeachers].sort((a, b) =>
+      String(a.fullName || '').localeCompare(String(b.fullName || ''), 'tr')
+    );
+    sorted.forEach((t, idx) => {
+      infoRows.push([
+        idx + 1,
+        String(t.fullName || '').trim(),
+        String(t.branch || '').trim(),
+        String(t.username || '').trim(),
+      ]);
+    });
+  } else {
+    infoRows.push([1, 'Ahmet Yılmaz', 'Matematik', 'ahmet.yilmaz']);
+  }
+
+  const infoSheet = XLSX.utils.aoa_to_sheet(infoRows);
+  infoSheet['!cols'] = [
+    { wch: 8 },
+    { wch: 28 },
+    { wch: 22 },
+    { wch: 22 },
+  ];
+  XLSX.utils.book_append_sheet(workbook, infoSheet, 'Öğretmen Listesi ve Rehber');
+
+  const safeSchoolName = schoolName ? schoolName.replace(/[^a-zA-Z0-9çğıöşüÇĞİÖŞÜ_-]/g, '_') : 'Okul';
+  const fileName = `${safeSchoolName}_Nobet_Programi_Sablonu.xlsx`;
+
+  return await saveAndShareWorkbook(workbook, fileName);
+};
+
 

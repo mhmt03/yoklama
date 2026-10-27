@@ -32,9 +32,39 @@ namespace OgretmenAjanda.Api.Data
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AuditLogs\" ADD COLUMN \"UserFullName\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AuditLogs\" ADD COLUMN \"Description\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"Branch\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"CounselorClass\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"PermissionsJson\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"AssignedLessonsJson\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"AssignedClassesJson\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"AssignedSchoolIdsJson\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"ScheduleItems\" ADD COLUMN \"LessonCode\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Institutions\" ADD COLUMN \"AdminPassword\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"ParentUsername\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"ParentPasswordHash\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"ParentCustomPassword\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"Students\" ADD COLUMN \"StudentCustomPassword\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"StudentEvaluations\" ADD COLUMN \"TargetAudience\" TEXT DEFAULT 'BOTH';"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"StudentEvaluations\" ADD COLUMN \"IsSharedWithStudent\" INTEGER DEFAULT 1;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"TargetAudience\" TEXT DEFAULT 'ALL';"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"ReplyToMessageId\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"ReplyToContent\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"Subject\" TEXT;"); } catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""TeacherDuties"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""TeacherName"" TEXT NOT NULL,
+                        ""DutyPlace"" TEXT NOT NULL,
+                        ""DayOfWeek"" TEXT,
+                        ""Date"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
 
             try
             {
@@ -239,6 +269,22 @@ namespace OgretmenAjanda.Api.Data
                 teacher.SchoolId = testSchool.Id;
             }
 
+            // Okul bağı boşta kalan öğretmenleri kurumun ilk okuluna bağla
+            var unassignedTeachers = await context.Users
+                .Where(u => !u.SchoolId.HasValue && (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff))
+                .ToListAsync();
+
+            if (unassignedTeachers.Count > 0 && testSchool != null)
+            {
+                foreach (var t in unassignedTeachers)
+                {
+                    t.SchoolId = testSchool.Id;
+                    if (string.IsNullOrEmpty(t.CustomerId)) t.CustomerId = testSchool.CustomerId ?? "mg-egitim";
+                    if (string.IsNullOrEmpty(t.RelationId)) t.RelationId = testSchool.RelationId ?? "ILK-10001";
+                }
+                await context.SaveChangesAsync();
+            }
+
             // 5. Varsayılan Sınıf & Şubeler (9-A, 9-B, 10-A, 11-A, 12-A)
             var hasClasses = await context.SchoolClasses.AnyAsync(c => c.SchoolId == testSchool.Id);
             if (!hasClasses)
@@ -318,6 +364,53 @@ namespace OgretmenAjanda.Api.Data
                     }
                 };
                 await context.Students.AddRangeAsync(defaultStudents);
+            }
+
+            // 7. Öğretmen kullanıcı adlarını 'isim.soyisim' formatına normalize et / eksikleri doldur
+            var teachersToNormalize = await context.Users
+                .Where(u => (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff) && (string.IsNullOrEmpty(u.Username) || !u.Username.Contains(".")))
+                .ToListAsync();
+
+            if (teachersToNormalize.Any())
+            {
+                var existingUsernames = await context.Users
+                    .Where(u => !string.IsNullOrEmpty(u.Username))
+                    .Select(u => u.Username.ToLower())
+                    .ToListAsync();
+
+                foreach (var t in teachersToNormalize)
+                {
+                    if (string.IsNullOrWhiteSpace(t.FullName)) continue;
+
+                    var clean = t.FullName.Trim().ToLowerInvariant()
+                        .Replace("ı", "i")
+                        .Replace("ğ", "g")
+                        .Replace("ü", "u")
+                        .Replace("ş", "s")
+                        .Replace("ö", "o")
+                        .Replace("ç", "c");
+
+                    clean = System.Text.RegularExpressions.Regex.Replace(clean, @"[^a-z\s]", " ").Trim();
+                    var parts = clean.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    string baseUsername = "ogretmen";
+                    if (parts.Length == 1) baseUsername = parts[0];
+                    else if (parts.Length == 2) baseUsername = $"{parts[0]}.{parts[1]}";
+                    else if (parts.Length > 2) baseUsername = $"{string.Join("", parts.Take(parts.Length - 1))}.{parts.Last()}";
+
+                    var username = baseUsername;
+                    int counter = 1;
+                    while (existingUsernames.Contains(username.ToLower()) && t.Username?.ToLower() != username.ToLower())
+                    {
+                        username = $"{baseUsername}{counter++}";
+                    }
+
+                    t.Username = username;
+                    if (!existingUsernames.Contains(username.ToLower()))
+                    {
+                        existingUsernames.Add(username.ToLower());
+                    }
+                }
             }
 
             await context.SaveChangesAsync();

@@ -125,8 +125,9 @@ export async function syncEvaluationToServer(payload: {
 /**
  * Öğrenci/Veli akış verilerini çeker
  */
-export async function fetchStudentPortalFeed(studentId: string): Promise<any> {
-  const res = await apiRequest(`sync/student-feed?studentId=${studentId}`);
+export async function fetchStudentPortalFeed(studentId: string, role?: string): Promise<any> {
+  const roleQuery = role ? `&role=${encodeURIComponent(role)}` : '';
+  const res = await apiRequest(`sync/student-feed?studentId=${studentId}${roleQuery}`);
   if (res.success && res.data) {
     return res.data;
   }

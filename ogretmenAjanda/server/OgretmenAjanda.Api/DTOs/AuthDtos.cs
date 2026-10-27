@@ -36,7 +36,8 @@ namespace OgretmenAjanda.Api.DTOs
     {
         public string SchoolCode { get; set; } = string.Empty;
         public string StudentNumber { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty; // Varsayılan aaaa_ogrencino
+        public string Password { get; set; } = string.Empty; // Varsayılan öğrenci: ooo_ogrencino, veli: vvv_ogrencino
+        public string? LoginType { get; set; } = "STUDENT"; // "STUDENT" veya "PARENT"
     }
 
     public class TeacherRegisterRequest
@@ -60,6 +61,7 @@ namespace OgretmenAjanda.Api.DTOs
     {
         public string? NewUsername { get; set; }
         public string? OldPassword { get; set; }
+        public string? CurrentPassword { get; set; }
         public string? NewPassword { get; set; }
     }
 
@@ -77,6 +79,9 @@ namespace OgretmenAjanda.Api.DTOs
         public string? RelationId { get; set; } // İlişki ID
         public string? GeminiApiKey { get; set; }
         public DateTime? LicenseExpiresAt { get; set; }
+        public string? AssignedClassesJson { get; set; }
+        public string? AssignedLessonsJson { get; set; }
+        public bool IsInstitutionAdmin { get; set; } = false;
         public List<SchoolDto> AffiliatedSchools { get; set; } = new();
     }
 

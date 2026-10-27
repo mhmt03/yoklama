@@ -18,11 +18,13 @@ namespace OgretmenAjanda.Api.Controllers
     {
         private readonly AppDbContext _context;
         private readonly ITokenService _tokenService;
+        private readonly IAuditLogService _auditLogService;
 
-        public AuthController(AppDbContext context, ITokenService tokenService)
+        public AuthController(AppDbContext context, ITokenService tokenService, IAuditLogService auditLogService)
         {
             _context = context;
             _tokenService = tokenService;
+            _auditLogService = auditLogService;
         }
 
         [AllowAnonymous]
@@ -186,6 +188,28 @@ namespace OgretmenAjanda.Api.Controllers
             user.LastLoginAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
+            // Başarılı Kullanıcı Girişi Logu
+            try
+            {
+                var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+                await _auditLogService.LogAsync(
+                    _context,
+                    user.SchoolId,
+                    user.Id,
+                    user.Username,
+                    user.FullName,
+                    user.Role,
+                    "LOGIN",
+                    "User",
+                    user.Id.ToString(),
+                    $"{user.FullName} ({user.Username} - {AuditLogService.GetRoleLabel(user.Role)}) sisteme giriş yaptı.",
+                    $"{{\"institution\": \"{request.InstitutionCode ?? ""}\", \"ip\": \"{clientIp ?? "local"}\"}}",
+                    clientIp
+                );
+                await _context.SaveChangesAsync();
+            }
+            catch {}
+
             var token = _tokenService.GenerateToken(user, school?.Code);
 
             // Bağlı olduğu admin/kuruma ait tüm okulları bul (Admin birden fazla okul yönetiyorsa hepsi döner)
@@ -193,31 +217,14 @@ namespace OgretmenAjanda.Api.Controllers
             var customerId = user.CustomerId ?? school?.CustomerId;
             var relationId = user.RelationId ?? school?.RelationId;
 
-            List<SchoolDto> affiliatedSchools;
-            if (user.Role == UserRoles.Teacher || user.Role == UserRoles.Staff)
-            {
-                // Öğretmen yalnızca kayıtlı olduğu okulu/okulları görebilir
-                var teacherSchoolIds = new List<Guid>();
-                if (user.SchoolId.HasValue) teacherSchoolIds.Add(user.SchoolId.Value);
-                if (school != null && !teacherSchoolIds.Contains(school.Id)) teacherSchoolIds.Add(school.Id);
+            bool isInstitutionAdmin = user.Role == UserRoles.SuperAdmin ||
+                ((user.Role == UserRoles.SchoolAdmin || user.Role == UserRoles.InstitutionAdmin) &&
+                 (!user.SchoolId.HasValue || _context.Institutions.Any(i => i.AdminUserId == user.Id || (!string.IsNullOrEmpty(customerId) && i.Code.ToLower() == customerId.ToLower()))));
 
-                affiliatedSchools = await _context.Schools
-                    .Where(s => s.IsActive && teacherSchoolIds.Contains(s.Id))
-                    .Select(s => new SchoolDto
-                    {
-                        Id = s.Id,
-                        Name = s.Name,
-                        Code = s.Code,
-                        Address = s.Address,
-                        Phone = s.Phone,
-                        GeminiApiKey = s.GeminiApiKey,
-                        GeminiModel = s.GeminiModel
-                    })
-                    .ToListAsync();
-            }
-            else
+            List<SchoolDto> affiliatedSchools;
+            if (isInstitutionAdmin)
             {
-                // Admin veya Süperadmin: Kuruma bağlı tüm okullar
+                // Kurum Admini veya Süperadmin: Kuruma bağlı tüm okullar
                 affiliatedSchools = await _context.Schools
                     .Where(s => s.IsActive && (
                         (adminUserId.HasValue && s.AdminUserId == adminUserId.Value) ||
@@ -237,6 +244,66 @@ namespace OgretmenAjanda.Api.Controllers
                     })
                     .ToListAsync();
             }
+            else
+            {
+                // Okul Admini / İdareci / Öğretmen: Atanmış okullar veya birincil okul
+                var targetSchoolIds = new List<Guid>();
+                if (!string.IsNullOrEmpty(user.AssignedSchoolIdsJson))
+                {
+                    try
+                    {
+                        var parsed = System.Text.Json.JsonSerializer.Deserialize<List<string>>(user.AssignedSchoolIdsJson);
+                        if (parsed != null)
+                        {
+                            foreach (var p in parsed)
+                            {
+                                if (Guid.TryParse(p, out var g)) targetSchoolIds.Add(g);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                if (user.SchoolId.HasValue && !targetSchoolIds.Contains(user.SchoolId.Value)) targetSchoolIds.Add(user.SchoolId.Value);
+                if (school != null && !targetSchoolIds.Contains(school.Id)) targetSchoolIds.Add(school.Id);
+
+                if (targetSchoolIds.Count > 0)
+                {
+                    affiliatedSchools = await _context.Schools
+                        .Where(s => s.IsActive && targetSchoolIds.Contains(s.Id))
+                        .Select(s => new SchoolDto
+                        {
+                            Id = s.Id,
+                            Name = s.Name,
+                            Code = s.Code,
+                            Address = s.Address,
+                            Phone = s.Phone,
+                            GeminiApiKey = s.GeminiApiKey,
+                            GeminiModel = s.GeminiModel
+                        })
+                        .ToListAsync();
+                }
+                else
+                {
+                    // Fallback: Kuruma bağlı okullar
+                    affiliatedSchools = await _context.Schools
+                        .Where(s => s.IsActive && (
+                            (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
+                            (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId)
+                        ))
+                        .Select(s => new SchoolDto
+                        {
+                            Id = s.Id,
+                            Name = s.Name,
+                            Code = s.Code,
+                            Address = s.Address,
+                            Phone = s.Phone,
+                            GeminiApiKey = s.GeminiApiKey,
+                            GeminiModel = s.GeminiModel
+                        })
+                        .ToListAsync();
+                }
+            }
 
             return Ok(new LoginResponse
             {
@@ -252,6 +319,9 @@ namespace OgretmenAjanda.Api.Controllers
                 RelationId = user.RelationId ?? school?.RelationId,
                 GeminiApiKey = school?.GeminiApiKey,
                 LicenseExpiresAt = user.LicenseExpiresAt ?? school?.LicenseExpiresAt,
+                AssignedClassesJson = user.AssignedClassesJson,
+                AssignedLessonsJson = user.AssignedLessonsJson,
+                IsInstitutionAdmin = isInstitutionAdmin,
                 AffiliatedSchools = affiliatedSchools
             });
         }
@@ -301,24 +371,124 @@ namespace OgretmenAjanda.Api.Controllers
                 }
             }
 
-            // Varsayılan şifre: aaaa_ + ogrencino
-            string defaultPassword = $"aaaa_{student.StudentNumber}";
+            bool isParent = string.Equals(request.LoginType, "PARENT", StringComparison.OrdinalIgnoreCase);
+
+            if (isParent)
+            {
+                // Veli Varsayılan Şifresi: vvv_{student.StudentNumber}
+                string defaultParentPassword = $"vvv_{student.StudentNumber}";
+                bool isPasswordValid = false;
+
+                if (!string.IsNullOrEmpty(student.ParentPasswordHash))
+                {
+                    isPasswordValid = BCrypt.Net.BCrypt.Verify(request.Password, student.ParentPasswordHash);
+                }
+                else if (!string.IsNullOrEmpty(student.ParentCustomPassword))
+                {
+                    isPasswordValid = request.Password == student.ParentCustomPassword || request.Password == defaultParentPassword;
+                }
+                else
+                {
+                    isPasswordValid = request.Password == defaultParentPassword;
+                }
+
+                if (!isPasswordValid)
+                {
+                    return Unauthorized(new { message = $"Veli şifresi hatalı. (Varsayılan şifreniz: vvv_{student.StudentNumber})" });
+                }
+
+                // Veli User kaydı (Oturum / Token için)
+                string parentUsername = $"v_{student.StudentNumber}";
+                var parentUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.SchoolId == school.Id && u.Username == parentUsername);
+
+                if (parentUser == null)
+                {
+                    parentUser = new User
+                    {
+                        Id = Guid.NewGuid(),
+                        Username = parentUsername,
+                        PasswordHash = student.ParentPasswordHash ?? BCrypt.Net.BCrypt.HashPassword(request.Password),
+                        FullName = !string.IsNullOrEmpty(student.ParentName) ? student.ParentName : $"{student.FullName} Velisi",
+                        Role = UserRoles.Parent,
+                        SchoolId = school.Id,
+                        RelationId = studentRelationId,
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    await _context.Users.AddAsync(parentUser);
+                }
+                else
+                {
+                    parentUser.FullName = !string.IsNullOrEmpty(student.ParentName) ? student.ParentName : $"{student.FullName} Velisi";
+                }
+
+                // Eğer hash henüz kaydedilmemişse kaydet
+                if (string.IsNullOrEmpty(student.ParentPasswordHash))
+                {
+                    student.ParentPasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+                }
+                await _context.SaveChangesAsync();
+
+                var parentToken = _tokenService.GenerateToken(parentUser, school.Code);
+
+                // Veli Giriş Logu
+                try
+                {
+                    var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+                    await _auditLogService.LogAsync(
+                        _context,
+                        school.Id,
+                        parentUser.Id,
+                        parentUser.Username,
+                        parentUser.FullName,
+                        UserRoles.Parent,
+                        "LOGIN",
+                        "Parent",
+                        student.Id.ToString(),
+                        $"{student.FullName} öğrencisinin velisi ({parentUser.FullName}, Öğrenci No: {student.StudentNumber}) sisteme giriş yaptı.",
+                        $"{{\"studentNumber\": \"{student.StudentNumber}\", \"parentName\": \"{parentUser.FullName}\", \"ip\": \"{clientIp ?? "local"}\"}}",
+                        clientIp
+                    );
+                    await _context.SaveChangesAsync();
+                }
+                catch {}
+
+                return Ok(new LoginResponse
+                {
+                    Token = parentToken,
+                    UserId = student.Id, // Dashboard'ın studentId ile beslenmesi için
+                    Username = student.StudentNumber,
+                    FullName = parentUser.FullName,
+                    Role = UserRoles.Parent,
+                    SchoolId = school.Id,
+                    SchoolCode = school.Code,
+                    SchoolName = school.Name,
+                    CustomerId = school.CustomerId,
+                    RelationId = studentRelationId
+                });
+            }
+
+            // Öğrenci Girişi
+            // Varsayılan şifre: ooo_ + ogrencino (veya geriye dönük uyumluluk için aaaa_ + ogrencino)
+            string defaultStudentPassword = $"ooo_{student.StudentNumber}";
+            string legacyStudentPassword = $"aaaa_{student.StudentNumber}";
+
             var studentUser = await _context.Users
                 .FirstOrDefaultAsync(u => u.SchoolId == school.Id && u.Username == student.StudentNumber);
 
             if (studentUser == null)
             {
-                // İlk girişte öğrenci hesabı yoksa ve varsayılan şifre doğru girilmişse hesabı otomatik oluştur
-                if (request.Password != defaultPassword)
+                if (request.Password != defaultStudentPassword && request.Password != legacyStudentPassword && request.Password != student.StudentCustomPassword)
                 {
-                    return Unauthorized(new { message = "Şifre hatalı. (Varsayılan şifreniz: aaaa_öğrencino)" });
+                    return Unauthorized(new { message = $"Şifre hatalı. (Varsayılan şifreniz: ooo_{student.StudentNumber})" });
                 }
 
                 studentUser = new User
                 {
                     Id = student.Id, // Aynı UUID
                     Username = student.StudentNumber,
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(defaultPassword),
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
                     FullName = student.FullName,
                     Role = UserRoles.Student,
                     SchoolId = school.Id,
@@ -331,13 +501,51 @@ namespace OgretmenAjanda.Api.Controllers
             }
             else
             {
-                if (!BCrypt.Net.BCrypt.Verify(request.Password, studentUser.PasswordHash))
+                bool isPasswordValid = false;
+                if (!string.IsNullOrEmpty(student.StudentCustomPassword) && request.Password == student.StudentCustomPassword)
+                {
+                    isPasswordValid = true;
+                }
+                else if (BCrypt.Net.BCrypt.Verify(request.Password, studentUser.PasswordHash))
+                {
+                    isPasswordValid = true;
+                }
+                else if (request.Password == defaultStudentPassword || request.Password == legacyStudentPassword)
+                {
+                    isPasswordValid = true;
+                    studentUser.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+                    await _context.SaveChangesAsync();
+                }
+
+                if (!isPasswordValid)
                 {
                     return Unauthorized(new { message = "Şifre hatalı." });
                 }
             }
 
             var token = _tokenService.GenerateToken(studentUser, school.Code);
+
+            // Başarılı Öğrenci Giriş Logu
+            try
+            {
+                var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+                await _auditLogService.LogAsync(
+                    _context,
+                    school.Id,
+                    studentUser.Id,
+                    studentUser.Username,
+                    studentUser.FullName,
+                    UserRoles.Student,
+                    "LOGIN",
+                    "Student",
+                    student.Id.ToString(),
+                    $"{student.FullName} (Öğrenci No: {student.StudentNumber}, Sınıf: {student.Grade}/{student.Section}) sisteme giriş yaptı.",
+                    $"{{\"studentNumber\": \"{student.StudentNumber}\", \"grade\": \"{student.Grade}\", \"section\": \"{student.Section}\", \"ip\": \"{clientIp ?? "local"}\"}}",
+                    clientIp
+                );
+                await _context.SaveChangesAsync();
+            }
+            catch {}
 
             return Ok(new LoginResponse
             {
@@ -389,18 +597,22 @@ namespace OgretmenAjanda.Api.Controllers
 
             await _context.Users.AddAsync(teacher);
 
-            // Audit Log
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = school.Id,
-                UserId = teacher.Id,
-                UserRole = UserRoles.Teacher,
-                ActionType = "TEACHER_REGISTERED",
-                EntityName = "User",
-                EntityId = teacher.Id.ToString(),
-                DetailsJson = $"{teacher.FullName} ({teacher.Username}) okula bağlandı.",
-                Timestamp = DateTime.UtcNow
-            });
+            // Audit Log: Detaylı Bilgilerle
+            var regIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+            await _auditLogService.LogAsync(
+                _context,
+                school.Id,
+                teacher.Id,
+                teacher.Username,
+                teacher.FullName,
+                UserRoles.Teacher,
+                "TEACHER_REGISTERED",
+                "User",
+                teacher.Id.ToString(),
+                $"{teacher.FullName} ({teacher.Username}) okul kodu ({school.Code}) ile yeni öğretmen olarak kaydoldu.",
+                $"{{\"email\": \"{teacher.Email ?? ""}\", \"phone\": \"{teacher.Phone ?? ""}\"}}",
+                regIp
+            );
 
             await _context.SaveChangesAsync();
 
@@ -438,7 +650,29 @@ namespace OgretmenAjanda.Api.Controllers
                 return BadRequest(new { message = "Mevcut şifreniz hatalı." });
             }
 
+            var role = User.FindFirstValue(ClaimTypes.Role);
             user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+
+            // Veli ve Öğrenci Şifrelerinin Bağımsız Yönetimi (Öğrenci velininkini değiştiremez, veli öğrencininkini değiştiremez)
+            if (string.Equals(role, UserRoles.Parent, StringComparison.OrdinalIgnoreCase))
+            {
+                var std = await _context.Students.FirstOrDefaultAsync(s => s.SchoolId == user.SchoolId && 
+                    (s.StudentNumber == user.Username || "v_" + s.StudentNumber == user.Username));
+                if (std != null)
+                {
+                    std.ParentPasswordHash = user.PasswordHash;
+                    std.ParentCustomPassword = request.NewPassword;
+                }
+            }
+            else if (string.Equals(role, UserRoles.Student, StringComparison.OrdinalIgnoreCase))
+            {
+                var std = await _context.Students.FirstOrDefaultAsync(s => s.SchoolId == user.SchoolId && s.StudentNumber == user.Username);
+                if (std != null)
+                {
+                    std.StudentCustomPassword = request.NewPassword;
+                }
+            }
+
             await _context.SaveChangesAsync();
 
             return Ok(new { message = "Şifreniz başarıyla güncellendi." });
@@ -472,12 +706,13 @@ namespace OgretmenAjanda.Api.Controllers
             // Şifre güncelleme
             if (!string.IsNullOrEmpty(request.NewPassword))
             {
-                if (string.IsNullOrEmpty(request.OldPassword))
+                var oldPass = !string.IsNullOrEmpty(request.OldPassword) ? request.OldPassword : request.CurrentPassword;
+                if (string.IsNullOrEmpty(oldPass))
                 {
                     return BadRequest(new { message = "Şifrenizi değiştirmek için mevcut şifrenizi girmelisiniz." });
                 }
 
-                if (!BCrypt.Net.BCrypt.Verify(request.OldPassword, user.PasswordHash))
+                if (!BCrypt.Net.BCrypt.Verify(oldPass, user.PasswordHash))
                 {
                     return BadRequest(new { message = "Mevcut şifreniz hatalı." });
                 }

@@ -55,6 +55,20 @@ interface Student360ModalProps {
   student: Student360Data | null;
 }
 
+const getDisplayPhotoUri = (uri?: string | null): string | undefined => {
+  if (!uri || !uri.trim()) return undefined;
+  const clean = uri.trim();
+  if (
+    clean.startsWith('file://') ||
+    clean.startsWith('data:image') ||
+    clean.startsWith('http://') ||
+    clean.startsWith('https://')
+  ) {
+    return clean;
+  }
+  return `http://ogretmenajanda.runasp.net${clean.startsWith('/') ? '' : '/'}${clean}`;
+};
+
 export const Student360Modal: React.FC<Student360ModalProps> = ({ visible, onClose, student }) => {
   if (!student) return null;
 
@@ -117,8 +131,8 @@ export const Student360Modal: React.FC<Student360ModalProps> = ({ visible, onClo
           <View style={styles.modalHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={styles.avatarWrap}>
-                {student.photo_uri ? (
-                  <Image source={{ uri: student.photo_uri }} style={styles.avatarImg} />
+                {getDisplayPhotoUri(student.photo_uri) ? (
+                  <Image source={{ uri: getDisplayPhotoUri(student.photo_uri) }} style={styles.avatarImg} />
                 ) : (
                   <View style={styles.avatarPlaceholder}>
                     <Text style={styles.avatarInitial}>{student.first_name[0]}</Text>

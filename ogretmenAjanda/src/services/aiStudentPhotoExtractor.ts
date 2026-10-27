@@ -129,18 +129,71 @@ export async function extractStudentPhotosWithAi(
         console.warn(LOG, 'PDF akış çıkarma atlandı/hata verdi:', streamErr);
       }
 
-      // Eğer doğrudan öğrenci no ile eşleşen fotoğraflar varsa onları topla
+const getStdNum = (s: any): string => String(s?.studentNumber || s?.student_number || s?.number || '').trim();
+const getStdFullName = (s: any): string =>
+  String(s?.fullName || s?.full_name || `${s?.first_name || s?.name || ''} ${s?.last_name || ''}`.trim() || '').trim();
+
+function findStudentByNumberFirst(stdNo: string, stdName: string | undefined, students: Student[]): Student | undefined {
+  if (stdNo && stdNo.trim()) {
+    const cleanNo = stdNo.trim().replace(/^0+/, '');
+    if (cleanNo.length > 0) {
+      // 1. BİRİNCİ VE EN KESİN KRİTER: Öğrenci Numarası (Okul No)
+      const byNum = students.find((s) => {
+        const sNum = getStdNum(s);
+        const cleanS = sNum.replace(/^0+/, '');
+        return sNum === stdNo.trim() || (cleanS.length > 0 && cleanS === cleanNo);
+      });
+      if (byNum) return byNum;
+    }
+  }
+
+  // 2. İKİNCİL DESTEK: Sadece numara hiç bulunamadıysa ve isim en az 2 kelimelik tam ad-soyad ise
+  if (stdName && stdName.trim().length >= 4) {
+    const norm = (str: string) =>
+      str
+        .replace(/Ý/g, 'İ')
+        .replace(/Ð/g, 'Ğ')
+        .replace(/Þ/g, 'Ş')
+        .replace(/ý/g, 'ı')
+        .replace(/ð/g, 'ğ')
+        .replace(/þ/g, 'ş')
+        .toLocaleLowerCase('tr-TR')
+        .replace(/[^a-zçğıöşü0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const targetNorm = norm(stdName);
+    const tToks = targetNorm.split(' ').filter(t => t.length >= 2);
+
+    // KATI GÜVENLİK: İsim eşleştirmesi için en az 2 kelime olmalı (tek harfler "I G L" asla eşleşemez)
+    if (tToks.length >= 2) {
+      const byName = students.find((s) => {
+        const sNameNorm = norm(getStdFullName(s));
+        if (sNameNorm === targetNorm) return true;
+        const sToks = sNameNorm.split(' ').filter(t => t.length >= 2);
+        if (sToks.length === tToks.length) {
+          return tToks.every((tt, idx) => tt === sToks[idx]);
+        }
+        return false;
+      });
+      if (byName) return byName;
+    }
+  }
+
+  return undefined;
+}
+
+      // PDF akışından çıkan TÜM fotoğrafları topla (boş numara olsa dahi atlama, sıra kaymasını engeller)
       for (const sp of streamPhotos) {
-        const stdNo = sp.matchedStudent?.student_number || sp.detectedNumber;
-        if (stdNo && sp.tempUri) {
+        const stdNo = sp.matchedStudent ? getStdNum(sp.matchedStudent) : (sp.detectedNumber || '');
+        if (sp.tempUri) {
           try {
             const b64 = await readUriAsBase64(sp.tempUri);
-            const matched = students.find((s) => s.student_number === stdNo);
+            const matched = sp.matchedStudent || (stdNo ? findStudentByNumberFirst(stdNo, sp.detectedName, students) : undefined);
             resultPhotos.push({
               studentNumber: stdNo,
-              studentName: matched?.full_name || sp.detectedName,
+              studentName: matched ? getStdFullName(matched) : (sp.detectedName || ''),
               photoBase64: `data:image/jpeg;base64,${b64}`,
-              fileName: `${stdNo}.jpg`,
+              fileName: `${stdNo || 'ogrenci_' + (resultPhotos.length + 1)}.jpg`,
               matchedStudent: matched,
               source: 'pdf-stream',
               tempUri: sp.tempUri,
@@ -153,28 +206,37 @@ export async function extractStudentPhotosWithAi(
       // Eğer akıştan eşleşme çıkmadıysa veya eksik kaldıysa: Gemini Vision ile PDF analizi yap
       if (resultPhotos.length === 0) {
         console.log(LOG, 'PDF akışında doğrudan numara eşleşmesi bulunamadı. Gemini Vision ile görsel analiz yapılıyor...');
-        onProgress?.('Gemini Vision ile PDF sayfası ve vesikalık fotoğraflar taranıyor...');
+        onProgress?.('Gemini Vision ile PDF sayfası ve vesikalık fotoğraflar taranıyor (Numara Öncelikli)...');
 
         const base64Pdf = await readUriAsBase64(fileUri);
         console.log(LOG, 'PDF base64 boyutu:', base64Pdf.length);
 
-        const prompt = `
-Sen MEB okulları için öğrenci listesi ve albüm çözümleyen yapay zeka asistanısın.
-Sana verilen PDF belgesinde öğrenci fotoğrafları, isimleri ve okul numaraları yer almaktadır.
-Her öğrenci için:
-1. "studentNumber": Öğrencinin fotoğrafının altında, yanında veya listesinde yer alan okul numarası (örn: "105", "412").
-2. "studentName": Öğrencinin adı soyadı.
-3. "pageNumber": Bulunduğu sayfa numarası (1'den başlar).
-4. "box_2d": Eğer vesikalık fotoğraf bir görsel alanındaysa tahmini koordinatları [ymin, xmin, ymax, xmax] (0-1000 arası normalize).
+        const registeredHints = students
+          .map((s) => ({ no: getStdNum(s), name: getStdFullName(s) }))
+          .filter((s) => s.no.length > 0)
+          .slice(0, 100);
 
-Sistemde kayıtlı öğrenci numaralarından bazıları ipucu olarak:
-${JSON.stringify(students.slice(0, 30).map((s) => ({ no: s.student_number, name: s.full_name })))}
+        const prompt = `
+Sen MEB okulları için öğrenci listesi ve okul albümü çözümleyen uzman bir yapay zeka asistanısın.
+Sana verilen PDF belgesinde öğrenci fotoğrafları, isimleri ve okul numaraları yer almaktadır.
+
+🔴 ÇOK ÖNEMLİ EŞLEŞTİRME KURALI:
+1. BİRİNCİ VE EN KESİN EŞLEŞTİRME ÖNCELİĞİN ÖĞRENCİ NUMARASIDIR (Okul No).
+2. Fotoğrafları analiz ederken mutlaka öğrencinin fotoğrafının altında, üstünde veya çerçevesinde yer alan OKUL NUMARASINI (studentNumber) birincil kriter olarak tespit et.
+3. İsimler kısaltılmış, eksik veya farklı yazılmış olsa dahi fotoğraflar için ASIL BELİRLEYİCİ KRİTER OKUL NUMARASIDIR.
+4. "studentNumber": Öğrencinin okul numarası (örn: "435", "105", "12").
+5. "studentName": Öğrencinin adı soyadı.
+6. "pageNumber": Bulunduğu sayfa numarası (1'den başlar).
+7. "box_2d": Eğer vesikalık fotoğraf bir görsel alanındaysa tahmini koordinatları [ymin, xmin, ymax, xmax] (0-1000 arası normalize).
+
+Sistemde bu okulda kayıtlı öğrencilerin okul numaraları ve adları (Lütfen öncelikle bu numaralarla eşleştir):
+${JSON.stringify(registeredHints)}
 
 Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
 [
   {
-    "studentNumber": "104",
-    "studentName": "Ahmet Yılmaz",
+    "studentNumber": "435",
+    "studentName": "Zehra Beren Aydeniz",
     "pageNumber": 1,
     "box_2d": [120, 50, 260, 200]
   }
@@ -231,14 +293,14 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
             const item = detectedItems[i];
             const stdNo = String(item.studentNumber || '').trim();
             if (!stdNo) continue;
-            const matched = students.find((s) => s.student_number === stdNo);
+            const matched = findStudentByNumberFirst(stdNo, item.studentName, students);
 
             // Eğer stream'den çıkarılmış fotoğraf varsa onunla eşle
             if (i < streamPhotos.length && streamPhotos[i]?.tempUri) {
               const b64 = await readUriAsBase64(streamPhotos[i].tempUri);
               resultPhotos.push({
                 studentNumber: stdNo,
-                studentName: matched?.full_name || item.studentName,
+                studentName: matched ? getStdFullName(matched) : item.studentName,
                 photoBase64: `data:image/jpeg;base64,${b64}`,
                 fileName: `${stdNo}.jpg`,
                 matchedStudent: matched,
@@ -259,17 +321,29 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
       const dims = await getImageDimensions(fileUri);
       console.log(LOG, 'Görsel boyutları:', dims.width, 'x', dims.height, '| Base64 uzunluğu:', base64Img.length);
 
+      const registeredHintsImg = students
+        .map((s) => ({ no: getStdNum(s), name: getStdFullName(s) }))
+        .filter((s) => s.no.length > 0)
+        .slice(0, 100);
+
       const prompt = `
 Sen okul albümü ve öğrenci listelerinden vesikalık fotoğrafları çıkaran yapay zeka modelisin.
-Görseldeki her bir öğrenci için:
-1. "studentNumber": Fotoğrafın altında veya yanında yazan okul numarası (örn: "214", "55").
-2. "studentName": Öğrencinin adı soyadı.
-3. "box_2d": Öğrencinin vesikalık fotoğrafının TAM SINIRLARI [ymin, xmin, ymax, xmax]. Koordinatlar 0 ile 1000 arasında normalize edilmiş tamsayılar olmalıdır. (0 üst/sol, 1000 alt/sağ).
+
+🔴 ÇOK ÖNEMLİ EŞLEŞTİRME KURALI:
+1. BİRİNCİ VE EN KESİN EŞLEŞTİRME ÖNCELİĞİN ÖĞRENCİ NUMARASIDIR (Okul No).
+2. Her öğrenci fotoğrafını kırparken, fotoğrafın hemen altında, üstünde veya yanında yazan OKUL NUMARASINI (studentNumber) birincil kriter olarak oku.
+3. İsimler eksik veya küçük puntolu olsa dahi numara önceliklidir.
+4. "studentNumber": Öğrencinin fotoğrafının altında veya yanında yazan okul numarası (örn: "435", "104").
+5. "studentName": Öğrencinin adı soyadı.
+6. "box_2d": Öğrencinin vesikalık fotoğrafının TAM SINIRLARI [ymin, xmin, ymax, xmax]. Koordinatlar 0 ile 1000 arasında normalize edilmiş tamsayılar olmalıdır (0 üst/sol, 1000 alt/sağ).
+
+Sistemdeki kayıtlı okul numaraları (Öncelikle bu numaralardan tespit et):
+${JSON.stringify(registeredHintsImg)}
 
 Örnek çıktı formatı:
 [
   {
-    "studentNumber": "104",
+    "studentNumber": "435",
     "studentName": "Ahmet Yılmaz",
     "box_2d": [120, 50, 260, 200]
   }
@@ -330,10 +404,10 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
 
           const cropRes = await cropImageByBoundingBox(fileUri, item.box_2d as any, dims.width, dims.height);
           if (cropRes && cropRes.base64) {
-            const matched = students.find((s) => s.student_number === stdNo);
+            const matched = findStudentByNumberFirst(stdNo, item.studentName, students);
             resultPhotos.push({
               studentNumber: stdNo,
-              studentName: matched?.full_name || item.studentName,
+              studentName: matched ? getStdFullName(matched) : item.studentName,
               photoBase64: `data:image/jpeg;base64,${cropRes.base64}`,
               fileName: `${stdNo}.jpg`,
               matchedStudent: matched,

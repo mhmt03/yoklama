@@ -416,7 +416,8 @@ export const ReportsScreen: React.FC = () => {
     }
     try {
       setLoading(true);
-      await generateStudentTemplateExcel();
+      const all = await getAllStudentsWithClass();
+      await generateStudentTemplateExcel(all);
     } catch (e: any) {
       Alert.alert('Hata', 'Şablon dosyası oluşturulamadı: ' + (e?.message || e));
     } finally {

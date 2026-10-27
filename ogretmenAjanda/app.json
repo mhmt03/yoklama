@@ -2,7 +2,7 @@
   "expo": {
     "name": "Öğretmen Ajanda",
     "slug": "ogretmen-ajanda",
-    "version": "1.0.0",
+    "version": "1.0.10",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -10,11 +10,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.gunnermg.ogretmenajanda",
-      "buildNumber": "1"
+      "buildNumber": "11"
     },
     "android": {
       "package": "com.gunnermg.ogretmenajanda",
-      "versionCode": 1,
+      "versionCode": 11,
       "adaptiveIcon": {
         "backgroundColor": "#0F172A",
         "foregroundImage": "./assets/android-icon-foreground.png"
@@ -22,7 +22,8 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "lang": "tr"
     },
     "plugins": [
       "expo-sqlite",

@@ -12,6 +12,7 @@ import {
   Image,
   ScrollView,
   Platform,
+  Linking,
 } from 'react-native';
 import { useRoute, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -42,6 +43,8 @@ import { getClasses, deleteEntireClassWithAllData } from '../database/operations
 import { syncClassStudentsFromServer } from '../services/studentSyncService';
 import { getActiveSchool } from '../database/operations/schoolOperations';
 import { getActiveUserRole } from '../utils/roleService';
+import { getClassCounselorTeacher } from '../utils/counselorService';
+import { loadSchoolSnapshotFromStorage } from '../services/schoolSnapshotService';
 import {
   getNotesByStudent,
   createNote,
@@ -105,6 +108,20 @@ export const ClassDetailScreen: React.FC = () => {
   const [syncingServer, setSyncingServer] = useState(false);
   const [isSchoolTeacher, setIsSchoolTeacher] = useState(false);
 
+  const getDisplayPhotoUri = (uri?: string | null): string | undefined => {
+    if (!uri || !uri.trim()) return undefined;
+    const clean = uri.trim();
+    if (
+      clean.startsWith('file://') ||
+      clean.startsWith('data:image') ||
+      clean.startsWith('http://') ||
+      clean.startsWith('https://')
+    ) {
+      return clean;
+    }
+    return `http://ogretmenajanda.runasp.net${clean.startsWith('/') ? '' : '/'}${clean}`;
+  };
+
   // Manual Add / Edit Modal state
   const [modalVisible, setModalVisible] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -146,6 +163,7 @@ export const ClassDetailScreen: React.FC = () => {
   // Student Detail & Opinion Modal state
   const [detailModalVisible, setDetailModalVisible] = useState(false);
   const [detailStudent, setDetailStudent] = useState<Student | null>(null);
+  const [classCounselorTeacher, setClassCounselorTeacher] = useState<string>('');
   const [detailStudentIndex, setDetailStudentIndex] = useState<number>(0);
   const [studentNotesList, setStudentNotesList] = useState<StudentNote[]>([]);
   const [quickNotesList, setQuickNotesList] = useState<QuickNoteItem[]>([]);
@@ -347,6 +365,16 @@ export const ClassDetailScreen: React.FC = () => {
       setLoading(true);
       const [role, active] = await Promise.all([getActiveUserRole(), getActiveSchool()]);
       setIsSchoolTeacher(role === 'teacher' && !!active);
+
+      if (active?.id) {
+        try {
+          const snap = await loadSchoolSnapshotFromStorage(String(active.id));
+          if (snap) {
+            const counselor = getClassCounselorTeacher(className, snap.teachers, snap.schedules);
+            if (counselor) setClassCounselorTeacher(counselor);
+          }
+        } catch {}
+      }
 
       const [data] = await Promise.all([
         getStudentsByClass(classId),
@@ -1117,6 +1145,127 @@ export const ClassDetailScreen: React.FC = () => {
     }
   };
 
+  const handleSendParentMessage = async (type: 'direct' | 'notes' | 'grades' | 'call') => {
+    if (!detailStudent) return;
+    const phone = detailStudent.parent_phone?.trim();
+    if (!phone && type !== 'direct') {
+      Alert.alert(
+        'Veli Telefonu Yok',
+        'Bu öğrencinin veli telefon numarası kayıtlı değil. Lütfen önce öğrenci bilgilerini düzenleyerek veli telefonunu giriniz.'
+      );
+      return;
+    }
+
+    if (type === 'call') {
+      if (phone) {
+        Linking.openURL(`tel:${phone}`);
+      }
+      return;
+    }
+
+    const stdFullName = `${detailStudent.first_name} ${detailStudent.last_name}`;
+    let messageText = '';
+
+    if (type === 'notes') {
+      const recentNotes = studentNotesList.slice(0, 5);
+      if (recentNotes.length === 0) {
+        Alert.alert('Bilgi', 'Bu öğrenci için henüz kayıtlı bir öğretmen görüşü bulunmuyor.');
+        return;
+      }
+      const notesFormatted = recentNotes
+        .map(
+          (n, i) =>
+            `${i + 1}. ${n.note} (${formatDateToTR(n.note_date || n.created_at)}${
+              n.lesson_info ? ' - ' + n.lesson_info : ''
+            })`
+        )
+        .join('\n');
+
+      messageText = `Sayın Velimiz,\n\nÖğrencimiz ${stdFullName} (${className} - No: ${
+        detailStudent.student_number || '-'
+      }) hakkında öğretmen ders içi gözlem ve görüşleri aşağıdadır:\n\n${notesFormatted}\n\nBilgilerinize sunar, başarılar dileriz.`;
+    } else if (type === 'grades') {
+      const currentGradeRow = gradebookData.students.find(
+        (r) => r.student_id === detailStudent.id
+      );
+      if (!currentGradeRow) {
+        Alert.alert('Bilgi', 'Öğrencinin kayıtlı sınav ve ders notu bulunamadı.');
+        return;
+      }
+
+      messageText =
+        `Sayın Velimiz,\n\nÖğrencimiz ${stdFullName} (${className} - No: ${
+          detailStudent.student_number || '-'
+        }) ${activeTerm}. dönem ders not durum bilgisi:\n\n` +
+        `📝 Yazılı Sınavlar: ${currentGradeRow.exam1 ?? '-'} / ${currentGradeRow.exam2 ?? '-'} / ${
+          currentGradeRow.exam3 ?? '-'
+        } (Ort: ${currentGradeRow.examAvg ?? '-'})\n` +
+        `⭐ Performans Notları: ${currentGradeRow.perf1 ?? '-'} / ${currentGradeRow.perf2 ?? '-'} / ${
+          currentGradeRow.perf3 ?? '-'
+        } (Ort: ${currentGradeRow.perfAvg ?? '-'})\n` +
+        `🎯 Quiz Ortalaması: ${currentGradeRow.quizAvg ?? '-'}\n` +
+        `🏆 Genel Not Ortalaması: ${currentGradeRow.overallAvg ?? '-'}\n\n` +
+        `Bilgilerinize sunarız.`;
+    } else {
+      // Direct
+      messageText = `Sayın Velimiz,\n\nÖğrencimiz ${stdFullName} (${className} - No: ${
+        detailStudent.student_number || '-'
+      }) hakkında bilgilendirmedir: `;
+    }
+
+    let cleanedPhone = (phone || '').replace(/[^0-9]/g, '');
+    if (cleanedPhone.startsWith('0')) {
+      cleanedPhone = '9' + cleanedPhone;
+    } else if (!cleanedPhone.startsWith('90') && cleanedPhone.length === 10) {
+      cleanedPhone = '90' + cleanedPhone;
+    }
+
+    const encodedMsg = encodeURIComponent(messageText);
+
+    Alert.alert(
+      'Veliye İletişim',
+      `Mesaj veli numarasına (${phone || 'Numara yok'}) yönlendirilecektir. Hangi yöntemle göndermek istersiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: '📱 WhatsApp ile Gönder',
+          onPress: async () => {
+            const waUrl = cleanedPhone
+              ? `whatsapp://send?phone=${cleanedPhone}&text=${encodedMsg}`
+              : `whatsapp://send?text=${encodedMsg}`;
+            try {
+              const supported = await Linking.canOpenURL(waUrl);
+              if (supported) {
+                await Linking.openURL(waUrl);
+              } else {
+                const webWaUrl = cleanedPhone
+                  ? `https://wa.me/${cleanedPhone}?text=${encodedMsg}`
+                  : `https://wa.me/?text=${encodedMsg}`;
+                await Linking.openURL(webWaUrl);
+              }
+            } catch (err) {
+              const webWaUrl = cleanedPhone
+                ? `https://wa.me/${cleanedPhone}?text=${encodedMsg}`
+                : `https://wa.me/?text=${encodedMsg}`;
+              await Linking.openURL(webWaUrl);
+            }
+          },
+        },
+        {
+          text: '✉️ Normal SMS ile Gönder',
+          onPress: async () => {
+            const smsUrl = cleanedPhone
+              ? Platform.OS === 'ios'
+                ? `sms:${phone}&body=${encodedMsg}`
+                : `sms:${phone}?body=${encodedMsg}`
+              : `sms:?body=${encodedMsg}`;
+            await Linking.openURL(smsUrl);
+          },
+        },
+      ]
+    );
+  };
+
   const handleAddNoteFromDetail = async (textToAdd?: string) => {
     const text = (textToAdd || newNoteText).trim();
     if (!text || !detailStudent) return;
@@ -1315,7 +1464,7 @@ export const ClassDetailScreen: React.FC = () => {
 
   const handleDownloadTemplate = async () => {
     try {
-      await generateStudentTemplateExcel();
+      await generateStudentTemplateExcel(students);
     } catch (error) {
       Alert.alert('Hata', 'Şablon dosyası oluşturulamadı.');
     }
@@ -1594,8 +1743,8 @@ export const ClassDetailScreen: React.FC = () => {
                     onPress={() => handleOpenStudentDetail(item)}
                     activeOpacity={0.8}
                   >
-                    {item.photo_uri ? (
-                      <Image source={{ uri: item.photo_uri }} style={styles.avatarImg} />
+                    {getDisplayPhotoUri(item.photo_uri) ? (
+                      <Image source={{ uri: getDisplayPhotoUri(item.photo_uri) }} style={styles.avatarImg} />
                     ) : (
                       <View style={styles.numberBadge}>
                         <Ionicons name="person" size={22} color={Colors.textMuted} />
@@ -3071,6 +3220,14 @@ export const ClassDetailScreen: React.FC = () => {
                 <Text style={styles.detailModalSubTitle}>
                   {className} • No: {detailStudent?.student_number || '-'}
                 </Text>
+                {!!classCounselorTeacher && (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#ECFDF5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, marginTop: 4, borderWidth: 1, borderColor: '#A7F3D0' }}>
+                    <Ionicons name="ribbon-outline" size={12} color="#059669" style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>
+                      Sınıf Rehberi: {classCounselorTeacher}
+                    </Text>
+                  </View>
+                )}
               </View>
 
               <TouchableOpacity
@@ -3112,9 +3269,9 @@ export const ClassDetailScreen: React.FC = () => {
                     activeOpacity={0.85}
                     style={styles.detailPhotoTouchWrap}
                   >
-                    {detailStudent?.photo_uri ? (
+                    {getDisplayPhotoUri(detailStudent?.photo_uri) ? (
                       <Image
-                        source={{ uri: detailStudent.photo_uri }}
+                        source={{ uri: getDisplayPhotoUri(detailStudent?.photo_uri) }}
                         style={styles.detailPhotoLarge}
                         resizeMode="cover"
                       />
@@ -3165,6 +3322,83 @@ export const ClassDetailScreen: React.FC = () => {
                       <Text style={styles.detailNotesText}>{detailStudent.notes}</Text>
                     </View>
                   ) : null}
+
+                  {/* Veli ve İletişim Bilgileri Kartı */}
+                  <View style={styles.detailParentCard}>
+                    <View style={styles.detailParentHeader}>
+                      <Ionicons name="people-circle" size={17} color={Colors.primary} />
+                      <Text style={styles.detailParentTitle}>Veli ve İletişim Bilgileri</Text>
+                    </View>
+
+                    <View style={styles.detailParentContent}>
+                      <View style={styles.detailParentRow}>
+                        <Text style={styles.detailParentLabel}>Veli Ad Soyad:</Text>
+                        <Text style={styles.detailParentValue} numberOfLines={1}>
+                          {detailStudent?.parent_name || 'Belirtilmemiş'}
+                        </Text>
+                      </View>
+
+                      <View style={styles.detailParentRow}>
+                        <Text style={styles.detailParentLabel}>Veli Telefonu:</Text>
+                        <Text
+                          style={[
+                            styles.detailParentValue,
+                            detailStudent?.parent_phone ? { color: '#047857', fontWeight: '800' } : null,
+                          ]}
+                        >
+                          {detailStudent?.parent_phone || 'Telefon Yok'}
+                        </Text>
+                      </View>
+
+                      {detailStudent?.student_phone ? (
+                        <View style={styles.detailParentRow}>
+                          <Text style={styles.detailParentLabel}>Öğrenci Tel:</Text>
+                          <Text style={styles.detailParentValue}>{detailStudent.student_phone}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {/* Veli Bilgilendirme ve Mesaj Butonları */}
+                    <View style={styles.parentActionButtonsWrap}>
+                      <TouchableOpacity
+                        style={[styles.parentActionBtn, { backgroundColor: '#25D366' }]}
+                        onPress={() => handleSendParentMessage('direct')}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="logo-whatsapp" size={13} color="#FFFFFF" />
+                        <Text style={styles.parentActionBtnText}>Veliye Mesaj Yolla</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.parentActionBtn, { backgroundColor: '#4F46E5' }]}
+                        onPress={() => handleSendParentMessage('notes')}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="chatbubbles" size={13} color="#FFFFFF" />
+                        <Text style={styles.parentActionBtnText}>Görüşleri Veliye Yolla</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.parentActionBtn, { backgroundColor: '#0284C7' }]}
+                        onPress={() => handleSendParentMessage('grades')}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="stats-chart" size={13} color="#FFFFFF" />
+                        <Text style={styles.parentActionBtnText}>Notları Veliye Yolla</Text>
+                      </TouchableOpacity>
+
+                      {detailStudent?.parent_phone ? (
+                        <TouchableOpacity
+                          style={[styles.parentActionBtn, { backgroundColor: '#059669', flex: 0, paddingHorizontal: 12 }]}
+                          onPress={() => handleSendParentMessage('call')}
+                          activeOpacity={0.8}
+                          accessibilityLabel="Veliyi Ara"
+                        >
+                          <Ionicons name="call" size={14} color="#FFFFFF" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
                 </View>
               </View>
 
@@ -3243,37 +3477,6 @@ export const ClassDetailScreen: React.FC = () => {
                   </View>
                 );
               })()}
-
-              {/* Quick Opinion Chips */}
-              <View style={styles.detailSection}>
-                <View style={styles.sectionHeaderRow}>
-                  <Ionicons name="sparkles" size={16} color={Colors.warningDark} />
-                  <Text style={styles.detailSectionTitle}>Hızlı Görüş Ekle</Text>
-                </View>
-                <Text style={styles.detailSectionSub}>
-                  Dokunarak öğrenciye hızlıca görüş veya gözlem kaydedin:
-                </Text>
-
-                <View style={styles.chipsContainer}>
-                  {quickNotesList.length === 0 ? (
-                    <Text style={{ fontSize: 13, color: Colors.textMuted, fontStyle: 'italic' }}>
-                      İşlemler sayfasından hızlı görüş metinleri ekleyin.
-                    </Text>
-                  ) : (
-                    quickNotesList.map((q, idx) => (
-                      <TouchableOpacity
-                        key={q.id ?? idx}
-                        style={styles.chipButton}
-                        onPress={() => handleAddNoteFromDetail(q.text)}
-                        disabled={savingNote}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.chipButtonText}>{q.text}</Text>
-                      </TouchableOpacity>
-                    ))
-                  )}
-                </View>
-              </View>
 
               {/* Custom Note Input */}
               {/* Custom Note Input */}
@@ -4763,11 +4966,81 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontStyle: 'italic',
   },
+  detailParentCard: {
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  detailParentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  detailParentTitle: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  detailParentContent: {
+    gap: 4,
+    marginBottom: 10,
+  },
+  detailParentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 1,
+  },
+  detailParentLabel: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  detailParentValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    maxWidth: '65%',
+    textAlign: 'right',
+  },
+  parentActionButtonsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 2,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  parentActionBtn: {
+    flex: 1,
+    minWidth: 130,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  parentActionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
   noteItemCard: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     backgroundColor: Colors.card,
-    borderRadius: 8,
+    borderRadius: 10,
     padding: 10,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -4853,17 +5126,24 @@ const styles = StyleSheet.create({
   noteActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
+    paddingRight: 2,
   },
   editNoteBtn: {
-    padding: 6,
-    borderRadius: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     backgroundColor: Colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   deleteNoteBtn: {
-    padding: 6,
-    borderRadius: 6,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     backgroundColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   fullHistoryBtn: {
     flexDirection: 'row',

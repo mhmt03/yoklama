@@ -19,11 +19,13 @@ namespace OgretmenAjanda.Api.Controllers
     {
         private readonly AppDbContext _context;
         private readonly IAuditLogService _auditLogService;
+        private readonly ISchoolPurgeService _purgeService;
 
-        public SchoolsController(AppDbContext context, IAuditLogService auditLogService)
+        public SchoolsController(AppDbContext context, IAuditLogService auditLogService, ISchoolPurgeService purgeService)
         {
             _context = context;
             _auditLogService = auditLogService;
+            _purgeService = purgeService;
         }
 
         private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -64,22 +66,64 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 // Süper admin tüm okulları görür
             }
-            else if (CurrentUserRole == UserRoles.Staff)
+            else
             {
-                // İdareci sadece kendi okulunu görür
                 var currentUser = await _context.Users.FindAsync(CurrentUserId);
-                if (currentUser?.SchoolId != null)
+                if (currentUser == null) return Unauthorized();
+
+                var customerId = currentUser.CustomerId;
+                var relationId = currentUser.RelationId;
+
+                // Kurum Admini mi? (Kurumun ana lisans sahibi / müşterisi - 1 adet)
+                bool isInstitutionOwner = (currentUser.Role == UserRoles.SchoolAdmin || currentUser.Role == UserRoles.InstitutionAdmin) &&
+                    (!currentUser.SchoolId.HasValue || _context.Institutions.Any(i => i.AdminUserId == currentUser.Id || (!string.IsNullOrEmpty(customerId) && i.Code.ToLower() == customerId.ToLower())));
+
+                if (isInstitutionOwner)
                 {
-                    query = query.Where(s => s.Id == currentUser.SchoolId.Value);
+                    // Kurum Admini kurumuna bağlı tüm okulları görür
+                    query = query.Where(s => s.AdminUserId == CurrentUserId ||
+                        (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
+                        (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId));
                 }
                 else
                 {
-                    query = query.Where(s => false);
+                    // Okul Admini / İdareci / Öğretmen:
+                    // 1) AssignedSchoolIdsJson içinde atanmış okullar
+                    var assignedSchoolIds = new List<Guid>();
+                    if (!string.IsNullOrEmpty(currentUser.AssignedSchoolIdsJson))
+                    {
+                        try
+                        {
+                            var parsed = System.Text.Json.JsonSerializer.Deserialize<List<string>>(currentUser.AssignedSchoolIdsJson);
+                            if (parsed != null)
+                            {
+                                foreach (var p in parsed)
+                                {
+                                    if (Guid.TryParse(p, out var g)) assignedSchoolIds.Add(g);
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // 2) Birincil SchoolId
+                    if (currentUser.SchoolId.HasValue && !assignedSchoolIds.Contains(currentUser.SchoolId.Value))
+                    {
+                        assignedSchoolIds.Add(currentUser.SchoolId.Value);
+                    }
+
+                    if (assignedSchoolIds.Count > 0)
+                    {
+                        query = query.Where(s => assignedSchoolIds.Contains(s.Id));
+                    }
+                    else
+                    {
+                        // Fallback: Kullanıcının kurumuna/ilişkisine bağlı okullar (özellikle Özkan Sunturlu gibi mevcut kullanıcılar için)
+                        query = query.Where(s => (!string.IsNullOrEmpty(customerId) && s.CustomerId == customerId) ||
+                                                 (!string.IsNullOrEmpty(relationId) && s.RelationId == relationId) ||
+                                                 (currentUser.SchoolId.HasValue && s.Id == currentUser.SchoolId.Value));
+                    }
                 }
-            }
-            else
-            {
-                query = query.Where(s => s.AdminUserId == CurrentUserId);
             }
 
             var schools = await query
@@ -258,17 +302,14 @@ namespace OgretmenAjanda.Api.Controllers
 
             await _context.Schools.AddAsync(school);
 
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = school.Id,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "SCHOOL_CREATED",
-                EntityName = "School",
-                EntityId = school.Id.ToString(),
-                DetailsJson = $"{school.Name} oluşturuldu. Okul Kodu: {school.Code}, Müşteri: {customerId}, İlişki: {relationId}",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                school.Id,
+                "SCHOOL_CREATED",
+                "School",
+                school.Id.ToString(),
+                $"{school.Name} ({school.Code}) okulu oluşturuldu.",
+                $"{{\"customerId\": \"{customerId}\", \"relationId\": \"{relationId}\"}}"
+            );
 
             await _context.SaveChangesAsync();
 
@@ -279,8 +320,22 @@ namespace OgretmenAjanda.Api.Controllers
         [HttpGet("{schoolId}/teachers")]
         public async Task<IActionResult> GetSchoolTeachers(Guid schoolId)
         {
+            var school = await _context.Schools.FindAsync(schoolId);
+            var customerId = school?.CustomerId;
+            var relationId = school?.RelationId;
+            var schoolIdStr = schoolId.ToString();
+
             var teachers = await _context.Users
-                .Where(u => u.SchoolId == schoolId && (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff))
+                .Where(u =>
+                    (u.SchoolId == schoolId ||
+                     (!string.IsNullOrEmpty(u.AssignedSchoolIdsJson) && u.AssignedSchoolIdsJson.Contains(schoolIdStr)) ||
+                     (!u.SchoolId.HasValue && (
+                        (!string.IsNullOrEmpty(customerId) && u.CustomerId == customerId) ||
+                        (!string.IsNullOrEmpty(relationId) && u.RelationId == relationId)
+                     ))) &&
+                    (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff)
+                )
+                .OrderBy(u => u.FullName)
                 .Select(u => new
                 {
                     u.Id,
@@ -293,6 +348,7 @@ namespace OgretmenAjanda.Api.Controllers
                     u.CustomerId,
                     u.IsActive,
                     u.AssignedClassesJson,
+                    u.AssignedLessonsJson,
                     u.Branch,
                     u.PermissionsJson,
                     u.CreatedAt,
@@ -320,22 +376,8 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             var fullName = request.FullName.Trim();
-            // Türkçe karakterleri temizleyip kullanıcı adı üret
-            var rawUsername = (fullName + (request.Branch ?? "")).ToLower()
-                .Replace(" ", "")
-                .Replace("ı", "i")
-                .Replace("ğ", "g")
-                .Replace("ü", "u")
-                .Replace("ş", "s")
-                .Replace("ö", "o")
-                .Replace("ç", "c");
-
-            var username = rawUsername;
-            var counter = 1;
-            while (await _context.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower()))
-            {
-                username = $"{rawUsername}{counter++}";
-            }
+            // Türkçe karakterleri temizleyip isim.soyisim formatında kullanıcı adı üret (mükerrerse sonuna 1, 2 ekler)
+            var username = await GenerateUniqueTeacherUsernameAsync(fullName);
 
             var password = "1234"; // Varsayılan otomatik şifre
             var teacher = new User
@@ -346,6 +388,7 @@ namespace OgretmenAjanda.Api.Controllers
                 FullName = fullName,
                 Role = !string.IsNullOrEmpty(request.Role) ? request.Role : UserRoles.Teacher,
                 Branch = request.Branch?.Trim(),
+                CounselorClass = request.CounselorClass?.Trim(),
                 PermissionsJson = request.PermissionsJson,
                 Email = request.Email?.Trim(),
                 Phone = request.Phone?.Trim(),
@@ -354,6 +397,7 @@ namespace OgretmenAjanda.Api.Controllers
                 CustomerId = school.CustomerId,
                 LicenseExpiresAt = school.LicenseExpiresAt,
                 AssignedClassesJson = request.AssignedClassesJson,
+                AssignedLessonsJson = request.AssignedLessonsJson,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             };
@@ -385,6 +429,146 @@ namespace OgretmenAjanda.Api.Controllers
             });
         }
 
+        // Okul Öğretmenlerini Toplu Güncelleme / Yükleme (Excel Senkronizasyonu)
+        // ÖNEMLİ KURAL: Mevcut öğretmenlerin şifresi (PasswordHash) ve kullanıcı adı (Username) ASLA DEĞİŞTİRİLMEZ / SIFIRLANMAZ!
+        [HttpPost("{schoolId}/teachers/batch")]
+        public async Task<IActionResult> BatchSyncTeachers(Guid schoolId, [FromBody] BatchTeacherSyncRequest request)
+        {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Okula bağlı öğretmenler toplu kadro güncelleme yetkisine sahip değildir." });
+            }
+
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (CurrentUserRole == UserRoles.Staff)
+            {
+                var currentUser = await _context.Users.FindAsync(CurrentUserId);
+                if (currentUser == null || currentUser.SchoolId != schoolId)
+                {
+                    return Forbid();
+                }
+            }
+
+            if (request.Teachers == null || !request.Teachers.Any())
+            {
+                return BadRequest(new { message = "Yüklenecek öğretmen listesi boş." });
+            }
+
+            var existingTeachers = await _context.Users
+                .Where(u => u.SchoolId == schoolId && (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff))
+                .ToListAsync();
+
+            int updatedCount = 0;
+            int addedCount = 0;
+
+            foreach (var item in request.Teachers)
+            {
+                if (string.IsNullOrWhiteSpace(item.FullName)) continue;
+
+                var cleanName = item.FullName.Trim();
+                User? matchedTeacher = null;
+
+                // 1. Varsa kullanıcı adına göre kesin eşleştir
+                if (!string.IsNullOrWhiteSpace(item.Username))
+                {
+                    var cleanUsername = item.Username.Trim().ToLowerInvariant();
+                    matchedTeacher = existingTeachers.FirstOrDefault(t => t.Username.ToLowerInvariant() == cleanUsername);
+                }
+
+                // 2. Kullanıcı adı ile bulunamadıysa isim benzerliği/denkliği ile eşleştir
+                if (matchedTeacher == null)
+                {
+                    matchedTeacher = existingTeachers.FirstOrDefault(t => IsTeacherNameMatch(t.FullName, cleanName));
+                }
+
+                if (matchedTeacher != null)
+                {
+                    // MEVCUT ÖĞRETMEN: Kullanıcı adı ve şifresi KESİNLİKLE KORUNUR!
+                    matchedTeacher.FullName = cleanName;
+                    if (!string.IsNullOrWhiteSpace(item.Branch)) matchedTeacher.Branch = item.Branch.Trim();
+                    if (!string.IsNullOrWhiteSpace(item.Role))
+                    {
+                        var roleStr = item.Role.Trim().ToUpperInvariant();
+                        if (roleStr.Contains("IDARE") || roleStr.Contains("MÜDÜR") || roleStr.Contains("MUDUR") || roleStr == "STAFF")
+                        {
+                            matchedTeacher.Role = UserRoles.Staff;
+                        }
+                        else
+                        {
+                            matchedTeacher.Role = UserRoles.Teacher;
+                        }
+                    }
+                    if (item.Phone != null) matchedTeacher.Phone = item.Phone.Trim();
+                    if (item.Email != null) matchedTeacher.Email = item.Email.Trim();
+                    if (item.IsActive.HasValue) matchedTeacher.IsActive = item.IsActive.Value;
+                    if (!string.IsNullOrWhiteSpace(item.AssignedClassesJson)) matchedTeacher.AssignedClassesJson = item.AssignedClassesJson;
+                    if (!string.IsNullOrWhiteSpace(item.AssignedLessonsJson)) matchedTeacher.AssignedLessonsJson = item.AssignedLessonsJson;
+
+                    updatedCount++;
+                }
+                else
+                {
+                    // YENİ ÖĞRETMEN: Otomatik kullanıcı adı (isim.soyisim) ve varsayılan 1234 şifresi ile oluştur
+                    var username = await GenerateUniqueTeacherUsernameAsync(cleanName);
+
+                    var role = UserRoles.Teacher;
+                    if (!string.IsNullOrWhiteSpace(item.Role))
+                    {
+                        var roleStr = item.Role.Trim().ToUpperInvariant();
+                        if (roleStr.Contains("IDARE") || roleStr.Contains("MÜDÜR") || roleStr.Contains("MUDUR") || roleStr == "STAFF")
+                        {
+                            role = UserRoles.Staff;
+                        }
+                    }
+
+                    var newTeacher = new User
+                    {
+                        Id = Guid.NewGuid(),
+                        Username = username,
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword("1234"),
+                        FullName = cleanName,
+                        Role = role,
+                        Branch = item.Branch?.Trim(),
+                        Phone = item.Phone?.Trim(),
+                        Email = item.Email?.Trim(),
+                        SchoolId = school.Id,
+                        RelationId = school.RelationId,
+                        CustomerId = school.CustomerId,
+                        LicenseExpiresAt = school.LicenseExpiresAt,
+                        AssignedClassesJson = item.AssignedClassesJson,
+                        AssignedLessonsJson = item.AssignedLessonsJson,
+                        IsActive = item.IsActive ?? true,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    await _context.Users.AddAsync(newTeacher);
+                    existingTeachers.Add(newTeacher);
+                    addedCount++;
+                }
+            }
+
+            await LogActionAsync(
+                school.Id,
+                "BATCH_TEACHERS_SYNCED",
+                "User",
+                null,
+                $"Öğretmen kadrosu Excel ile senkronize edildi: {updatedCount} güncellendi, {addedCount} yeni eklendi.",
+                $"{{\"updatedCount\": {updatedCount}, \"addedCount\": {addedCount}, \"total\": {request.Teachers.Count}}}"
+            );
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                message = $"{updatedCount} öğretmen güncellendi, {addedCount} yeni öğretmen kadroya eklendi.",
+                updatedCount,
+                addedCount,
+                total = request.Teachers.Count
+            });
+        }
+
         // Öğretmen Yetki / Durum / Rol Düzenleme (Admin veya İdareci yetkisi)
         [HttpPut("teachers/{teacherId}/status")]
         public async Task<IActionResult> UpdateTeacherStatus(Guid teacherId, [FromBody] UpdateTeacherStatusRequest request)
@@ -404,6 +588,7 @@ namespace OgretmenAjanda.Api.Controllers
             teacher.IsActive = request.IsActive;
             if (!string.IsNullOrEmpty(request.Role)) teacher.Role = request.Role;
             if (request.AssignedClassesJson != null) teacher.AssignedClassesJson = request.AssignedClassesJson;
+            if (request.AssignedLessonsJson != null) teacher.AssignedLessonsJson = request.AssignedLessonsJson;
             if (request.PermissionsJson != null) teacher.PermissionsJson = request.PermissionsJson;
             if (!string.IsNullOrEmpty(request.FullName)) teacher.FullName = request.FullName.Trim();
             if (request.Branch != null) teacher.Branch = request.Branch.Trim();
@@ -518,25 +703,22 @@ namespace OgretmenAjanda.Api.Controllers
                 }
             }
 
-            school.IsActive = false;
-
-            // Bu okula bağlı kullanıcıları pasife al
-            var teachers = await _context.Users.Where(u => u.SchoolId == school.Id).ToListAsync();
-            foreach (var teacher in teachers)
-            {
-                teacher.IsActive = false;
-            }
-
             await LogActionAsync(
                 school.Id,
                 "SCHOOL_DELETED",
                 "School",
                 school.Id.ToString(),
-                $"{school.Name} ({school.Code}) okulu silindi (arşive alındı)."
+                $"{school.Name} ({school.Code}) okulu ve ilişkili verileri silindi."
             );
 
-            await _context.SaveChangesAsync();
-            return Ok(new { message = "Okul başarıyla silindi.", deletedSchoolId = school.Id });
+            // Okulu ve bağlı tüm verileri cascade temizle (çoklu okulu olan öğretmenler korunur)
+            var purgeResult = await _purgeService.PurgeSchoolAsync(_context, schoolId);
+
+            return Ok(new { 
+                message = "Okul ve ilgili tüm verileri başarıyla silindi.", 
+                deletedSchoolId = schoolId,
+                details = purgeResult
+            });
         }
 
         // Okul Ortak Gemini API Key ve Model Güncelleme
@@ -711,17 +893,14 @@ namespace OgretmenAjanda.Api.Controllers
             if (teacher == null) return NotFound(new { message = "Öğretmen bulunamadı." });
 
             _context.Users.Remove(teacher);
-            _context.AuditLogs.Add(new AuditLog
-            {
-                SchoolId = teacher.SchoolId,
-                UserId = CurrentUserId,
-                UserRole = CurrentUserRole,
-                ActionType = "TEACHER_DELETED",
-                EntityName = "User",
-                EntityId = teacher.Id.ToString(),
-                DetailsJson = $"{teacher.FullName} ({teacher.Username}) silindi.",
-                Timestamp = DateTime.UtcNow
-            });
+            await LogActionAsync(
+                teacher.SchoolId,
+                "TEACHER_DELETED",
+                "User",
+                teacher.Id.ToString(),
+                $"{teacher.FullName} ({teacher.Username} - {teacher.Role}) okul kadrosundan silindi.",
+                $"{{\"branch\": \"{teacher.Branch ?? ""}\", \"email\": \"{teacher.Email ?? ""}\"}}"
+            );
 
             await _context.SaveChangesAsync();
             return Ok(new { message = "Öğretmen başarıyla silindi." });
@@ -745,11 +924,28 @@ namespace OgretmenAjanda.Api.Controllers
 
             if (!string.IsNullOrEmpty(request.FullName)) teacher.FullName = request.FullName.Trim();
             if (request.Branch != null) teacher.Branch = request.Branch.Trim();
+            if (request.CounselorClass != null) teacher.CounselorClass = request.CounselorClass.Trim();
             if (!string.IsNullOrEmpty(request.Role)) teacher.Role = request.Role;
             if (request.PermissionsJson != null) teacher.PermissionsJson = request.PermissionsJson;
             if (request.Phone != null) teacher.Phone = request.Phone.Trim();
             if (request.Email != null) teacher.Email = request.Email.Trim();
             if (request.AssignedClassesJson != null) teacher.AssignedClassesJson = request.AssignedClassesJson;
+            if (request.AssignedLessonsJson != null) teacher.AssignedLessonsJson = request.AssignedLessonsJson;
+
+            // Okul bağı ve Müşteri No güvencesi (İdareci yapıldığında okul bağının kopmaması için)
+            if (teacher.SchoolId.HasValue && (string.IsNullOrEmpty(teacher.CustomerId) || string.IsNullOrEmpty(teacher.RelationId)))
+            {
+                var sch = await _context.Schools.FindAsync(teacher.SchoolId.Value);
+                if (sch != null)
+                {
+                    if (string.IsNullOrEmpty(teacher.CustomerId)) teacher.CustomerId = sch.CustomerId;
+                    if (string.IsNullOrEmpty(teacher.RelationId)) teacher.RelationId = sch.RelationId;
+                }
+            }
+            if (teacher.SchoolId.HasValue && string.IsNullOrEmpty(teacher.AssignedSchoolIdsJson))
+            {
+                teacher.AssignedSchoolIdsJson = System.Text.Json.JsonSerializer.Serialize(new List<string> { teacher.SchoolId.Value.ToString() });
+            }
 
             await LogActionAsync(
                 teacher.SchoolId,
@@ -774,11 +970,19 @@ namespace OgretmenAjanda.Api.Controllers
             var newPass = !string.IsNullOrEmpty(req?.NewPassword) ? req.NewPassword : "1234";
             teacher.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPass);
 
+            await LogActionAsync(
+                teacher.SchoolId,
+                "PASSWORD_RESET",
+                "User",
+                teacher.Id.ToString(),
+                $"{teacher.FullName} ({teacher.Username} - {teacher.Role}) öğretmen şifresi sıfırlandı/güncellendi."
+            );
+
             await _context.SaveChangesAsync();
             return Ok(new { message = $"Şifre başarıyla güncellendi: {newPass}", password = newPass });
         }
 
-        // Öğrenci & Veli Şifre Sıfırlama
+        // Öğrenci Şifre Sıfırlama
         [HttpPost("{schoolId}/students/{studentId}/reset-password")]
         public async Task<IActionResult> ResetStudentPassword(Guid schoolId, Guid studentId, [FromBody] ResetPasswordRequest? req)
         {
@@ -793,7 +997,7 @@ namespace OgretmenAjanda.Api.Controllers
             var student = await _context.Students.FirstOrDefaultAsync(s => s.Id == studentId && s.SchoolId == schoolId);
             if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
 
-            var defaultPassword = $"aaaa_{student.StudentNumber.Trim()}";
+            var defaultPassword = $"ooo_{student.StudentNumber.Trim()}";
             var newPass = !string.IsNullOrWhiteSpace(req?.NewPassword) ? req.NewPassword.Trim() : defaultPassword;
 
             var studentUser = await _context.Users
@@ -821,6 +1025,7 @@ namespace OgretmenAjanda.Api.Controllers
                 studentUser.IsActive = true;
             }
 
+            student.StudentCustomPassword = (newPass == defaultPassword ? null : newPass);
             await _context.SaveChangesAsync();
 
             await LogActionAsync(
@@ -828,14 +1033,66 @@ namespace OgretmenAjanda.Api.Controllers
                 "STUDENT_PASSWORD_RESET",
                 "Student",
                 student.Id.ToString(),
-                $"Öğrenci/Veli şifresi sıfırlandı: {student.FullName} (No: {student.StudentNumber})",
+                $"Öğrenci şifresi güncellendi: {student.FullName} (No: {student.StudentNumber})",
                 $"{{\"studentNumber\": \"{student.StudentNumber}\", \"isDefault\": {((newPass == defaultPassword) ? "true" : "false")}}}"
             );
 
             return Ok(new
             {
                 success = true,
-                message = $"Öğrenci/Veli şifresi başarıyla güncellendi: {newPass}",
+                message = $"Öğrenci şifresi başarıyla güncellendi: {newPass}",
+                password = newPass,
+                studentNumber = student.StudentNumber,
+                defaultPassword = defaultPassword
+            });
+        }
+
+        // Veli Şifre Sıfırlama
+        [HttpPost("{schoolId}/students/{studentId}/reset-parent-password")]
+        public async Task<IActionResult> ResetParentPassword(Guid schoolId, Guid studentId, [FromBody] ResetPasswordRequest? req)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (school.AdminUserId != CurrentUserId && CurrentUserRole != UserRoles.SuperAdmin)
+            {
+                return Forbid();
+            }
+
+            var student = await _context.Students.FirstOrDefaultAsync(s => s.Id == studentId && s.SchoolId == schoolId);
+            if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
+
+            var defaultPassword = $"vvv_{student.StudentNumber.Trim()}";
+            var newPass = !string.IsNullOrWhiteSpace(req?.NewPassword) ? req.NewPassword.Trim() : defaultPassword;
+
+            student.ParentPasswordHash = BCrypt.Net.BCrypt.HashPassword(newPass);
+            student.ParentCustomPassword = (newPass == defaultPassword ? null : newPass);
+
+            // Veli user varsa onun da şifresini güncelle
+            var parentUsername = $"v_{student.StudentNumber.Trim()}";
+            var parentUser = await _context.Users
+                .FirstOrDefaultAsync(u => u.SchoolId == schoolId && u.Username == parentUsername);
+            if (parentUser != null)
+            {
+                parentUser.PasswordHash = student.ParentPasswordHash;
+                parentUser.IsActive = true;
+            }
+
+            await _context.SaveChangesAsync();
+
+            await LogActionAsync(
+                schoolId,
+                "PARENT_PASSWORD_RESET",
+                "Student",
+                student.Id.ToString(),
+                $"Veli şifresi güncellendi: {student.FullName} Velisi (Öğrenci No: {student.StudentNumber})",
+                $"{{\"studentNumber\": \"{student.StudentNumber}\", \"isDefault\": {((newPass == defaultPassword) ? "true" : "false")}}}"
+            );
+
+            return Ok(new
+            {
+                success = true,
+                message = $"Veli şifresi başarıyla güncellendi: {newPass}",
                 password = newPass,
                 studentNumber = student.StudentNumber,
                 defaultPassword = defaultPassword
@@ -1014,6 +1271,7 @@ namespace OgretmenAjanda.Api.Controllers
         {
             var items = await _context.SchoolLessons.Where(l => l.SchoolId == schoolId).ToListAsync();
             _context.SchoolLessons.RemoveRange(items);
+            await LogActionAsync(schoolId, "ALL_LESSONS_DELETED", "SchoolLesson", null, $"Tüm ders tanımları silindi ({items.Count} adet).");
             await _context.SaveChangesAsync();
             return Ok(new { message = $"{items.Count} adet ders başarıyla silindi." });
         }
@@ -1024,6 +1282,7 @@ namespace OgretmenAjanda.Api.Controllers
         {
             var items = await _context.SchoolClasses.Where(c => c.SchoolId == schoolId).ToListAsync();
             _context.SchoolClasses.RemoveRange(items);
+            await LogActionAsync(schoolId, "ALL_CLASSES_DELETED", "SchoolClass", null, $"Tüm sınıf/şube kayıtları silindi ({items.Count} adet).");
             await _context.SaveChangesAsync();
             return Ok(new { message = $"{items.Count} adet sınıf/şube başarıyla silindi." });
         }
@@ -1036,6 +1295,7 @@ namespace OgretmenAjanda.Api.Controllers
                 .Where(u => u.SchoolId == schoolId && (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff))
                 .ToListAsync();
             _context.Users.RemoveRange(teachers);
+            await LogActionAsync(schoolId, "ALL_TEACHERS_DELETED", "User", null, $"Tüm öğretmen kadrosu silindi ({teachers.Count} adet).");
             await _context.SaveChangesAsync();
             return Ok(new { message = $"{teachers.Count} adet öğretmen başarıyla silindi." });
         }
@@ -1118,6 +1378,445 @@ namespace OgretmenAjanda.Api.Controllers
 
             return File(content, contentType, fileName);
         }
+
+        public static string GenerateDefaultTeacherUsername(string fullName)
+        {
+            if (string.IsNullOrWhiteSpace(fullName)) return "ogretmen";
+
+            var clean = fullName.Trim().ToLowerInvariant()
+                .Replace("ı", "i")
+                .Replace("ğ", "g")
+                .Replace("ü", "u")
+                .Replace("ş", "s")
+                .Replace("ö", "o")
+                .Replace("ç", "c");
+
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"[^a-z\s]", " ").Trim();
+            var parts = clean.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts.Length == 0) return "ogretmen";
+            if (parts.Length == 1) return parts[0];
+            if (parts.Length == 2) return $"{parts[0]}.{parts[1]}";
+
+            // 3 veya daha fazla isim: örn. "Ahmet Can Yılmaz" -> "ahmetcan.yilmaz"
+            var firstName = string.Join("", parts.Take(parts.Length - 1));
+            var lastName = parts.Last();
+            return $"{firstName}.{lastName}";
+        }
+
+        private async Task<string> GenerateUniqueTeacherUsernameAsync(string fullName, Guid? excludeUserId = null)
+        {
+            var baseUsername = GenerateDefaultTeacherUsername(fullName);
+            var username = baseUsername;
+            var counter = 1;
+
+            while (await _context.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower() && (!excludeUserId.HasValue || u.Id != excludeUserId.Value)))
+            {
+                username = $"{baseUsername}{counter++}";
+            }
+
+            return username;
+        }
+
+        private static bool IsTeacherNameMatch(string? name1, string? name2)
+        {
+            if (string.IsNullOrWhiteSpace(name1) || string.IsNullOrWhiteSpace(name2)) return false;
+
+            var norm1 = NormalizeTurkishPersonName(name1);
+            var norm2 = NormalizeTurkishPersonName(name2);
+
+            if (norm1 == norm2) return true;
+
+            var parts1 = norm1.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var parts2 = norm2.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (parts1.Length >= 2 && parts2.Length >= 2)
+            {
+                var lastName1 = parts1[^1];
+                var lastName2 = parts2[^1];
+
+                if (lastName1 == lastName2)
+                {
+                    var first1 = parts1[0];
+                    var first2 = parts2[0];
+                    if (first1 == first2 || 
+                        (first1.Length == 1 && first2.StartsWith(first1)) || 
+                        (first2.Length == 1 && first1.StartsWith(first2)))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static string NormalizeTurkishPersonName(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+
+            var clean = raw.Trim();
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\b(öğr|öğrt|uzm|dr|prof|gör)\.?\b", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            var trCulture = new System.Globalization.CultureInfo("tr-TR");
+            clean = clean.ToLower(trCulture);
+
+            clean = clean
+                .Replace("ç", "c")
+                .Replace("ğ", "g")
+                .Replace("ı", "i")
+                .Replace("i", "i")
+                .Replace("ö", "o")
+                .Replace("ş", "s")
+                .Replace("ü", "u");
+
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"[^\w\s]", "");
+            clean = System.Text.RegularExpressions.Regex.Replace(clean, @"\s+", " ").Trim();
+
+            return clean;
+        }
+
+        private static int NormalizeDayOfWeekInt(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return 1;
+            var t = raw.Trim().ToLowerInvariant();
+            if (int.TryParse(t, out var n) && n >= 1 && n <= 7) return n;
+            if (t.Contains("pazartesi") || t.Contains("pzt")) return 1;
+            if (t.Contains("salı") || t.Contains("sali") || t.Contains("sal")) return 2;
+            if (t.Contains("çarşamba") || t.Contains("carsamba") || t.Contains("çar")) return 3;
+            if (t.Contains("perşembe") || t.Contains("persembe") || t.Contains("per")) return 4;
+            if (t.Contains("cuma") || t.Contains("cum")) return 5;
+            if (t.Contains("cumartesi") || t.Contains("cts")) return 6;
+            if (t.Contains("pazar")) return 7;
+            return 1;
+        }
+
+        // --- NÖBETÇİ ÖĞRETMEN YÖNETİMİ ---
+        [HttpGet("{schoolId}/duties")]
+        public async Task<IActionResult> GetSchoolDuties(Guid schoolId)
+        {
+            var duties = await _context.TeacherDuties
+                .Where(d => d.SchoolId == schoolId)
+                .OrderBy(d => d.DayOfWeek)
+                .ThenBy(d => d.TeacherName)
+                .ToListAsync();
+
+            var result = duties.Select(d => new
+            {
+                d.Id,
+                d.SchoolId,
+                d.TeacherName,
+                d.DutyPlace,
+                DayOfWeek = NormalizeDayOfWeekInt(d.DayOfWeek),
+                d.Date,
+                d.CreatedAt
+            });
+
+            return Ok(result);
+        }
+
+        [HttpPost("{schoolId}/duties/batch")]
+        public async Task<IActionResult> BatchSaveDuties(Guid schoolId, [FromBody] System.Text.Json.JsonElement body)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            bool overwrite = true;
+            System.Text.Json.JsonElement dutiesElement;
+
+            if (body.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                dutiesElement = body;
+            }
+            else if (body.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                if (body.TryGetProperty("overwriteExisting", out var ow) || body.TryGetProperty("OverwriteExisting", out ow))
+                {
+                    overwrite = ow.ValueKind == System.Text.Json.JsonValueKind.True;
+                }
+                if (body.TryGetProperty("duties", out var dt) || body.TryGetProperty("Duties", out dt))
+                {
+                    dutiesElement = dt;
+                }
+                else
+                {
+                    dutiesElement = body;
+                }
+            }
+            else
+            {
+                return BadRequest(new { message = "Geçersiz veri formatı." });
+            }
+
+            if (overwrite)
+            {
+                var existing = _context.TeacherDuties.Where(d => d.SchoolId == schoolId);
+                _context.TeacherDuties.RemoveRange(existing);
+            }
+
+            int count = 0;
+            if (dutiesElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var item in dutiesElement.EnumerateArray())
+                {
+                    string teacherName = "";
+                    if (item.TryGetProperty("teacherName", out var tn) || item.TryGetProperty("TeacherName", out tn))
+                    {
+                        teacherName = tn.GetString() ?? "";
+                    }
+                    if (string.IsNullOrWhiteSpace(teacherName)) continue;
+
+                    string dutyPlace = "Genel Nöbet";
+                    if (item.TryGetProperty("dutyPlace", out var dp) || item.TryGetProperty("DutyPlace", out dp))
+                    {
+                        dutyPlace = dp.GetString() ?? "Genel Nöbet";
+                    }
+
+                    string dayOfWeek = "1";
+                    if (item.TryGetProperty("dayOfWeek", out var dw) || item.TryGetProperty("DayOfWeek", out dw))
+                    {
+                        if (dw.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        {
+                            dayOfWeek = dw.GetInt32().ToString();
+                        }
+                        else if (dw.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            dayOfWeek = dw.GetString() ?? "1";
+                        }
+                    }
+
+                    int normalizedDay = NormalizeDayOfWeekInt(dayOfWeek);
+
+                    string? date = null;
+                    if (item.TryGetProperty("date", out var dtVal) || item.TryGetProperty("Date", out dtVal))
+                    {
+                        date = dtVal.GetString();
+                    }
+
+                    _context.TeacherDuties.Add(new TeacherDuty
+                    {
+                        Id = Guid.NewGuid(),
+                        SchoolId = schoolId,
+                        TeacherName = teacherName.Trim(),
+                        DutyPlace = !string.IsNullOrWhiteSpace(dutyPlace) ? dutyPlace.Trim() : "Genel Nöbet",
+                        DayOfWeek = normalizedDay.ToString(),
+                        Date = date?.Trim(),
+                        CreatedAt = DateTime.UtcNow
+                    });
+                    count++;
+                }
+            }
+
+            await LogActionAsync(schoolId, "DUTIES_SAVED", "TeacherDuty", null, $"{count} adet nöbetçi öğretmen kaydı güncellendi.");
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, count, message = $"{count} adet nöbetçi öğretmen başarıyla kaydedildi." });
+        }
+
+        [HttpPost("{schoolId}/duties")]
+        public async Task<IActionResult> SaveDuty(Guid schoolId, [FromBody] System.Text.Json.JsonElement request)
+        {
+            string teacherName = "";
+            if (request.TryGetProperty("teacherName", out var tn) || request.TryGetProperty("TeacherName", out tn))
+                teacherName = tn.GetString() ?? "";
+
+            if (string.IsNullOrWhiteSpace(teacherName))
+                return BadRequest(new { message = "Öğretmen adı zorunludur." });
+
+            string dutyPlace = "Genel Nöbet";
+            if (request.TryGetProperty("dutyPlace", out var dp) || request.TryGetProperty("DutyPlace", out dp))
+                dutyPlace = dp.GetString() ?? "Genel Nöbet";
+
+            string dayOfWeek = "1";
+            if (request.TryGetProperty("dayOfWeek", out var dw) || request.TryGetProperty("DayOfWeek", out dw))
+            {
+                if (dw.ValueKind == System.Text.Json.JsonValueKind.Number)
+                    dayOfWeek = dw.GetInt32().ToString();
+                else if (dw.ValueKind == System.Text.Json.JsonValueKind.String)
+                    dayOfWeek = dw.GetString() ?? "1";
+            }
+            int normalizedDay = NormalizeDayOfWeekInt(dayOfWeek);
+
+            string? date = null;
+            if (request.TryGetProperty("date", out var dt) || request.TryGetProperty("Date", out dt))
+                date = dt.GetString();
+
+            Guid dutyId = Guid.NewGuid();
+            if (request.TryGetProperty("id", out var idProp) || request.TryGetProperty("Id", out idProp))
+            {
+                if (idProp.TryGetGuid(out var g) && g != Guid.Empty) dutyId = g;
+            }
+
+            var duty = await _context.TeacherDuties.FirstOrDefaultAsync(d => d.Id == dutyId && d.SchoolId == schoolId);
+            if (duty == null)
+            {
+                duty = new TeacherDuty
+                {
+                    Id = dutyId,
+                    SchoolId = schoolId,
+                    TeacherName = teacherName.Trim(),
+                    DutyPlace = !string.IsNullOrWhiteSpace(dutyPlace) ? dutyPlace.Trim() : "Genel Nöbet",
+                    DayOfWeek = normalizedDay.ToString(),
+                    Date = date?.Trim(),
+                    CreatedAt = DateTime.UtcNow
+                };
+                await _context.TeacherDuties.AddAsync(duty);
+            }
+            else
+            {
+                duty.TeacherName = teacherName.Trim();
+                duty.DutyPlace = !string.IsNullOrWhiteSpace(dutyPlace) ? dutyPlace.Trim() : "Genel Nöbet";
+                duty.DayOfWeek = normalizedDay.ToString();
+                duty.Date = date?.Trim();
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, duty = new { duty.Id, duty.TeacherName, duty.DutyPlace, DayOfWeek = normalizedDay, duty.Date } });
+        }
+
+        [HttpDelete("{schoolId}/duties/{dutyId}")]
+        public async Task<IActionResult> DeleteDuty(Guid schoolId, Guid dutyId)
+        {
+            var duty = await _context.TeacherDuties.FirstOrDefaultAsync(d => d.Id == dutyId && d.SchoolId == schoolId);
+            if (duty != null)
+            {
+                _context.TeacherDuties.Remove(duty);
+                await _context.SaveChangesAsync();
+            }
+            return Ok(new { success = true });
+        }
+
+        // ---------------------------------------------------------
+        // OKUL TAM ANLIK GÖRÜNTÜSÜ (OFFLINE-FIRST / SNAPSHOT SYNC)
+        // ---------------------------------------------------------
+        [HttpGet("{schoolId}/snapshot")]
+        public async Task<IActionResult> GetSchoolSnapshot(Guid schoolId)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            var customerId = school.CustomerId;
+            var relationId = school.RelationId;
+            var schoolIdStr = schoolId.ToString();
+
+            var teachers = await _context.Users
+                .AsNoTracking()
+                .Where(u =>
+                    (u.SchoolId == schoolId ||
+                     (!string.IsNullOrEmpty(u.AssignedSchoolIdsJson) && u.AssignedSchoolIdsJson.Contains(schoolIdStr)) ||
+                     (!u.SchoolId.HasValue && (
+                        (!string.IsNullOrEmpty(customerId) && u.CustomerId == customerId) ||
+                        (!string.IsNullOrEmpty(relationId) && u.RelationId == relationId)
+                     ))) &&
+                    (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff)
+                )
+                .OrderBy(u => u.FullName)
+                .Select(u => new
+                {
+                    id = u.Id.ToString(),
+                    fullName = u.FullName,
+                    username = u.Username,
+                    branch = u.Branch ?? "",
+                    counselorClass = u.CounselorClass ?? "",
+                    phone = u.Phone ?? "",
+                    email = u.Email ?? "",
+                    role = u.Role,
+                    isActive = u.IsActive,
+                    lastLoginAt = u.LastLoginAt
+                })
+                .ToListAsync();
+
+            var classes = await _context.SchoolClasses
+                .AsNoTracking()
+                .Where(c => c.SchoolId == schoolId)
+                .OrderBy(c => c.Grade).ThenBy(c => c.Section)
+                .Select(c => new
+                {
+                    id = c.Id.ToString(),
+                    grade = c.Grade,
+                    section = c.Section,
+                    className = $"{c.Grade}-{c.Section}",
+                    name = $"{c.Grade}/{c.Section}"
+                })
+                .ToListAsync();
+
+            var lessons = await _context.SchoolLessons
+                .AsNoTracking()
+                .Where(l => l.SchoolId == schoolId)
+                .OrderBy(l => l.Name)
+                .Select(l => new
+                {
+                    id = l.Id.ToString(),
+                    name = l.Name,
+                    shortCode = l.ShortCode ?? "",
+                    grade = l.Grade ?? "",
+                    weeklyHours = l.WeeklyHours
+                })
+                .ToListAsync();
+
+            var schedules = await _context.ScheduleItems
+                .AsNoTracking()
+                .Where(s => s.SchoolId == schoolId)
+                .Select(s => new
+                {
+                    id = s.Id.ToString(),
+                    teacherId = s.TeacherId.HasValue ? s.TeacherId.Value.ToString() : null,
+                    teacherName = s.TeacherName ?? "",
+                    dayOfWeek = s.DayOfWeek,
+                    lessonHour = s.LessonHour,
+                    grade = s.Grade,
+                    section = s.Section,
+                    lessonName = s.LessonName,
+                    lessonCode = s.LessonCode ?? "",
+                    classroom = s.Classroom ?? ""
+                })
+                .ToListAsync();
+
+            var duties = await _context.TeacherDuties
+                .AsNoTracking()
+                .Where(d => d.SchoolId == schoolId)
+                .Select(d => new
+                {
+                    id = d.Id.ToString(),
+                    teacherName = d.TeacherName,
+                    dutyPlace = d.DutyPlace,
+                    dayOfWeek = NormalizeDayOfWeekInt(d.DayOfWeek),
+                    date = d.Date ?? ""
+                })
+                .ToListAsync();
+
+            var students = await _context.Students
+                .AsNoTracking()
+                .Where(s => s.SchoolId == schoolId)
+                .OrderBy(s => s.Grade).ThenBy(s => s.Section).ThenBy(s => s.StudentNumber)
+                .Select(s => new
+                {
+                    id = s.Id.ToString(),
+                    studentNumber = s.StudentNumber,
+                    fullName = s.FullName,
+                    grade = s.Grade ?? "",
+                    section = s.Section ?? "",
+                    photoPath = s.PhotoPath ?? "",
+                    parentName = s.ParentName ?? "",
+                    parentPhone = s.ParentPhone ?? "",
+                    studentPhone = s.StudentPhone ?? ""
+                })
+                .ToListAsync();
+
+            return Ok(new
+            {
+                success = true,
+                schoolId = school.Id.ToString(),
+                schoolName = school.Name,
+                dailyLessonHours = school.DailyLessonHours > 0 ? school.DailyLessonHours : 8,
+                teachers,
+                classes,
+                lessons,
+                schedules,
+                duties,
+                students,
+                syncedAt = DateTime.UtcNow.ToString("o")
+            });
+        }
     }
 
     public class CreateClassRequest
@@ -1150,12 +1849,27 @@ namespace OgretmenAjanda.Api.Controllers
         public int? DailyLessonHours { get; set; }
     }
 
+    public class TeacherDutyDto
+    {
+        public Guid? Id { get; set; }
+        public string TeacherName { get; set; } = string.Empty;
+        public string DutyPlace { get; set; } = string.Empty;
+        public string? DayOfWeek { get; set; }
+        public string? Date { get; set; }
+    }
+
+    public class BatchTeacherDutyRequest
+    {
+        public bool OverwriteExisting { get; set; } = true;
+        public List<TeacherDutyDto> Duties { get; set; } = new();
+    }
 
     public class UpdateTeacherStatusRequest
     {
         public bool IsActive { get; set; } = true;
         public string? Role { get; set; }
         public string? AssignedClassesJson { get; set; }
+        public string? AssignedLessonsJson { get; set; }
         public string? PermissionsJson { get; set; }
         public string? Branch { get; set; }
         public string? Phone { get; set; }
@@ -1174,9 +1888,30 @@ namespace OgretmenAjanda.Api.Controllers
         public string FullName { get; set; } = string.Empty;
         public string? Role { get; set; }
         public string? Branch { get; set; }
+        public string? CounselorClass { get; set; }
         public string? Phone { get; set; }
         public string? Email { get; set; }
         public string? AssignedClassesJson { get; set; }
+        public string? AssignedLessonsJson { get; set; }
         public string? PermissionsJson { get; set; }
+    }
+
+    public class BatchTeacherSyncItem
+    {
+        public string FullName { get; set; } = string.Empty;
+        public string? Username { get; set; }
+        public string? Branch { get; set; }
+        public string? CounselorClass { get; set; }
+        public string? Role { get; set; }
+        public string? Phone { get; set; }
+        public string? Email { get; set; }
+        public bool? IsActive { get; set; }
+        public string? AssignedClassesJson { get; set; }
+        public string? AssignedLessonsJson { get; set; }
+    }
+
+    public class BatchTeacherSyncRequest
+    {
+        public List<BatchTeacherSyncItem> Teachers { get; set; } = new();
     }
 }

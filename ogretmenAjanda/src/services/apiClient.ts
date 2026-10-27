@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 const isDev = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
 
@@ -19,10 +20,19 @@ export const getPlatformDefaultApiUrl = (): string => {
     return 'http://localhost:5079/api';
   }
 
-  // Mobil Geliştirme (Emülatör) Modu
+  // Mobil Geliştirme (Expo Go / Emülatör / BlueStacks / Gerçek Cihaz) Modu
   if (isDev) {
+    // Expo Go ile bağlanan bilgisayarın yerel IP adresini tespit et (BlueStacks, telefon ve tüm cihazlar için)
+    const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest2?.extra?.expoGo?.debuggerHost;
+    if (hostUri) {
+      const hostIp = hostUri.split(':')[0];
+      if (hostIp && hostIp !== 'localhost' && hostIp !== '127.0.0.1') {
+        return `http://${hostIp}:5079/api`;
+      }
+    }
+
     if (Platform.OS === 'android') {
-      // Android emülatörün bilgisayarın yerel sunucusuna (localhost) erişim köprüsü
+      // Android Studio QEMU fallback
       return 'http://10.0.2.2:5079/api';
     }
     return 'http://localhost:5079/api';
@@ -32,7 +42,7 @@ export const getPlatformDefaultApiUrl = (): string => {
   return 'https://ogretmenajanda.runasp.net/api';
 };
 
-// Varsayılan API URL'i: Emülatörde 10.0.2.2:5079, yerel webde localhost:5079, canlıda runasp.net
+// Varsayılan API URL'i
 export const DEFAULT_API_URL = getPlatformDefaultApiUrl();
 
 
@@ -63,6 +73,8 @@ export interface UserSession {
   geminiApiKey?: string;
   geminiModel?: string;
   licenseExpiresAt?: string;
+  assignedClasses?: string[] | string;
+  assignedLessons?: string[] | string;
   affiliatedSchools?: AffiliatedSchool[];
 }
 
@@ -137,11 +149,20 @@ export async function apiRequest<T = any>(
       headers['Content-Type'] = 'application/json';
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: isFormData ? body : body ? JSON.stringify(body) : undefined,
-    });
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 7000) : null;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        body: isFormData ? body : body ? JSON.stringify(body) : undefined,
+        signal: controller ? controller.signal : undefined,
+      });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
 
     const text = await response.text();
     let data: any;

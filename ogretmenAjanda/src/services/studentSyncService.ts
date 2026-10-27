@@ -4,6 +4,7 @@ import { getActiveSchool } from '../database/operations/schoolOperations';
 import { getStudentsByClass } from '../database/operations/studentOperations';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
+import { isTeacherMatch } from '../utils/teacherUtils';
 
 export interface ServerStudentItem {
   id?: string;
@@ -29,22 +30,43 @@ export interface SyncResult {
  * Sunucudaki öğrenci vesikalık fotoğrafını tam URL'e dönüştürür ve
  * yerel mobil cihazda çevrimdışı kullanım için kalıcı olarak indirip önbelleğe alır.
  */
-async function resolveAndDownloadStudentPhoto(photoPath?: string | null, studentNumber?: string): Promise<string | null> {
+export async function resolveAndDownloadStudentPhoto(photoPath?: string | null, studentNumber?: string): Promise<string | null> {
   if (!photoPath || !photoPath.trim()) return null;
   const cleanPath = photoPath.trim();
 
   try {
+    const safeNum = (studentNumber || 'unknown').replace(/[^a-zA-Z0-9]/g, '_');
+
+    // 1. Eğer görsel doğrudan Data URI (Base64) olarak gelmişse
+    if (cleanPath.startsWith('data:image')) {
+      if (Platform.OS === 'web') {
+        return cleanPath;
+      }
+      const photoDir = `${FileSystem.documentDirectory}student_photos/`;
+      const dirInfo = await FileSystem.getInfoAsync(photoDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(photoDir, { intermediates: true });
+      }
+      const localUri = `${photoDir}std_${safeNum}.jpg`;
+      const base64Data = cleanPath.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+      await FileSystem.writeAsStringAsync(localUri, base64Data, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      return localUri;
+    }
+
     const apiBase = await getBaseApiUrl();
     const origin = apiBase.replace(/\/api\/?$/, '');
-    const fullUrl = cleanPath.startsWith('http')
+    const rawFullUrl = cleanPath.startsWith('http')
       ? cleanPath
       : `${origin}${cleanPath.startsWith('/') ? '' : '/'}${cleanPath}`;
 
+    // Web platformunda doğrudan tam URL'i döndür
     if (Platform.OS === 'web') {
-      return fullUrl;
+      return encodeURI(rawFullUrl);
     }
 
-    // Mobil ortamda (Android/iOS) yerel kalıcı klasöre indir
+    // Mobil ortamda (Android/iOS) yerel kalıcı klasöre indir ve önbellekten kullan
     const photoDir = `${FileSystem.documentDirectory}student_photos/`;
     const dirInfo = await FileSystem.getInfoAsync(photoDir);
     if (!dirInfo.exists) {
@@ -53,9 +75,16 @@ async function resolveAndDownloadStudentPhoto(photoPath?: string | null, student
 
     const extMatch = cleanPath.match(/\.([a-zA-Z0-9]+)(?:\?.*)?$/);
     const ext = extMatch ? `.${extMatch[1]}` : '.jpg';
-    const safeNum = (studentNumber || 'unknown').replace(/[^a-zA-Z0-9]/g, '_');
     const localUri = `${photoDir}std_${safeNum}${ext}`;
 
+    // Dosya zaten yerelde varsa ve boyutu > 0 ise tekrar indirme, doğrudan yereli kullan!
+    const fileInfo = await FileSystem.getInfoAsync(localUri);
+    if (fileInfo.exists && (fileInfo as any).size > 0) {
+      return localUri;
+    }
+
+    // Yerelde yoksa sunucudan indir
+    const fullUrl = encodeURI(rawFullUrl);
     const downloadRes = await FileSystem.downloadAsync(fullUrl, localUri);
     if (downloadRes.status === 200) {
       return localUri;
@@ -300,30 +329,11 @@ export async function syncTeacherAssignedClassesAndStudents(
     const rawTeacherName = (await getActiveTeacherName()) || session?.fullName || session?.username || '';
     const cleanTeacherName = rawTeacherName.trim();
 
-    const normalizeText = (str: string) =>
-      (str || '')
-        .trim()
-        .toLowerCase()
-        .replace(/ı/g, 'i')
-        .replace(/ğ/g, 'g')
-        .replace(/ü/g, 'u')
-        .replace(/ş/g, 's')
-        .replace(/ö/g, 'o')
-        .replace(/ç/g, 'c')
-        .replace(/[^a-z0-9]/g, ' ')
-        .replace(/\s+/g, ' ');
-
-    const normTeacher = normalizeText(cleanTeacherName);
-    const teacherTokens = normTeacher.split(' ').filter((w) => w.length >= 2);
-
     const matchesTeacher = (target: string): boolean => {
       if (!target || !cleanTeacherName) return false;
-      const normTarget = normalizeText(target);
-      if (normTarget === normTeacher || normTarget.includes(normTeacher) || normTeacher.includes(normTarget)) {
-        return true;
-      }
-      return teacherTokens.some((tok) => normTarget.includes(tok));
+      return isTeacherMatch(cleanTeacherName, target);
     };
+
 
     const assignedClassNames = new Set<string>();
 
@@ -356,25 +366,9 @@ export async function syncTeacherAssignedClassesAndStudents(
       console.warn('Otomatik ders programı kontrolü uyarısı:', schedSyncErr);
     }
 
-    // 4. Yerel SQLite schedules tablosundan öğretmenin girdiği sınıfları topla
+    // 4. Şube kaynakları: YALNIZCA sunucudaki güncel çarşaf program ve profil atamaları esas alınır.
+    // Yerelde önceden kalmış eski artık programlar kesinlikle şube olarak eklenmez!
     const db = await getDB();
-    try {
-      const localSchedClasses = await db.getAllAsync<{ name: string }>(
-        `SELECT DISTINCT c.name 
-         FROM schedules s 
-         JOIN classes c ON c.id = s.class_id 
-         WHERE (c.school_id = ? OR s.school_id = ?) AND c.name IS NOT NULL`,
-        targetLocalSchoolId,
-        targetLocalSchoolId
-      );
-      for (const sc of localSchedClasses) {
-        if (sc.name && sc.name.trim()) {
-          addClassIfValid(sc.name);
-        }
-      }
-    } catch (dbErr) {
-      console.warn('Yerel program sınıfları okunurken hata:', dbErr);
-    }
 
     // 5. Sunucudaki Çarşaf Ders Programından gelen sınıflar (sync/schedules)
     if (schoolId) {
@@ -502,6 +496,7 @@ export async function syncTeacherAssignedClassesAndStudents(
             locClass.id
           );
           if ((noteCount?.count || 0) === 0 && (quizCount?.count || 0) === 0) {
+            await db.runAsync('DELETE FROM schedules WHERE class_id = ?', locClass.id);
             await db.runAsync('DELETE FROM students WHERE class_id = ?', locClass.id);
             await db.runAsync('DELETE FROM classes WHERE id = ?', locClass.id);
           }

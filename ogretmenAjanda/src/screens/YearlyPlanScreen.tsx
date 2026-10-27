@@ -117,6 +117,7 @@ export const YearlyPlanScreen: React.FC = () => {
   const [sheetPickerVisible, setSheetPickerVisible] = useState(false);
   const [sheetPickerSheets, setSheetPickerSheets] = useState<string[]>([]);
   const [pendingExcelAsset, setPendingExcelAsset] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+  const [currentMappingAsset, setCurrentMappingAsset] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
   const [pendingImportType, setPendingImportType] = useState<'mapping' | 'ai' | 'standard'>('mapping');
 
   // PDF Document State
@@ -612,6 +613,7 @@ export const YearlyPlanScreen: React.FC = () => {
     try {
       setLoadingExcel(true);
       if (pendingImportType === 'mapping') {
+        setCurrentMappingAsset(pendingExcelAsset);
         setExcelLoadingMsg(`"${selectedSheet}" sayfası ve yapay zeka önerileri taranıyor...`);
         const analysis = await analyzeUploadedDocument(pendingExcelAsset, selectedSheet);
         setDocAnalysis(analysis);
@@ -641,7 +643,23 @@ export const YearlyPlanScreen: React.FC = () => {
       Alert.alert('Sayfa Okuma Hatası', err?.message || 'Seçilen sayfa okunamadı.');
     } finally {
       setLoadingExcel(false);
-      setPendingExcelAsset(null);
+    }
+  };
+
+  // Dinamik Sütun Eşleştirme için Çalışma Sayfası (Sheet) Değiştirme
+  const handleSwitchSheetInMapping = async (sheetName: string) => {
+    if (!currentMappingAsset) return;
+    try {
+      setLoadingExcel(true);
+      setExcelLoadingMsg(`"${sheetName}" çalışma sayfası ve sütunları taranıyor...`);
+      const analysis = await analyzeUploadedDocument(currentMappingAsset, sheetName);
+      setDocAnalysis(analysis);
+      setUserMapping(analysis.suggestedMapping);
+      setParsedRows([]);
+    } catch (e: any) {
+      Alert.alert('Sayfa Değiştirme Hatası', e?.message || 'Seçilen sayfa okunamadı.');
+    } finally {
+      setLoadingExcel(false);
     }
   };
 
@@ -668,6 +686,7 @@ export const YearlyPlanScreen: React.FC = () => {
       }
 
       const asset = result.assets[0];
+      setCurrentMappingAsset(asset);
       const fileName = (asset.name || '').toLowerCase();
       if (fileName.endsWith('.doc') && !fileName.endsWith('.docx')) {
         setLoadingExcel(false);
@@ -991,7 +1010,11 @@ export const YearlyPlanScreen: React.FC = () => {
             <Text style={styles.manageLevelsBtnText}>Düzeyleri Yönet</Text>
           </TouchableOpacity>
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.levelScroll}>
+        <ScrollView
+          horizontal={Platform.OS !== 'web'}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={[styles.levelScroll, Platform.OS === 'web' && { flexWrap: 'wrap', flexDirection: 'row' }]}
+        >
           {gradeLevels.map((g) => {
             const isSel = selectedGradeLevel === g.level;
             return (
@@ -1011,31 +1034,72 @@ export const YearlyPlanScreen: React.FC = () => {
 
       {/* 2. Ders Seçicisi */}
       <View style={styles.courseChipsBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
-          {courses.length === 0 ? (
-            <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
-              <Text style={{ fontSize: 13, color: '#6B7280', fontStyle: 'italic' }}>
-                Bu okulda adınıza tanımlı ders bulunamadı
-              </Text>
-            </View>
-          ) : (
-            courses.map((crs) => {
-              const isSelected = selectedCourseId === crs.id;
-              return (
-                <TouchableOpacity
-                  key={crs.id}
-                  style={[styles.chip, isSelected && styles.chipActive]}
-                  onPress={() => handleSelectCourse(crs.id)}
-                >
-                  <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
-                    {crs.code ? `[${crs.code}] ` : ''}
-                    {crs.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })
-          )}
-        </ScrollView>
+        {Platform.OS === 'web' ? (
+          <View style={styles.webCourseList}>
+            {courses.length === 0 ? (
+              <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
+                <Text style={{ fontSize: 13, color: '#6B7280', fontStyle: 'italic' }}>
+                  Bu okulda adınıza tanımlı ders bulunamadı
+                </Text>
+              </View>
+            ) : (
+              courses.map((crs) => {
+                const isSelected = selectedCourseId === crs.id;
+                return (
+                  <TouchableOpacity
+                    key={crs.id}
+                    style={[styles.webCourseItem, isSelected && styles.webCourseItemActive]}
+                    onPress={() => handleSelectCourse(crs.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons
+                        name={isSelected ? "checkmark-circle" : "book-outline"}
+                        size={16}
+                        color={isSelected ? "#FFFFFF" : Colors.primary}
+                      />
+                      <Text style={[styles.webCourseItemText, isSelected && styles.webCourseItemTextActive]}>
+                        {crs.code ? `[${crs.code}] ` : ''}
+                        {crs.name}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <View style={styles.activeCourseBadge}>
+                        <Text style={styles.activeCourseBadgeText}>Aktif Plan</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </View>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
+            {courses.length === 0 ? (
+              <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
+                <Text style={{ fontSize: 13, color: '#6B7280', fontStyle: 'italic' }}>
+                  Bu okulda adınıza tanımlı ders bulunamadı
+                </Text>
+              </View>
+            ) : (
+              courses.map((crs) => {
+                const isSelected = selectedCourseId === crs.id;
+                return (
+                  <TouchableOpacity
+                    key={crs.id}
+                    style={[styles.chip, isSelected && styles.chipActive]}
+                    onPress={() => handleSelectCourse(crs.id)}
+                  >
+                    <Text style={[styles.chipText, isSelected && styles.chipTextActive]}>
+                      {crs.code ? `[${crs.code}] ` : ''}
+                      {crs.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </ScrollView>
+        )}
       </View>
 
       {/* 5. Yıllık Plan Listesi */}
@@ -1430,6 +1494,75 @@ export const YearlyPlanScreen: React.FC = () => {
                       </Text>
                     </View>
                   </View>
+
+                  {/* 📑 Çalışma Sayfası (Sheet) Seçici Barı (Çok Sheet'li Excel Dosyaları İçin) */}
+                  {docAnalysis.availableSheets && docAnalysis.availableSheets.length > 1 ? (
+                    <View style={styles.sheetSelectorBox}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Ionicons name="layers" size={16} color="#4F46E5" />
+                          <Text style={styles.sheetSelectorTitle}>
+                            Çalışma Sayfası (Sheet) Seçimi:
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (currentMappingAsset) {
+                              setPendingExcelAsset(currentMappingAsset);
+                              setPendingImportType('mapping');
+                              setSheetPickerSheets(docAnalysis.availableSheets || []);
+                              setSheetPickerVisible(true);
+                            }
+                          }}
+                          style={styles.sheetAllBtn}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="swap-horizontal" size={13} color="#4F46E5" />
+                          <Text style={styles.sheetAllBtnText}>Tüm Sayfalar ({docAnalysis.availableSheets.length})</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 2 }}>
+                        {docAnalysis.availableSheets.map((sName) => {
+                          const isActive = docAnalysis.sheetName === sName;
+                          return (
+                            <TouchableOpacity
+                              key={sName}
+                              style={[styles.sheetTab, isActive && styles.sheetTabActive]}
+                              onPress={() => handleSwitchSheetInMapping(sName)}
+                              activeOpacity={0.7}
+                            >
+                              {isActive && <Ionicons name="checkmark-circle" size={14} color="#FFFFFF" />}
+                              <Text style={[styles.sheetTabText, isActive && styles.sheetTabTextActive]}>
+                                {sName}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  ) : docAnalysis.sheetName ? (
+                    <View style={{
+                      backgroundColor: '#F8FAFC',
+                      borderWidth: 1,
+                      borderColor: '#E2E8F0',
+                      borderRadius: 10,
+                      padding: 10,
+                      marginBottom: 12,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name="layers-outline" size={16} color="#4F46E5" />
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                          Çalışma Sayfası (Sheet): <Text style={{ color: '#4F46E5', fontWeight: '800' }}>{docAnalysis.sheetName}</Text>
+                        </Text>
+                      </View>
+                      <View style={{ backgroundColor: '#EEF2FF', borderWidth: 1, borderColor: '#C7D2FE', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#4338CA' }}>Tek Sayfa (Otomatik Seçildi)</Text>
+                      </View>
+                    </View>
+                  ) : null}
 
                   {docAnalysis.aiReason ? (
                     <View style={styles.aiSuggestionNotice}>
@@ -2088,6 +2221,46 @@ const styles = StyleSheet.create({
     color: Colors.primaryDark,
     fontWeight: '700',
   },
+  webCourseList: {
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  webCourseItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: Colors.cardSubtle,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  webCourseItemActive: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primaryDark,
+  },
+  webCourseItemText: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  webCourseItemTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  activeCourseBadge: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  activeCourseBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   listHeaderWrapper: {
     paddingBottom: 4,
   },
@@ -2660,6 +2833,57 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#059669',
+  },
+  sheetSelectorBox: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  sheetSelectorTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  sheetAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3.5,
+    borderRadius: 6,
+  },
+  sheetAllBtnText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  sheetTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  sheetTabActive: {
+    backgroundColor: '#4F46E5',
+    borderColor: '#4338CA',
+  },
+  sheetTabText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  sheetTabTextActive: {
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
   mappingContainer: {
     paddingVertical: 4,

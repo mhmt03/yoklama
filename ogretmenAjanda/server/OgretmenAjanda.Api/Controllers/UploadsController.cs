@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OgretmenAjanda.Api.Data;
 using OgretmenAjanda.Api.Models;
+using OgretmenAjanda.Api.Services;
 
 namespace OgretmenAjanda.Api.Controllers
 {
@@ -20,13 +21,16 @@ namespace OgretmenAjanda.Api.Controllers
     {
         private readonly IWebHostEnvironment _env;
         private readonly AppDbContext _context;
+        private readonly IAuditLogService _auditLogService;
 
-        public UploadsController(IWebHostEnvironment env, AppDbContext context)
+        public UploadsController(IWebHostEnvironment env, AppDbContext context, IAuditLogService auditLogService)
         {
             _env = env;
             _context = context;
+            _auditLogService = auditLogService;
         }
 
+        private Guid CurrentUserId => Guid.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? Guid.Empty.ToString());
         private string CurrentUserRole => User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? string.Empty;
         private bool IsTeacher => string.Equals(CurrentUserRole, UserRoles.Teacher, StringComparison.OrdinalIgnoreCase);
 
@@ -220,6 +224,31 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             await _context.SaveChangesAsync();
+
+            if (successCount > 0 && effectiveSchoolId != Guid.Empty)
+            {
+                try
+                {
+                    var user = await _context.Users.FindAsync(CurrentUserId);
+                    var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+                    await _auditLogService.LogAsync(
+                        _context,
+                        effectiveSchoolId,
+                        CurrentUserId,
+                        user?.Username,
+                        user?.FullName,
+                        CurrentUserRole,
+                        "PHOTOS_UPLOADED",
+                        "Student",
+                        null,
+                        $"{successCount} adet öğrenci vesikalık fotoğrafı sisteme aktarıldı/güncellendi.",
+                        $"{{\"successCount\": {successCount}, \"failedCount\": {failedCount}}}",
+                        clientIp
+                    );
+                    await _context.SaveChangesAsync();
+                }
+                catch {}
+            }
 
             return Ok(new
             {
