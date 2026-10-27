@@ -1,0 +1,472 @@
+@{
+    ViewData["Title"] = "Sınav Değerlendir";
+}
+
+<div class="container-fluid py-4">
+    <h2 class="mb-4"><i class="bi bi-file-earmark-bar-graph text-primary me-2"></i>Optik Sınav Değerlendirme</h2>
+
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+            <h5 class="card-title fw-bold">1. Dosya ve Parametre Seçimi</h5>
+        </div>
+        <div class="card-body">
+            <form id="degerlendirmeForm">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold">1. Optik TXT Dosyası</label>
+                        <input type="file" id="txtFile" class="form-control" accept=".txt" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold">2. Uygulanan Sınav</label>
+                        <select id="sinavId" class="form-select" required onchange="checkEslesme()">
+                            <option value="">-- Sınav Seçin --</option>
+                            @foreach (var sinav in ViewBag.Sinavlar)
+                            {
+                                <option value="@sinav.Id">@sinav.SinavAdi (@sinav.UygulamaTarihi.ToString("dd.MM.yyyy"))</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold">3. Kullanılan Optik Form</label>
+                        <select id="formId" class="form-select" required onchange="checkEslesme()">
+                            <option value="">-- Form Seçin --</option>
+                            @foreach (var form in ViewBag.Formlar)
+                            {
+                                <option value="@form.Id">@form.FormAdi</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-primary w-100" id="btnDegerlendir" disabled>
+                            <i class="bi bi-play-fill me-1"></i> Değerlendir
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Dinamik Eşleştirme Alanı -->
+                <div id="eslesmeContainer" class="mt-4 p-3 bg-light border rounded" style="display: none;">
+                    <h6 class="fw-bold text-primary mb-3"><i class="bi bi-link-45deg me-2"></i>Ders Eşleştirmeleri</h6>
+                    <p class="small text-muted mb-3">Lütfen sınavdaki derslerin, seçtiğiniz optik formda hangi bölüme denk geldiğini seçiniz.</p>
+                    <div class="row g-3" id="eslesmeRow">
+                        <!-- Dinamik Selectbox'lar buraya gelecek -->
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Sonuçlar Bölümü -->
+    <div class="card shadow-sm border-0" id="sonuclarCard" style="display: none;">
+        <div class="card-header bg-white border-bottom-0 pt-4 d-flex justify-content-between align-items-center">
+            <h5 class="card-title fw-bold mb-0">2. Değerlendirme Önizlemesi</h5>
+            <button type="button" class="btn btn-success" id="btnKaydet">
+                <i class="bi bi-save me-1"></i> Sonuçları Veritabanına Kaydet
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-warning" id="notFoundsAlert" style="display:none;">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i><strong>Dikkat!</strong> Bazı öğrenciler veritabanında bulunamadı. Bu satırlar kaydedilmeyecektir. Tablodan "Durum" sütununu kontrol edin.
+            </div>
+
+            <div id="notFoundsAlert" class="alert alert-danger" style="display:none;">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i> Sistemde kayıtlı olmayan (veya numarası hatalı kodlanmış) öğrenciler bulundu! Lütfen aşağıdaki tablodan kırmızı <strong>Kayıtsız</strong> etiketli satırlara tıklayarak doğru öğrenciyle eşleştirin.
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-striped table-hover align-middle w-100" id="sonuclarTable">
+                    <thead class="table-light">
+                        <tr id="tableHeadRow">
+                            <!-- Dinamik olarak doldurulacak -->
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                        <!-- Dinamik olarak doldurulacak -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Yükleniyor Overlay -->
+<div id="loadingOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
+    <div class="spinner-border text-light" style="width: 3rem; height: 3rem;" role="status">
+        <span class="visually-hidden">Yükleniyor...</span>
+    </div>
+</div>
+
+<!-- Düzeltme Modalı -->
+<div class="modal fade" id="duzeltmeModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-light">
+                <h5 class="modal-title text-danger"><i class="bi bi-pencil-square me-2"></i>Satır Düzeltme</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editRowIndex">
+                
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Okunan Öğrenci No (Hatalı Olabilir)</label>
+                        <input type="text" id="editOgrenciNo" class="form-control text-danger fw-bold" readonly>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold text-success">Sistemden Doğru Öğrenciyi Seçin</label>
+                        <select id="editOgrenciSecim" class="form-select">
+                            <option value="">-- Öğrenci Seçin --</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Kitapçık Türü</label>
+                        <select id="editKitapcik" class="form-select">
+                            <option value="">Belirtilmemiş</option>
+                            <option value="A">A Kitapçığı</option>
+                            <option value="B">B Kitapçığı</option>
+                            <option value="C">C Kitapçığı</option>
+                            <option value="D">D Kitapçığı</option>
+                        </select>
+                    </div>
+                </div>
+
+                <hr>
+                <h6 class="fw-bold mb-3">Öğrenci Kodlamaları</h6>
+                <div id="editDerslerContainer" class="row g-3">
+                    <!-- Dinamik Ders İnputları -->
+                </div>
+            </div>
+            <div class="modal-footer d-flex justify-content-between">
+                <button type="button" class="btn btn-danger" onclick="silSatir()"><i class="bi bi-trash"></i> Satırı Sil</button>
+                <div>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="button" class="btn btn-primary" onclick="kaydetDuzeltme()">Uygula ve Yeniden Hesapla</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+    <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet" />
+
+    <script>
+        let islenmisSonuclar = null;
+        let dataTable = null;
+        let sinavDersleriRef = null;
+        let tumOgrenciler = [];
+        let duzeltmeModalObj = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            duzeltmeModalObj = new bootstrap.Modal(document.getElementById('duzeltmeModal'));
+            
+            // Öğrencileri listesi (Düzeltme modalı için)
+            try {
+                const res = await fetch('@Url.Action("GetOgrencilerListesi", "OptikModul")', { credentials: 'same-origin' });
+                tumOgrenciler = await res.json();
+                
+                let ogrSelect = document.getElementById('editOgrenciSecim');
+                tumOgrenciler.forEach(o => {
+                    ogrSelect.options.add(new Option(`${o.ogrenciNo} - ${o.adSoyad} (${o.sinif})`, o.ogrenciNo));
+                });
+            } catch (err) {
+                console.error("Öğrenci listesi yüklenemedi", err);
+            }
+        });
+
+        async function checkEslesme() {
+            const sinavId = document.getElementById('sinavId').value;
+            const formId = document.getElementById('formId').value;
+            
+            const eslesmeContainer = document.getElementById('eslesmeContainer');
+            const eslesmeRow = document.getElementById('eslesmeRow');
+            const btnDegerlendir = document.getElementById('btnDegerlendir');
+
+            if (!sinavId || !formId) {
+                eslesmeContainer.style.display = 'none';
+                btnDegerlendir.disabled = true;
+                return;
+            }
+
+            try {
+                const response = await fetch(`@Url.Action("GetSinavVeFormDersleri", "OptikModul")?sinavId=${sinavId}&formId=${formId}`, { credentials: 'same-origin' });
+                if (!response.ok) throw new Error("Hata oluştu");
+                
+                const data = await response.json();
+                
+                let html = '';
+                data.sinavDersleri.forEach(sinavDers => {
+                    html += `
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold text-dark">Sınavdaki Ders: ${sinavDers}</label>
+                            <select class="form-select eslesme-select" data-sinav-ders="${sinavDers}" required>
+                                <option value="">-- Formdaki Karşılığını Seçin --</option>
+                    `;
+                    data.formDersleri.forEach(formDers => {
+                        // Eğer isimleri birebir aynıysa otomatik seçili getir
+                        const selected = (sinavDers.toLowerCase() === formDers.toLowerCase()) ? "selected" : "";
+                        html += `<option value="${formDers}" ${selected}>${formDers}</option>`;
+                    });
+                    html += `</select></div>`;
+                });
+
+                eslesmeRow.innerHTML = html;
+                eslesmeContainer.style.display = 'block';
+                btnDegerlendir.disabled = false;
+
+            } catch (err) {
+                console.error(err);
+                eslesmeContainer.style.display = 'none';
+                btnDegerlendir.disabled = true;
+                alert("Dersler yüklenirken bir hata oluştu.");
+            }
+        }
+
+        document.getElementById('degerlendirmeForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            var sinavId = document.getElementById('sinavId').value;
+            var formId = document.getElementById('formId').value;
+            var fileInput = document.getElementById('txtFile');
+            
+            // Eşleştirmeleri JSON'a çevir
+            var eslesmeler = {};
+            document.querySelectorAll('.eslesme-select').forEach(sel => {
+                eslesmeler[sel.getAttribute('data-sinav-ders')] = sel.value;
+            });
+
+            var formData = new FormData();
+            formData.append('sinavId', sinavId);
+            formData.append('formId', formId);
+            formData.append('txtFile', fileInput.files[0]);
+            formData.append('dersEslesmeleriJson', JSON.stringify(eslesmeler));
+
+            document.getElementById('loadingOverlay').style.display = 'flex';
+
+            try {
+                const response = await fetch('@Url.Action("TxtOku", "OptikModul")', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                document.getElementById('loadingOverlay').style.display = 'none';
+
+                if (result.success) {
+                    islenmisSonuclar = result.data;
+                    sinavDersleriRef = result.sinavDersleri;
+                    tabloyuDoldur(result.data, result.sinavDersleri);
+                    document.getElementById('sonuclarCard').style.display = 'block';
+                } else {
+                    alert("Hata: " + result.message);
+                }
+            } catch (error) {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                alert("Sunucuya bağlanırken hata oluştu.");
+            }
+        });
+
+        function tabloyuDoldur(data, dersler) {
+            if (dataTable) {
+                dataTable.destroy();
+                document.getElementById('tableHeadRow').innerHTML = '';
+                document.getElementById('tableBody').innerHTML = '';
+            }
+
+            let hasNotFound = false;
+
+            let headerHtml = `
+                <th>Öğrenci No</th>
+                <th>Sınıf</th>
+                <th>Ad Soyad</th>
+                <th>Durum</th>
+                <th>Top. Doğru</th>
+                <th>Top. Yanlış</th>
+                <th>Top. Boş</th>
+                <th>Top. Net</th>
+            `;
+            dersler.forEach(d => {
+                headerHtml += `
+                    <th class="text-nowrap text-secondary">${d} Kodlaması</th>
+                    <th class="text-nowrap text-primary">${d} D/Y/B/N</th>
+                `;
+            });
+            document.getElementById('tableHeadRow').innerHTML = headerHtml;
+
+            let bodyHtml = '';
+            let rowIndex = 0;
+            data.forEach(row => {
+                if(row.durum === "Bulunamadı") hasNotFound = true;
+                
+                let durumBadge = row.durum === "Bulundu" ? 
+                    '<span class="badge bg-success">Bulundu</span>' : 
+                    '<span class="badge bg-danger">Kayıtsız</span>';
+
+                let tr = `<tr style="cursor:pointer;" onclick="satirSec(${rowIndex})" title="Düzeltmek için tıklayın">
+                    <td class="fw-bold">${row.ogrenciNo}</td>
+                    <td>${row.sinif}</td>
+                    <td>${row.adSoyad}</td>
+                    <td>${durumBadge}</td>
+                    <td class="text-success">${row.toplamDogru}</td>
+                    <td class="text-danger">${row.toplamYanlis}</td>
+                    <td class="text-secondary">${row.toplamBos}</td>
+                    <td class="fw-bold text-primary">${row.toplamNet}</td>
+                `;
+
+                dersler.forEach(d => {
+                    let dersSonuc = row.dersSonuclari.find(ds => ds.dersAdi === d);
+                    if (dersSonuc) {
+                        tr += `<td class="font-monospace small text-muted text-nowrap">${dersSonuc.kodlama}</td>`;
+                        tr += `<td class="text-nowrap"><small><span class="text-success">${dersSonuc.dogru}</span> / <span class="text-danger">${dersSonuc.yanlis}</span> / <span class="text-secondary">${dersSonuc.bos}</span> / <strong class="text-primary">${dersSonuc.net}</strong></small></td>`;
+                    } else {
+                        tr += `<td>-</td><td>-</td>`;
+                    }
+                });
+
+                tr += `</tr>`;
+                bodyHtml += tr;
+                rowIndex++;
+            });
+
+            document.getElementById('tableBody').innerHTML = bodyHtml;
+
+            if (hasNotFound) {
+                document.getElementById('notFoundsAlert').style.display = 'block';
+            } else {
+                document.getElementById('notFoundsAlert').style.display = 'none';
+            }
+
+            dataTable = $('#sonuclarTable').DataTable({
+                language: { url: 'https://cdn.datatables.net/plug-ins/1.13.6/i18n/tr.json' },
+                pageLength: 50,
+                destroy: true
+            });
+        }
+
+        function satirSec(index) {
+            let row = islenmisSonuclar[index];
+            if (!row) return;
+
+            document.getElementById('editRowIndex').value = index;
+            document.getElementById('editOgrenciNo').value = row.ogrenciNo;
+            document.getElementById('editOgrenciSecim').value = (row.durum === "Bulundu") ? row.ogrenciNo : "";
+            document.getElementById('editKitapcik').value = row.kitapcikTuru || "A";
+
+            let container = document.getElementById('editDerslerContainer');
+            let html = '';
+            
+            // Eğer islenmisSonuclar içinde dersSonuclari var
+            if (row.dersSonuclari && Array.isArray(row.dersSonuclari)) {
+                row.dersSonuclari.forEach(d => {
+                    html += `
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted">${d.dersAdi} Kodlaması</label>
+                        <input type="text" class="form-control font-monospace edit-kodlama" data-ders="${d.dersAdi}" value="${d.kodlama}" style="text-transform: uppercase;">
+                    </div>`;
+                });
+            }
+            container.innerHTML = html;
+
+            duzeltmeModalObj.show();
+        }
+
+        function silSatir() {
+            let index = parseInt(document.getElementById('editRowIndex').value);
+            if (confirm("Bu satırı silmek istediğinize emin misiniz?")) {
+                islenmisSonuclar.splice(index, 1);
+                tabloyuDoldur(islenmisSonuclar, sinavDersleriRef);
+                duzeltmeModalObj.hide();
+            }
+        }
+
+        async function kaydetDuzeltme() {
+            let index = parseInt(document.getElementById('editRowIndex').value);
+            let row = islenmisSonuclar[index];
+
+            let secilenOgrenci = document.getElementById('editOgrenciSecim').value;
+            if (!secilenOgrenci) {
+                alert("Lütfen sistemden doğru öğrenciyi seçin.");
+                return;
+            }
+            
+            let kitapcik = document.getElementById('editKitapcik').value;
+
+            let kodlamalar = {};
+            document.querySelectorAll('.edit-kodlama').forEach(inp => {
+                kodlamalar[inp.getAttribute('data-ders')] = inp.value.toUpperCase();
+            });
+
+            let sinavId = document.getElementById('sinavId').value;
+
+            let dto = {
+                SinavId: parseInt(sinavId),
+                YeniOgrenciNo: secilenOgrenci,
+                YeniKitapcikTuru: kitapcik,
+                Kodlamalar: kodlamalar,
+                OrijinalSatir: row.orijinalSatir
+            };
+
+            document.getElementById('loadingOverlay').style.display = 'flex';
+
+            try {
+                const response = await fetch('@Url.Action("RecalculateRow", "OptikModul")', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dto)
+                });
+                
+                const result = await response.json();
+                document.getElementById('loadingOverlay').style.display = 'none';
+
+                if (result.success) {
+                    islenmisSonuclar[index] = result.data;
+                    tabloyuDoldur(islenmisSonuclar, sinavDersleriRef);
+                    duzeltmeModalObj.hide();
+                } else {
+                    alert("Hata: " + result.message);
+                }
+            } catch (err) {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                console.error(err);
+                alert("Sunucu ile iletişimde hata.");
+            }
+        }
+
+        document.getElementById('btnKaydet').addEventListener('click', async function() {
+            if (!islenmisSonuclar || islenmisSonuclar.length === 0) return;
+
+            if(!confirm("Ekranda görünen geçerli sonuçları sisteme kaydetmek istediğinize emin misiniz? (Önceden kaydedilmiş olanlar silinip üzerine yazılacaktır.)")) return;
+
+            var sinavId = document.getElementById('sinavId').value;
+            
+            var formData = new FormData();
+            formData.append('sinavId', sinavId);
+            formData.append('sonuclarJson', JSON.stringify(islenmisSonuclar));
+
+            document.getElementById('loadingOverlay').style.display = 'flex';
+
+            try {
+                const response = await fetch('@Url.Action("SonuclariKaydet", "OptikModul")', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                document.getElementById('loadingOverlay').style.display = 'none';
+
+                if (result.success) {
+                    alert("Sonuçlar başarıyla veritabanına kaydedildi.");
+                    window.location.href = '@Url.Action("SinavSonuclari", "OptikModul")?sinavId=' + sinavId;
+                } else {
+                    alert("Kayıt sırasında hata oluştu: " + result.message);
+                }
+            } catch (error) {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                alert("Sunucuya bağlanırken hata oluştu.");
+            }
+        });
+    </script>
+}

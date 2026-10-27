@@ -23,23 +23,10 @@
                     <span asp-validation-for="PansiyonGorevlisiId" class="text-danger"></span>
                 </div>
 
-                <div class="row">
-                    <div class="col-md-6 mb-3">
-                        <label asp-for="BaslangicTarihi" class="form-label fw-bold"></label>
-                        <input asp-for="BaslangicTarihi" type="date" class="form-control" />
-                        <span asp-validation-for="BaslangicTarihi" class="text-danger"></span>
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label asp-for="BitisTarihi" class="form-label fw-bold"></label>
-                        <input asp-for="BitisTarihi" type="date" class="form-control" />
-                        <span asp-validation-for="BitisTarihi" class="text-danger"></span>
-                    </div>
-                </div>
-
                 <div class="mb-3">
-                    <label asp-for="Gun" class="form-label fw-bold">Nöbet Günü</label>
-                    <select asp-for="Gun" asp-items="ViewBag.Gunler" class="form-select"></select>
-                    <span asp-validation-for="Gun" class="text-danger"></span>
+                    <label asp-for="BaslangicTarihi" class="form-label fw-bold">Nöbet Tarihi</label>
+                    <input asp-for="BaslangicTarihi" type="date" class="form-control" />
+                    <span asp-validation-for="BaslangicTarihi" class="text-danger"></span>
                 </div>
 
                 <div class="mb-3">

@@ -1,0 +1,60 @@
+@model yoklamaWeb.Models.PlannerExam
+@{
+    ViewData["Title"] = "Yeni Yazılı Sınavı Planı Oluştur";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 650px;">
+    <div class="mb-3">
+        <a asp-action="YaziliExams" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Yazılı Planları Listesi
+        </a>
+    </div>
+
+    <div class="card shadow-sm border-0 rounded-3">
+        <div class="card-header bg-primary text-white py-3">
+            <h4 class="mb-0 fw-bold" style="font-family: 'Outfit', sans-serif;">
+                <i class="bi bi-pencil-square me-2"></i>Yeni Yazılı Oturma Planı Başlat
+            </h4>
+            <p class="small text-white-50 mb-0 mt-1">1. Adım: Sınavın adını, gününü ve 24 saat dilimine göre başlangıç saatini belirleyin.</p>
+        </div>
+        <div class="card-body p-4">
+            <form asp-action="CreateYaziliExam" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+
+                <div class="col-12">
+                    <label asp-for="Name" class="form-label fw-semibold">Sınav Adı / Başlığı</label>
+                    <input asp-for="Name" class="form-control" placeholder="Örn: 1. Dönem 1. Ortak Yazılı Sınavı (9-Mat, 10-Fiz, 11-Kim)" required autofocus />
+                    <div class="form-text">Planlanan ortak yazılı sınavının veya oturumunun açıklayıcı adı.</div>
+                    <span asp-validation-for="Name" class="text-danger small"></span>
+                </div>
+
+                <div class="col-md-6">
+                    <label asp-for="ExamDate" class="form-label fw-semibold">Sınav Tarihi</label>
+                    <input asp-for="ExamDate" class="form-control" type="date" required />
+                    <div class="form-text">Excel çıktısında sınav günü (Pazartesi, Salı...) otomatik yazılacaktır.</div>
+                    <span asp-validation-for="ExamDate" class="text-danger small"></span>
+                </div>
+
+                <div class="col-md-6">
+                    <label asp-for="StartTime" class="form-label fw-semibold">Sınav Başlangıç Saati (24s)</label>
+                    <input asp-for="StartTime" class="form-control" type="time" required value="09:40" />
+                    <div class="form-text">24 saat dilimine göre giriniz (Örn: 09:40 veya 14:15).</div>
+                    <span asp-validation-for="StartTime" class="text-danger small"></span>
+                </div>
+
+                <div class="col-12 mt-4 pt-3 border-top d-flex justify-content-between align-items-center">
+                    <a asp-action="YaziliExams" class="btn btn-outline-secondary">İptal</a>
+                    <button type="submit" class="btn btn-primary px-4">
+                        Devam Et: Şube & Ders Seçimi <i class="bi bi-arrow-right ms-1"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

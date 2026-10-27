@@ -1,0 +1,570 @@
+@model yoklamaWeb.Models.OptikSinav
+@{
+    ViewData["Title"] = "Sınav Düzenle";
+}
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0"><i class="bi bi-pencil-square text-primary me-2"></i>Sınav Düzenle: @Model.SinavAdi</h2>
+        <a asp-action="SinavOlustur" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i> Geri Dön
+        </a>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <form asp-action="SinavDuzenle" method="post" id="sinavDuzenleForm">
+                <input type="hidden" asp-for="Id" />
+                <input type="hidden" id="mevcutSiniflar" value="@Model.HedefSiniflar" />
+                <input type="hidden" id="mevcutOgrenciler" value="@Model.HedefOgrenciler" />
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-8">
+                        <label class="form-label fw-bold">Sınav Adı</label>
+                        <input type="text" asp-for="SinavAdi" class="form-control" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-bold">Uygulama Tarihi</label>
+                        <input type="date" name="UygulamaTarihi" class="form-control" required value="@Model.UygulamaTarihi.ToString("yyyy-MM-dd")">
+                    </div>
+                    
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Yanlış/Doğru Kuralı</label>
+                        <select asp-for="YanlisDogruyuGotururSayisi" class="form-select">
+                            <option value="0">Yanlış doğruyu götürmez</option>
+                            <option value="3">3 Yanlış 1 Doğruyu Götürür</option>
+                            <option value="4">4 Yanlış 1 Doğruyu Götürür</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">Kitapçık Türleri</label>
+                        <select asp-for="KitapcikTurleri" id="sinavKitapcikTurleri" class="form-select" onchange="updateKitapcikInputs()">
+                            <option value="">Tek Kitapçık</option>
+                            <option value="A,B">A, B (2 Kitapçık)</option>
+                            <option value="A,B,C">A, B, C (3 Kitapçık)</option>
+                            <option value="A,B,C,D">A, B, C, D (4 Kitapçık)</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Hiyerarşik Seçici -->
+                    <div class="col-md-12">
+                        <label class="form-label fw-bold">Hedef Kitle Seçimi (Seçilmezse tüm okulu değerlendirir)</label>
+                        <div class="border rounded p-3 bg-light" style="max-height: 350px; overflow-y:auto;" id="treeContainer">
+                            <div class="text-center text-muted" id="treeLoading">Sınıf listesi yükleniyor...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <h6 class="mt-4 mb-2 fw-bold text-primary border-bottom pb-2 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <span><i class="bi bi-card-checklist me-1"></i> Ders ve Cevap Anahtarları</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-success fw-semibold" id="btnOptikFormdanEkle" data-bs-toggle="modal" data-bs-target="#optikFormSecModal">
+                            <i class="bi bi-file-earmark-spreadsheet me-1"></i> Optik Formdan Ekle
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary fw-semibold" id="btnDersEkle">
+                            <i class="bi bi-plus-lg me-1"></i> Ders Ekle
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="tumDersleriTemizle()" title="Tüm dersleri temizle">
+                            <i class="bi bi-trash me-1"></i> Tümünü Sil
+                        </button>
+                    </div>
+                </h6>
+
+                <!-- Toplu Cevap Anahtarı Girişi -->
+                <div class="row g-2 mb-3 bg-light p-2 rounded border" id="topluGirisContainer">
+                    <div class="col-12">
+                        <label class="form-label fw-bold small text-primary mb-1"><i class="bi bi-lightning-fill"></i> Toplu Cevap Anahtarı Dağıt (İsteğe Bağlı)</label>
+                        <p class="text-muted small mb-2">Tüm sınavın cevap anahtarını bitişik yazıp "Dağıt" butonuna basarak aşağıdaki derslere otomatik bölüştürebilirsiniz.</p>
+                    </div>
+                    <div class="col-md-5">
+                        <input type="text" id="topluAnahtarA" class="form-control form-control-sm" placeholder="A Kitapçığı Toplu Anahtarı (Tüm Dersler Bitişik)" style="text-transform: uppercase;">
+                    </div>
+                    <div class="col-md-5 kitapcik-b" style="display:none;">
+                        <input type="text" id="topluAnahtarB" class="form-control form-control-sm" placeholder="B Kitapçığı Toplu Anahtarı" style="text-transform: uppercase;">
+                    </div>
+                    <div class="col-md-5 kitapcik-c" style="display:none;">
+                        <input type="text" id="topluAnahtarC" class="form-control form-control-sm" placeholder="C Kitapçığı Toplu Anahtarı" style="text-transform: uppercase;">
+                    </div>
+                    <div class="col-md-5 kitapcik-d" style="display:none;">
+                        <input type="text" id="topluAnahtarD" class="form-control form-control-sm" placeholder="D Kitapçığı Toplu Anahtarı" style="text-transform: uppercase;">
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-sm btn-primary w-100 h-100" onclick="topluAnahtarDagit()"><i class="bi bi-arrow-down-square"></i> Dağıt</button>
+                    </div>
+                </div>
+                
+                <div id="derslerContainer">
+                    @if (Model.Dersler != null && Model.Dersler.Any())
+                    {
+                        foreach (var ders in Model.Dersler)
+                        {
+                            <div class="row g-2 mb-3 pb-3 border-bottom ders-row align-items-start">
+                                <div class="col-md-3">
+                                    <label class="form-label small text-muted">Ders Adı</label>
+                                    <input type="text" class="form-control ders-adi" required value="@ders.DersAdi">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label small text-muted">Soru Sayısı</label>
+                                    <input type="number" class="form-control ders-soru" required min="1" value="@ders.SoruSayisi" onchange="updateCevapPlaceholder(this)">
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="row g-1">
+                                        <div class="col-12 mb-1">
+                                            <input type="text" class="form-control form-control-sm ders-cevap-a" value="@ders.CevapAnahtari" style="text-transform: uppercase;" minlength="@ders.SoruSayisi" maxlength="@ders.SoruSayisi" placeholder="[A] Cevap Anahtarı (Opsiyonel)">
+                                        </div>
+                                        <div class="col-12 mb-1 kitapcik-b" style="display:none;">
+                                            <input type="text" class="form-control form-control-sm ders-cevap-b" value="@ders.CevapAnahtariB" style="text-transform: uppercase;" minlength="@ders.SoruSayisi" maxlength="@ders.SoruSayisi" placeholder="[B] Cevap Anahtarı (Opsiyonel)">
+                                        </div>
+                                        <div class="col-12 mb-1 kitapcik-c" style="display:none;">
+                                            <input type="text" class="form-control form-control-sm ders-cevap-c" value="@ders.CevapAnahtariC" style="text-transform: uppercase;" minlength="@ders.SoruSayisi" maxlength="@ders.SoruSayisi" placeholder="[C] Cevap Anahtarı (Opsiyonel)">
+                                        </div>
+                                        <div class="col-12 mb-1 kitapcik-d" style="display:none;">
+                                            <input type="text" class="form-control form-control-sm ders-cevap-d" value="@ders.CevapAnahtariD" style="text-transform: uppercase;" minlength="@ders.SoruSayisi" maxlength="@ders.SoruSayisi" placeholder="[D] Cevap Anahtarı (Opsiyonel)">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-1">
+                                    <button type="button" class="btn btn-outline-danger w-100 btnDersSil"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="alert alert-info text-center" id="noDersAlert">Henüz ders eklenmedi.</div>
+                    }
+                </div>
+
+                <div class="alert alert-warning mt-2 small">
+                    <strong>Not:</strong> Cevap anahtarını boş bırakabilirsiniz. Girecekseniz soru sayısıyla aynı uzunlukta olmalıdır. 
+                    Sadece <strong>A, B, C, D, E</strong> harfleri ile <strong>H</strong> (Herkes için doğru) ve <strong>X</strong> (İptal) kullanılabilir.
+                </div>
+
+                <input type="hidden" name="derslerJson" id="derslerJson">
+
+                <div class="mt-4 text-end">
+                    <button type="submit" class="btn btn-primary px-4" onclick="prepareJson()">Değişiklikleri Kaydet</button>
+                </div>
+            </form>
+        </div>
+</div>
+
+<!-- Optik Formdan Ders Ekle Modal -->
+<div class="modal fade" id="optikFormSecModal" tabindex="-1" aria-labelledby="optikFormSecModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title fw-bold" id="optikFormSecModalLabel">
+                    <i class="bi bi-file-earmark-spreadsheet me-2"></i>Optik Formdan Dersleri Aktar
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body p-4">
+                <p class="text-muted small mb-3">
+                    Tanımlı optik formlardan birini seçerek, formdaki tüm dersleri ve soru sayılarını bu sınava doğrudan aktarabilirsiniz.
+                </p>
+
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-dark">Tanımlı Optik Form:</label>
+                    <select id="modalOptikFormSelect" class="form-select form-select-lg" onchange="previewOptikFormDersleri(this.value)">
+                        <option value="">-- Optik Form Seçiniz --</option>
+                        @if (ViewBag.Formlar != null)
+                        {
+                            foreach (var f in (IEnumerable<yoklamaWeb.Models.OptikForm>)ViewBag.Formlar)
+                            {
+                                var dCount = f.Dersler?.Count ?? 0;
+                                var totalQuestions = f.Dersler?.Sum(d => d.KarakterSayisi) ?? 0;
+                                <option value="@f.Id">
+                                    @f.FormAdi (@dCount Ders, Toplam @totalQuestions Soru)
+                                </option>
+                            }
+                        }
+                    </select>
+                </div>
+
+                <!-- Preview container -->
+                <div id="modalFormDersPreview" class="border rounded p-3 bg-light mb-3" style="display: none; max-height: 200px; overflow-y: auto;">
+                    <div class="small fw-bold text-secondary mb-2">Formdaki Dersler & Soru Sayıları:</div>
+                    <ul id="modalFormDersList" class="list-group list-group-flush small"></ul>
+                </div>
+
+                <div>
+                    <label class="form-label small fw-bold text-muted">Aktarma Seçeneği:</label>
+                    <div class="form-check mb-1">
+                        <input class="form-check-input" type="radio" name="optikAktarModu" id="aktarMevcutlariSil" value="replace" checked>
+                        <label class="form-check-label fw-semibold text-danger small cursor-pointer" for="aktarMevcutlariSil">
+                            Mevcut dersleri sil ve bu formdaki dersleri yükle (Önerilen)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="optikAktarModu" id="aktarMevcutlaraEkle" value="append">
+                        <label class="form-check-label fw-semibold small cursor-pointer" for="aktarMevcutlaraEkle">
+                            Mevcut derslerin sonuna ekle
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+                <button type="button" class="btn btn-success btn-sm px-3" onclick="aktarOptikFormDersleri()" id="btnFormDersAktarOnay">
+                    <i class="bi bi-box-arrow-in-down me-1"></i> Dersleri Sınava Aktar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<template id="dersTemplate">
+    <div class="row g-2 mb-3 pb-3 border-bottom ders-row align-items-end">
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Ders Adı</label>
+            <input type="text" class="form-control ders-adi" required placeholder="Örn: Türkçe">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small text-muted">Soru Sayısı</label>
+            <input type="number" class="form-control ders-soru" required min="1" value="20" onchange="updateCevapPlaceholder(this)">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label small text-muted">Cevap Anahtarı (Opsiyonel)</label>
+            <input type="text" class="form-control ders-cevap" placeholder="Girilecekse tam girilmelidir" style="text-transform: uppercase;">
+        </div>
+        <div class="col-md-1">
+            <button type="button" class="btn btn-outline-danger w-100 btnDersSil"><i class="bi bi-trash"></i></button>
+        </div>
+    </div>
+</template>
+
+@section Scripts {
+    <script>
+        document.addEventListener("DOMContentLoaded", async function() {
+            try {
+                const response = await fetch('@Url.Action("GetSinifVeOgrenciler", "OptikModul")');
+                const data = await response.json();
+                
+                const mevcutSiniflarStr = document.getElementById('mevcutSiniflar').value;
+                const mevcutOgrencilerStr = document.getElementById('mevcutOgrenciler').value;
+                
+                const mevcutSiniflar = mevcutSiniflarStr ? mevcutSiniflarStr.split(',').map(x => x.trim()) : [];
+                const mevcutOgrenciler = mevcutOgrencilerStr ? mevcutOgrencilerStr.split(',').map(x => x.trim()) : [];
+                
+                const container = document.getElementById('treeContainer');
+                container.innerHTML = ''; 
+                
+                data.forEach(level => {
+                    const levelId = 'level_' + level.sinifDuzeyi;
+                    let html = `<div class="accordion-item mb-2 border rounded">
+                        <div class="accordion-header d-flex align-items-center p-2 bg-white">
+                            <div class="form-check me-2 mb-0">
+                                <input class="form-check-input cb-level" type="checkbox" id="cb_${levelId}" data-target=".child-of-${levelId}">
+                            </div>
+                            <button class="accordion-button collapsed p-2" type="button" data-bs-toggle="collapse" data-bs-target="#${levelId}">
+                                <strong>${level.sinifDuzeyi}. Sınıflar</strong>
+                            </button>
+                        </div>
+                        <div id="${levelId}" class="accordion-collapse collapse show">
+                            <div class="accordion-body p-3 bg-light">`;
+                    
+                    level.subeler.forEach(sube => {
+                        const subeId = levelId + '_sube_' + sube.sube;
+                        const sinifAd = level.sinifDuzeyi + sube.sube; 
+                        
+                        // Şube daha önce seçilmiş mi?
+                        const subeChecked = mevcutSiniflar.includes(sinifAd) ? "checked" : "";
+                        
+                        html += `
+                            <div class="border rounded bg-white p-2 mb-2">
+                                <div class="d-flex align-items-center border-bottom pb-2 mb-2">
+                                    <div class="form-check me-2 mb-0">
+                                        <input class="form-check-input cb-sube child-of-${levelId}" type="checkbox" name="SeciliSiniflar" value="${sinifAd}" id="cb_${subeId}" data-target=".child-of-${subeId}" data-parent="#cb_${levelId}" ${subeChecked}>
+                                    </div>
+                                    <a class="text-decoration-none fw-bold text-dark" data-bs-toggle="collapse" href="#${subeId}" role="button">
+                                        ${sinifAd} Şubesi <i class="bi bi-chevron-down ms-1 small"></i>
+                                    </a>
+                                </div>
+                                <div class="collapse ms-4 show" id="${subeId}">
+                                    <div class="row g-2">
+                        `;
+                        
+                        sube.ogrenciler.forEach(ogr => {
+                            // Sınıf seçiliyse otomatik checked olur. Sınıf seçili değilse ama öğrenci spesifik seçilmişse yine checked olur.
+                            const ogrChecked = (subeChecked || mevcutOgrenciler.includes(ogr.ogrenciNo)) ? "checked" : "";
+                            
+                            html += `
+                                <div class="col-md-6 col-lg-4">
+                                    <div class="form-check">
+                                        <input class="form-check-input cb-ogr child-of-${subeId} child-of-${levelId}" type="checkbox" name="SeciliOgrenciler" value="${ogr.ogrenciNo}" id="ogr_${ogr.ogrenciNo}" data-parent="#cb_${subeId}" ${ogrChecked}>
+                                        <label class="form-check-label small" for="ogr_${ogr.ogrenciNo}">${ogr.ogrenciNo} - ${ogr.adSoyad}</label>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        
+                        html += `</div></div></div>`;
+                    });
+                    
+                    html += `</div></div></div>`;
+                    container.insertAdjacentHTML('beforeend', html);
+                });
+
+                // Başlangıçta parent durumlarını (indeterminate) ayarla
+                document.querySelectorAll('.cb-sube').forEach(cb => {
+                    updateParents(document.querySelector(cb.getAttribute('data-target'))); 
+                    // this will trigger upwards
+                });
+
+                document.querySelectorAll('#treeContainer input[type="checkbox"]').forEach(cb => {
+                    cb.addEventListener('change', function() {
+                        const targetSelector = this.getAttribute('data-target');
+                        if (targetSelector) {
+                            document.querySelectorAll(targetSelector).forEach(childCb => {
+                                childCb.checked = this.checked;
+                            });
+                        }
+                        updateParents(this);
+                    });
+                });
+                
+            } catch (err) {
+                document.getElementById('treeLoading').innerHTML = '<span class="text-danger">Veri yüklenirken hata oluştu.</span>';
+            }
+        });
+
+        function updateParents(element) {
+            if(!element) return;
+            let parentSelector = element.getAttribute('data-parent');
+            while(parentSelector) {
+                let parent = document.querySelector(parentSelector);
+                if(!parent) break;
+                
+                let targetSelector = parent.getAttribute('data-target');
+                let siblings = document.querySelectorAll(targetSelector);
+                
+                let allChecked = true;
+                let anyChecked = false;
+                
+                siblings.forEach(s => {
+                    if(s.checked) anyChecked = true;
+                    else allChecked = false;
+                });
+                
+                parent.checked = allChecked;
+                parent.indeterminate = anyChecked && !allChecked;
+                
+                parentSelector = parent.getAttribute('data-parent');
+            }
+        }
+
+        function addDersRow(dersAdi = '', soruSayisi = 20, cevapA = '', cevapB = '', cevapC = '', cevapD = '') {
+            var alertEl = document.getElementById('noDersAlert');
+            if (alertEl) alertEl.style.display = 'none';
+
+            var container = document.getElementById('derslerContainer');
+            var div = document.createElement('div');
+            div.className = 'row g-2 mb-3 pb-3 border-bottom ders-row align-items-start';
+            div.innerHTML = `
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Ders Adı</label>
+                    <input type="text" class="form-control ders-adi" required value="${dersAdi}" placeholder="Örn: Türkçe">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small text-muted">Soru Sayısı</label>
+                    <input type="number" class="form-control ders-soru" required min="1" value="${soruSayisi}" onchange="updateCevapPlaceholder(this)">
+                </div>
+                <div class="col-md-6">
+                    <div class="row g-1">
+                        <div class="col-12 mb-1">
+                            <input type="text" class="form-control form-control-sm ders-cevap-a" value="${cevapA}" style="text-transform: uppercase;" minlength="${soruSayisi}" maxlength="${soruSayisi}" placeholder="[A] Cevap Anahtarı (Opsiyonel)">
+                        </div>
+                        <div class="col-12 mb-1 kitapcik-b" style="display:none;">
+                            <input type="text" class="form-control form-control-sm ders-cevap-b" value="${cevapB}" style="text-transform: uppercase;" minlength="${soruSayisi}" maxlength="${soruSayisi}" placeholder="[B] Cevap Anahtarı (Opsiyonel)">
+                        </div>
+                        <div class="col-12 mb-1 kitapcik-c" style="display:none;">
+                            <input type="text" class="form-control form-control-sm ders-cevap-c" value="${cevapC}" style="text-transform: uppercase;" minlength="${soruSayisi}" maxlength="${soruSayisi}" placeholder="[C] Cevap Anahtarı (Opsiyonel)">
+                        </div>
+                        <div class="col-12 mb-1 kitapcik-d" style="display:none;">
+                            <input type="text" class="form-control form-control-sm ders-cevap-d" value="${cevapD}" style="text-transform: uppercase;" minlength="${soruSayisi}" maxlength="${soruSayisi}" placeholder="[D] Cevap Anahtarı (Opsiyonel)">
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-1">
+                    <button type="button" class="btn btn-outline-danger w-100 btnDersSil" title="Dersi Sil"><i class="bi bi-trash"></i></button>
+                </div>
+            `;
+            container.appendChild(div);
+            updateKitapcikInputs();
+        }
+
+        document.getElementById('btnDersEkle').addEventListener('click', function() {
+            addDersRow('', 20);
+        });
+
+        document.getElementById('derslerContainer').addEventListener('click', function(e) {
+            if(e.target.closest('.btnDersSil')) {
+                e.target.closest('.ders-row').remove();
+                var remaining = document.querySelectorAll('.ders-row');
+                if (remaining.length === 0) {
+                    var container = document.getElementById('derslerContainer');
+                    container.innerHTML = '<div class="alert alert-info text-center" id="noDersAlert">Henüz ders eklenmedi.</div>';
+                }
+            }
+        });
+
+        function tumDersleriTemizle() {
+            if (confirm("Ekli tüm dersleri silmek istediğinizden emin misiniz?")) {
+                var container = document.getElementById('derslerContainer');
+                container.innerHTML = '<div class="alert alert-info text-center" id="noDersAlert">Henüz ders eklenmedi.</div>';
+            }
+        }
+
+        async function previewOptikFormDersleri(formId) {
+            const previewDiv = document.getElementById("modalFormDersPreview");
+            const list = document.getElementById("modalFormDersList");
+            if (!formId) {
+                previewDiv.style.display = "none";
+                return;
+            }
+            try {
+                const resp = await fetch(`/OptikModul/GetOptikFormDersleri?formId=${formId}`);
+                if (resp.ok) {
+                    const dersler = await resp.json();
+                    list.innerHTML = "";
+                    if (dersler.length === 0) {
+                        list.innerHTML = "<li class='list-group-item text-muted text-center'>Bu formda henüz ders tanımlanmamış.</li>";
+                    } else {
+                        dersler.forEach(d => {
+                            list.innerHTML += `<li class='list-group-item d-flex justify-content-between align-items-center py-2'>
+                                <strong>${d.dersAdi}</strong>
+                                <span class='badge bg-primary rounded-pill'>${d.soruSayisi} Soru</span>
+                            </li>`;
+                        });
+                    }
+                    previewDiv.style.display = "block";
+                }
+            } catch(e) {
+                console.error("Form dersleri yüklenirken hata:", e);
+            }
+        }
+
+        async function aktarOptikFormDersleri() {
+            const formId = document.getElementById("modalOptikFormSelect").value;
+            if (!formId) {
+                alert("Lütfen önce listeden bir optik form seçiniz.");
+                return;
+            }
+            const replaceMode = document.getElementById("aktarMevcutlariSil").checked;
+
+            try {
+                const resp = await fetch(`/OptikModul/GetOptikFormDersleri?formId=${formId}`);
+                if (!resp.ok) {
+                    alert("Form dersleri sunucudan alınamadı.");
+                    return;
+                }
+                const dersler = await resp.json();
+                if (dersler.length === 0) {
+                    alert("Seçtiğiniz optik formda tanımlı ders bulunamadı.");
+                    return;
+                }
+
+                if (replaceMode) {
+                    const container = document.getElementById("derslerContainer");
+                    container.innerHTML = "";
+                }
+
+                dersler.forEach(d => {
+                    addDersRow(d.dersAdi, d.soruSayisi);
+                });
+
+                // Modalı kapat
+                const modalEl = document.getElementById("optikFormSecModal");
+                const modal = bootstrap.Modal.getInstance(modalEl);
+                if (modal) modal.hide();
+
+            } catch (err) {
+                alert("Dersler aktarılırken hata oluştu: " + err.message);
+            }
+        }
+
+        function updateCevapPlaceholder(elem) {
+            var val = elem.value;
+            var row = elem.closest('.ders-row');
+            ['a','b','c','d'].forEach(k => {
+                var input = row.querySelector('.ders-cevap-' + k);
+                if (input) {
+                    input.setAttribute('minlength', val);
+                    input.setAttribute('maxlength', val);
+                    input.placeholder = "[" + k.toUpperCase() + "] Soru sayısıyla aynı: " + val;
+                }
+            });
+        }
+
+        document.getElementById('derslerContainer').addEventListener('input', function(e) {
+            if(e.target.classList.contains('ders-cevap-a') || e.target.classList.contains('ders-cevap-b') || 
+               e.target.classList.contains('ders-cevap-c') || e.target.classList.contains('ders-cevap-d')) {
+                var val = e.target.value.toUpperCase().replace(/[^ABCDEHX]/g, ''); 
+                e.target.value = val;
+            }
+        });
+
+        // Toplu input kısıtlaması
+        document.getElementById('topluGirisContainer').addEventListener('input', function(e) {
+            if(e.target.tagName === 'INPUT') {
+                e.target.value = e.target.value.toUpperCase().replace(/[^ABCDEHX]/g, ''); 
+            }
+        });
+
+        function updateKitapcikInputs() {
+            var val = document.getElementById('sinavKitapcikTurleri').value;
+            var hasB = val.includes('B');
+            var hasC = val.includes('C');
+            var hasD = val.includes('D');
+
+            document.querySelectorAll('.kitapcik-b').forEach(el => el.style.display = hasB ? 'block' : 'none');
+            document.querySelectorAll('.kitapcik-c').forEach(el => el.style.display = hasC ? 'block' : 'none');
+            document.querySelectorAll('.kitapcik-d').forEach(el => el.style.display = hasD ? 'block' : 'none');
+        }
+
+        // Sayfa yüklendiğinde kitapçık UI'ını ayarla
+        setTimeout(() => updateKitapcikInputs(), 100);
+
+        function topluAnahtarDagit() {
+            var rows = document.querySelectorAll('.ders-row');
+            if (rows.length === 0) return alert("Lütfen önce ders ekleyin.");
+
+            ['A','B','C','D'].forEach(k => {
+                var topluInput = document.getElementById('topluAnahtar' + k);
+                if (topluInput && topluInput.closest('div').style.display !== 'none' || k === 'A') {
+                    var fullKey = topluInput.value;
+                    var currentIndex = 0;
+                    
+                    rows.forEach(row => {
+                        var soruSayisi = parseInt(row.querySelector('.ders-soru').value);
+                        if (isNaN(soruSayisi) || soruSayisi <= 0) return;
+                        
+                        var dersInput = row.querySelector('.ders-cevap-' + k.toLowerCase());
+                        if (dersInput) {
+                            var part = fullKey.substring(currentIndex, currentIndex + soruSayisi);
+                            dersInput.value = part;
+                            currentIndex += soruSayisi;
+                        }
+                    });
+                }
+            });
+        }
+
+        function prepareJson() {
+            var dersler = [];
+            var rows = document.querySelectorAll('.ders-row');
+            rows.forEach(function(row) {
+                dersler.push({
+                    DersAdi: row.querySelector('.ders-adi').value,
+                    SoruSayisi: parseInt(row.querySelector('.ders-soru').value),
+                    CevapAnahtari: row.querySelector('.ders-cevap-a').value.toUpperCase(),
+                    CevapAnahtariB: row.querySelector('.ders-cevap-b').value.toUpperCase(),
+                    CevapAnahtariC: row.querySelector('.ders-cevap-c').value.toUpperCase(),
+                    CevapAnahtariD: row.querySelector('.ders-cevap-d').value.toUpperCase()
+                });
+            });
+            document.getElementById('derslerJson').value = JSON.stringify(dersler);
+        }
+    </script>
+}

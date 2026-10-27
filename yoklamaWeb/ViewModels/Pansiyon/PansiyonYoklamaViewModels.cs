@@ -75,6 +75,10 @@ namespace yoklamaWeb.ViewModels.Pansiyon
         public int? PansiyonOgrenciId { get; set; }
         public int? OgrenciId { get => PansiyonOgrenciId; set => PansiyonOgrenciId = value; }
         public int? OdaId { get; set; }
+        public string? OdaNo { get; set; }
+        public int? EtutId { get; set; }
+        public string? EtutAdi { get; set; }
+        public int? YoklamaNo { get; set; }
         public string? Arama { get; set; }
         public DateTime? BaslangicTarihi { get; set; }
         public DateTime? BitisTarihi { get; set; }
@@ -191,6 +195,11 @@ namespace yoklamaWeb.ViewModels.Pansiyon
         public string Durum { get; set; } = string.Empty;
         public string? Aciklama { get; set; }
         public string? OdaNo { get; set; }
+        public int? EtutId { get; set; }
+        public string? EtutAdi { get; set; }
+        public string? Telefon { get; set; }
+        public string? VeliTelefon { get; set; }
+        public int YoklamaNo { get; set; }
         public string? IzinBilgisi { get; set; }
         public byte[] RowVersion { get; set; } = Array.Empty<byte>();
     }
@@ -199,14 +208,19 @@ namespace yoklamaWeb.ViewModels.Pansiyon
     {
         public List<PansiyonYoklamaViewModel> Yoklamalar { get; set; } = new();
         public YoklamaFilterViewModel Filter { get; set; } = new();
+        public DateTime Tarih { get; set; } = DateTime.Today;
+
     }
 
     public class GunlukYoklamaViewModel
     {
         public DateTime Tarih { get; set; } = DateTime.Today;
         public int? OdaId { get; set; }
+        public int? EtutId { get; set; }
+        public int YoklamaNo { get; set; } = 1;
         public List<GunlukYoklamaOgrenciViewModel> Ogrenciler { get; set; } = new();
         public List<SelectListItem> OdaListesi { get; set; } = new();
+        public List<SelectListItem> EtutListesi { get; set; } = new();
         public List<SelectListItem> DurumListesi { get; set; } = new();
         public List<PansiyonYoklamaViewModel> Yoklamalar { get; set; } = new();
         public List<PansiyonOgrenciViewModel> TumOgrenciler { get; set; } = new();

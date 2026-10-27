@@ -209,8 +209,12 @@
 
     /* RESPONSIVE DESIGN (Max 768px) - Çift satır / Kart görünümü */
     @@media (max-width: 768px) {
-        .ta-header { padding: 12px 16px; }
-        .ta-toolbar { padding: 10px 16px; gap: 8px; }
+        .ta-header { padding: 6px 12px; }
+        .ta-breadcrumb { margin-bottom: 2px; font-size: 0.7rem; }
+        .ta-title { font-size: 1.05rem; }
+        .ta-meta { gap: 6px; margin-top: 4px; }
+        .ta-badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 12px; }
+        .ta-toolbar { padding: 8px 12px; gap: 6px; }
         .search-box { width: 100%; min-width: 100%; order: -1; }
         .ta-content { padding: 4px 6px; }
         .ta-footer { padding: 12px 16px; flex-direction: column; align-items: stretch; }
@@ -279,19 +283,82 @@
             box-sizing: border-box;
         }
     }
+
+    /* Custom Radio Button Group */
+    .status-radio-group {
+        display: flex;
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--surface3);
+        max-width: 320px;
+    }
+    .status-radio-group input[type="radio"] {
+        display: none;
+    }
+    .status-radio-group label {
+        flex: 1;
+        text-align: center;
+        padding: 6px 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: all 0.2s;
+        border-right: 1px solid var(--border);
+        margin: 0;
+        white-space: nowrap;
+    }
+    .status-radio-group label:last-child {
+        border-right: none;
+    }
+    .status-radio-group input[type="radio"]:checked + label.lbl-unknown {
+        background: rgba(148,163,184,.25);
+        color: #e2e8f0;
+    }
+    .status-radio-group input[type="radio"]:checked + label.lbl-present {
+        background: rgba(16,185,129,.3);
+        color: #6ee7b7;
+    }
+    .status-radio-group input[type="radio"]:checked + label.lbl-absent {
+        background: rgba(239,68,68,.3);
+        color: #fca5a5;
+    }
+    .status-radio-group input[type="radio"]:checked + label.lbl-late {
+        background: rgba(245,158,11,.3);
+        color: #fcd34d;
+    }
+    .status-radio-group input[type="radio"]:disabled + label {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Row backgrounds */
+    .yk-table tbody tr.status-present { background: rgba(16,185,129,.08); }
+    .yk-table tbody tr.status-present:hover { background: rgba(16,185,129,.13); }
+    .yk-table tbody tr.status-absent  { background: rgba(239,68,68,.08); }
+    .yk-table tbody tr.status-absent:hover  { background: rgba(239,68,68,.13); }
+    .yk-table tbody tr.status-late    { background: rgba(245,158,11,.08); }
+    .yk-table tbody tr.status-late:hover    { background: rgba(245,158,11,.12); }
+    .yk-table tbody tr.status-unknown { background: rgba(148,163,184,.08); }
+    .yk-table tbody tr.status-unknown:hover { background: rgba(148,163,184,.13); }
 </style>
 
 <div class="ta-header">
     <div class="ta-breadcrumb">
-        <a asp-controller="SuperYoklamaci" asp-action="Rooms" asp-route-examId="@Model.ExamId">← Salon Listesi</a>
+        <a asp-controller="SuperYoklamaci" asp-action="Index">← Sınav Listesi</a>
     </div>
     <div class="ta-header-row">
         <div>
+        <div style="display: flex; flex-direction: row;">    
             <h1 class="ta-title">⚡ [Süper] @Model.ExamName</h1>
+            
             <div class="ta-meta">
                 <span class="ta-badge">🏛 Salon: @Model.Room</span>
                 <span class="ta-badge">📅 @Model.ApplicationDate.ToString("dd MMMM yyyy", new System.Globalization.CultureInfo("tr-TR"))</span>
                 <span class="ta-badge green">👥 @Model.Seats.Count öğrenci</span>
+</div>
                 @if (!Model.IsTimeValid)
                 {
                     <span class="ta-badge red">⚠️ Geçersiz Saat Aralığı (Sadece İzleme Modu)</span>
@@ -320,6 +387,17 @@
 
     <div class="toolbar-sep"></div>
 
+    <span class="filter-label">Salon:</span>
+    <select id="salonSelectFilter" class="search-box" style="min-width: 140px; padding: 4px 10px;" onchange="filterByText()">
+        <option value="">Tüm Salonlar</option>
+        @foreach (var salon in Model.Seats.Select(s => s.SalonName).Distinct().OrderBy(x => x))
+        {
+            <option value="@salon">@salon</option>
+        }
+    </select>
+
+    <div class="toolbar-sep"></div>
+
     <input type="text" id="liveSearchInput" class="search-box" placeholder="🔍 Öğrenci adı veya no ara..." onkeyup="filterByText()" />
     <span class="count-chip">Toplam: <strong>@Model.Seats.Count</strong></span>
 </div>
@@ -339,6 +417,14 @@
         }
         else
         {
+            <!-- Bulk Actions for Filtered Students -->
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; background: var(--surface2); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); flex-wrap: wrap;">
+                <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600; margin-right: 4px;"><i class="bi bi-check-all"></i> Toplu Yoklama (Filtrelenmiş):</span>
+                <button type="button" class="pill-btn active" style="background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.4); color: #6ee7b7;" onclick="markAllVisible(1)">Tümü Var</button>
+                <button type="button" class="pill-btn active" style="background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.4); color: #fca5a5;" onclick="markAllVisible(2)">Tümü Yok</button>
+                <button type="button" class="pill-btn active" style="background: rgba(148,163,184,.1); border-color: rgba(148,163,184,.3); color: #94a3b8;" onclick="markAllVisible(0)">Tümü Belirsiz</button>
+            </div>
+
             <div class="yk-table-wrap">
                 <table class="yk-table">
                     <thead>
@@ -347,8 +433,8 @@
                             <th>Koltuk</th>
                             <th>Öğrenci No</th>
                             <th>Ad Soyad</th>
-                            <th>Sınıf</th>
-                            <th>Şube</th>
+                            <th>Sınıf/Şube</th>
+                            <th>Salon</th>
                             <th>Durum</th>
                             <th>Not</th>
                         </tr>
@@ -357,14 +443,14 @@
                         @for (int i = 0; i < Model.Seats.Count; i++)
                         {
                             var seat = Model.Seats[i];
-                            var selectClass = seat.Status switch
+                            var rowClass = seat.Status switch
                             {
-                                yoklamaWeb.Models.AttendanceStatus.Katildi   => "s-present",
-                                yoklamaWeb.Models.AttendanceStatus.Katilmadi => "s-absent",
-                                yoklamaWeb.Models.AttendanceStatus.Gec       => "s-late",
-                                _                                              => ""
+                                yoklamaWeb.Models.AttendanceStatus.Katildi   => "status-present",
+                                yoklamaWeb.Models.AttendanceStatus.Katilmadi => "status-absent",
+                                yoklamaWeb.Models.AttendanceStatus.Gec       => "status-late",
+                                _                                              => "status-unknown"
                             };
-                            <tr data-status="@seat.Status" id="row-@seat.SeatId" class="student-row" data-searchname="@seat.AdSoyad.ToLower(new System.Globalization.CultureInfo("tr-TR"))" data-searchno="@seat.OgrenciNo">
+                            <tr data-status="@seat.Status" id="row-@seat.SeatId" class="student-row @rowClass" data-searchname="@seat.AdSoyad.ToLower(new System.Globalization.CultureInfo("tr-TR"))" data-searchno="@seat.OgrenciNo" data-salon="@seat.SalonName">
                                 <td style="color:var(--text-muted);font-size:.8rem">@(i + 1)</td>
                                 <td>
                                     <span class="seat-no">@seat.Sira</span>
@@ -378,40 +464,35 @@
                                     <input type="hidden" name="Seats[@i].Sira"       value="@seat.Sira" />
                                 </td>
                                 <td><span class="student-no">@seat.OgrenciNo</span></td>
-                                <td data-student-info="@seat.OgrenciNo - @seat.SinifDuzeyi-@seat.Sube"><span class="student-name">@seat.AdSoyad</span></td>
-                                <td><span class="class-badge">@seat.SinifDuzeyi</span></td>
-                                <td><span class="class-badge">@seat.Sube</span></td>
+                                <td data-student-info="@seat.OgrenciNo - @seat.SinifDuzeyi-@seat.Sube - Salon: @seat.SalonName"><span class="student-name">@seat.AdSoyad</span></td>
+                                <td><span class="class-badge">@seat.SinifDuzeyi - @seat.Sube</span></td>
+                                <td><span class="badge bg-info text-white">@seat.SalonName</span></td>
                                 <td>
-                                    @if (Model.IsTimeValid)
+                                    <div class="status-radio-group">
+                                        @foreach (var (val, label, css) in statuses)
+                                        {
+                                            var radioId = $"status-{seat.SeatId}-{(int)val}";
+                                            var isChecked = seat.Status == val ? "checked" : "";
+                                            var isDisabled = !Model.IsTimeValid ? "disabled" : "";
+                                            var labelClass = val switch {
+                                                yoklamaWeb.Models.AttendanceStatus.Katildi => "lbl-present",
+                                                yoklamaWeb.Models.AttendanceStatus.Katilmadi => "lbl-absent",
+                                                yoklamaWeb.Models.AttendanceStatus.Gec => "lbl-late",
+                                                _ => "lbl-unknown"
+                                            };
+                                            <input type="radio" 
+                                                   class="status-radio" 
+                                                   name="Seats[@i].Status" 
+                                                   id="@radioId" 
+                                                   value="@((int)val)" 
+                                                   @isChecked 
+                                                   @isDisabled 
+                                                   onchange="onStatusRadioChange(this, '@seat.SeatId')" />
+                                            <label class="@labelClass" for="@radioId">@label</label>
+                                        }
+                                    </div>
+                                    @if (!Model.IsTimeValid)
                                     {
-                                        <select name="Seats[@i].Status"
-                                                class="status-select @selectClass"
-                                                id="status-@seat.SeatId"
-                                                onchange="onStatusChange(this, '@seat.SeatId')">
-                                            @foreach (var (val, label, css) in statuses)
-                                            {
-                                                if (seat.Status == val)
-                                                {
-                                                    <option value="@((int)val)" selected>@label</option>
-                                                }
-                                                else
-                                                {
-                                                    <option value="@((int)val)">@label</option>
-                                                }
-                                            }
-                                        </select>
-                                    }
-                                    else
-                                    {
-                                        <select disabled class="status-select @selectClass" id="status-@seat.SeatId">
-                                            @foreach (var (val, label, css) in statuses)
-                                            {
-                                                if (seat.Status == val)
-                                                {
-                                                    <option value="@((int)val)" selected>@label</option>
-                                                }
-                                            }
-                                        </select>
                                         <input type="hidden" name="Seats[@i].Status" value="@((int)seat.Status)" />
                                     }
                                 </td>
@@ -504,25 +585,40 @@
 @section Scripts {
 <script>
     // Durum renk güncelleme
-    function onStatusChange(select, seatId) {
-        select.className = 'status-select';
-        const v = parseInt(select.value);
-        if (v === 1) select.classList.add('s-present');
-        else if (v === 2) select.classList.add('s-absent');
-        else if (v === 3) select.classList.add('s-late');
+    function onStatusRadioChange(radio, seatId) {
+        const v = parseInt(radio.value);
+        const row = document.getElementById('row-' + seatId);
+        row?.classList.remove('status-present', 'status-absent', 'status-late', 'status-unknown');
+        if (v === 1) {
+            row?.classList.add('status-present');
+        }
+        else if (v === 2) {
+            row?.classList.add('status-absent');
+        }
+        else if (v === 3) {
+            row?.classList.add('status-late');
+        }
+        else {
+            row?.classList.add('status-unknown');
+        }
         updateStats();
     }
 
-    // Metin tabanlı filtreleme fonksiyonu
+    // Metin ve Salon tabanlı filtreleme fonksiyonu
     function filterByText() {
         const query = document.getElementById('liveSearchInput').value.trim().toLowerCase();
+        const salonVal = document.getElementById('salonSelectFilter').value.trim().toLowerCase();
         const rows = document.querySelectorAll('.student-row');
         
         rows.forEach(row => {
             const name = row.getAttribute('data-searchname') || '';
             const no = row.getAttribute('data-searchno') || '';
+            const salon = (row.getAttribute('data-salon') || '').toLowerCase();
             
-            if (name.includes(query) || no.includes(query)) {
+            const matchesText = !query || name.includes(query) || no.includes(query);
+            const matchesSalon = !salonVal || salon === salonVal;
+            
+            if (matchesText && matchesSalon) {
                 row.style.setProperty('display', '', 'important');
             } else {
                 row.style.setProperty('display', 'none', 'important');
@@ -531,14 +627,29 @@
         updateStats();
     }
 
+    function markAllVisible(statusValue) {
+        const rows = document.querySelectorAll('.student-row');
+        rows.forEach(row => {
+            if (row.style.display !== 'none') {
+                const radios = row.querySelectorAll('.status-radio');
+                radios.forEach(radio => {
+                    if (parseInt(radio.value) === statusValue && !radio.disabled && !radio.checked) {
+                        radio.checked = true;
+                        onStatusRadioChange(radio, row.id.replace('row-', ''));
+                    }
+                });
+            }
+        });
+    }
+
     function updateStats() {
         let p = 0, a = 0, l = 0, u = 0;
         // Sadece görünür satırların durumlarını say
         document.querySelectorAll('.student-row').forEach(row => {
             if (row.style.display !== 'none') {
-                const s = row.querySelector('.status-select');
-                if (s) {
-                    const v = parseInt(s.value);
+                const checkedRadio = row.querySelector('.status-radio:checked');
+                if (checkedRadio) {
+                    const v = parseInt(checkedRadio.value);
                     if (v === 1) p++;
                     else if (v === 2) a++;
                     else if (v === 3) l++;

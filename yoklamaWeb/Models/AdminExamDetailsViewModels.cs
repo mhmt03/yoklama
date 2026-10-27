@@ -14,6 +14,9 @@ namespace yoklamaWeb.Models
         public TimeSpan? StartTime { get; set; }
         public TimeSpan? EndTime { get; set; }
 
+        public int YoklamaSayisi { get; set; } = 1;
+        public int SelectedYoklamaNo { get; set; } = 1;
+
         public List<AdminSeatRowViewModel> Seats { get; set; } = new();
 
         public int TotalStudents => Seats.Count;
@@ -35,9 +38,29 @@ namespace yoklamaWeb.Models
         public int Sira { get; set; }
         public string BinaNo { get; set; } = string.Empty;
         public AttendanceStatus AttendanceStatus { get; set; }
+        public int YoklamaNo { get; set; } = 1;
         public string Note { get; set; } = string.Empty;
         public string ProctorName { get; set; } = string.Empty;
         public string RoomNote { get; set; } = string.Empty;
         public DateTime UpdatedAt { get; set; }
+    }
+
+    public class AdminExamItemViewModel
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public DateTime ApplicationDate { get; set; }
+        public string BuildingNumber { get; set; } = string.Empty;
+        public DateTime ValidFrom { get; set; }
+        public DateTime ValidTo { get; set; }
+        public TimeSpan? StartTime { get; set; }
+        public TimeSpan? EndTime { get; set; }
+        public int YoklamaSayisi { get; set; }
+
+        public int TotalStudents { get; set; }
+        public int PresentCount { get; set; }
+        public int AbsentCount { get; set; }
+        public int LateCount { get; set; }
+        public int PendingCount { get; set; }
     }
 }

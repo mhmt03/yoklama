@@ -28,6 +28,9 @@ namespace yoklamaWeb.Models
         public TimeSpan? StartTime { get; set; }
         public TimeSpan? EndTime { get; set; }
 
+        // Attendance count for the exam (default 1)
+        public int YoklamaSayisi { get; set; } = 1;
+
         // Navigation property for seat assignments
         public virtual ICollection<ExamSeat> ExamSeats { get; set; } = new List<ExamSeat>();
 

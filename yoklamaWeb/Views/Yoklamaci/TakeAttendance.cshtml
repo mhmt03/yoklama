@@ -216,7 +216,7 @@
 
     .req-star { color: #f87171; }
 
-    /* RESPONSIVE DESIGN (Max 768px) - Çift satır / Kart görünümü */
+    /* RESPONSIVE DESIGN (Max 768px) - Çift/Üç satır Mobil Kart Görünümü */
     @@media (max-width: 768px) {
         .ta-header { padding: 12px 16px; }
         .ta-toolbar { padding: 10px 16px; gap: 8px; }
@@ -227,47 +227,42 @@
 
         /* Tabloyu mobil kartlara çevirme */
         .yk-table thead { display: none; }
-        .yk-table tbody, .yk-table tr, .yk-table td { display: block; width: 100%; }
+        .yk-table tbody, .yk-table tr, .yk-table td { display: block; width: 100%; box-sizing: border-box; }
         
         .yk-table tbody tr {
             background: var(--surface2);
             border: 1px solid var(--border);
             border-radius: 8px;
-            margin-bottom: 8px;
-            padding: 10px;
+            margin-bottom: 10px;
+            padding: 10px 12px;
             box-sizing: border-box;
         }
 
         .yk-table td {
-            padding: 4px 0;
+            padding: 3px 0;
             border: none;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
         }
 
         /* Çift satırlı kart tasarımı için özelleştirmeler */
         .yk-table td:nth-child(1) { display: none; } /* Sıra numarasını gizle */
+        .yk-table td:nth-child(2) { display: none; } /* Koltuk numarasını gizle */
         
-        /* 1. Satır: Koltuk No & Öğrenci No, Sınıf Şube */
-        .yk-table td:nth-child(2) {
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            padding-bottom: 8px;
-            margin-bottom: 6px;
-            justify-content: flex-start;
-            gap: 8px;
-        }
         .yk-table td:nth-child(3), .yk-table td:nth-child(5), .yk-table td:nth-child(6) {
-            display: none; /* Bunları üst satıra ve ad satırına gömeceğiz */
+            display: none; /* Bunları ad satırına gömüyoruz */
         }
         
-        /* 2. Satır: Ad Soyad */
+        /* 2. Satır: Ad Soyad ve Öğrenci No */
         .yk-table td:nth-child(4) {
             font-size: 0.95rem;
-            margin-bottom: 6px;
+            margin-bottom: 8px;
             display: block;
         }
-        /* Mobile layout inline data injection */
+        .yk-table td:nth-child(4)::before {
+            content: "Koltuk " attr(data-seat-no) " — ";
+            font-size: 0.85rem;
+            font-weight: bold;
+            color: var(--primary-light);
+        }
         .yk-table td:nth-child(4)::after {
             content: " (" attr(data-student-info) ")";
             font-size: 0.75rem;
@@ -275,17 +270,71 @@
             font-weight: normal;
         }
 
-        /* Durum Seçici ve Not Girişi Yan Yana */
-        .yk-table td:nth-child(7), .yk-table td:nth-child(8) {
-            display: inline-flex;
-            width: 48%;
-            vertical-align: top;
-            padding: 4px 0;
+        /* 3. Satır: Durum Radio Butonları (Tam Genişlik) ve Not Girişi (Ayrı Satır/Genişlik) */
+        .yk-table td:nth-child(7) {
+            display: block;
+            width: 100%;
+            margin-bottom: 6px;
         }
-        .status-select, .note-input {
+        .yk-table td:nth-child(8) {
+            display: block;
+            width: 100%;
+        }
+
+        /* Custom Radio Button Group for Mobile */
+        .status-radio-group {
+            display: flex;
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            background: var(--surface3);
+        }
+        .status-radio-group input[type="radio"] {
+            display: none;
+        }
+        .status-radio-group label {
+            flex: 1;
+            text-align: center;
+            padding: 7px 4px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            border-right: 1px solid var(--border);
+            margin: 0;
+            white-space: nowrap;
+        }
+        .status-radio-group label:last-child {
+            border-right: none;
+        }
+        .status-radio-group input[type="radio"]:checked + label.lbl-unknown {
+            background: rgba(148,163,184,.25);
+            color: #e2e8f0;
+        }
+        .status-radio-group input[type="radio"]:checked + label.lbl-present {
+            background: rgba(16,185,129,.3);
+            color: #6ee7b7;
+        }
+        .status-radio-group input[type="radio"]:checked + label.lbl-absent {
+            background: rgba(239,68,68,.3);
+            color: #fca5a5;
+        }
+        .status-radio-group input[type="radio"]:checked + label.lbl-late {
+            background: rgba(245,158,11,.3);
+            color: #fcd34d;
+        }
+        .status-radio-group input[type="radio"]:disabled + label {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .note-input {
             width: 100%;
             min-width: 100%;
             box-sizing: border-box;
+            padding: 6px 10px;
         }
     }
 </style>
@@ -358,6 +407,14 @@
         }
         else
         {
+            <!-- Bulk Actions for Filtered Students -->
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px; background: var(--surface2); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); flex-wrap: wrap;">
+                <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 600; margin-right: 4px;"><i class="bi bi-check-all"></i> Toplu Yoklama (Filtrelenmiş):</span>
+                <button type="button" class="pill-btn active" style="background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.4); color: #6ee7b7;" onclick="markAllVisible(1)">Tümü Var</button>
+                <button type="button" class="pill-btn active" style="background: rgba(239,68,68,.15); border-color: rgba(239,68,68,.4); color: #fca5a5;" onclick="markAllVisible(2)">Tümü Yok</button>
+                <button type="button" class="pill-btn active" style="background: rgba(148,163,184,.1); border-color: rgba(148,163,184,.3); color: #94a3b8;" onclick="markAllVisible(0)">Tümü Belirsiz</button>
+            </div>
+
             <div class="yk-table-wrap">
                 <table class="yk-table">
                     <thead>
@@ -404,40 +461,35 @@
                                     <input type="hidden" name="Seats[@i].Sira"       value="@seat.Sira" />
                                 </td>
                                 <td><span class="student-no">@seat.OgrenciNo</span></td>
-                                <td data-student-info="@seat.OgrenciNo - @seat.SinifDuzeyi-@seat.Sube"><span class="student-name">@seat.AdSoyad</span></td>
+                                <td data-student-info="@seat.OgrenciNo - @seat.SinifDuzeyi-@seat.Sube" data-seat-no="@seat.Sira"><span class="student-name">@seat.AdSoyad</span></td>
                                 <td><span class="class-badge">@seat.SinifDuzeyi</span></td>
                                 <td><span class="class-badge">@seat.Sube</span></td>
                                 <td>
-                                    @if (Model.IsTimeValid)
+                                    <div class="status-radio-group">
+                                        @foreach (var (val, label, css) in statuses)
+                                        {
+                                            var radioId = $"status-{seat.SeatId}-{(int)val}";
+                                            var isChecked = seat.Status == val ? "checked" : "";
+                                            var isDisabled = !Model.IsTimeValid ? "disabled" : "";
+                                            var labelClass = val switch {
+                                                yoklamaWeb.Models.AttendanceStatus.Katildi => "lbl-present",
+                                                yoklamaWeb.Models.AttendanceStatus.Katilmadi => "lbl-absent",
+                                                yoklamaWeb.Models.AttendanceStatus.Gec => "lbl-late",
+                                                _ => "lbl-unknown"
+                                            };
+                                            <input type="radio" 
+                                                   class="status-radio" 
+                                                   name="Seats[@i].Status" 
+                                                   id="@radioId" 
+                                                   value="@((int)val)" 
+                                                   @isChecked 
+                                                   @isDisabled 
+                                                   onchange="onStatusRadioChange(this, '@seat.SeatId')" />
+                                            <label class="@labelClass" for="@radioId">@label</label>
+                                        }
+                                    </div>
+                                    @if (!Model.IsTimeValid)
                                     {
-                                        <select name="Seats[@i].Status"
-                                                class="status-select @selectClass"
-                                                id="status-@seat.SeatId"
-                                                onchange="onStatusChange(this, '@seat.SeatId')">
-                                            @foreach (var (val, label, css) in statuses)
-                                            {
-                                                if (seat.Status == val)
-                                                {
-                                                    <option value="@((int)val)" selected>@label</option>
-                                                }
-                                                else
-                                                {
-                                                    <option value="@((int)val)">@label</option>
-                                                }
-                                            }
-                                        </select>
-                                    }
-                                    else
-                                    {
-                                        <select disabled class="status-select @selectClass" id="status-@seat.SeatId">
-                                            @foreach (var (val, label, css) in statuses)
-                                            {
-                                                if (seat.Status == val)
-                                                {
-                                                    <option value="@((int)val)" selected>@label</option>
-                                                }
-                                            }
-                                        </select>
                                         <input type="hidden" name="Seats[@i].Status" value="@((int)seat.Status)" />
                                     }
                                 </td>
@@ -521,30 +573,40 @@
     </div>
 </form>
 
-@section Scripts {
 <script>
     // Durum renk güncelleme
-    function onStatusChange(select, seatId) {
-        select.className = 'status-select';
-        const v = parseInt(select.value);
+    function onStatusRadioChange(radio, seatId) {
+        const v = parseInt(radio.value);
         const row = document.getElementById('row-' + seatId);
         row?.classList.remove('status-present', 'status-absent', 'status-late', 'status-unknown');
         if (v === 1) {
-            select.classList.add('s-present');
             row?.classList.add('status-present');
         }
         else if (v === 2) {
-            select.classList.add('s-absent');
             row?.classList.add('status-absent');
         }
         else if (v === 3) {
-            select.classList.add('s-late');
             row?.classList.add('status-late');
         }
         else {
             row?.classList.add('status-unknown');
         }
         updateStats();
+    }
+
+    function markAllVisible(statusValue) {
+        const rows = document.querySelectorAll('.student-row');
+        rows.forEach(row => {
+            if (row.style.display !== 'none') {
+                const radios = row.querySelectorAll('.status-radio');
+                radios.forEach(radio => {
+                    if (parseInt(radio.value) === statusValue && !radio.disabled && !radio.checked) {
+                        radio.checked = true;
+                        onStatusRadioChange(radio, row.id.replace('row-', ''));
+                    }
+                });
+            }
+        });
     }
 
     // Metin tabanlı filtreleme fonksiyonu
@@ -565,14 +627,15 @@
         updateStats();
     }
 
+    // İstatistik güncelleme
     function updateStats() {
         let p = 0, a = 0, l = 0, u = 0;
         // Sadece görünür satırların durumlarını say
         document.querySelectorAll('.student-row').forEach(row => {
             if (row.style.display !== 'none') {
-                const s = row.querySelector('.status-select');
-                if (s) {
-                    const v = parseInt(s.value);
+                const checkedRadio = row.querySelector('input[type="radio"]:checked');
+                if (checkedRadio) {
+                    const v = parseInt(checkedRadio.value);
                     if (v === 1) p++;
                     else if (v === 2) a++;
                     else if (v === 3) l++;
@@ -600,4 +663,3 @@
     // Sayfa yüklenince istatistik hesapla
     document.addEventListener('DOMContentLoaded', updateStats);
 </script>
-}

@@ -1,6 +1,6 @@
 @inject yoklamaWeb.Data.AppDbContext _context
 @{
-    bool isGlobalAdmin = User.Identity != null && User.Identity.IsAuthenticated && User.IsInRole("Admin");
+    bool isGlobalAdmin = User.Identity != null && User.Identity.IsAuthenticated && (User.IsInRole("Admin") || User.IsInRole("Idareci") || User.IsInRole("SinavYoneticisi"));
     bool isPansiyonAdmin = false;
     bool isPansiyonGorevlisi = User.Identity != null && User.Identity.IsAuthenticated && User.IsInRole("PansiyonGorevlisi");
 
@@ -12,13 +12,79 @@
             isPansiyonAdmin = true;
         }
     }
+
+    // Role-based navbar background styles
+    string navBgStyle = "background-color: #ffffff; color: #212529;";
+    string navLinkClass = "text-dark";
+    string navBrandClass = "text-dark";
+    string btnOutlineClass = "btn-outline-dark";
+ 
+    if (User.Identity != null && User.Identity.IsAuthenticated)
+    {
+        if (User.IsInRole("Admin"))
+        {
+            // Admin: Koyu Kırmızı / Bordo (Executive Red)
+            navBgStyle = "background: linear-gradient(135deg, #881337 0%, #4c0519 100%); color: #ffffff;";
+            navLinkClass = "text-white fw-medium";
+            navBrandClass = "text-white fw-bold";
+            btnOutlineClass = "btn-outline-light";
+        }
+        else if (User.IsInRole("Idareci"))
+        {
+            // İdareci: Gece Mavisi (Navy Blue)
+            navBgStyle = "background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); color: #ffffff;";
+            navLinkClass = "text-white fw-medium";
+            navBrandClass = "text-white fw-bold";
+            btnOutlineClass = "btn-outline-light";
+        }
+        else if (User.IsInRole("SinavYoneticisi"))
+        {
+            // Sınav Yöneticisi: Mor / İndigo (Indigo Deep)
+            navBgStyle = "background: linear-gradient(135deg, #4c1d95 0%, #581c87 100%); color: #ffffff;";
+            navLinkClass = "text-white fw-medium";
+            navBrandClass = "text-white fw-bold";
+            btnOutlineClass = "btn-outline-light";
+        }
+        else if (User.IsInRole("SuperYoklamaci"))
+        {
+            // Süper Yoklamacı: Zümrüt Yeşili (Emerald Green)
+            navBgStyle = "background: linear-gradient(135deg, #064e3b 0%, #022c22 100%); color: #ffffff;";
+            navLinkClass = "text-white fw-medium";
+            navBrandClass = "text-white fw-bold";
+            btnOutlineClass = "btn-outline-light";
+        }
+        else if (User.IsInRole("Yoklamaci"))
+        {
+            // Gözetmen / Yoklamacı: Camgöbeği / Turkuaz (Teal)
+            navBgStyle = "background: linear-gradient(135deg, #134e4a 0%, #042f2e 100%); color: #ffffff;";
+            navLinkClass = "text-white fw-medium";
+            navBrandClass = "text-white fw-bold";
+            btnOutlineClass = "btn-outline-light";
+        }
+        else if (User.IsInRole("PansiyonGorevlisi"))
+        {
+            // Pansiyon Görevlisi: Sıcak Kiremit / Turuncu-Kahve (Warm Amber-Bronze)
+            navBgStyle = "background: linear-gradient(135deg, #7c2d12 0%, #451a03 100%); color: #ffffff;";
+            navLinkClass = "text-white fw-medium";
+            navBrandClass = "text-white fw-bold";
+            btnOutlineClass = "btn-outline-light";
+        }
+        else if (User.IsInRole("gunlukYoklamaci"))
+        {
+            // Günlük Yoklamacı: Koyu Mavi / Slate
+            navBgStyle = "background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff;";
+            navLinkClass = "text-white fw-medium";
+            navBrandClass = "text-white fw-bold";
+            btnOutlineClass = "btn-outline-light";
+        }
+    }
 }
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@ViewData["Title"] - yoklamaWeb</title>
+    <title>@ViewData["Title"] - m.g.</title>
     <script type="importmap"></script>
     <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
@@ -33,9 +99,9 @@
     @if (User.Identity != null && User.Identity.IsAuthenticated)
     {
         <header>
-            <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
+            <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-dark border-bottom box-shadow mb-3 shadow-sm" style="@navBgStyle">
                 <div class="container-fluid">
-                    <a class="navbar-brand" asp-area="" asp-controller="Home" asp-action="Index">Yoklamacı</a>
+                    <a class="navbar-brand @navBrandClass me-3" asp-area="" asp-controller="Home" asp-action="Index"><i class="bi bi-shield-check me-1"></i>Yoklamacı</a>
                     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
                             aria-expanded="false" aria-label="Toggle navigation">
                         <span class="navbar-toggler-icon"></span>
@@ -45,78 +111,139 @@
                             @if (isGlobalAdmin)
                             {
                                 <li class="nav-item">
-                                    <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Index">Home</a>
+                                    <a class="nav-link @navLinkClass" asp-area="" asp-controller="Exam" asp-action="Index">e-Yoklama</a>
                                 </li>
                                 <li class="nav-item">
-                                    <a class="nav-link text-dark" asp-area="" asp-controller="Exam" asp-action="Index">Sınavlar</a>
+                                    <a class="nav-link @navLinkClass" asp-area="" asp-controller="Ogrenci" asp-action="Index">Öğrenciler</a>
                                 </li>
-                                <li class="nav-item">
-                                    <a class="nav-link text-dark" asp-area="" asp-controller="Ogrenci" asp-action="Index">Öğrenciler</a>
-                                </li>
+                                @if (User.IsInRole("Admin") || User.IsInRole("Idareci") || isPansiyonAdmin)
+                                {
+                                    <li class="nav-item dropdown">
+                                        <a class="nav-link dropdown-toggle @navLinkClass" href="#" id="pansiyonDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">Pansiyon Modülü</a>
+                                        <ul class="dropdown-menu" aria-labelledby="pansiyonDropdown">
+                                            <li><a class="dropdown-item" asp-controller="Yoklama" asp-action="GunlukYoklama">Günlük Yoklama Girişi</a></li>
+                                            <li><hr class="dropdown-divider"/></li>
+                                            <li><a class="dropdown-item" asp-controller="Izin" asp-action="Index">İzin İşlemleri</a></li>
+                                            <li><hr class="dropdown-divider"/></li>
+                                            <li><a class="dropdown-item" asp-controller="PansiyonOgrenci" asp-action="Index">Pansiyon Öğrencileri</a></li>
+                                            <li><a class="dropdown-item" asp-controller="Oda" asp-action="Index">Oda Yönetimi</a></li>
+                                            <li><a class="dropdown-item" asp-controller="Etut" asp-action="Index">Etüt Yönetimi</a></li>
+                                            <li><a class="dropdown-item" asp-controller="NobetciPlan" asp-action="Index">Nöbetçi Planı</a></li>
+                                            <li><a class="dropdown-item" asp-controller="PansiyonGorevlisi" asp-action="Index">Pansiyon Görevlileri</a></li>
+                                            <li><a class="dropdown-item" asp-controller="YoklamaTuru" asp-action="Index">Yoklama Çeşitleri</a></li>
+                                        </ul>
+                                    </li>
+                                }
+
+                                <!-- Optik Okuma Modülü -->
                                 <li class="nav-item dropdown">
-                                    <a class="nav-link dropdown-toggle text-dark" href="#" id="pansiyonDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-                                        Pansiyon Modülü
+                                    <a class="nav-link dropdown-toggle @navLinkClass" href="#" id="optikModulDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Optik Okuma
                                     </a>
-                                    <ul class="dropdown-menu" aria-labelledby="pansiyonDropdown">
-                                        <li><a class="dropdown-item" asp-controller="Yoklama" asp-action="GunlukYoklama">Günlük Yoklama Girişi</a></li>
-                                        <li><a class="dropdown-item" asp-controller="Yoklama" asp-action="Index">Yoklama Listesi & Geçmişi</a></li>
+                                    <ul class="dropdown-menu" aria-labelledby="optikModulDropdown">
+                                        <li><a class="dropdown-item" asp-controller="OptikModul" asp-action="FormTanimla">Optik Form Tanımla</a></li>
+                                        <li><a class="dropdown-item" asp-controller="OptikModul" asp-action="SinavOlustur">Sınav Oluştur</a></li>
                                         <li><hr class="dropdown-divider"></li>
-                                        <li><a class="dropdown-item" asp-controller="Izin" asp-action="Index">İzin İşlemleri</a></li>
-                                        <li><a class="dropdown-item" asp-controller="Izin" asp-action="Create">İzin Ekle</a></li>
-                                        <li><hr class="dropdown-divider"></li>
-                                        <li><a class="dropdown-item" asp-controller="PansiyonOgrenci" asp-action="Index">Pansiyon Öğrencileri</a></li>
-                                        <li><a class="dropdown-item" asp-controller="Oda" asp-action="Index">Oda Yönetimi</a></li>
-                                        <li><a class="dropdown-item" asp-controller="NobetciPlan" asp-action="Index">Nöbetçi Planı</a></li>
-                                        <li><a class="dropdown-item" asp-controller="PansiyonGorevlisi" asp-action="Index">Pansiyon Görevlileri</a></li>
+                                        <li><a class="dropdown-item" asp-controller="OptikModul" asp-action="SinavDegerlendir">Sınav Değerlendir</a></li>
+                                        <li><a class="dropdown-item" asp-controller="OptikModul" asp-action="SinavSonuclari">Sınav Sonuçları</a></li>
                                     </ul>
                                 </li>
-                                <li class="nav-item">
-                                    <a class="nav-link text-dark" asp-area="" asp-controller="Admin" asp-action="Index">Kullanıcı Yönetimi</a>
+
+                                 <li class="nav-item">
+                                     <a class="nav-link " asp-area="" asp-controller="Admin" asp-action="Index">Kullanıcı Yönetimi</a>
+                                 </li>
+                                 @if (User.IsInRole("Admin"))
+                                 {
+                                     <li class="nav-item">
+                                         <a class="nav-link @navLinkClass" asp-controller="SystemLog" asp-action="Index">Sistem Logları</a>
+                                     </li>
+                                 }
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle @navLinkClass" href="#" id="classAttendanceDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Sınıf Yoklaması
+                                    </a>
+                                    <ul class="dropdown-menu" aria-labelledby="classAttendanceDropdown">
+                                        <li><a class="dropdown-item" asp-controller="ClassAttendance" asp-action="Index">Sınıf Yoklama Planları</a></li>
+                                        <li><a class="dropdown-item" asp-controller="ClassAttendance" asp-action="DailyAttendance">Günlük Sınıf Yoklaması Al</a></li>
+                                        <li><a class="dropdown-item" asp-controller="ClassAttendance" asp-action="DailyAttendanceList">Günlük Yoklama Listeleri</a></li>
+                                        <li><a class="dropdown-item" asp-controller="GunlukYoklamaci" asp-action="Index">Günlük Yoklamacılar</a></li>
+                                    </ul>
                                 </li>
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle @navLinkClass" href="#" id="plannerDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Oturma Planlayıcı
+                                    </a>
+                                    <ul class="dropdown-menu" aria-labelledby="plannerDropdown">
+                                        <li><a class="dropdown-item" asp-controller="Planner" asp-action="Exams"><i class="bi bi-grid-3x3 me-1 text-primary"></i>Sınavlar & Yerleştirme (Deneme)</a></li>
+                                        <li><a class="dropdown-item" asp-controller="Planner" asp-action="YaziliExams"><i class="bi bi-pencil-square me-1 text-success"></i>Yazılı Oturma Planı</a></li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li><a class="dropdown-item" asp-controller="Planner" asp-action="Rooms"><i class="bi bi-door-open me-1 text-secondary"></i>Sınav Salonları</a></li>
+                                    </ul>
+                                </li>
+                            }
+                            else if (User.IsInRole("SuperYoklamaci"))
+                            {
                                 <li class="nav-item">
-                                    <a class="nav-link text-dark" asp-area="" asp-controller="ClassAttendance" asp-action="Index">Sınıf Yoklaması</a>
+                                    <a class="nav-link @navLinkClass fw-bold" asp-controller="SuperYoklamaci" asp-action="Index">Süper Yoklamacı Ekranı</a>
+                                </li>
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle @navLinkClass fw-bold" href="#" id="classAttendanceDropdownSuper" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                        Sınıf Yoklaması
+                                    </a>
+                                    <ul class="dropdown-menu" aria-labelledby="classAttendanceDropdownSuper">
+                                        <li><a class="dropdown-item" asp-controller="ClassAttendance" asp-action="Index">Sınıf Yoklama Planları</a></li>
+                                        <li><a class="dropdown-item" asp-controller="ClassAttendance" asp-action="DailyAttendance">Günlük Sınıf Yoklaması Al</a></li>
+                                        <li><a class="dropdown-item" asp-controller="ClassAttendance" asp-action="DailyAttendanceList">Günlük Yoklama Listeleri</a></li>
+                                        <li><a class="dropdown-item" asp-controller="GunlukYoklamaci" asp-action="Index">Günlük Yoklamacılar</a></li>
+                                    </ul>
+                                </li>
+                            }
+                            else if (User.IsInRole("gunlukYoklamaci"))
+                            {
+                                <li class="nav-item">
+                                    <a class="nav-link @navLinkClass fw-bold" asp-controller="ClassAttendance" asp-action="DailyAttendance">Günlük Sınıf Yoklaması Al</a>
                                 </li>
                             }
                             else if (isPansiyonAdmin)
                             {
                                 <li class="nav-item dropdown">
-                                    <a class="nav-link dropdown-toggle text-dark fw-bold" href="#" id="pansiyonDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                    <a class="nav-link dropdown-toggle @navLinkClass fw-bold" href="#" id="pansiyonDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                                         Pansiyon Modülü
                                     </a>
                                     <ul class="dropdown-menu" aria-labelledby="pansiyonDropdown">
                                         <li><a class="dropdown-item" asp-controller="Yoklama" asp-action="GunlukYoklama">Günlük Yoklama Girişi</a></li>
-                                        <li><a class="dropdown-item" asp-controller="Yoklama" asp-action="Index">Yoklama Listesi & Geçmişi</a></li>
                                         <li><hr class="dropdown-divider"></li>
                                         <li><a class="dropdown-item" asp-controller="Izin" asp-action="Index">İzin İşlemleri</a></li>
-                                        <li><a class="dropdown-item" asp-controller="Izin" asp-action="Create">İzin Ekle</a></li>
                                         <li><hr class="dropdown-divider"></li>
                                         <li><a class="dropdown-item" asp-controller="PansiyonOgrenci" asp-action="Index">Pansiyon Öğrencileri</a></li>
                                         <li><a class="dropdown-item" asp-controller="Oda" asp-action="Index">Oda Yönetimi</a></li>
+                                        <li><a class="dropdown-item" asp-controller="Etut" asp-action="Index">Etüt Yönetimi</a></li>
                                         <li><a class="dropdown-item" asp-controller="NobetciPlan" asp-action="Index">Nöbetçi Planı</a></li>
                                         <li><a class="dropdown-item" asp-controller="PansiyonGorevlisi" asp-action="Index">Pansiyon Görevlileri</a></li>
+                                        <li><a class="dropdown-item" asp-controller="YoklamaTuru" asp-action="Index">Yoklama Çeşitleri</a></li>
                                     </ul>
                                 </li>
                             }
                             else if (isPansiyonGorevlisi || User.IsInRole("PansiyonNobetcisi"))
                             {
                                 <li class="nav-item">
-                                    <a class="nav-link text-dark fw-bold" asp-controller="Yoklama" asp-action="GunlukYoklama">Günlük Yoklama Girişi</a>
+                                    <a class="nav-link @navLinkClass fw-bold" asp-controller="Yoklama" asp-action="GunlukYoklama">Günlük Yoklama Girişi</a>
                                 </li>
                                 <li class="nav-item">
-                                    <a class="nav-link text-dark" asp-controller="Yoklama" asp-action="Index">Yoklama Geçmişi</a>
-                                </li>
-                                <li class="nav-item">
-                                    <a class="nav-link text-dark" asp-controller="Izin" asp-action="Create">İzin Talebi Ekle</a>
+                                    <a class="nav-link @navLinkClass" asp-controller="Izin" asp-action="Create">İzin Talebi Ekle</a>
                                 </li>
                             }
                         </ul>
-                        <ul class="navbar-nav ms-auto align-items-center">
-                            <li class="nav-item me-3">
-                                <span class="text-dark">Merhaba, <strong>@User.Identity.Name</strong></span>
+                        <ul class="navbar-nav ms-auto align-items-center gap-2">
+                            <li class="nav-item me-2">
+                                <span class="@navLinkClass small"><i class="bi bi-person-circle me-1"></i><strong>@User.Identity?.Name</strong></span>
+                            </li>
+                            <li class="nav-item me-2">
+                                <a class="btn btn-sm @btnOutlineClass py-1 px-2" asp-controller="Account" asp-action="ChangePassword"><i class="bi bi-key-fill me-1"></i>Şifre Değiştir</a>
                             </li>
                             <li class="nav-item">
                                 <form asp-controller="Account" asp-action="Logout" method="post" class="d-inline">
-                                    <button type="submit" class="btn btn-link nav-link text-danger p-0" style="text-decoration: none;">Çıkış Yap</button>
+                                    <button type="submit" class="btn btn-sm btn-danger py-1 px-2"><i class="bi bi-box-arrow-right me-1"></i>Çıkış</button>
                                 </form>
                             </li>
                         </ul>
@@ -125,7 +252,7 @@
             </nav>
         </header>
     }
-    <div class="container">
+    <div class="container-fluid px-1 ">
         <main role="main" class="pb-3">
             @RenderBody()
         </main>

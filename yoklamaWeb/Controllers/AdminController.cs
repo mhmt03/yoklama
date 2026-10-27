@@ -8,7 +8,7 @@ using yoklamaWeb.Models;
 
 namespace yoklamaWeb.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
     public class AdminController : Controller
     {
         private readonly AppDbContext _context;
@@ -58,6 +58,33 @@ namespace yoklamaWeb.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateUser(AdminUserCreateModel model)
         {
+            if (User.IsInRole("Idareci") && (model.Role == "Admin" || model.Role == "Idareci" || model.Role == "SuperYoklamaci"))
+            {
+                ModelState.AddModelError("Role", "İdareci rolü Admin, İdareci veya Sınav Yöneticisi rolünde kullanıcı oluşturamaz.");
+                model.Roles = await GetRoleSelectListAsync();
+                return View(model);
+            }
+
+            if (User.IsInRole("SinavYoneticisi") && (model.Role == "Admin" || model.Role == "Idareci" || model.Role == "PansiyonGorevlisi"))
+            {
+                ModelState.AddModelError("Role", "Sınav Yöneticisi rolü Admin, İdareci veya Pansiyon Görevlisi rolünde kullanıcı oluşturamaz.");
+                model.Roles = await GetRoleSelectListAsync();
+                return View(model);
+            }
+
+            // Check duplicate user
+            var existingUser = await _userManager.FindByNameAsync(model.UserName);
+            if (existingUser != null)
+            {
+                ModelState.AddModelError("UserName", "Bu kullanıcı adı zaten kullanılmaktadır.");
+            }
+
+            // Check invalid characters
+            if (!string.IsNullOrWhiteSpace(model.UserName) && !System.Text.RegularExpressions.Regex.IsMatch(model.UserName, @"^[a-zA-Z0-9_\-\.\@]+$"))
+            {
+                ModelState.AddModelError("UserName", "Kullanıcı adı geçersiz karakterler barındırıyor (Sadece harf, rakam ve _, -, ., @ kullanılabilir).");
+            }
+
             if (!ModelState.IsValid)
             {
                 model.Roles = await GetRoleSelectListAsync();
@@ -97,6 +124,26 @@ namespace yoklamaWeb.Controllers
                 return NotFound();
             }
 
+            if (User.IsInRole("Idareci"))
+            {
+                var targetUserRoles = await _userManager.GetRolesAsync(user);
+                if (targetUserRoles.Any(r => r == "Admin" || r == "Idareci" || r == "SuperYoklamaci"))
+                {
+                    TempData["AdminError"] = "Bu kullanıcıyı düzenleme yetkiniz bulunmamaktadır.";
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
+            if (User.IsInRole("SinavYoneticisi"))
+            {
+                var targetUserRoles = await _userManager.GetRolesAsync(user);
+                if (targetUserRoles.Any(r => r == "Admin" || r == "Idareci" || r == "PansiyonGorevlisi"))
+                {
+                    TempData["AdminError"] = "Bu kullanıcıyı düzenleme yetkiniz bulunmamaktadır.";
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
             var roles = await _userManager.GetRolesAsync(user);
             var model = new AdminUserEditModel
             {
@@ -122,6 +169,28 @@ namespace yoklamaWeb.Controllers
             if (user == null)
             {
                 return NotFound();
+            }
+
+            if (User.IsInRole("Idareci"))
+            {
+                var targetUserRoles = await _userManager.GetRolesAsync(user);
+                if (targetUserRoles.Any(r => r == "Admin" || r == "Idareci" || r == "SuperYoklamaci") ||
+                    model.Role == "Admin" || model.Role == "Idareci" || model.Role == "SuperYoklamaci")
+                {
+                    TempData["AdminError"] = "Bu kullanıcıyı düzenleme yetkiniz bulunmamaktadır.";
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
+            if (User.IsInRole("SinavYoneticisi"))
+            {
+                var targetUserRoles = await _userManager.GetRolesAsync(user);
+                if (targetUserRoles.Any(r => r == "Admin" || r == "Idareci" || r == "PansiyonGorevlisi") ||
+                    model.Role == "Admin" || model.Role == "Idareci" || model.Role == "PansiyonGorevlisi")
+                {
+                    TempData["AdminError"] = "Bu kullanıcıyı düzenleme yetkiniz bulunmamaktadır.";
+                    return RedirectToAction(nameof(Index));
+                }
             }
 
             user.UserName = model.UserName;
@@ -188,6 +257,26 @@ namespace yoklamaWeb.Controllers
                 return RedirectToAction(nameof(Index));
             }
 
+            if (User.IsInRole("Idareci"))
+            {
+                var targetUserRoles = await _userManager.GetRolesAsync(user);
+                if (targetUserRoles.Any(r => r == "Admin" || r == "Idareci" || r == "SuperYoklamaci"))
+                {
+                    TempData["AdminError"] = "Bu kullanıcıyı silme yetkiniz bulunmamaktadır.";
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
+            if (User.IsInRole("SinavYoneticisi"))
+            {
+                var targetUserRoles = await _userManager.GetRolesAsync(user);
+                if (targetUserRoles.Any(r => r == "Admin" || r == "Idareci" || r == "PansiyonGorevlisi"))
+                {
+                    TempData["AdminError"] = "Bu kullanıcıyı silme yetkiniz bulunmamaktadır.";
+                    return RedirectToAction(nameof(Index));
+                }
+            }
+
             var result = await _userManager.DeleteAsync(user);
             if (!result.Succeeded)
             {
@@ -199,7 +288,16 @@ namespace yoklamaWeb.Controllers
 
         private async Task<List<SelectListItem>> GetRoleSelectListAsync()
         {
-            return await _roleManager.Roles
+            var query = _roleManager.Roles.AsQueryable();
+            if (User.IsInRole("Idareci"))
+            {
+                query = query.Where(r => r.Name != "Admin" && r.Name != "Idareci" && r.Name != "SuperYoklamaci");
+            }
+            if (User.IsInRole("SinavYoneticisi"))
+            {
+                query = query.Where(r => r.Name != "Admin" && r.Name != "Idareci" && r.Name != "PansiyonGorevlisi");
+            }
+            return await query
                 .OrderBy(r => r.Name)
                 .Select(r => new SelectListItem(r.Name!, r.Name!))
                 .ToListAsync();

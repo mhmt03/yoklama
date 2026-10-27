@@ -48,6 +48,10 @@ namespace yoklamaWeb.Models
         public int? OdaId { get; set; }
         public Oda Oda { get; set; }
 
+        public int? EtutId { get; set; }
+        [Display(Name = "Etüt Salonu")]
+        public Etut Etut { get; set; }
+
         public virtual ICollection<PansiyonYoklama> Yoklamalar { get; set; } = new List<PansiyonYoklama>();
         public virtual ICollection<IzinGirisi> IzinGirisleri { get; set; } = new List<IzinGirisi>();
 

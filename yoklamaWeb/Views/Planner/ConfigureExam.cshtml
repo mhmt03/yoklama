@@ -1,0 +1,368 @@
+@{
+    ViewData["Title"] = "Oturma Planı Yerleşim Ayarları";
+    Layout = "_Layout";
+    var exam = (yoklamaWeb.Models.PlannerExam)ViewBag.Exam;
+    var rooms = (List<yoklamaWeb.Models.PlannerRoom>)ViewBag.Rooms;
+    var currentRooms = (List<int>)ViewBag.CurrentRooms;
+    var gradeLevels = (List<string>)ViewBag.GradeLevels;
+    var studentCounts = (Dictionary<string, int>)ViewBag.StudentCounts;
+    var students = (List<yoklamaWeb.Models.Ogrenci>)ViewBag.Students;
+    var hasSeating = (bool)ViewBag.HasSeating;
+}
+
+<div class="container mt-4">
+    <div class="mb-4">
+        <a asp-action="Exams" class="btn btn-sm btn-outline-secondary mb-2">← Sınavlar Listesi</a>
+        <h2 style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Yerleşim Ayarları</h2>
+        <h5 class="text-muted">Sınav: @exam.Name (@exam.ExamDate.ToString("dd.MM.yyyy") - @exam.StartTime)</h5>
+    </div>
+
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger">@TempData["ErrorMessage"]</div>
+    }
+
+    <form asp-action="PlaceStudents" method="post" onsubmit="return validateSelection();">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="examId" value="@exam.Id" />
+
+        <!-- New Option: Participation Filter -->
+        <div class="card shadow-sm border-0 mb-4 bg-light">
+            <div class="card-body">
+                <h5 class="card-title fw-bold text-dark"><i class="bi bi-funnel-fill me-1 text-primary"></i> Katılım Kriteri</h5>
+                <p class="text-muted small">Sınav yerleşimine sadece sınava katılacağını belirten ("Evet") öğrenciler mi dahil edilsin, yoksa tüm öğrenciler mi?</p>
+                <div class="d-flex gap-4 mt-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="participationFilter" id="filterTumu" value="tumu" checked onchange="onParticipationFilterChange(this)" />
+                        <label class="form-check-label fw-bold" for="filterTumu">
+                            Tüm Öğrenciler (Katılım durumuna bakılmaksızın)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="participationFilter" id="filterKatilacaklar" value="sadeceKatilacaklar" onchange="onParticipationFilterChange(this)" />
+                        <label class="form-check-label fw-bold text-danger" for="filterKatilacaklar">
+                            Sadece İsteyenler (Katılım Durumu: Evet olanlar)
+                        </label>
+                    </div>
+                </div>
+            </div>
+        <!-- Distribution Mode Selection -->
+        <div class="card shadow-sm border-0 mb-4 bg-light">
+            <div class="card-body">
+                <h5 class="card-title fw-bold text-dark"><i class="bi bi-distribute-horizontal me-1 text-primary"></i> Yerleşim / Dağıtım Türü</h5>
+                <p class="text-muted small">Öğrencilerin salonlara nasıl yerleştirileceğini seçin:</p>
+                <div class="d-flex gap-4 mt-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="placementType" id="typeSequential" value="sequential" checked />
+                        <label class="form-check-label fw-bold" for="typeSequential">
+                            Salonları Doldurarak Git (Sırayla salonları doldurur)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="placementType" id="typeHomogeneous" value="homogeneous" />
+                        <label class="form-check-label fw-bold text-success" for="typeHomogeneous">
+                            Homojen Dağıt (Öğrencileri tüm salonlara kapasitelerine oranla eşit şekilde dağıtır)
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Butterfly Seating Option -->
+        <div class="card shadow-sm border-0 mb-4 bg-light">
+            <div class="card-body">
+                <h5 class="card-title fw-bold text-dark"><i class="bi bi-shuffle me-1 text-primary"></i> Kelebek Sistemi</h5>
+                <p class="text-muted small">Sınav esnasında kopya çekilmesini engellemek için aynı sınıf düzeyindeki öğrencilerin peş peşe oturması önlensin mi?</p>
+                <div class="d-flex gap-4 mt-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="isButterfly" id="butterflyNo" value="false" checked />
+                        <label class="form-check-label fw-bold" for="butterflyNo">
+                            Normal Rastgele (Sınıf sınırlaması olmadan yerleştir)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="isButterfly" id="butterflyYes" value="true" />
+                        <label class="form-check-label fw-bold text-danger" for="butterflyYes">
+                            Kelebek Sistemi Uygula (Farklı sınıf düzeylerini ardışık olarak yerleştir)
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Left Column: Rooms Selection -->
+            <div class="col-md-6 mb-4">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">1. Salon Seçimi</h5>
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="selectAllRooms" onclick="toggleAllRooms(this)" />
+                            <label class="form-check-label text-white small" for="selectAllRooms">Tümünü Seç</label>
+                        </div>
+                    </div>
+                    <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                        @if (!rooms.Any())
+                        {
+                            <div class="alert alert-warning mb-0">Lütfen önce "Sınav Salonları" sayfasından salon ekleyin.</div>
+                        }
+                        else
+                        {
+                            <div class="list-group">
+                                @foreach (var roomGroup in rooms.GroupBy(r => string.IsNullOrWhiteSpace(r.RoomGroup) ? "Gruplandırılmamış" : r.RoomGroup).OrderBy(g => g.Key == "Gruplandırılmamış" ? "zzz" : g.Key))
+                                {
+                                    <div class="list-group-item bg-light fw-bold text-secondary border-0 pt-3 pb-1" style="font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px;">
+                                        <i class="bi bi-tag-fill me-1"></i> @roomGroup.Key
+                                    </div>
+                                    @foreach (var room in roomGroup)
+                                    {
+                                        var isChecked = currentRooms.Contains(room.Id) ? "checked" : "";
+                                        <label class="list-group-item d-flex justify-content-between align-items-center cursor-pointer border-0 ps-4">
+                                            <div>
+                                                <input class="form-check-input me-2 room-checkbox" type="checkbox" name="selectedRoomIds" value="@room.Id" data-capacity="@room.Capacity" @isChecked onchange="calculateTotals()" />
+                                                <span class="fw-semibold">@room.RoomName</span>
+                                            </div>
+                                            <span class="badge bg-secondary rounded-pill">Kapasite: @room.Capacity</span>
+                                        </label>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Grades/Students Selection -->
+            <div class="col-md-6 mb-4">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">2. Öğrenci Seçimi</h5>
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="selectAllGrades" onclick="toggleAllGrades(this)" />
+                            <label class="form-check-label text-white small" for="selectAllGrades">Tümünü Seç</label>
+                        </div>
+                    </div>
+                    <div class="card-body" style="max-height: 500px; overflow-y: auto;">
+                        @if (!gradeLevels.Any())
+                        {
+                            <div class="alert alert-warning mb-0">Sistemde öğrenci bulunamadı.</div>
+                        }
+                        else
+                        {
+                            <div class="accordion" id="gradeAccordion">
+                                @foreach (var grade in gradeLevels)
+                                {
+                                    var gradeStudents = students.Where(s => s.SinifDuzeyi == grade).ToList();
+                                    <div class="card mb-2 border">
+                                        <div class="card-body p-3">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div class="form-check mb-0">
+                                                    <input class="form-check-input grade-checkbox" type="checkbox" id="grade-@grade" data-grade="@grade" onchange="toggleGradeStudents(this, '@grade')" />
+                                                    <label class="form-check-label fw-bold" for="grade-@grade">@grade. Sınıflar</label>
+                                                </div>
+                                                <button type="button" class="btn btn-sm btn-link text-decoration-none" onclick="toggleStudentCollapse('@grade')">
+                                                    <span id="btn-icon-@grade">▼</span> Öğrencileri Göster
+                                                </button>
+                                            </div>
+
+                                            <div id="students-container-@grade" class="student-collapse-container ps-3 mt-2 border-top pt-2" style="display: none; max-height: 250px; overflow-y: auto;">
+                                                @foreach (var student in gradeStudents)
+                                                {
+                                                    <div class="form-check student-item-row py-1" data-will-participate="@student.SinavlaraKatilacak.ToString().ToLower()">
+                                                        <input class="form-check-input student-checkbox" type="checkbox" name="selectedStudentNos" value="@student.OgrenciNo" data-grade="@grade" data-will-participate="@student.SinavlaraKatilacak.ToString().ToLower()" id="student-@student.OgrenciNo" onchange="onStudentCheckboxChange('@grade')" />
+                                                        <label class="form-check-label small" for="student-@student.OgrenciNo">
+                                                            @student.OgrenciNo - @student.AdSoyad (@student.Sube)
+                                                            @if (!student.SinavlaraKatilacak)
+                                                            {
+                                                                <span class="badge bg-danger ms-1 text-white will-not-badge">Katılmıyor</span>
+                                                            }
+                                                        </label>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seating Status and Live Math -->
+        <div class="card shadow-sm border-0 mb-4 bg-light">
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-4 mb-3 mb-md-0">
+                        <div class="text-muted small uppercase">Seçilen Toplam Kapasite</div>
+                        <div class="h3 fw-bold text-success" id="totalCapacityVal">0</div>
+                    </div>
+                    <div class="col-md-4 mb-3 mb-md-0">
+                        <div class="text-muted small uppercase">Seçilen Öğrenci Sayısı</div>
+                        <div class="h3 fw-bold text-primary" id="totalStudentsVal">0</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="text-muted small uppercase">Doluluk Oranı / Kalan</div>
+                        <div class="h3 fw-bold" id="ratioVal">-%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (hasSeating)
+        {
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                Bu sınava ait mevcut bir oturma planı bulunmaktadır. Yerleşimi yeniden başlattığınızda <strong>eski plan silinecektir</strong>.
+            </div>
+        }
+
+        <div class="d-flex justify-content-end mb-5">
+            <button type="submit" class="btn btn-primary btn-lg" id="placeBtn">
+                🎲 Öğrencileri Rastgele Yerleştir
+            </button>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+<script>
+    function toggleStudentCollapse(grade) {
+        const container = document.getElementById(`students-container-${grade}`);
+        const icon = document.getElementById(`btn-icon-${grade}`);
+        if (container.style.display === 'none') {
+            container.style.display = 'block';
+            icon.textContent = '▲';
+        } else {
+            container.style.display = 'none';
+            icon.textContent = '▼';
+        }
+    }
+
+    function toggleGradeStudents(gradeCheckbox, grade) {
+        const studentCheckboxes = document.querySelectorAll(`.student-checkbox[data-grade="${grade}"]`);
+        studentCheckboxes.forEach(cb => {
+            // Only check/uncheck if it is not disabled (hidden by filter)
+            if (!cb.disabled) {
+                cb.checked = gradeCheckbox.checked;
+            }
+        });
+        calculateTotals();
+    }
+
+    function onStudentCheckboxChange(grade) {
+        const gradeCheckbox = document.getElementById(`grade-${grade}`);
+        const studentCheckboxes = Array.from(document.querySelectorAll(`.student-checkbox[data-grade="${grade}"]`)).filter(cb => !cb.disabled);
+        const checkedCount = studentCheckboxes.filter(cb => cb.checked).length;
+
+        if (checkedCount === 0) {
+            gradeCheckbox.checked = false;
+            gradeCheckbox.indeterminate = false;
+        } else if (checkedCount === studentCheckboxes.length) {
+            gradeCheckbox.checked = true;
+            gradeCheckbox.indeterminate = false;
+        } else {
+            gradeCheckbox.checked = false;
+            gradeCheckbox.indeterminate = true;
+        }
+
+        calculateTotals();
+    }
+
+    function onParticipationFilterChange(radio) {
+        const filterVal = document.querySelector('input[name="participationFilter"]:checked').value;
+        const studentRows = document.querySelectorAll('.student-item-row');
+
+        studentRows.forEach(row => {
+            const cb = row.querySelector('.student-checkbox');
+            const willParticipate = row.getAttribute('data-will-participate') === 'true';
+
+            if (filterVal === 'sadeceKatilacaklar' && !willParticipate) {
+                row.style.display = 'none';
+                cb.checked = false;
+                cb.disabled = true;
+            } else {
+                row.style.display = '';
+                cb.disabled = false;
+            }
+        });
+
+        // Sync grade level checkboxes status after filtering students
+        document.querySelectorAll('.grade-checkbox').forEach(gc => {
+            const grade = gc.getAttribute('data-grade');
+            onStudentCheckboxChange(grade);
+        });
+
+        calculateTotals();
+    }
+
+    function toggleAllRooms(chk) {
+        document.querySelectorAll('.room-checkbox').forEach(cb => cb.checked = chk.checked);
+        calculateTotals();
+    }
+
+    function toggleAllGrades(chk) {
+        document.querySelectorAll('.grade-checkbox').forEach(cb => {
+            cb.checked = chk.checked;
+            toggleGradeStudents(cb, cb.getAttribute('data-grade'));
+        });
+        calculateTotals();
+    }
+
+    function calculateTotals() {
+        let totalCapacity = 0;
+        let totalStudents = 0;
+
+        document.querySelectorAll('.room-checkbox:checked').forEach(cb => {
+            totalCapacity += parseInt(cb.getAttribute('data-capacity') || 0);
+        });
+
+        document.querySelectorAll('.student-checkbox:checked').forEach(cb => {
+            if (!cb.disabled) {
+                totalStudents++;
+            }
+        });
+
+        document.getElementById('totalCapacityVal').textContent = totalCapacity;
+        document.getElementById('totalStudentsVal').textContent = totalStudents;
+
+        const ratioEl = document.getElementById('ratioVal');
+        if (totalCapacity > 0) {
+            const ratio = ((totalStudents / totalCapacity) * 100).toFixed(1);
+            const remaining = totalCapacity - totalStudents;
+
+            if (totalStudents > totalCapacity) {
+                ratioEl.textContent = `${ratio}% (Kapasite Yetersiz)`;
+                ratioEl.className = 'h3 fw-bold text-danger';
+                document.getElementById('placeBtn').disabled = true;
+            } else {
+                ratioEl.textContent = `${ratio}% (Boş Koltuk: ${remaining})`;
+                ratioEl.className = 'h3 fw-bold text-success';
+                document.getElementById('placeBtn').disabled = false;
+            }
+        } else {
+            ratioEl.textContent = '-';
+            ratioEl.className = 'h3 fw-bold text-muted';
+            document.getElementById('placeBtn').disabled = false;
+        }
+    }
+
+    function validateSelection() {
+        const roomChecked = document.querySelectorAll('.room-checkbox:checked').length > 0;
+        const studentChecked = Array.from(document.querySelectorAll('.student-checkbox:checked')).filter(cb => !cb.disabled).length > 0;
+
+        if (!roomChecked) {
+            alert('Lütfen en az bir salon seçin.');
+            return false;
+        }
+        if (!studentChecked) {
+            alert('Lütfen en az bir öğrenci seçin.');
+            return false;
+        }
+        return true;
+    }
+
+    // Run math on load
+    document.addEventListener('DOMContentLoaded', calculateTotals);
+</script>
+}

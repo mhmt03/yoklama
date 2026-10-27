@@ -47,8 +47,13 @@
                     <input asp-for="EndTime" class="form-control" type="time" />
                     <span asp-validation-for="EndTime" class="text-danger"></span>
                 </div>
-                <div class="col-12">
-                    <button type="submit" class="btn btn-primary btn-sm">Kaydet</button>
+                <div class="col-md-6">
+                    <label asp-for="YoklamaSayisi" class="form-label fw-bold text-primary">Alınacak Yoklama Sayısı</label>
+                    <input asp-for="YoklamaSayisi" class="form-control" type="number" min="1" max="10" value="1" />
+                    <span asp-validation-for="YoklamaSayisi" class="text-danger"></span>
+                </div>
+                <div class="col-12 mt-4">
+                    <button type="submit" class="btn btn-primary btn-sm px-4">Kaydet</button>
                     <a asp-action="Index" class="btn btn-outline-secondary btn-sm ms-2">İptal</a>
                 </div>
             </form>

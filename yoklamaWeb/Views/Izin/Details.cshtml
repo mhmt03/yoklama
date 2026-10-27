@@ -26,7 +26,27 @@
                 </tr>
                 <tr>
                     <td class="fw-bold text-muted">İzin Türü:</td>
-                    <td><span class="badge bg-info text-dark">@Model.Tur.ToString()</span></td>
+                    <td>
+                        @{
+                            string turStr = Model.Tur switch
+                            {
+                                IzinTur.Hastalik => "Hastalık İzni",
+                                IzinTur.AileZiyareti => "Aile Ziyareti İzni",
+                                IzinTur.ResmiIs => "Resmi İş İzni",
+                                IzinTur.Diger => "Diğer İzin",
+                                IzinTur.GecGelme => "Geç Gelme İzni",
+                                _ => Model.Tur.ToString()
+                            };
+                        }
+                        <span class="badge bg-info text-dark">@turStr</span>
+                        @if (Model.Tur == IzinTur.GecGelme && !string.IsNullOrEmpty(Model.IzinliYoklamaNolar))
+                        {
+                            var map = ViewBag.YoklamaTurleriMap as Dictionary<int, string> ?? new Dictionary<int, string>();
+                            var names = Model.IzinliYoklamaNolar.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                .Select(idStr => int.TryParse(idStr, out int id) && map.ContainsKey(id) ? map[id] : idStr + ". Yoklama");
+                            <div class="small text-muted mt-1">İzinli Olunan Yoklamalar: @(string.Join(", ", names))</div>
+                        }
+                    </td>
                 </tr>
                 <tr>
                     <td class="fw-bold text-muted">Başlangıç Tarihi:</td>
@@ -60,6 +80,10 @@
                             <span class="badge bg-secondary">İptal Edildi</span>
                         }
                     </td>
+                </tr>
+                <tr>
+                    <td class="fw-bold text-muted">Talepte Bulunan Görevli:</td>
+                    <td>@(Model.TalepEdenAdSoyad ?? "-")</td>
                 </tr>
                 <tr>
                     <td class="fw-bold text-muted">Onaylayan Görevli:</td>

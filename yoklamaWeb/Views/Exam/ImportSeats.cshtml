@@ -1,48 +1,106 @@
 @{
-    ViewData["Title"] = "Import Seat Assignments";
+    ViewData["Title"] = "Koltuk Yerleşimi İçe Aktar";
     Layout = "_Layout";
+    var plannerExams = (List<yoklamaWeb.Models.PlannerExam>)ViewBag.PlannerExams;
 }
 
-<h1 class="display-4 text-center my-4">Import Seats for Exam @ViewBag.ExamId</h1>
+<div class="container mt-4">
+    <div class="mb-4">
+        <a asp-action="Details" asp-route-id="@ViewBag.ExamId" class="btn btn-sm btn-outline-secondary mb-2">← Sınav Detaylarına Dön</a>
+        <h2 style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Koltuk Yerleşimi Yükle</h2>
+        <p class="text-muted">Bu sınava ait öğrencilerin oturma düzenini excel dosyasından yükleyebilir veya sistemdeki hazır planlamadan aktarabilirsiniz.</p>
+    </div>
 
-<div class="alert alert-info">
-    <h5 class="alert-heading">Excel import format</h5>
-    <p>The first row must contain these exact column headers in this order:</p>
-    <ul>
-        <li><strong>OgrenciNo</strong> – Öğrenci numarası</li>
-        <li><strong>SeatNumber</strong> – Koltuk numarası</li>
-        <li><strong>SalonAdi</strong> – Salon adı</li>
-        <li><strong>Sira</strong> – Sıra numarası</li>
-        <li><strong>BinaNo</strong> – Bina numarası</li>
-    </ul>
-    <p>Veri satırları ikinci satırdan itibaren başlamalıdır. Eksik veya hatalı bir satır varsa işlem iptal edilir.</p>
-</div>
-
-@if (TempData["SuccessMessage"] != null) {
-    <div class="alert alert-success" role="alert">@TempData["SuccessMessage"]</div>
-}
-@if (ViewData["Errors"] != null) {
-    var errors = ViewData["Errors"] as List<string>;
-    if (errors != null && errors.Any()) {
-        <div class="alert alert-danger" role="alert">
-            <ul>
-                @foreach (var err in errors) {
-                    <li>@err</li>
-                }
-            </ul>
-        </div>
+    @if (TempData["ErrorMessage"] != null) {
+        <div class="alert alert-danger" role="alert">@TempData["ErrorMessage"]</div>
     }
-}
+    @if (TempData["SuccessMessage"] != null) {
+        <div class="alert alert-success" role="alert">@TempData["SuccessMessage"]</div>
+    }
+    @if (ViewData["Errors"] != null) {
+        var errors = ViewData["Errors"] as List<string>;
+        if (errors != null && errors.Any()) {
+            <div class="alert alert-danger" role="alert">
+                <h5 class="alert-heading">Hatalar Tespit Edildi:</h5>
+                <ul class="mb-0">
+                    @foreach (var err in errors) {
+                        <li>@err</li>
+                    }
+                </ul>
+            </div>
+        }
+    }
 
-<form asp-action="ImportSeats" asp-route-id="@ViewBag.ExamId" method="post" enctype="multipart/form-data">
-    <div class="mb-3">
-        <label for="excelFile" class="form-label">Excel File</label>
-        <input type="file" class="form-control" name="excelFile" required />
+    <div class="row">
+        <!-- Option 1: System Seating Planner -->
+        <div class="col-md-6 mb-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Seçenek A: Sistemdeki Sınavı Al</h5>
+                </div>
+                <div class="card-body d-flex flex-column justify-content-between">
+                    <div>
+                        <p class="text-muted"><strong>Oturma Planlayıcı</strong> modülünde önceden hazırladığınız ve yerleşimini tamamladığınız sınav listelerinden birini seçip doğrudan aktarın.</p>
+                        
+                        @if (plannerExams == null || !plannerExams.Any())
+                        {
+                            <div class="alert alert-warning">Sistemde henüz yerleşimi yapılmış bir planlama sınavı bulunamadı.</div>
+                        }
+                        else
+                        {
+                            <form asp-action="ImportFromPlanner" method="post" class="mt-3">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="examId" value="@ViewBag.ExamId" />
+                                
+                                <div class="mb-3">
+                                    <label for="plannerExamId" class="form-label fw-bold">Yerleşim Sınavı Seçin</label>
+                                    <select class="form-select" id="plannerExamId" name="plannerExamId" required>
+                                        <option value="">-- Bir Sınav Seçin --</option>
+                                        @foreach (var pExam in plannerExams)
+                                        {
+                                            <option value="@pExam.Id">@pExam.Name (@pExam.ExamDate.ToString("dd.MM.yyyy"))</option>
+                                        }
+                                    </select>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100">Oturma Planını Aktar</button>
+                            </form>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Option 2: Excel Import -->
+        <div class="col-md-6 mb-4">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-success text-white">
+                    <h5 class="mb-0">Seçenek B: Excel ile Yükle</h5>
+                </div>
+                <div class="card-body d-flex flex-column justify-content-between">
+                    <div>
+                        <p class="text-muted">Dışarıdan hazırladığınız koltuk dağılım şablonu Excel dosyasını sisteme yükleyin.</p>
+                        
+                        <div class="alert alert-info py-2">
+                            <h6 class="alert-heading fw-bold mb-1">Şablon Dosya Formatı:</h6>
+                            <p class="small mb-0">İlk satır şu başlıkları sırasıyla içermelidir:<br />
+                            <code>OgrenciNo</code>, <code>SeatNumber</code>, <code>SalonAdi</code>, <code>Sira</code>, <code>BinaNo</code></p>
+                        </div>
+
+                        <form asp-action="ImportSeats" asp-route-id="@ViewBag.ExamId" method="post" enctype="multipart/form-data" class="mt-3">
+                            @Html.AntiForgeryToken()
+                            <div class="mb-3">
+                                <label for="excelFile" class="form-label fw-bold">Excel Dosyası Seçin</label>
+                                <input type="file" class="form-control" name="excelFile" required />
+                            </div>
+                            <div class="mb-3">
+                                <label for="startRow" class="form-label small">Veri Başlangıç Satırı (Varsayılan 2)</label>
+                                <input type="number" class="form-control form-control-sm" name="startRow" value="2" min="1" />
+                            </div>
+                            <button type="submit" class="btn btn-success w-100">Excel Yükle</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-    <div class="mb-3">
-        <label for="startRow" class="form-label">Start Row (default 2)</label>
-        <input type="number" class="form-control" name="startRow" value="2" min="1" />
-    </div>
-    <button type="submit" class="btn btn-success">Upload</button>
-    <a asp-action="Details" asp-route-id="@ViewBag.ExamId" class="btn btn-secondary ms-2">Cancel</a>
-</form>
+</div>

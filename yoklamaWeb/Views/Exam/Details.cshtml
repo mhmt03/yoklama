@@ -4,6 +4,18 @@
     ViewData["Title"] = "Sınav Detayları";
     Layout = "_Layout";
     var statusValues = Enum.GetValues<AttendanceStatus>();
+    var uniqueSalons = Model.Seats
+        .Where(s => !string.IsNullOrWhiteSpace(s.SalonAdi))
+        .Select(s => s.SalonAdi.Trim())
+        .Distinct()
+        .OrderBy(s => s)
+        .ToList();
+    var uniqueSubeler = Model.Seats
+        .Where(s => !string.IsNullOrWhiteSpace(s.Sube))
+        .Select(s => s.Sube.Trim())
+        .Distinct()
+        .OrderBy(s => s)
+        .ToList();
 }
 
 @functions{
@@ -25,6 +37,7 @@
 }
 
 <div class="container py-2 exam-shell">
+    @Html.AntiForgeryToken()
     <div class="card shadow-sm border-0 mb-3 exam-header-card">
         <div class="card-body py-3 px-3 px-lg-4">
             <div class="d-flex flex-column flex-lg-row justify-content-between gap-2">
@@ -46,17 +59,28 @@
             <div class="row g-2 mt-2">
                 <div class="col-md-6 col-lg-3">
                     <div class="p-2 rounded-3 bg-light compact-stat-card">
+                        <div class="text-muted small">Yoklama Oturumu</div>
+                        <select class="form-select form-select-sm fw-bold border-primary" onchange="location.href='?yoklamaNo=' + this.value;">
+                            @for (int i = 1; i <= Model.YoklamaSayisi; i++)
+                            {
+                                <option value="@i" selected="@(i == Model.SelectedYoklamaNo)">Yoklama @i</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="col-md-6 col-lg-2">
+                    <div class="p-2 rounded-3 bg-light compact-stat-card">
                         <div class="text-muted small">Geçerlilik</div>
                         <div class="fw-semibold small">@Model.ValidFrom.ToString("dd.MM.yyyy") – @Model.ValidTo.ToString("dd.MM.yyyy")</div>
                     </div>
                 </div>
-                <div class="col-md-6 col-lg-3">
+                <div class="col-md-6 col-lg-2">
                     <div class="p-2 rounded-3 bg-light compact-stat-card">
                         <div class="text-muted small">Saat</div>
                         <div class="fw-semibold small">@(Model.StartTime.HasValue ? Model.StartTime.Value.ToString("hh\\:mm") : "—") – @(Model.EndTime.HasValue ? Model.EndTime.Value.ToString("hh\\:mm") : "—")</div>
                     </div>
                 </div>
-                <div class="col-md-6 col-lg-3">
+                <div class="col-md-6 col-lg-2">
                     <div class="p-2 rounded-3 bg-light compact-stat-card">
                         <div class="text-muted small">Toplam</div>
                         <div class="fw-semibold small">@Model.TotalStudents öğrenci</div>
@@ -64,7 +88,7 @@
                 </div>
                 <div class="col-md-6 col-lg-3">
                     <div class="p-2 rounded-3 bg-light compact-stat-card">
-                        <div class="text-muted small">Durumlar</div>
+                        <div class="text-muted small">Yoklama @Model.SelectedYoklamaNo Durumlar</div>
                         <div class="fw-semibold small">Var @Model.PresentCount • Yok @Model.AbsentCount • Geç @Model.LateCount • Beklemede @Model.PendingCount</div>
                     </div>
                 </div>
@@ -86,11 +110,25 @@
             <div class="d-flex flex-column flex-md-row justify-content-between gap-2 mb-2">
                 <div>
                     <h2 class="h6 mb-1">Koltuk Atamaları</h2>
-                    <input id="salonFilter" type="text" class="form-control form-control-sm compact-filter" placeholder="Salon filtre" />
+                    <select id="salonFilter" class="form-select form-select-sm compact-filter">
+                        <option value="">Tüm Salonlar</option>
+                        <option value="belirsiz">Belirsiz (Atanmamış)</option>
+                        @foreach (var salon in uniqueSalons)
+                        {
+                            <option value="@salon">@salon</option>
+                        }
+                    </select>
                 </div>
                 <div>
 
-<input id="subeFilter" type="text" class="form-control form-control-sm compact-filter" placeholder="Şube filtre" />
+                    <select id="subeFilter" class="form-select form-select-sm compact-filter">
+                        <option value="">Tüm Şubeler</option>
+                        <option value="şube yok">Şube Yok</option>
+                        @foreach (var sube in uniqueSubeler)
+                        {
+                            <option value="@sube">@sube</option>
+                        }
+                    </select>
                 </div>
                 <div class="d-flex flex-wrap align-items-center gap-2 compact-filters">
                     <input id="seatSearch" type="text" class="form-control form-control-sm compact-filter" placeholder="Öğrenci ara" />
@@ -99,25 +137,38 @@
                 </div>
             </div>
 
+            <!-- Bulk Actions for Visible/Filtered Students -->
+            <div class="d-flex gap-2 mb-3 align-items-center bg-light p-2 rounded-3 border flex-wrap">
+                <span class="text-secondary small fw-bold"><i class="bi bi-check-all"></i> Toplu Yoklama İşlemleri (Filtrelenmiş):</span>
+                <button type="button" class="btn btn-sm btn-success px-3 fw-bold" onclick="markAllVisible(1)">Tümü Var</button>
+                <button type="button" class="btn btn-sm btn-danger px-3 fw-bold" onclick="markAllVisible(2)">Tümü Yok</button>
+                <button type="button" class="btn btn-sm btn-secondary px-3 fw-bold" onclick="markAllVisible(0)">Tümü Belirsiz</button>
+            </div>
+
             @if (Model.Seats.Any())
             {
                 <div class="table-responsive d-none d-lg-block">
                     <table id="seatTable" class="table align-middle mb-0">
                         <thead class="table-dark">
                             <tr>
-                                <th>Öğrenci</th>
-                                <th>Koltuk / Salon</th>
-                                <th>Durum</th>
-                                <th>Yoklama Notu</th>
-                                <th>Salon Notu</th>
-                                <th>Yoklamacı</th>
+                            <th>Sıra</th>
+                                <th onclick="sortTable(0)" style="cursor:pointer;">Öğrenci <i class="bi bi-arrow-down-up ms-1 sort-icon small text-muted"></i></th>
+                                <th onclick="sortTable(1)" style="cursor:pointer;">Koltuk / Salon <i class="bi bi-arrow-down-up ms-1 sort-icon small text-muted"></i></th>
+                                <th onclick="sortTable(2)" style="cursor:pointer;">Durum <i class="bi bi-arrow-down-up ms-1 sort-icon small text-muted"></i></th>
+                                <th onclick="sortTable(3)" style="cursor:pointer;">Yoklama Notu <i class="bi bi-arrow-down-up ms-1 sort-icon small text-muted"></i></th>
+                                <th onclick="sortTable(4)" style="cursor:pointer;">Salon Notu <i class="bi bi-arrow-down-up ms-1 sort-icon small text-muted"></i></th>
+                                <th onclick="sortTable(5)" style="cursor:pointer;">Yoklamacı <i class="bi bi-arrow-down-up ms-1 sort-icon small text-muted"></i></th>
                                 <th>İşlem</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var row in Model.Seats)
+                            @{int sira=1;}
+                                @foreach (var row in Model.Seats)
+                            
                             {
-                                <tr class="seat-row @StatusClass(row.AttendanceStatus)" data-seat-id="@row.SeatId" data-salon="@row.SalonAdi" data-sube="@row.SinifDuzeyi @row.Sube">
+                                <tr class="seat-row @StatusClass(row.AttendanceStatus)" data-seat-id="@row.SeatId" data-salon="@row.SalonAdi" data-sube="@(string.IsNullOrWhiteSpace(row.Sube) ? "şube yok" : row.Sube.Trim())">
+                                   <td>@sira</td>
+                                   @{sira++;}
                                     <td>
                                         <div class="fw-semibold">@row.AdSoyad</div>
                                         <div class="small text-muted">@row.OgrenciNo • @row.SinifDuzeyi @row.Sube • Sıra @row.Sira</div>
@@ -127,26 +178,31 @@
                                         <div class="small text-muted">Koltuk @row.SeatNumber • Bina @row.BinaNo</div>
                                     </td>
                                     <td>
-                                        <form id="updateSeatForm-@row.SeatId" asp-action="UpdateSeat" method="post" class="d-flex flex-column gap-2">
-                                            @Html.AntiForgeryToken()
-                                            <input type="hidden" name="seatId" value="@row.SeatId" />
-                                            <select class="form-select form-select-sm" name="attendanceStatus" form="updateSeatForm-@row.SeatId">
-                                                @foreach (var status in statusValues)
-                                                {
-                                                    <option value="@((int)status)" selected="@(row.AttendanceStatus == status ? "selected" : null)">@StatusLabel(status)</option>
-                                                }
-                                            </select>
-                                            <button type="submit" class="btn btn-sm btn-primary">Güncelle</button>
-                                        </form>
+                                        <div class="btn-group btn-group-sm" role="group" aria-label="Yoklama Durumu">
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-@row.SeatId" id="status-pending-@row.SeatId" value="0" @(row.AttendanceStatus == AttendanceStatus.KontrolEdilmedi ? "checked" : "") />
+                                            <label class="btn btn-outline-secondary px-2 fw-bold" for="status-pending-@row.SeatId">Belirsiz</label>
+
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-@row.SeatId" id="status-present-@row.SeatId" value="1" @(row.AttendanceStatus == AttendanceStatus.Katildi ? "checked" : "") />
+                                            <label class="btn btn-outline-success px-2 fw-bold" for="status-present-@row.SeatId">Var</label>
+
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-@row.SeatId" id="status-absent-@row.SeatId" value="2" @(row.AttendanceStatus == AttendanceStatus.Katilmadi ? "checked" : "") />
+                                            <label class="btn btn-outline-danger px-2 fw-bold" for="status-absent-@row.SeatId">Yok</label>
+
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-@row.SeatId" id="status-late-@row.SeatId" value="3" @(row.AttendanceStatus == AttendanceStatus.Gec ? "checked" : "") />
+                                            <label class="btn btn-outline-info px-2 fw-bold" for="status-late-@row.SeatId">Geç</label>
+                                        </div>
                                     </td>
                                     <td>
-                                        <textarea class="form-control form-control-sm" name="note" rows="2" placeholder="Öğrenci notu" form="updateSeatForm-@row.SeatId">@row.Note</textarea>
+                                        <textarea class="form-control form-control-sm note-input" name="note" rows="2" placeholder="Öğrenci notu">@row.Note</textarea>
                                     </td>
                                     <td>
-                                        <textarea class="form-control form-control-sm" name="roomNote" rows="2" placeholder="Salon notu" form="updateSeatForm-@row.SeatId">@row.RoomNote</textarea>
+                                        <textarea class="form-control form-control-sm room-note-input" name="roomNote" rows="2" placeholder="Salon notu">@row.RoomNote</textarea>
                                     </td>
                                     <td>
-                                        <input class="form-control form-control-sm" name="proctorName" value="@row.ProctorName" placeholder="Yoklamacı adı" form="updateSeatForm-@row.SeatId" />
+                                        <div class="d-flex align-items-center gap-1">
+                                            <input class="form-control form-control-sm proctor-input" name="proctorName" value="@row.ProctorName" placeholder="Yoklamacı adı" />
+                                            <button type="button" class="btn btn-sm btn-outline-primary save-btn" title="Notları ve Yoklamacıyı Kaydet"><i class="bi bi-save"></i></button>
+                                        </div>
                                         <div class="small text-muted mt-1">Son güncelleme: @row.UpdatedAt.ToString("dd.MM.yyyy HH:mm")</div>
                                     </td>
                                     <td>
@@ -172,51 +228,59 @@
                 <div class="d-block d-lg-none">
                     @foreach (var row in Model.Seats)
                     {
-                        <div class="seat-card @StatusClass(row.AttendanceStatus) mb-2" data-salon="@row.SalonAdi" data-sube="@row.SinifDuzeyi @row.Sube">
+                        <div class="seat-card @StatusClass(row.AttendanceStatus) mb-2" data-salon="@row.SalonAdi" data-sube="@(string.IsNullOrWhiteSpace(row.Sube) ? "şube yok" : row.Sube.Trim())" data-seat-id="@row.SeatId">
                             <div class="d-flex justify-content-between align-items-start gap-2">
                                 <div>
                                     <div class="fw-semibold">@row.AdSoyad</div>
                                     <div class="small text-muted">@row.OgrenciNo • @row.SinifDuzeyi @row.Sube • Koltuk @row.SeatNumber</div>
                                 </div>
-                                <span class="badge rounded-pill bg-light text-dark">@StatusLabel(row.AttendanceStatus)</span>
+                                <span class="badge rounded-pill bg-light text-dark status-badge">@StatusLabel(row.AttendanceStatus)</span>
                             </div>
                             <div class="small text-muted mt-2">Salon <span class="fw-semibold text-primary">@row.SalonAdi</span> • Sıra @row.Sira • Bina @row.BinaNo</div>
-                            <form asp-action="UpdateSeat" method="post" class="mt-3">
-                                @Html.AntiForgeryToken()
-                                <input type="hidden" name="seatId" value="@row.SeatId" />
+                            <div class="mt-3">
                                 <div class="row g-2">
                                     <div class="col-12">
                                         <label class="form-label small">Durum</label>
-                                        <select class="form-select form-select-sm" name="attendanceStatus">
-                                            @foreach (var status in statusValues)
-                                            {
-                                                <option value="@((int)status)" selected="@(row.AttendanceStatus == status ? "selected" : null)">@StatusLabel(status)</option>
-                                            }
-                                        </select>
+                                        <div class="btn-group btn-group-sm w-100" role="group" aria-label="Yoklama Durumu">
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-Mobile-@row.SeatId" id="status-pending-mobile-@row.SeatId" value="0" @(row.AttendanceStatus == AttendanceStatus.KontrolEdilmedi ? "checked" : "") />
+                                            <label class="btn btn-outline-secondary px-2 fw-bold" for="status-pending-mobile-@row.SeatId">Belirsiz</label>
+
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-Mobile-@row.SeatId" id="status-present-mobile-@row.SeatId" value="1" @(row.AttendanceStatus == AttendanceStatus.Katildi ? "checked" : "") />
+                                            <label class="btn btn-outline-success px-2 fw-bold" for="status-present-mobile-@row.SeatId">Var</label>
+
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-Mobile-@row.SeatId" id="status-absent-mobile-@row.SeatId" value="2" @(row.AttendanceStatus == AttendanceStatus.Katilmadi ? "checked" : "") />
+                                            <label class="btn btn-outline-danger px-2 fw-bold" for="status-absent-mobile-@row.SeatId">Yok</label>
+
+                                            <input type="radio" class="btn-check status-radio" name="AttendanceStatus-Mobile-@row.SeatId" id="status-late-mobile-@row.SeatId" value="3" @(row.AttendanceStatus == AttendanceStatus.Gec ? "checked" : "") />
+                                            <label class="btn btn-outline-info px-2 fw-bold" for="status-late-mobile-@row.SeatId">Geç</label>
+                                        </div>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small">Yoklama Notu</label>
-                                        <textarea class="form-control form-control-sm" name="note" rows="2">@row.Note</textarea>
+                                        <textarea class="form-control form-control-sm note-input" name="note" rows="2">@row.Note</textarea>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small">Salon Notu</label>
-                                        <textarea class="form-control form-control-sm" name="roomNote" rows="2">@row.RoomNote</textarea>
+                                        <textarea class="form-control form-control-sm room-note-input" name="roomNote" rows="2">@row.RoomNote</textarea>
                                     </div>
                                     <div class="col-12">
                                         <label class="form-label small">Yoklamacı</label>
-                                        <input class="form-control form-control-sm" name="proctorName" value="@row.ProctorName" />
+                                        <input class="form-control form-control-sm proctor-input" name="proctorName" value="@row.ProctorName" />
                                     </div>
                                 </div>
-                                <div class="d-flex gap-2 mt-3">
-                                    <button type="submit" class="btn btn-sm btn-primary flex-grow-1">Güncelle</button>
+                                <div class="d-flex gap-2 mt-3 butonSatiri">
+                                    <button type="button" class="btn btn-sm btn-primary flex-grow-1 save-btn">Kaydet</button>
                                     <button type="button" class="btn btn-xs btn-outline-secondary icon-action-btn" data-bs-toggle="modal" data-bs-target="#seatEditModal" data-seat-id="@row.SeatId" data-seat-number="@row.SeatNumber" data-salon="@row.SalonAdi" data-sira="@row.Sira" data-bina="@row.BinaNo" title="Salon/Sıra Düzenle" aria-label="Salon/Sıra Düzenle">✎</button>
-                                </div>
-                            </form>
-                            <form asp-action="DeleteSeat" method="post" class="mt-2">
+                                 <form asp-action="DeleteSeat" method="post" class="mt-2">
                                 @Html.AntiForgeryToken()
                                 <input type="hidden" name="seatId" value="@row.SeatId" />
                                 <button type="submit" class="btn btn-xs btn-outline-danger icon-action-btn compact-delete-btn" onclick="return confirm('Bu öğrenciyi sınavdan kaldırmak istediğinize emin misiniz?');" title="Sınavdan Kaldır" aria-label="Sınavdan Kaldır">🗑</button>
                             </form>
+                                
+                                </div>
+
+                            </div>
+                           
                         </div>
                     }
                 </div>
@@ -339,90 +403,246 @@
 </div>
 
 <style>
-    .exam-shell { max-width: 100%; }
-    .exam-header-card .card-body { padding: 0.8rem 0.95rem; }
-    .compact-action-btn { padding: 0.2rem 0.5rem; font-size: 0.78rem; }
-    .compact-stat-card { font-size: 0.82rem; }
-    .compact-filters .compact-filter { min-width: 140px; }
+    .exam-shell {
+        max-width: 100%;
+    }
+
+    .exam-header-card .card-body {
+        padding: 0.8rem 0.95rem;
+    }
+
+    .compact-action-btn {
+        padding: 0.2rem 0.5rem;
+        font-size: 0.78rem;
+    }
+
+    .compact-stat-card {
+        font-size: 0.82rem;
+    }
+
+    .compact-filters .compact-filter {
+        min-width: 140px;
+    }
+
     .seat-row {
         cursor: pointer;
         transition: background-color .15s ease, transform .15s ease;
     }
+
     .seat-row:hover {
         transform: translateY(-1px);
     }
-    .seat-row.status-present {
-        background: rgba(17, 233, 161, 0.3);
-        border: 2px solid rgba(17, 233, 161, 0.45);
+
+
+    /* =========================================================
+       SINAV YOKLAMA TABLOSU
+       Tek / çift satırlar aynı durum renginin farklı
+       alpha değerlerini kullanır.
+       ========================================================= */
+
+
+    /* -------------------------
+       VAR
+       ------------------------- */
+
+    .seat-row.status-present:nth-child(odd) >td {
+        background-color: rgba(17, 233, 161, 0.12) !important;
+        border: 2px solid rgba(17, 233, 161, 0.35) !important;
     }
-    .seat-row.status-absent {
-        background: rgba(239,68,68,0.14);
+
+    .seat-row.status-present:nth-child(even) >td {
+        background-color: rgba(17, 233, 161, 0.20) !important;
+        border: 2px solid rgba(17, 233, 161, 0.45) !important   ;
+    }
+
+
+    /* -------------------------
+       YOK
+       ------------------------- */
+
+    .seat-row.status-absent:nth-child(odd) >td {
+        background-color: rgba(239, 68, 68, 0.07)   !important;
+        border-left: 6px solid #ef4444 !important;
+    }
+
+    .seat-row.status-absent:nth-child(even) >td {
+        background-color: rgba(239, 68, 68, 0.14) !important;
         border-left: 6px solid #ef4444;
     }
-    .seat-row.status-late {
-        background: rgba(245,158,11,0.10);
+
+
+    /* -------------------------
+       GEÇ
+       ------------------------- */
+
+    .seat-row.status-late:nth-child(odd) >td {
+        background-color: rgba(245, 158, 11, 0.07) !important;
+        border-left: 4px solid #f59e0b !important;
+    }
+
+    .seat-row.status-late:nth-child(even) >td {
+        background-color: rgba(245, 158, 11, 0.13) !important;
         border-left: 4px solid #f59e0b;
     }
-    .seat-row.status-pending {
-        background: rgba(255,255,255,0.9);
+
+
+    /* -------------------------
+       BELİRSİZ
+       ------------------------- */
+
+    .seat-row.status-pending:nth-child(odd)  >td {
+        background-color: rgba(148, 163, 184, 0.06) !important;
+        border-left: 4px solid #64748b !important;
+    }
+
+    .seat-row.status-pending:nth-child(even) >td {
+        background-color: rgba(148, 163, 184, 0.12) !important;
         border-left: 4px solid #64748b;
     }
+
+
+    /* -------------------------
+       Not içeren satır
+       ------------------------- */
+
     .seat-row.has-notes {
         min-height: 132px;
     }
+
+
+    /* =========================================================
+       MOBİL KARTLAR
+       ========================================================= */
+
     .seat-card.status-present {
-        background: rgba(16,185,129,0.24);
-        border: 2px solid rgba(17, 233, 161, 0.45);
+        background: rgba(16, 185, 129, 0.24);
+           border: 2px solid rgba(17, 233, 161, 0.45);
     }
+
     .seat-card.status-absent {
         border-left: 8px solid #ef4444;
-        background: rgba(239,68,68,0.08);
+        background: rgba(239, 68, 68, 0.08);
     }
+
     .seat-card.status-late {
         border-left: 6px solid #f59e0b;
-        background: rgba(245,158,11,0.08);
+        background: rgba(245, 158, 11, 0.08);
     }
+
     .seat-card.status-pending {
         border-left: 6px solid #64748b;
-        background: rgba(148,163,184,0.08);
+        background: rgba(148, 163, 184, 0.08);
     }
+
     .seat-card {
         padding: 12px;
         border-radius: 12px;
-        border: 1px solid rgba(0,0,0,0.08);
+        border: 1px solid rgba(0, 0, 0, 0.08);
     }
+
+
+    /* =========================================================
+       BUTONLAR
+       ========================================================= */
+
     .icon-action-btn {
         padding: 0.15rem 0.4rem;
         font-size: 0.8rem;
         line-height: 1;
     }
+
     .compact-delete-btn {
-        min-width: 1.8rem;
+       height: 30px;
         width: auto;
-        padding: 0.15rem 0.35rem;
+        
         display: inline-flex;
         align-items: center;
         justify-content: center;
     }
+
     .btn-xs {
         padding: 0.25rem 0.5rem;
         font-size: 0.75rem;
     }
-    .action-cell { min-width: 54px; }
-    .table td, .table th { padding: 0.35rem 0.4rem; }
+
+    .action-cell {
+        min-width: 54px;
+    }
+
+
+    /* =========================================================
+       TABLO
+       ========================================================= */
+
+    .table td,
+    .table th {
+        padding: 0.35rem 0.4rem;
+    }
+
+
+    /* =========================================================
+       MASAÜSTÜ
+       ========================================================= */
+
     @@media (min-width: 992px) {
-        .table td, .table th {
+
+        .table td,
+        .table th {
             white-space: nowrap;
             vertical-align: middle;
         }
+
         .seat-row {
             margin: 0;
         }
     }
+
+
+    /* =========================================================
+       MOBİL
+       ========================================================= */
+
     @@media (max-width: 991px) {
-        .compact-filters .compact-filter { min-width: 100%; }
-        .table td, .table th { white-space: normal; }
-        .compact-delete-btn { min-width: 1.7rem; }
+        .buton-satiri{
+            display: flex;
+            flex-direction: column;
+            justify-content: "space-between";
+            align-items: center;
+        }
+.save-btn{
+    padding: 0;
+    font-size: 12px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    
+    max-width: 80px;
+    height: auto;
+}
+.room-note-input{
+    
+    height: 20px;
+    font-size: 12px;
+}
+.note-input{
+    
+    height: 20px;
+    font-size: 12px;
+}
+
+
+        .compact-filters .compact-filter {
+            min-width: 100%;
+        }
+
+        .table td,
+        .table th {
+            white-space: normal;
+        }
+
+        .compact-delete-btn {
+            min-width: 1.7rem;
+        }
     }
 </style>
 
@@ -449,8 +669,20 @@
                 const salonText = (item.getAttribute('data-salon') || '').toLowerCase();
                 const subeText = (item.getAttribute('data-sube') || '').toLowerCase();
                 const matchesQuery = !query || text.includes(query);
-                const matchesSalon = !salonValue || salonText.includes(salonValue);
-                const matchesSube = !subeValue || subeText.includes(subeValue);
+                
+                let matchesSalon = true;
+                if (salonValue === 'belirsiz') {
+                    matchesSalon = !salonText || salonText.trim() === '';
+                } else if (salonValue) {
+                    matchesSalon = salonText === salonValue;
+                }
+
+                let matchesSube = true;
+                if (subeValue === 'şube yok') {
+                    matchesSube = !subeText || subeText.trim() === '' || subeText === 'şube yok';
+                } else if (subeValue) {
+                    matchesSube = subeText === subeValue;
+                }
                 item.style.display = matchesQuery && matchesSalon && matchesSube ? '' : 'none';
             });
         }
@@ -462,11 +694,71 @@
             });
         });
 
-        [searchInput, salonFilter, subeFilter].forEach(input => {
-            if (input) {
-                input.addEventListener('input', applySeatFilters);
+        if (searchInput) searchInput.addEventListener('input', applySeatFilters);
+        if (salonFilter) salonFilter.addEventListener('change', applySeatFilters);
+        if (subeFilter) subeFilter.addEventListener('change', applySeatFilters);
+
+        // Sorting function
+        let sortDirections = {};
+        window.sortTable = function(columnIndex) {
+            const table = document.getElementById("seatTable");
+            const tbody = table.querySelector("tbody");
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            if (rows.length === 0) return;
+
+            const currentDirection = sortDirections[columnIndex] || 'asc';
+            const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+            sortDirections[columnIndex] = newDirection;
+
+            // Reset icons
+            table.querySelectorAll("th .sort-icon").forEach(icon => {
+                icon.className = "bi bi-arrow-down-up ms-1 sort-icon small text-muted";
+            });
+
+            const activeHeader = table.querySelectorAll("th")[columnIndex];
+            const activeIcon = activeHeader.querySelector(".sort-icon");
+            if (activeIcon) {
+                activeIcon.className = newDirection === 'asc' 
+                    ? "bi bi-arrow-up ms-1 text-primary sort-icon small" 
+                    : "bi bi-arrow-down ms-1 text-primary sort-icon small";
             }
-        });
+
+            rows.sort((rowA, rowB) => {
+                let cellA = "";
+                let cellB = "";
+
+                if (columnIndex === 0) {
+                    cellA = rowA.cells[0].querySelector('.fw-semibold').innerText.trim();
+                    cellB = rowB.cells[0].querySelector('.fw-semibold').innerText.trim();
+                } else if (columnIndex === 1) {
+                    cellA = rowA.cells[1].innerText.trim();
+                    cellB = rowB.cells[1].innerText.trim();
+                } else if (columnIndex === 2) {
+                    const radioA = rowA.querySelector('.status-radio:checked');
+                    const radioB = rowB.querySelector('.status-radio:checked');
+                    cellA = radioA ? radioA.value : "";
+                    cellB = radioB ? radioB.value : "";
+                } else if (columnIndex === 3 || columnIndex === 4) {
+                    cellA = rowA.cells[columnIndex].querySelector('textarea').value.trim();
+                    cellB = rowB.cells[columnIndex].querySelector('textarea').value.trim();
+                } else if (columnIndex === 5) {
+                    cellA = rowA.cells[5].querySelector('input').value.trim();
+                    cellB = rowB.cells[5].querySelector('input').value.trim();
+                }
+
+                if (columnIndex === 2) {
+                    const numA = parseInt(cellA) || 0;
+                    const numB = parseInt(cellB) || 0;
+                    return newDirection === 'asc' ? numA - numB : numB - numA;
+                } else {
+                    return newDirection === 'asc' 
+                        ? cellA.localeCompare(cellB, 'tr') 
+                        : cellB.localeCompare(cellA, 'tr');
+                }
+            });
+
+            rows.forEach(row => tbody.appendChild(row));
+        };
 
         const editModal = document.getElementById('seatEditModal');
         if (editModal) {
@@ -489,6 +781,107 @@
                     button.click();
                 }
             });
+        });
+
+        // Dynamic save logic
+        function saveSeat(element) {
+            const container = element.closest('.seat-row, .seat-card');
+            const seatId = container.getAttribute('data-seat-id');
+            const checkedRadio = container.querySelector('.status-radio:checked');
+            const attendanceStatus = checkedRadio ? checkedRadio.value : 0;
+            const note = container.querySelector('.note-input').value;
+            const roomNote = container.querySelector('.room-note-input').value;
+            const proctorName = container.querySelector('.proctor-input').value;
+            const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+            container.style.opacity = '0.6';
+
+            const formData = new FormData();
+            formData.append('seatId', seatId);
+            formData.append('attendanceStatus', attendanceStatus);
+            formData.append('note', note);
+            formData.append('roomNote', roomNote);
+            formData.append('proctorName', proctorName);
+            formData.append('__RequestVerificationToken', token);
+
+            fetch('/Exam/UpdateSeat', {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            })
+            .then(r => r.json())
+            .then(data => {
+                container.style.opacity = '1';
+                
+                // Update CSS classes
+                const statusClass = getStatusClass(parseInt(attendanceStatus));
+                
+                // Check if row or card
+                if (container.classList.contains('seat-row')) {
+                    container.className = `seat-row ${statusClass}`;
+                } else {
+                    container.className = `seat-card ${statusClass} mb-2`;
+                }
+                
+                // Also update the mobile badge text if it exists
+                const badge = container.querySelector('.status-badge');
+                if (badge) {
+                    badge.textContent = getStatusLabel(parseInt(attendanceStatus));
+                }
+            })
+            .catch(err => {
+                container.style.opacity = '1';
+                console.error(err);
+            });
+        }
+
+        function getStatusClass(status) {
+            switch(status) {
+                case 1: return 'status-present';
+                case 2: return 'status-absent';
+                case 3: return 'status-late';
+                default: return 'status-pending';
+            }
+        }
+
+        function getStatusLabel(status) {
+            switch(status) {
+                case 1: return 'Var';
+                case 2: return 'Yok';
+                case 3: return 'Geç';
+                default: return 'Belirsiz';
+            }
+        }
+
+        window.markAllVisible = function(statusValue) {
+            const items = document.querySelectorAll('.seat-row, .seat-card');
+            items.forEach(item => {
+                if (item.style.display !== "none") {
+                    const radios = item.querySelectorAll('.status-radio');
+                    radios.forEach(radio => {
+                        if (parseInt(radio.value) === statusValue && !radio.checked) {
+                            radio.checked = true;
+                            radio.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    });
+                }
+            });
+        };
+
+        // Event listeners for dynamic autosave
+        document.addEventListener('change', function(e) {
+            if (e.target.matches('.status-radio')) {
+                saveSeat(e.target);
+            }
+        });
+
+        document.addEventListener('click', function(e) {
+            const btn = e.target.closest('.save-btn');
+            if (btn) {
+                saveSeat(btn);
+            }
         });
     })();
 </script>

@@ -18,87 +18,6 @@ namespace yoklamaWeb.Controllers
             _context = context;
         }
 
-        // GET: Yoklama
-        public async Task<IActionResult> Index(YoklamaFilterViewModel filter)
-        {
-            var query = _context.PansiyonYoklamalar
-                .Include(y => y.PansiyonOgrenci)
-                .Include(y => y.YoklamaYapan)
-                .AsQueryable();
-
-            if (!string.IsNullOrWhiteSpace(filter.Arama))
-            {
-                query = query.Where(y => y.PansiyonOgrenci.AdSoyad.Contains(filter.Arama)
-                    || y.PansiyonOgrenci.OgrenciNo.Contains(filter.Arama)
-                    || y.YoklamaYapan.AdSoyad.Contains(filter.Arama)
-                    || y.Aciklama.Contains(filter.Arama));
-            }
-
-            if (filter.OgrenciId.HasValue)
-            {
-                query = query.Where(y => y.PansiyonOgrenciId == filter.OgrenciId.Value);
-            }
-
-            if (filter.YoklamaYapanId.HasValue)
-            {
-                query = query.Where(y => y.YoklamaYapanId == filter.YoklamaYapanId.Value);
-            }
-
-            if (!string.IsNullOrWhiteSpace(filter.Durum))
-            {
-                query = query.Where(y => y.Durum == filter.Durum);
-            }
-
-            if (filter.BaslangicTarihi.HasValue)
-            {
-                query = query.Where(y => y.Tarih >= filter.BaslangicTarihi.Value);
-            }
-
-            if (filter.BitisTarihi.HasValue)
-            {
-                query = query.Where(y => y.Tarih <= filter.BitisTarihi.Value);
-            }
-
-            var yoklamalar = await query
-                .OrderByDescending(y => y.Tarih)
-                .ThenByDescending(y => y.Saat)
-                .ToListAsync();
-
-            var viewModel = new YoklamaListViewModel
-            {
-                Yoklamalar = yoklamalar.Select(y => new PansiyonYoklamaViewModel
-                {
-                    Id = y.Id,
-                    PansiyonOgrenciId = y.PansiyonOgrenciId,
-                    OgrenciAdSoyad = y.PansiyonOgrenci.AdSoyad,
-                    OgrenciNo = y.PansiyonOgrenci.OgrenciNo,
-                    YoklamaYapanId = y.YoklamaYapanId,
-                    YoklamaYapanAdSoyad = y.YoklamaYapan.AdSoyad,
-                    Tarih = y.Tarih,
-                    Saat = y.Saat,
-                    Durum = y.Durum,
-                    Aciklama = y.Aciklama,
-                    RowVersion = y.RowVersion
-                }).ToList(),
-                Filter = filter
-            };
-
-            ViewBag.Ogrenciler = await _context.PansiyonOgrenciler
-                .Where(o => o.Aktif)
-                .OrderBy(o => o.AdSoyad)
-                .Select(o => new SelectListItem { Value = o.Id.ToString(), Text = $"{o.AdSoyad} ({o.OgrenciNo})" })
-                .ToListAsync();
-
-            ViewBag.Gorevlisiler = await _context.PansiyonGorevlileri
-                .Where(g => g.Aktif)
-                .OrderBy(g => g.AdSoyad)
-                .Select(g => new SelectListItem { Value = g.Id.ToString(), Text = g.AdSoyad })
-                .ToListAsync();
-
-            ViewBag.Durumlar = GetDurumlarSelectList();
-
-            return View(viewModel);
-        }
 
         // GET: Yoklama/Details/5
         public async Task<IActionResult> Details(int? id)
@@ -463,7 +382,8 @@ namespace yoklamaWeb.Controllers
                     Aciklama = y.Aciklama,
                     RowVersion = y.RowVersion
                 }).ToList(),
-                Filter = filter
+                Filter = filter,
+                Tarih = filter.BaslangicTarihi ?? DateTime.Today
             };
 
             ViewBag.Ogrenci = ogrenci;
@@ -471,17 +391,28 @@ namespace yoklamaWeb.Controllers
 
             return View(viewModel);
         }
-
-        // GET: Yoklama/GunlukYoklama
-        public async Task<IActionResult> GunlukYoklama(DateTime? tarih)
+// GET: Yoklama/GunlukYoklama
+        public async Task<IActionResult> GunlukYoklama(DateTime? tarih, YoklamaFilterViewModel filter = null)
         {
+            if (filter == null) filter = new YoklamaFilterViewModel();
             var secilenTarih = tarih ?? DateTime.Today;
 
-            var username = User.Identity?.Name;
-            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi == username);
+            var activeYoklamaTurleri = await _context.YoklamaTurleri.Where(y => y.Aktif).OrderBy(y => y.Sira).ToListAsync();
+            ViewBag.YoklamaTurleri = activeYoklamaTurleri;
 
-            // Nöbetçi günü/Admin yetki kontrolü
-            bool isAdmin = User.IsInRole("Admin") || (gorevlisi != null && gorevlisi.Rol == "Admin");
+            int secilenYoklamaNo = filter.YoklamaNo ?? 0;
+            if (secilenYoklamaNo == 0 || !activeYoklamaTurleri.Any(y => y.Id == secilenYoklamaNo))
+            {
+                secilenYoklamaNo = activeYoklamaTurleri.FirstOrDefault()?.Id ?? 1;
+            }
+            filter.YoklamaNo = secilenYoklamaNo;
+
+            var username = User.Identity?.Name ?? "";
+            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi.ToLower() == username.ToLower());
+
+            // Nöbetçi günü/Admin/İdareci yetki kontrolü
+            bool isAdmin = User.IsInRole("Admin") || User.IsInRole("Idareci") || (gorevlisi != null && gorevlisi.Rol == "Admin");
+            
             ViewBag.IsAdmin = isAdmin;
             if (!isAdmin)
             {
@@ -503,10 +434,10 @@ namespace yoklamaWeb.Controllers
                     _ => ""
                 };
 
-                bool hasPlan = await _context.NobetciPlanlar.AnyAsync(p => 
-                    p.PansiyonGorevlisiId == gorevlisi.Id && 
-                    p.BaslangicTarihi <= secilenTarih && 
-                    p.BitisTarihi >= secilenTarih && 
+                bool hasPlan = await _context.NobetciPlanlar.AnyAsync(p =>
+                    p.PansiyonGorevlisiId == gorevlisi.Id &&
+                    p.BaslangicTarihi <= secilenTarih &&
+                    p.BitisTarihi >= secilenTarih &&
                     p.Gun == targetDayName);
 
                 if (!hasPlan)
@@ -518,13 +449,14 @@ namespace yoklamaWeb.Controllers
 
             var yoklamalar = await _context.PansiyonYoklamalar
                 .Include(y => y.PansiyonOgrenci)
+                .Include(y => y.PansiyonOgrenci.Oda)
                 .Include(y => y.YoklamaYapan)
-                .Where(y => y.Tarih == secilenTarih)
-                .OrderBy(y => y.PansiyonOgrenci.AdSoyad)
+                .Where(y => y.Tarih == secilenTarih && y.YoklamaNo == secilenYoklamaNo)
                 .ToListAsync();
 
             var tumOgrenciler = await _context.PansiyonOgrenciler
                 .Include(o => o.Oda)
+                .Include(o => o.Etut)
                 .Where(o => o.Aktif)
                 .OrderBy(o => o.AdSoyad)
                 .ToListAsync();
@@ -535,73 +467,125 @@ namespace yoklamaWeb.Controllers
                 .ToListAsync();
             var izinlerMap = onayliIzinler.ToLookup(i => i.OgrenciId);
 
-            var yoklamalarMap = yoklamalar.ToDictionary(y => y.PansiyonOgrenciId);
+            var yoklamalarMap = yoklamalar.GroupBy(y => y.PansiyonOgrenciId).ToDictionary(g => g.Key, g => g.First());
 
-            var viewModel = new GunlukYoklamaViewModel
+            // Build view model
+            var viewModel = new YoklamaListViewModel
             {
-                Tarih = secilenTarih,
-                Yoklamalar = tumOgrenciler.Select(o =>
-                {
-                    var ogrenciIzin = izinlerMap[o.Id].FirstOrDefault();
-                    string? izinBilgisi = ogrenciIzin != null
-                        ? $"{ogrenciIzin.Tur switch {
-                            yoklamaWeb.Models.Enums.IzinTur.Hastalik => "Sağlık İzni",
-                            yoklamaWeb.Models.Enums.IzinTur.AileZiyareti => "Evci İzni",
-                            yoklamaWeb.Models.Enums.IzinTur.ResmiIs => "Resmi İzin",
-                            _ => "Diğer İzin"
-                          }} ({ogrenciIzin.BaslangicTarihi:dd.MM.yyyy} - {ogrenciIzin.BitisTarihi:dd.MM.yyyy})"
-                        : null;
+                Yoklamalar = tumOgrenciler.Select(o => {
+                    var y = yoklamalarMap.ContainsKey(o.Id) ? yoklamalarMap[o.Id] : null;
 
-                    if (yoklamalarMap.TryGetValue(o.Id, out var y))
+                    var studentLeaves = izinlerMap[o.Id];
+                    IzinGirisi activeLeave = null;
+                    foreach (var leave in studentLeaves)
                     {
-                        return new PansiyonYoklamaViewModel
+                        if (leave.Tur == yoklamaWeb.Models.Enums.IzinTur.GecGelme)
                         {
-                            Id = y.Id,
-                            PansiyonOgrenciId = o.Id,
-                            OgrenciAdSoyad = o.AdSoyad,
-                            OgrenciNo = o.OgrenciNo,
-                            OdaNo = o.Oda?.OdaNo,
-                            YoklamaYapanId = y.YoklamaYapanId,
-                            YoklamaYapanAdSoyad = y.YoklamaYapan?.AdSoyad ?? "",
-                            Tarih = y.Tarih,
-                            Saat = y.Saat,
-                            Durum = y.Durum,
-                            Aciklama = y.Aciklama,
-                            IzinBilgisi = izinBilgisi,
-                            RowVersion = y.RowVersion
-                        };
+                            var nos = (leave.IzinliYoklamaNolar ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+                            if (nos.Contains(secilenYoklamaNo.ToString()))
+                            {
+                                activeLeave = leave;
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            activeLeave = leave;
+                            break;
+                        }
                     }
-                    else
+
+                    string izinBilgisi = null;
+                    string defaultStatus = "blrsiz";
+                    if (activeLeave != null)
                     {
-                        return new PansiyonYoklamaViewModel
+                        defaultStatus = "İzinli";
+                        if (activeLeave.Tur == yoklamaWeb.Models.Enums.IzinTur.GecGelme)
                         {
-                            Id = 0,
-                            PansiyonOgrenciId = o.Id,
-                            OgrenciAdSoyad = o.AdSoyad,
-                            OgrenciNo = o.OgrenciNo,
-                            OdaNo = o.Oda?.OdaNo,
-                            Tarih = secilenTarih,
-                            Durum = ogrenciIzin != null ? "Izinli" : "Belirtilmemiş",
-                            Aciklama = ogrenciIzin != null ? "Sistem tarafından otomatik izinli işaretlendi." : "",
-                            IzinBilgisi = izinBilgisi
-                        };
+                            var formattedNos = string.Join(", ", (activeLeave.IzinliYoklamaNolar ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(n => n + ". Yoklama"));
+                            izinBilgisi = $"Geç Gelme İzni ({formattedNos}) - {activeLeave.Aciklama}";
+                        }
+                        else
+                        {
+                            string turStr = activeLeave.Tur switch
+                            {
+                                yoklamaWeb.Models.Enums.IzinTur.Hastalik => "Hastalık İzni",
+                                yoklamaWeb.Models.Enums.IzinTur.AileZiyareti => "Aile Ziyareti İzni",
+                                yoklamaWeb.Models.Enums.IzinTur.ResmiIs => "Resmi İş İzni",
+                                yoklamaWeb.Models.Enums.IzinTur.Diger => "Diğer İzin",
+                                _ => activeLeave.Tur.ToString()
+                            };
+                            izinBilgisi = $"{turStr} - {activeLeave.Aciklama}";
+                        }
                     }
+
+                    return new PansiyonYoklamaViewModel
+                    {
+                        Id = y?.Id ?? 0,
+                        PansiyonOgrenciId = o.Id,
+                        OgrenciAdSoyad = o.AdSoyad,
+                        OgrenciNo = o.OgrenciNo,
+                        YoklamaYapanId = y?.YoklamaYapanId ?? 0,
+                        YoklamaYapanAdSoyad = y?.YoklamaYapan?.AdSoyad,
+                        Tarih = secilenTarih,
+                        Saat = y?.Saat,
+                        Durum = y?.Durum ?? defaultStatus,
+                        Aciklama = y?.Aciklama,
+                        RowVersion = y?.RowVersion,
+                        OdaNo = o.Oda?.OdaNo,
+                        EtutId = o.EtutId,
+                        EtutAdi = o.Etut?.EtutAdi,
+                        Telefon = o.Telefon,
+                        VeliTelefon = o.VeliTelefon,
+                        YoklamaNo = secilenYoklamaNo,
+                        IzinBilgisi = izinBilgisi
+                    };
                 }).ToList(),
-                TumOgrenciler = tumOgrenciler.Select(o => new PansiyonOgrenciViewModel
-                {
-                    Id = o.Id,
-                    AdSoyad = o.AdSoyad,
-                    OgrenciNo = o.OgrenciNo,
-                    OdaNo = o.Oda != null ? o.Oda.OdaNo : null,
-                    Aktif = o.Aktif
-                }).ToList()
+                Filter = filter,
+                Tarih = secilenTarih
             };
 
-            // Yoklaması olmayan öğrencileri işaretle
-            var yoklamasiOlanOgrenciIds = yoklamalar.Select(y => y.PansiyonOgrenciId).ToHashSet();
-            foreach (var ogrenci in viewModel.TumOgrenciler)
+            // Prepare distinct room numbers for filter dropdown
+            var distinctRooms = await _context.Odalar
+                .Where(o => o != null)
+                .Select(o => o.OdaNo)
+                .Distinct()
+                .OrderBy(r => r)
+                .ToListAsync();
+            distinctRooms.Insert(0, "Odası olmayan");
+            ViewBag.RoomList = distinctRooms;
+
+            // Prepare distinct study halls for filter dropdown
+            var distinctEtuts = await _context.Etutler
+                .Where(e => e.Aktif)
+                .OrderBy(e => e.EtutAdi)
+                .Select(e => new SelectListItem { Value = e.Id.ToString(), Text = e.EtutAdi })
+                .ToListAsync();
+            ViewBag.EtutList = distinctEtuts;
+
+            // Apply room filter if provided
+            if (!string.IsNullOrWhiteSpace(filter?.OdaNo))
             {
-                ogrenci.YoklamaYapildi = yoklamasiOlanOgrenciIds.Contains(ogrenci.Id);
+                if (filter.OdaNo == "Odası olmayan")
+                {
+                    viewModel.Yoklamalar = viewModel.Yoklamalar
+                        .Where(y => y.OdaNo == null)
+                        .ToList();
+                }
+                else
+                {
+                    viewModel.Yoklamalar = viewModel.Yoklamalar
+                        .Where(y => y.OdaNo != null && y.OdaNo.Equals(filter.OdaNo))
+                        .ToList();
+                }
+            }
+
+            // Apply study hall filter if provided
+            if (filter?.EtutId.HasValue == true)
+            {
+                viewModel.Yoklamalar = viewModel.Yoklamalar
+                    .Where(y => y.EtutId == filter.EtutId.Value)
+                    .ToList();
             }
 
             return View(viewModel);
@@ -613,11 +597,11 @@ namespace yoklamaWeb.Controllers
         public async Task<IActionResult> ExportExcel(DateTime? tarih)
         {
             var secilenTarih = tarih ?? DateTime.Today;
+
             var yoklamalar = await _context.PansiyonYoklamalar
                 .Include(y => y.PansiyonOgrenci)
                 .Include(y => y.YoklamaYapan)
                 .Where(y => y.Tarih == secilenTarih)
-                .OrderBy(y => y.PansiyonOgrenci.AdSoyad)
                 .ToListAsync();
 
             var tumOgrenciler = await _context.PansiyonOgrenciler
@@ -631,40 +615,157 @@ namespace yoklamaWeb.Controllers
                 .ToListAsync();
             var izinlerMap = onayliIzinler.ToLookup(i => i.OgrenciId);
 
+            // Aktif yoklama türlerini al (veya var olan kayıtların yoklama numaraları)
+            var yoklamaTurleri = await _context.YoklamaTurleri
+                .Where(t => t.Aktif)
+                .OrderBy(t => t.Sira)
+                .ToListAsync();
+
+            if (!yoklamaTurleri.Any())
+            {
+                // Fallback eğer yoklama türü tanımlı değilse
+                yoklamaTurleri = new List<yoklamaWeb.Models.YoklamaTuru>
+                {
+                    new yoklamaWeb.Models.YoklamaTuru { Id = 1, Ad = "Yoklama 1", Sira = 1 }
+                };
+            }
+
             var workbook = new XLWorkbook();
             var worksheet = workbook.Worksheets.Add("Yoklama");
-            worksheet.Cell(1, 1).Value = "Öğrenci No";
-            worksheet.Cell(1, 2).Value = "Ad Soyad";
-            worksheet.Cell(1, 3).Value = "Oda No";
-            worksheet.Cell(1, 4).Value = "Durum";
-            worksheet.Cell(1, 5).Value = "Yoklama Yapan";
-            worksheet.Cell(1, 6).Value = "İzin Bilgisi";
-            worksheet.Row(1).Style.Font.Bold = true;
 
-            int row = 2;
-            foreach (var o in tumOgrenciler)
+            int baseColCount = 3; // Öğrenci No, Ad Soyad, Oda No
+            int colsPerYoklama = 4; // Durum, Yoklama Yapan ve Saati, Açıklama, İzin Bilgisi
+            int totalCols = baseColCount + (yoklamaTurleri.Count * colsPerYoklama);
+
+            // SATIR 1: Üst Başlık Header Banner
+            var titleRange = worksheet.Range(1, 1, 1, totalCols);
+            titleRange.Merge();
+            titleRange.Value = $"{secilenTarih:dd.MM.yyyy} Tarihli Yoklama Çizelgesi";
+            titleRange.Style.Font.Bold = true;
+            titleRange.Style.Font.SetFontSize(16);
+            titleRange.Style.Font.SetFontColor(XLColor.White);
+            titleRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#1e1b4b");
+            titleRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            titleRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            worksheet.Row(1).Height = 35;
+
+            // SATIR 2: Sabit Başlıklar + Yoklama Tür Grubu Başlıkları
+            worksheet.Range(2, 1, 3, 1).Merge().Value = "Öğrenci No";
+            worksheet.Range(2, 2, 3, 2).Merge().Value = "Ad Soyad";
+            worksheet.Range(2, 3, 3, 3).Merge().Value = "Oda No";
+
+            int colIndex = baseColCount + 1;
+            foreach (var tur in yoklamaTurleri)
             {
-                var izin = izinlerMap[o.Id].FirstOrDefault();
-                var yoklama = yoklamalar.FirstOrDefault(y => y.PansiyonOgrenciId == o.Id);
-                worksheet.Cell(row, 1).Value = o.OgrenciNo;
-                worksheet.Cell(row, 2).Value = o.AdSoyad;
-                worksheet.Cell(row, 3).Value = o.Oda?.OdaNo ?? "-";
-                if (yoklama != null)
+                var turHeaderRange = worksheet.Range(2, colIndex, 2, colIndex + colsPerYoklama - 1);
+                turHeaderRange.Merge();
+                turHeaderRange.Value = tur.Ad;
+                turHeaderRange.Style.Font.Bold = true;
+                turHeaderRange.Style.Font.SetFontSize(12);
+                turHeaderRange.Style.Font.SetFontColor(XLColor.White);
+                turHeaderRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#4f46e5");
+                turHeaderRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+                // SATIR 3: Yoklama Türü Alt Sütunları
+                worksheet.Cell(3, colIndex).Value = "Durum";
+                worksheet.Cell(3, colIndex + 1).Value = "Yoklama Yapan / Saati";
+                worksheet.Cell(3, colIndex + 2).Value = "Açıklama";
+                worksheet.Cell(3, colIndex + 3).Value = "İzin Bilgisi";
+
+                colIndex += colsPerYoklama;
+            }
+
+            // Satır 2 ve 3 başlık stilleri
+            var subHeaderRange = worksheet.Range(2, 1, 3, totalCols);
+            subHeaderRange.Style.Font.Bold = true;
+            subHeaderRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+            subHeaderRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            // Sabit 1-3 sütunlar için gri arka plan
+            var baseHeaderRange = worksheet.Range(2, 1, 3, baseColCount);
+            baseHeaderRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#313150");
+            baseHeaderRange.Style.Font.SetFontColor(XLColor.White);
+
+            // Satır 3 alt sütun başlıkları için açık mavi stil
+            var colSubHeaderRange = worksheet.Range(3, baseColCount + 1, 3, totalCols);
+            colSubHeaderRange.Style.Fill.BackgroundColor = XLColor.FromHtml("#e0e7ff");
+            colSubHeaderRange.Style.Font.SetFontColor(XLColor.FromHtml("#1e1b4b"));
+
+            // SATIR 4 ve Sonrası: Öğrenci Verileri
+            int row = 4;
+            foreach (var ogrenci in tumOgrenciler)
+            {
+                worksheet.Cell(row, 1).Value = ogrenci.OgrenciNo;
+                worksheet.Cell(row, 2).Value = ogrenci.AdSoyad;
+                worksheet.Cell(row, 3).Value = ogrenci.Oda?.OdaNo ?? "-";
+
+                var izin = izinlerMap[ogrenci.Id].FirstOrDefault();
+                string izinText = izin != null ? $"{izin.Tur} ({izin.BaslangicTarihi:dd.MM.yyyy} - {izin.BitisTarihi:dd.MM.yyyy})" : "";
+
+                colIndex = baseColCount + 1;
+                foreach (var tur in yoklamaTurleri)
                 {
-                    worksheet.Cell(row, 4).Value = yoklama.Durum;
-                    worksheet.Cell(row, 5).Value = yoklama.YoklamaYapan?.AdSoyad ?? "";
+                    var yoklama = yoklamalar.FirstOrDefault(y => y.PansiyonOgrenciId == ogrenci.Id && y.YoklamaNo == tur.Id);
+
+                    string durumText = "";
+                    string yapanText = "";
+                    string aciklamaText = yoklama?.Aciklama ?? "";
+
+                    if (yoklama != null)
+                    {
+                        durumText = string.IsNullOrWhiteSpace(yoklama.Durum) || yoklama.Durum == "blrsiz" ? "Belirtilmemiş" : yoklama.Durum;
+                        
+                        var yapanAd = yoklama.YoklamaYapan?.AdSoyad ?? "";
+                        var saatStr = yoklama.Saat.HasValue ? yoklama.Saat.Value.ToString(@"hh\:mm") : "";
+                        yapanText = !string.IsNullOrEmpty(yapanAd) ? $"{yapanAd} {(string.IsNullOrEmpty(saatStr) ? "" : $"({saatStr})")}".Trim() : "";
+                    }
+                    else
+                    {
+                        durumText = izin != null ? "İzinli" : "Belirtilmemiş";
+                    }
+
+                    worksheet.Cell(row, colIndex).Value = durumText;
+                    worksheet.Cell(row, colIndex + 1).Value = yapanText;
+                    worksheet.Cell(row, colIndex + 2).Value = aciklamaText;
+                    worksheet.Cell(row, colIndex + 3).Value = izinText;
+
+                    // Durum renklendirme
+                    var cellDurum = worksheet.Cell(row, colIndex);
+                    if (durumText == "Var")
+                    {
+                        cellDurum.Style.Font.SetFontColor(XLColor.FromHtml("#059669"));
+                        cellDurum.Style.Font.Bold = true;
+                    }
+                    else if (durumText == "Yok")
+                    {
+                        cellDurum.Style.Font.SetFontColor(XLColor.FromHtml("#dc2626"));
+                        cellDurum.Style.Font.Bold = true;
+                    }
+                    else if (durumText == "İzinli" || durumText == "Izinli")
+                    {
+                        cellDurum.Style.Font.SetFontColor(XLColor.FromHtml("#d97706"));
+                        cellDurum.Style.Font.Bold = true;
+                    }
+                    else if (durumText == "Geç" || durumText == "Gecikmeli")
+                    {
+                        cellDurum.Style.Font.SetFontColor(XLColor.FromHtml("#2563eb"));
+                        cellDurum.Style.Font.Bold = true;
+                    }
+
+                    colIndex += colsPerYoklama;
                 }
-                else
-                {
-                    worksheet.Cell(row, 4).Value = izin != null ? "İzinli" : "Var";
-                    worksheet.Cell(row, 5).Value = "";
-                }
-                if (izin != null)
-                {
-                    worksheet.Cell(row, 6).Value = $"{izin.Tur} ({izin.BaslangicTarihi:dd.MM.yyyy} - {izin.BitisTarihi:dd.MM.yyyy})";
-                }
+
                 row++;
             }
+
+            // Tablo çerçevesi ve biçimlendirmeler
+            var dataRange = worksheet.Range(1, 1, row - 1, totalCols);
+            dataRange.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+            dataRange.Style.Border.InsideBorder = XLBorderStyleValues.Thin;
+            dataRange.Style.Border.OutsideBorderColor = XLColor.FromHtml("#cbd5e1");
+            dataRange.Style.Border.InsideBorderColor = XLColor.FromHtml("#e2e8f0");
+
+            worksheet.Columns(1, totalCols).AdjustToContents();
 
             using var stream = new MemoryStream();
             workbook.SaveAs(stream);
@@ -678,11 +779,11 @@ namespace yoklamaWeb.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> TopluYoklama(GunlukYoklamaViewModel viewModel)
         {
-            var username = User.Identity?.Name;
-            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi == username);
+            var username = User.Identity?.Name ?? "";
+            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi.ToLower() == username.ToLower());
 
-            // Nöbetçi günü/Admin yetki kontrolü
-            bool isAdmin = User.IsInRole("Admin") || (gorevlisi != null && gorevlisi.Rol == "Admin");
+            // Nöbetçi günü/Admin/İdareci yetki kontrolü
+            bool isAdmin = User.IsInRole("Admin") || User.IsInRole("Idareci") || (gorevlisi != null && gorevlisi.Rol == "Admin");
             if (!isAdmin)
             {
                 if (gorevlisi == null)
@@ -726,7 +827,8 @@ namespace yoklamaWeb.Controllers
                     {
                         var mevcutYoklama = await _context.PansiyonYoklamalar
                             .FirstOrDefaultAsync(y => y.PansiyonOgrenciId == ogrenciYoklama.PansiyonOgrenciId
-                                && y.Tarih == viewModel.Tarih);
+                                && y.Tarih == viewModel.Tarih
+                                && y.YoklamaNo == viewModel.YoklamaNo);
 
                         if (mevcutYoklama != null)
                         {
@@ -745,6 +847,7 @@ namespace yoklamaWeb.Controllers
                                 PansiyonOgrenciId = ogrenciYoklama.PansiyonOgrenciId,
                                 YoklamaYapanId = gorevlisiId,
                                 Tarih = viewModel.Tarih,
+                                YoklamaNo = viewModel.YoklamaNo,
                                 Saat = ogrenciYoklama.Saat,
                                 Durum = ogrenciYoklama.Durum,
                                 Aciklama = ogrenciYoklama.Aciklama
@@ -756,10 +859,10 @@ namespace yoklamaWeb.Controllers
 
                 await _context.SaveChangesAsync();
                 TempData["SuccessMessage"] = "Toplu yoklama kaydedildi.";
-                return RedirectToAction(nameof(GunlukYoklama), new { tarih = viewModel.Tarih });
+                return RedirectToAction(nameof(GunlukYoklama), new { tarih = viewModel.Tarih, yoklamaNo = viewModel.YoklamaNo });
             }
 
-            return RedirectToAction(nameof(GunlukYoklama), new { tarih = viewModel.Tarih });
+            return RedirectToAction(nameof(GunlukYoklama), new { tarih = viewModel.Tarih, yoklamaNo = viewModel.YoklamaNo });
         }
 
         private List<SelectListItem> GetOgrencilerSelectList()
@@ -799,6 +902,7 @@ namespace yoklamaWeb.Controllers
             public int PansiyonOgrenciId { get; set; }
             public string Durum { get; set; }
             public DateTime Tarih { get; set; }
+            public int YoklamaNo { get; set; }
         }
 
         [HttpPost]
@@ -808,19 +912,33 @@ namespace yoklamaWeb.Controllers
             if (dto == null || string.IsNullOrWhiteSpace(dto.Durum))
                 return BadRequest();
 
-            // Identify the current logged‑in staff (yoklamacı)
-            var username = User.Identity?.Name;
-            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi == username);
+            var username = User.Identity?.Name ?? "";
+            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi.ToLower() == username.ToLower());
             int gorevlisiId = gorevlisi?.Id ?? 0;
 
-            var yoklama = await _context.PansiyonYoklamalar.FirstOrDefaultAsync(y => y.Id == dto.Id);
+            PansiyonYoklama yoklama = null;
+            if (dto.Id > 0)
+            {
+                yoklama = await _context.PansiyonYoklamalar.FirstOrDefaultAsync(y => y.Id == dto.Id);
+            }
+            else
+            {
+                var targetDate = dto.Tarih != default ? dto.Tarih.Date : DateTime.Today;
+                int targetYoklamaNo = dto.YoklamaNo > 0 ? dto.YoklamaNo : 1;
+                yoklama = await _context.PansiyonYoklamalar.FirstOrDefaultAsync(y => 
+                    y.PansiyonOgrenciId == dto.PansiyonOgrenciId 
+                    && y.Tarih == targetDate 
+                    && y.YoklamaNo == targetYoklamaNo);
+            }
+
             if (yoklama == null)
             {
-                // Create new record if it does not exist (e.g., Id == 0)
+                // Create new record if it does not exist
                 yoklama = new PansiyonYoklama
                 {
                     PansiyonOgrenciId = dto.PansiyonOgrenciId,
                     Tarih = dto.Tarih != default ? dto.Tarih.Date : DateTime.Today,
+                    YoklamaNo = dto.YoklamaNo > 0 ? dto.YoklamaNo : 1,
                     Saat = DateTime.Now.TimeOfDay,
                     Durum = dto.Durum,
                     YoklamaYapanId = gorevlisiId
@@ -835,7 +953,37 @@ namespace yoklamaWeb.Controllers
                 _context.Update(yoklama);
             }
             await _context.SaveChangesAsync();
-            return Json(new { success = true, saat = yoklama.Saat, yoklamaYapanId = yoklama.YoklamaYapanId });
+            string yapanAdSoyad = gorevlisi?.AdSoyad ?? "Bilinmiyor";
+            return Json(new { 
+                success = true, 
+                id = yoklama.Id, 
+                saat = yoklama.Saat?.ToString(@"hh\:mm"), 
+                tarih = yoklama.Tarih.ToString("dd.MM.yyyy"),
+                yoklamaYapanAdSoyad = yapanAdSoyad 
+            });
+        }
+        // DTO for note update via AJAX
+        public class NoteUpdateDto
+        {
+            public int Id { get; set; }
+            public string Note { get; set; }
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UpdateNote([FromBody] NoteUpdateDto dto)
+        {
+            if (dto == null)
+                return BadRequest();
+
+            var yoklama = await _context.PansiyonYoklamalar.FirstOrDefaultAsync(y => y.Id == dto.Id);
+            if (yoklama == null)
+                return NotFound();
+
+            yoklama.Aciklama = dto.Note;
+            _context.Update(yoklama);
+            await _context.SaveChangesAsync();
+            return Json(new { success = true });
         }
 
         private bool YoklamaExists(int id)

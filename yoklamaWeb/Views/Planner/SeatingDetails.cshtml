@@ -1,0 +1,309 @@
+@model IEnumerable<yoklamaWeb.Models.PlannerSeating>
+@{
+    ViewData["Title"] = "Sınav Oturma Planı Sonuçları";
+    Layout = "_Layout";
+    var exam = (yoklamaWeb.Models.PlannerExam)ViewBag.Exam;
+    var isWritten = exam?.ExamType == "Yazili";
+    var groupedSeatings = Model.GroupBy(s => s.RoomName).OrderBy(g => g.Key).ToList();
+    var allSelectedRooms = groupedSeatings.Select(g => g.Key).ToList();
+    var capacities = (Dictionary<string, int>?)ViewBag.RoomCapacities ?? new Dictionary<string, int>();
+    var culture = new System.Globalization.CultureInfo("tr-TR");
+}
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
+        <div>
+            @if (isWritten)
+            {
+                <a asp-action="YaziliExams" class="btn btn-sm btn-outline-secondary mb-2">← Yazılı Sınavları Listesi</a>
+            }
+            else
+            {
+                <a asp-action="Exams" class="btn btn-sm btn-outline-secondary mb-2">← Sınavlar Listesi</a>
+            }
+            <div class="d-flex align-items-center gap-2">
+                <h2 style="font-family: 'Outfit', sans-serif; color: #1e293b;" class="mb-0 fw-bold">Oturma Planı Detayları</h2>
+                @if (isWritten)
+                {
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1">Yazılı Oturma Planı</span>
+                }
+            </div>
+            <h5 class="text-muted mt-2 mb-0">
+                Sınav: <strong class="text-dark">@exam.Name</strong> 
+                — <span class="text-primary fw-semibold"><i class="bi bi-calendar3 me-1"></i>@exam.ExamDate.ToString("dd.MM.yyyy dddd", culture)</span>
+                — <span class="text-dark"><i class="bi bi-clock me-1"></i>Saat: <strong>@(string.IsNullOrEmpty(exam.StartTime) ? "-" : exam.StartTime)</strong> (24s)</span>
+            </h5>
+        </div>
+        <div class="d-flex align-items-center gap-2 mt-2 mt-md-0 no-print">
+            @if (isWritten)
+            {
+                <a asp-action="ConfigureYaziliExam" asp-route-id="@exam.Id" class="btn btn-warning">
+                    <i class="bi bi-sliders me-1"></i> Yerleşimi Yenile
+                </a>
+            }
+            else
+            {
+                <a asp-action="ConfigureExam" asp-route-id="@exam.Id" class="btn btn-warning">
+                    <i class="bi bi-sliders me-1"></i> Yerleşimi Yenile
+                </a>
+            }
+            <button onclick="window.print()" class="btn btn-secondary"><i class="bi bi-printer me-1"></i> Yazdır</button>
+        </div>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show shadow-sm border-0" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Kapat"></button>
+        </div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show shadow-sm border-0" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Kapat"></button>
+        </div>
+    }
+
+    <!-- Excel Reports Menu -->
+    <div class="card shadow-sm border-0 mb-4 bg-light no-print rounded-3">
+        <div class="card-body p-4">
+            <h5 class="fw-bold mb-3 text-dark"><i class="bi bi-file-earmark-excel-fill text-success me-2"></i> Excel Raporları Menüsü</h5>
+            
+            <!-- Checkbox requested by user: Salon listesinin altında özet bilgi olsun mu -->
+            <div class="mb-3">
+                <div class="form-check form-switch bg-white p-2 ps-5 rounded border d-inline-block shadow-sm">
+                    <input class="form-check-input" type="checkbox" id="chkIncludeSummary" checked onchange="updateExcelDownloadLinks()" />
+                    <label class="form-check-label fw-bold text-dark cursor-pointer" for="chkIncludeSummary">
+                        Salon listesinin altında özet bilgi olsun mu?
+                    </label>
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <a asp-action="ExportRoomAttendanceExcel" asp-route-id="@exam.Id" id="btnExportRoomAttendance" class="btn btn-success shadow-sm">
+                    <i class="bi bi-download me-1"></i> 1- Salon Yoklama Listeleri Excel'i
+                </a>
+                <a asp-action="ExportStudentInfoExcel" asp-route-id="@exam.Id" class="btn btn-success shadow-sm">
+                    <i class="bi bi-download me-1"></i> 2- Öğrenci Bilgilendirme Listeleri Excel'i
+                </a>
+            </div>
+            <div class="small text-muted bg-white p-3 rounded border">
+                <strong><i class="bi bi-check2-circle text-success me-1"></i> 1. Salon Yoklama Listeleri Excel'i:</strong> Her salon için ayrı bir sayfa oluşturur; sınav tarihi ve 24 saat formatındaki saatini yazar; listenin altına ders ve sınıf/alan bazlı öğrenci sayı özetini ekler ve her listeyi tek A4 sayfasına sığdırır.<br />
+                <strong><i class="bi bi-check2-circle text-success me-1"></i> 2. Öğrenci Bilgilendirme Listeleri Excel'i:</strong> Her şube için ayrı sayfa, sınava katılmayanlar listesi ve tüm öğrencileri alfabetik sıralayan genel listeyi içerir.
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 mb-4 no-print rounded-3">
+        <div class="card-body">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h5 class="mb-1 fw-bold text-dark"><i class="bi bi-search me-1 text-primary"></i> Hızlı Öğrenci Arama</h5>
+                    <p class="text-muted small mb-0">Ad, soyad veya numara girerek öğrencinin hangi salonda ve hangi koltukta olduğunu anında bulun.</p>
+                </div>
+                <div class="col-md-4">
+                    <input type="text" id="seatingSearch" class="form-control" placeholder="🔍 Öğrenci ara..." onkeyup="filterSeating()" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!groupedSeatings.Any())
+    {
+        <div class="alert alert-info">Bu sınav için henüz oturma planı yerleşimi yapılmamış. Lütfen "Yerleşim Ayarları" butonuna basarak öğrencileri yerleştirin.</div>
+    }
+    else
+    {
+        <div class="row" id="seatingContainer">
+            @foreach (var group in groupedSeatings)
+            {
+                var capacityVal = capacities.ContainsKey(group.Key) ? capacities[group.Key].ToString() : "?";
+                
+                // Summaries for this room
+                var lessonSummary = group
+                    .Where(s => !string.IsNullOrEmpty(s.Ders))
+                    .GroupBy(s => s.Ders)
+                    .Select(g => $"{g.Key}: {g.Count()} kişi")
+                    .ToList();
+
+                var alanSummary = group
+                    .GroupBy(s => $"{s.SinifDuzeyi} " + (string.IsNullOrEmpty(s.Alan) || s.Alan == "YOK" ? "Alanı Yok" : s.Alan))
+                    .Select(g => $"{g.Key}: {g.Count()} kişi")
+                    .ToList();
+
+                var subeSummary = group
+                    .GroupBy(s => $"{s.SinifDuzeyi}-{s.Sube}")
+                    .Select(g => $"{g.Key}: {g.Count()}")
+                    .ToList();
+
+                <div class="col-md-6 mb-4 salon-card" id="card-@group.Key">
+                    <div class="card shadow-sm border-0 h-100 rounded-3">
+                        <!-- Clickable header for collapse -->
+                        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center cursor-pointer no-print py-3" onclick="toggleRoomCard('@group.Key')">
+                            <h5 class="mb-0 fw-bold"><span id="icon-@group.Key">▼</span> @group.Key (Kapasite: @capacityVal)</h5>
+                            <span class="badge bg-primary fs-6">Öğrenci: @group.Count()</span>
+                        </div>
+                        
+                        <!-- Print header (always visible when printing) -->
+                        <div class="card-header bg-dark text-white d-none d-print-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">@group.Key (Kapasite: @capacityVal)</h5>
+                            <span class="badge bg-primary">Öğrenci: @group.Count()</span>
+                        </div>
+
+                        <!-- Collapsible Body (closed by default) -->
+                        <div id="body-@group.Key" class="card-body p-0 card-body-collapsible" style="display: none;">
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover align-middle mb-0">
+                                    <thead class="table-light small text-uppercase">
+                                        <tr>
+                                            <th style="width: 70px;" class="text-center">Koltuk</th>
+                                            <th style="width: 90px;" class="text-center">Öğr. No</th>
+                                            <th>Ad Soyad</th>
+                                            <th style="width: 90px;" class="text-center">Sınıf</th>
+                                            <th style="width: 70px;" class="text-center">Alanı</th>
+                                            @if (isWritten)
+                                            {
+                                                <th>Yazılı Dersi</th>
+                                            }
+                                            <th style="width: 130px;" class="no-print text-end pe-3">İşlemler</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var seat in group.OrderBy(s => s.SeatNumber))
+                                        {
+                                            <tr class="seating-row" data-search="@seat.AdSoyad.ToLower(culture) @seat.OgrenciNo @seat.Ders @seat.Alan">
+                                                <td class="text-center"><span class="badge bg-secondary">@seat.SeatNumber</span></td>
+                                                <td class="text-center fw-semibold">@seat.OgrenciNo</td>
+                                                <td class="fw-bold text-dark">@seat.AdSoyad</td>
+                                                <td class="text-center"><span class="badge bg-light text-dark border">@seat.SinifDuzeyi-@seat.Sube</span></td>
+                                                <td class="text-center">
+                                                    @if (!string.IsNullOrEmpty(seat.Alan) && seat.Alan != "YOK")
+                                                    {
+                                                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">@seat.Alan</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted small">-</span>
+                                                    }
+                                                </td>
+                                                @if (isWritten)
+                                                {
+                                                    <td>
+                                                        <span class="badge bg-warning-subtle text-dark border border-warning-subtle fw-semibold">
+                                                            @(string.IsNullOrEmpty(seat.Ders) ? "-" : seat.Ders)
+                                                        </span>
+                                                    </td>
+                                                }
+                                                <td class="no-print text-end pe-3">
+                                                    <!-- Move & Delete inline controls -->
+                                                    <div class="d-inline-flex align-items-center gap-1">
+                                                        <form asp-action="MoveSeating" method="post" class="d-inline-flex align-items-center gap-1">
+                                                            @Html.AntiForgeryToken()
+                                                            <input type="hidden" name="id" value="@seat.Id" />
+                                                            <select name="targetRoomName" class="form-select form-select-sm p-1" style="font-size: 0.75rem; width: 85px;" required>
+                                                                <option value="">Salon</option>
+                                                                @foreach (var otherRoom in allSelectedRooms)
+                                                                {
+                                                                    if (otherRoom != group.Key)
+                                                                    {
+                                                                        <option value="@otherRoom">@otherRoom</option>
+                                                                    }
+                                                                }
+                                                            </select>
+                                                            <button type="submit" class="btn btn-sm btn-outline-warning p-1 px-2" title="Taşı"><i class="bi bi-arrow-right-short"></i></button>
+                                                        </form>
+                                                        <form asp-action="DeleteSeating" method="post" class="d-inline" onsubmit="return confirm('@seat.AdSoyad isimli öğrenciyi listeden silmek istediğinize emin misiniz?');">
+                                                            @Html.AntiForgeryToken()
+                                                            <input type="hidden" name="id" value="@seat.Id" />
+                                                            <button type="submit" class="btn btn-sm btn-outline-danger p-1 px-2" title="Sil"><i class="bi bi-trash"></i></button>
+                                                        </form>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Room Summary Box (User's specific requirement) -->
+                            <div class="p-3 bg-light border-top">
+                                <h6 class="fw-bold text-dark small mb-2"><i class="bi bi-info-circle me-1 text-primary"></i> Salon Yoklama Dağılım Özeti:</h6>
+                                @if (lessonSummary.Any())
+                                {
+                                    <div class="small text-secondary mb-1">
+                                        <strong class="text-dark">Ders Dağılımı:</strong> @string.Join(" | ", lessonSummary)
+                                    </div>
+                                }
+                                <div class="small text-secondary mb-1">
+                                    <strong class="text-dark">Sınıf & Alan:</strong> @string.Join(" | ", alanSummary)
+                                </div>
+                                <div class="small text-muted">
+                                    <strong>Şubeler:</strong> @string.Join(", ", subeSummary) (Toplam: <strong>@group.Count()</strong> Öğrenci)
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@section Scripts {
+<script>
+    function toggleRoomCard(roomKey) {
+        const body = document.getElementById(`body-${roomKey}`);
+        const icon = document.getElementById(`icon-${roomKey}`);
+        if (body.style.display === 'none') {
+            body.style.display = 'block';
+            icon.textContent = '▲';
+        } else {
+            body.style.display = 'none';
+            icon.textContent = '▼';
+        }
+    }
+
+    function filterSeating() {
+        const query = document.getElementById('seatingSearch').value.trim().toLowerCase();
+        
+        document.querySelectorAll('.seating-row').forEach(row => {
+            const data = row.getAttribute('data-search') || '';
+            if (data.includes(query)) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        // Automatically open room card if search matches rows inside
+        if (query.length > 1) {
+            document.querySelectorAll('.salon-card').forEach(card => {
+                const visibleRows = card.querySelectorAll('.seating-row:not([style*="display: none"])');
+                const roomKey = card.id.replace('card-', '');
+                const body = document.getElementById(`body-${roomKey}`);
+                const icon = document.getElementById(`icon-${roomKey}`);
+                if (visibleRows.length > 0) {
+                    body.style.display = 'block';
+                    icon.textContent = '▲';
+                }
+            });
+        }
+    }
+
+    function updateExcelDownloadLinks() {
+        const chk = document.getElementById("chkIncludeSummary");
+        const btn = document.getElementById("btnExportRoomAttendance");
+        if (btn) {
+            const baseUrl = '@Url.Action("ExportRoomAttendanceExcel", "Planner", new { id = exam.Id })';
+            const includeVal = chk ? chk.checked : true;
+            btn.href = `${baseUrl}?includeSummary=${includeVal}`;
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+        updateExcelDownloadLinks();
+    });
+</script>
+}

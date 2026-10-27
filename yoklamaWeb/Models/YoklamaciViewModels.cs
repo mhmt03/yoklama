@@ -18,6 +18,13 @@ namespace yoklamaWeb.Models
         public TimeSpan? EndTime { get; set; }
         /// <summary>Sınav tarihi ve saati geçmemişse true</summary>
         public bool IsAccessible { get; set; }
+
+        // İstatistikler
+        public int TotalCount { get; set; }
+        public int PresentCount { get; set; }
+        public int AbsentCount { get; set; }
+        public int LateCount { get; set; }
+        public int PendingCount { get; set; }
     }
 
     /// <summary>
@@ -34,6 +41,7 @@ namespace yoklamaWeb.Models
         public int Sira { get; set; }
         public AttendanceStatus Status { get; set; } = AttendanceStatus.KontrolEdilmedi;
         public string Not { get; set; } = string.Empty;
+        public string SalonName { get; set; } = string.Empty;
     }
 
     /// <summary>

@@ -10,6 +10,10 @@
             <h4 class="mb-0 fw-bold">İzin Kaydı Düzenle</h4>
         </div>
         <div class="card-body p-4">
+            <div class="alert alert-light border p-2 mb-3 text-muted small">
+                <i class="bi bi-info-circle text-primary"></i> <span class="text-danger fw-bold">*</span> ile işaretli alanların doldurulması zorunludur.
+            </div>
+
             <form method="post" asp-action="Edit">
                 @Html.AntiForgeryToken()
                 
@@ -18,39 +22,52 @@
                 <input type="hidden" asp-for="RowVersion" />
 
                 <div class="mb-3">
-                    <label asp-for="OgrenciId" class="form-label fw-bold">Öğrenci</label>
+                    <label asp-for="OgrenciId" class="form-label fw-bold">Öğrenci <span class="text-danger">*</span></label>
                     <select asp-for="OgrenciId" asp-items="ViewBag.Ogrenciler" class="form-select"></select>
                     <span asp-validation-for="OgrenciId" class="text-danger"></span>
                 </div>
 
                 <div class="mb-3">
-                    <label asp-for="Tur" class="form-label fw-bold">İzin Türü</label>
+                    <label asp-for="Tur" class="form-label fw-bold">İzin Türü <span class="text-danger">*</span></label>
                     <select asp-for="Tur" asp-items="ViewBag.Turler" class="form-select"></select>
                     <span asp-validation-for="Tur" class="text-danger"></span>
                 </div>
 
+                <div class="mb-3 bg-light p-3 rounded border" id="yoklamaSecimiDiv" style="display:none;">
+                    <label class="form-label fw-bold d-block"><i class="bi bi-list-check"></i> İzinli Olacağı Yoklama Numaraları</label>
+                    @foreach (var tur in ViewBag.YoklamaTurleri as List<yoklamaWeb.Models.YoklamaTuru> ?? new List<yoklamaWeb.Models.YoklamaTuru>())
+                    {
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input yoklama-chk" type="checkbox" id="yoklama_@tur.Id" value="@tur.Id">
+                            <label class="form-check-label" for="yoklama_@tur.Id">@tur.Ad</label>
+                        </div>
+                    }
+                    <input type="hidden" asp-for="IzinliYoklamaNolar" id="IzinliYoklamaNolar" />
+                    <span asp-validation-for="IzinliYoklamaNolar" class="text-danger d-block mt-1"></span>
+                </div>
+
                 <div class="row">
                     <div class="col-md-6 mb-3">
-                        <label asp-for="BaslangicTarihi" class="form-label fw-bold"></label>
+                        <label asp-for="BaslangicTarihi" class="form-label fw-bold">Başlangıç Tarihi <span class="text-danger">*</span></label>
                         <input asp-for="BaslangicTarihi" type="date" class="form-control" />
                         <span asp-validation-for="BaslangicTarihi" class="text-danger"></span>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label asp-for="BitisTarihi" class="form-label fw-bold"></label>
+                        <label asp-for="BitisTarihi" class="form-label fw-bold">Bitiş Tarihi <span class="text-danger">*</span></label>
                         <input asp-for="BitisTarihi" type="date" class="form-control" />
                         <span asp-validation-for="BitisTarihi" class="text-danger"></span>
                     </div>
                 </div>
 
                 <div class="mb-3">
-                    <label asp-for="Durum" class="form-label fw-bold">Durum</label>
+                    <label asp-for="Durum" class="form-label fw-bold">Durum <span class="text-danger">*</span></label>
                     <select asp-for="Durum" asp-items="ViewBag.Durumlar" class="form-select"></select>
                     <span asp-validation-for="Durum" class="text-danger"></span>
                 </div>
 
                 <div class="mb-3">
-                    <label asp-for="Aciklama" class="form-label fw-bold"></label>
-                    <textarea asp-for="Aciklama" class="form-control" rows="3"></textarea>
+                    <label asp-for="Aciklama" class="form-label fw-bold">Açıklama <span class="text-muted fw-normal small">(İsteğe Bağlı)</span></label>
+                    <textarea asp-for="Aciklama" class="form-control" rows="3" placeholder="İzin gerekçesi, adres veya notlar (isteğe bağlı)..."></textarea>
                     <span asp-validation-for="Aciklama" class="text-danger"></span>
                 </div>
 
@@ -65,4 +82,49 @@
 
 @section Scripts {
     @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            const turSelect = document.getElementById("Tur");
+            const yoklamaDiv = document.getElementById("yoklamaSecimiDiv");
+            const checkboxes = document.querySelectorAll(".yoklama-chk");
+            const hiddenInput = document.getElementById("IzinliYoklamaNolar");
+
+            // Initialize checkboxes based on existing value
+            if (hiddenInput && hiddenInput.value) {
+                const existingNos = hiddenInput.value.split(",");
+                checkboxes.forEach(c => {
+                    if (existingNos.includes(c.value)) {
+                        c.checked = true;
+                    }
+                });
+            }
+
+            function toggleYoklamaDiv() {
+                // "4" represents IzinTur.GecGelme
+                if (turSelect.value === "4") {
+                    yoklamaDiv.style.display = "block";
+                } else {
+                    yoklamaDiv.style.display = "none";
+                    hiddenInput.value = "";
+                    checkboxes.forEach(c => c.checked = false);
+                }
+            }
+
+            function updateHiddenInput() {
+                const selected = Array.from(checkboxes)
+                    .filter(c => c.checked)
+                    .map(c => c.value);
+                hiddenInput.value = selected.join(",");
+            }
+
+            if (turSelect) {
+                turSelect.addEventListener("change", toggleYoklamaDiv);
+                toggleYoklamaDiv();
+            }
+
+            checkboxes.forEach(c => {
+                c.addEventListener("change", updateHiddenInput);
+            });
+        });
+    </script>
 }

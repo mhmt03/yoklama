@@ -1,0 +1,44 @@
+@model yoklamaWeb.Models.GunlukYoklamaci
+@{
+    ViewData["Title"] = "Yoklamaci Sil";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-lg-6 col-md-8">
+            <div class="card shadow-sm border-0 rounded-4 border-danger border-top" style="border-top-width: 4px !important;">
+                <div class="card-body p-4">
+                    <h3 class="card-title fw-bold text-center mb-3 text-danger" style="font-family: 'Outfit', sans-serif;">Yoklamacıyı Silmek İstiyor musunuz?</h3>
+                    <p class="text-center text-muted mb-4">Aşağıdaki öğretmeni silmek istediğinize emin misiniz? Bu işlem geri alınamaz.</p>
+
+                    <div class="bg-light p-3 rounded-3 mb-4">
+                        <table class="table table-borderless mb-0">
+                            <tr>
+                                <td class="fw-semibold text-secondary" style="width: 120px;">Ad Soyad:</td>
+                                <td class="fw-bold">@Model.AdSoyad</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-semibold text-secondary">Kullanıcı Adı:</td>
+                                <td><code>@Model.KullaniciAdi</code></td>
+                            </tr>
+                            <tr>
+                                <td class="fw-semibold text-secondary">Branş:</td>
+                                <td>@Model.Brans</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <form asp-action="Delete" method="post">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" asp-for="Id" />
+                        <div class="d-flex justify-content-between gap-3 mt-4">
+                            <a asp-action="Index" class="btn btn-outline-secondary px-4"><i class="bi bi-arrow-left"></i> Geri Dön</a>
+                            <button type="submit" class="btn btn-danger px-4 fw-bold"><i class="bi bi-trash"></i> Evet, Sil</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -70,9 +70,12 @@ if (!string.IsNullOrWhiteSpace(filter.Rol))
                 }).ToList()
             };
 
-            ViewBag.Roller = Enum.GetValues(typeof(GorevliRol))
-                .Cast<GorevliRol>()
-                .Select(r => new SelectListItem { Value = r.ToString(), Text = r.ToString() }).ToList();
+            ViewBag.Roller = new List<SelectListItem>
+            {
+                new SelectListItem { Value = "Gorevli", Text = "Görevli" },
+                new SelectListItem { Value = "Admin", Text = "Admin" },
+                new SelectListItem { Value = "Nobetci", Text = "Nöbetçi" }
+            };
             return View(viewModel);
         }
 
@@ -386,7 +389,7 @@ var gorevlisi = await _context.PansiyonGorevlileri
                 return NotFound();
             }
 
-            var viewModel = new PansiyonGorevlisiViewModel
+            var viewModel = new PansiyonGorevlisiDetailViewModel
             {
                 Id = gorevlisi.Id,
                 KullaniciAdi = gorevlisi.KullaniciAdi,

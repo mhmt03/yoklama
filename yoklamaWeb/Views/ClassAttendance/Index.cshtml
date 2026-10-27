@@ -12,20 +12,23 @@
         <h2 class="mb-1" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Sınıf Yoklaması</h2>
         <p class="text-muted mb-0">Yeni sınıf yoklaması oluşturun veya mevcut yoklama etkinliklerini yönetin.</p>
     </div>
-    <a asp-action="Create" class="btn btn-primary btn-lg">Yeni Yoklama Oluştur</a>
+    @if (User.IsInRole("Admin") || User.IsInRole("Idareci") || User.IsInRole("SinavYoneticisi"))
+    {
+        <a asp-action="Create" class="btn btn-primary btn-lg">Yeni Yoklama Oluştur</a>
+    }
 </div>
 
 <div class="card mb-4 p-3 border-0 shadow-sm">
     <form method="get" class="row g-3">
-        <div class="col-md-4">
+        <div class="col-md-3">
             <label class="form-label">Yoklama Adı</label>
             <input name="nameFilter" value="@ViewData["NameFilter"]" class="form-control" placeholder="Ara..." />
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label">Bina</label>
             <input name="buildingFilter" value="@ViewData["BuildingFilter"]" class="form-control" placeholder="Bina..." />
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label">Durum</label>
             @{ var statusFilter = ViewData["StatusFilter"]?.ToString(); }
             <select name="statusFilter" class="form-select">
@@ -34,8 +37,20 @@
                 <option value="Expired" selected="@(statusFilter == "Expired" ? "selected" : null)">Süresi Dolmuş</option>
             </select>
         </div>
-        <div class="col-md-2 d-flex align-items-end">
-            <button type="submit" class="btn btn-outline-primary w-100">Filtrele</button>
+        <div class="col-md-2">
+            <label class="form-label">Tarih</label>
+            <input type="date" name="dateFilter" value="@ViewData["DateFilter"]" class="form-control" />
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Sıralama</label>
+            @{ var sortOrder = ViewData["SortOrder"]?.ToString(); }
+            <select name="sortOrder" class="form-select">
+                <option value="date_desc" selected="@(sortOrder == "date_desc" ? "selected" : null)">Tarih (Yeni-Eski)</option>
+                <option value="date_asc" selected="@(sortOrder == "date_asc" ? "selected" : null)">Tarih (Eski-Yeni)</option>
+            </select>
+        </div>
+        <div class="col-md-1 d-flex align-items-end">
+            <button type="submit" class="btn btn-outline-primary w-100">Ara</button>
         </div>
     </form>
 </div>
@@ -59,9 +74,16 @@
                     <p class="card-text text-muted mb-3"><strong>Saat:</strong> @(attendance.StartTime.HasValue ? attendance.StartTime.Value.ToString(@"hh\:mm") : "—") - @(attendance.EndTime.HasValue ? attendance.EndTime.Value.ToString(@"hh\:mm") : "—")</p>
                     <div class="mt-auto d-flex flex-wrap gap-2">
                         <a asp-action="Details" asp-route-id="@attendance.Id" class="btn btn-primary btn-sm">Detay</a>
-                        <a asp-action="Edit" asp-route-id="@attendance.Id" class="btn btn-outline-secondary btn-sm">Düzenle</a>
-                        <a asp-action="ImportStudents" asp-route-id="@attendance.Id" class="btn btn-success btn-sm">Excel İçe Aktar</a>
+                        @if (User.IsInRole("Admin") || User.IsInRole("Idareci") || User.IsInRole("SinavYoneticisi"))
+                        {
+                            <a asp-action="Edit" asp-route-id="@attendance.Id" class="btn btn-outline-secondary btn-sm">Düzenle</a>
+                            <a asp-action="ImportStudents" asp-route-id="@attendance.Id" class="btn btn-success btn-sm">Excel İçe Aktar</a>
+                        }
                         <a asp-action="ExportStudents" asp-route-id="@attendance.Id" class="btn btn-outline-success btn-sm">Excel Dışa Aktar</a>
+                        @if (User.IsInRole("Admin") || User.IsInRole("Idareci") || User.IsInRole("SinavYoneticisi"))
+                        {
+                            <a asp-action="Delete" asp-route-id="@attendance.Id" class="btn btn-danger btn-sm">Sil</a>
+                        }
                     </div>
                 </div>
             </div>

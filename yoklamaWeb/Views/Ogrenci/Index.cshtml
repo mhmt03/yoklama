@@ -3,77 +3,317 @@
     ViewData["Title"] = "Öğrenci Listesi";
     Layout = "_Layout";
 }
-<link href="~/css/site.css" rel="stylesheet" />
-<h2 class="mt-4 mb-3" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Öğrenci Listesi</h2>
 
-<div class="mb-3 row gx-2 gy-2">
-    <div class="col-md-3">
-        <input id="filterNo" type="text" class="form-control" placeholder="Öğrenci No ara" />
+<div class="mt-4 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h2 class="fw-bold mb-0" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Öğrenci Listesi</h2>
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-success btn-sm" onclick="location.href='@Url.Action("ImportExcel", "Ogrenci")'"><i class="bi bi-file-earmark-arrow-up"></i> Excel'den İçe Aktar</button>
+        <a asp-action="ExportToExcel" class="btn btn-success btn-sm"><i class="bi bi-file-earmark-excel"></i> Excel Olarak Dışa Aktar</a>
+        <a asp-action="Create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg"></i> Yeni Öğrenci Ekle</a>
+        <button type="button" class="btn btn-outline-danger btn-sm" id="btnDeleteSelected" disabled onclick="submitBulkDelete()"><i class="bi bi-trash"></i> Seçilenleri Sil (<span id="selectedCount">0</span>)</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="submitDeleteAll()"><i class="bi bi-x-circle-fill"></i> Tümünü Sil</button>
     </div>
-    <div class="col-md-3">
-        <input id="filterName" type="text" class="form-control" placeholder="Ad Soyad ara" />
-    </div>
-    <div class="col-md-2">
-        <input id="filterClass" type="text" class="form-control" placeholder="Sınıf ara" />
-    </div>
-    <div class="col-md-2">
-        <input id="filterBranch" type="text" class="form-control" placeholder="Şube ara" />
-    </div>
-    <div class="col-md-2 text-end">
-        <a asp-action="Create" class="btn btn-primary w-100">Yeni Öğrenci Ekle</a>
-    </div>
-<div class="col-md-12 mt-3">
-<button type="button" class="btn btn-success" onclick="location.href='@Url.Action("ImportExcel", "Ogrenci")'">Excel'den İçe Aktar</button>
-
-    </div>
-
-    <a asp-action="ExportToExcel" class="btn btn-success">Excel Olarak Dışa Aktar</a>
 </div>
 
-<div class="table-responsive">
-    <table id="ogrenciTable" class="table table-bordered table-hover align-middle">
-        <thead class="table-dark">
-            <tr>
-                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="0">Öğrenci No</button></th>
-                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="1">Ad Soyad</button></th>
-                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="2">Sınıf</button></th>
-                <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="3">Şube</button></th>
-                <th>İşlemler</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var item in Model)
-            {
+@if (TempData["SuccessMessage"] != null)
+{
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <i class="bi bi-check-circle-fill me-2"></i> @TempData["SuccessMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+@if (TempData["ErrorMessage"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i> @TempData["ErrorMessage"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<!-- İstatistik Kartları -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3 col-6">
+        <div class="card border-0 shadow-sm bg-primary text-white">
+            <div class="card-body p-3 text-center">
+                <h6 class="text-white-50 mb-1 small text-uppercase fw-bold">Toplam Öğrenci</h6>
+                <h3 class="fw-bold mb-0" id="statTotal">@Model.Count()</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 shadow-sm bg-info text-white">
+            <div class="card-body p-3 text-center">
+                <h6 class="text-white-50 mb-1 small text-uppercase fw-bold">Listelenen Öğrenci</h6>
+                <h3 class="fw-bold mb-0" id="statVisible">@Model.Count()</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 shadow-sm bg-success text-white">
+            <div class="card-body p-3 text-center">
+                <h6 class="text-white-50 mb-1 small text-uppercase fw-bold">Sınava Katılacak</h6>
+                <h3 class="fw-bold mb-0" id="statExamYes">@Model.Count(o => o.SinavlaraKatilacak)</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 col-6">
+        <div class="card border-0 shadow-sm bg-secondary text-white">
+            <div class="card-body p-3 text-center">
+                <h6 class="text-white-50 mb-1 small text-uppercase fw-bold">Sınava Katılmayacak</h6>
+                <h3 class="fw-bold mb-0" id="statExamNo">@Model.Count(o => !o.SinavlaraKatilacak)</h3>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filtre Paneli -->
+<div class="card mb-4 shadow-sm border-0 bg-light">
+    <div class="card-body p-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3 col-sm-6">
+                <label class="form-label fw-bold small mb-1"><i class="bi bi-search"></i> Arama (No / Ad Soyad)</label>
+                <input id="filterSearch" type="text" class="form-control form-control-sm" placeholder="No veya Ad Soyad ile ara..." />
+            </div>
+            <div class="col-md-2 col-sm-6">
+                <label class="form-label fw-bold small mb-1"><i class="bi bi-building"></i> Sınıf</label>
+                <select id="filterClass" class="form-select form-select-sm">
+                    <option value="">-- Tüm Sınıflar --</option>
+                </select>
+            </div>
+            <div class="col-md-2 col-sm-6">
+                <label class="form-label fw-bold small mb-1"><i class="bi bi-door-closed"></i> Şube</label>
+                <select id="filterBranch" class="form-select form-select-sm">
+                    <option value="">-- Tüm Şubeler --</option>
+                </select>
+            </div>
+            <div class="col-md-2 col-sm-6">
+                <label class="form-label fw-bold small mb-1"><i class="bi bi-mortarboard"></i> Alanı</label>
+                <select id="filterAlan" class="form-select form-select-sm">
+                    <option value="">-- Tüm Alanlar --</option>
+                    <option value="SAY">SAY</option>
+                    <option value="TM">TM</option>
+                    <option value="SÖZ">SÖZ</option>
+                    <option value="DİL">DİL</option>
+                    <option value="YOK">YOK</option>
+                </select>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <label class="form-label fw-bold small mb-1"><i class="bi bi-pencil-square"></i> Sınava Katılım</label>
+                <select id="filterExam" class="form-select form-select-sm">
+                    <option value="">-- Tüm Durumlar --</option>
+                    <option value="evet">Evet (Katılacak)</option>
+                    <option value="hayir">Hayır (Katılmayacak)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Çoklu Silme Formu -->
+<form id="bulkDeleteForm" method="post" asp-action="DeleteSelected">
+    @Html.AntiForgeryToken()
+    <div class="table-responsive">
+        <table id="ogrenciTable" class="table table-bordered table-hover align-middle">
+            <thead class="table-dark">
                 <tr>
-                    <td>@item.OgrenciNo</td>
-                    <td>@item.AdSoyad</td>
-                    <td>@item.SinifDuzeyi</td>
-                    <td>@item.Sube</td>
-                    <td>
-                        <a asp-action="Details" asp-route-id="@item.OgrenciNo" class="btn btn-outline-primary btn-sm me-1">Detay</a>
-                        <a asp-action="Edit" asp-route-id="@item.OgrenciNo" class="btn btn-outline-success btn-sm me-1">Düzenle</a>
-                        <a asp-action="Delete" asp-route-id="@item.OgrenciNo" class="btn btn-outline-danger btn-sm">Sil</a>
-                    </td>
+                    <th style="width: 40px;" class="text-center">
+                        <input type="checkbox" id="selectAllCheckbox" class="form-check-input" title="Tümünü Seç / Kaldır" />
+                    </th>
+                    <th style="width: 50px;" class="text-center">#</th>
+                    <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="2">Öğrenci No</button></th>
+                    <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="3">Ad Soyad</button></th>
+                    <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="4">Sınıf</button></th>
+                    <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="5">Şube</button></th>
+                    <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="6">Sınav Katılım</button></th>
+                    <th><button type="button" class="btn btn-sm btn-outline-light sort-btn" data-col="7">Alanı</button></th>
+                    <th class="text-end pe-3" style="min-width: 200px;">İşlemler</th>
                 </tr>
-            }
-        </tbody>
-    </table>
-</div>
+            </thead>
+            <tbody>
+                @{ int index = 1; }
+                @foreach (var item in Model)
+                {
+                    <tr>
+                        <td class="text-center">
+                            <input type="checkbox" class="form-check-input student-checkbox" name="selectedNos" value="@item.OgrenciNo" />
+                        </td>
+                        <td class="text-center fw-bold text-muted row-number">@index</td>
+                        <td>@item.OgrenciNo</td>
+                        <td><strong>@item.AdSoyad</strong></td>
+                        <td data-val="@(item.SinifDuzeyi ?? "")">@(string.IsNullOrWhiteSpace(item.SinifDuzeyi) ? "Belirsiz" : item.SinifDuzeyi)</td>
+                        <td data-val="@(item.Sube ?? "")">@(string.IsNullOrWhiteSpace(item.Sube) ? "Belirsiz" : item.Sube)</td>
+                        <td data-val="@(item.SinavlaraKatilacak ? "evet" : "hayir")">
+                            @if (item.SinavlaraKatilacak)
+                            {
+                                <span class="badge bg-success">Evet</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Hayır</span>
+                            }
+                        </td>
+                        <td data-val="@(item.Alan ?? "YOK")">
+                            <span class="badge @(item.Alan != "YOK" && !string.IsNullOrEmpty(item.Alan) ? "bg-primary" : "bg-light text-muted border")">
+                                @(string.IsNullOrEmpty(item.Alan) ? "YOK" : item.Alan)
+                            </span>
+                        </td>
+                        <td class="text-end pe-3">
+                            <a asp-action="Details" asp-route-id="@item.OgrenciNo" class="btn btn-outline-primary btn-sm me-1"><i class="bi bi-eye"></i> Detay</a>
+                            <a asp-action="Edit" asp-route-id="@item.OgrenciNo" class="btn btn-outline-success btn-sm me-1"><i class="bi bi-pencil"></i> Düzenle</a>
+                            <a asp-action="Delete" asp-route-id="@item.OgrenciNo" class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i> Sil</a>
+                        </td>
+                    </tr>
+                    index++;
+                }
+            </tbody>
+        </table>
+    </div>
+</form>
+
+<!-- Tümünü Silmek İçin Gizli Form -->
+<form id="deleteAllForm" method="post" asp-action="DeleteAll" style="display:none;">
+    @Html.AntiForgeryToken()
+</form>
 
 <script>
-    (function() {
+    document.addEventListener("DOMContentLoaded", function() {
         const table = document.getElementById('ogrenciTable');
         if (!table) return;
 
         const tbody = table.querySelector('tbody');
-        const sortButtons = table.querySelectorAll('.sort-btn');
-        const inputs = [
-            document.getElementById('filterNo'),
-            document.getElementById('filterName'),
-            document.getElementById('filterClass'),
-            document.getElementById('filterBranch')
-        ];
+        const rows = Array.from(tbody.querySelectorAll('tr'));
 
+        const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+        const btnDeleteSelected = document.getElementById('btnDeleteSelected');
+        const selectedCountSpan = document.getElementById('selectedCount');
+
+        const filterSearch = document.getElementById('filterSearch');
+        const filterClass = document.getElementById('filterClass');
+        const filterBranch = document.getElementById('filterBranch');
+        const filterAlan = document.getElementById('filterAlan');
+        const filterExam = document.getElementById('filterExam');
+
+        const statVisible = document.getElementById('statVisible');
+        const statExamYes = document.getElementById('statExamYes');
+        const statExamNo = document.getElementById('statExamNo');
+
+        // Populate Sınıf and Şube dropdowns dynamically from table data
+        const classes = new Set();
+        const branches = new Set();
+        let hasEmptyClass = false;
+        let hasEmptyBranch = false;
+
+        rows.forEach(row => {
+            const cells = row.children;
+            const sinifVal = cells[4].getAttribute('data-val') || cells[4].textContent.trim();
+            const subeVal = cells[5].getAttribute('data-val') || cells[5].textContent.trim();
+
+            if (!sinifVal || sinifVal.toLowerCase() === 'belirsiz') {
+                hasEmptyClass = true;
+            } else {
+                classes.add(sinifVal);
+            }
+
+            if (!subeVal || subeVal.toLowerCase() === 'belirsiz') {
+                hasEmptyBranch = true;
+            } else {
+                branches.add(subeVal);
+            }
+        });
+
+        // Add class options
+        Array.from(classes).sort((a, b) => a.localeCompare(b, 'tr', { numeric: true })).forEach(cls => {
+            const opt = document.createElement('option');
+            opt.value = cls;
+            opt.textContent = cls + ". Sınıf";
+            filterClass.appendChild(opt);
+        });
+        if (hasEmptyClass) {
+            const opt = document.createElement('option');
+            opt.value = "belirsiz";
+            opt.textContent = "Belirsiz";
+            filterClass.appendChild(opt);
+        }
+
+        // Add branch options
+        Array.from(branches).sort().forEach(br => {
+            const opt = document.createElement('option');
+            opt.value = br;
+            opt.textContent = br + " Şubesi";
+            filterBranch.appendChild(opt);
+        });
+        if (hasEmptyBranch) {
+            const opt = document.createElement('option');
+            opt.value = "belirsiz";
+            opt.textContent = "Belirsiz";
+            filterBranch.appendChild(opt);
+        }
+
+        // Attach event listeners for filtering
+        [filterSearch, filterClass, filterBranch, filterAlan, filterExam].forEach(element => {
+            if (element) {
+                element.addEventListener('change', applyFilters);
+                element.addEventListener('keyup', applyFilters);
+            }
+        });
+
+        // Checkbox events
+        selectAllCheckbox.addEventListener('change', function() {
+            const visibleCheckboxes = tbody.querySelectorAll('tr:not([style*="display: none"]) .student-checkbox');
+            visibleCheckboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+            updateSelectionState();
+        });
+
+        tbody.addEventListener('change', function(e) {
+            if (e.target && e.target.classList.contains('student-checkbox')) {
+                updateSelectionState();
+            }
+        });
+
+        function updateSelectionState() {
+            const visibleCheckboxes = Array.from(tbody.querySelectorAll('tr:not([style*="display: none"]) .student-checkbox'));
+            const selectedCheckboxes = visibleCheckboxes.filter(cb => cb.checked);
+
+            if (selectedCountSpan) {
+                selectedCountSpan.textContent = selectedCheckboxes.length;
+            }
+
+            if (btnDeleteSelected) {
+                btnDeleteSelected.disabled = selectedCheckboxes.length === 0;
+            }
+
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = visibleCheckboxes.length > 0 && selectedCheckboxes.length === visibleCheckboxes.length;
+            }
+        }
+
+        // Global functions for buttons
+        window.submitBulkDelete = function() {
+            const selectedCheckboxes = Array.from(tbody.querySelectorAll('.student-checkbox:checked'));
+            if (selectedCheckboxes.length === 0) {
+                alert('Lütfen silmek için en az bir öğrenci seçin.');
+                return;
+            }
+
+            if (confirm(`Seçtiğiniz ${selectedCheckboxes.length} adet öğrenci silinecek.\n\nEmin misiniz?`)) {
+                document.getElementById('bulkDeleteForm').submit();
+            }
+        };
+
+        window.submitDeleteAll = function() {
+            const totalCount = rows.length;
+            if (totalCount === 0) {
+                alert('Sistemde silinecek öğrenci bulunmuyor.');
+                return;
+            }
+
+            if (confirm(`DİKKAT! Tüm öğrenciler (${totalCount} adet) veritabanından kalıcı olarak silinecek!\n\nBu işlemi onaylıyor musunuz?`)) {
+                document.getElementById('deleteAllForm').submit();
+            }
+        };
+
+        // Sort Buttons logic
+        const sortButtons = table.querySelectorAll('.sort-btn');
         let sortDirections = {};
 
         sortButtons.forEach(button => {
@@ -85,15 +325,11 @@
             });
         });
 
-        inputs.forEach((input, idx) => {
-            input.addEventListener('input', () => applyFilters());
-        });
-
         function sortTable(col, direction) {
-            const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => r.style.display !== 'none');
+            const currentRows = Array.from(tbody.querySelectorAll('tr')).filter(r => r.style.display !== 'none');
             const multiplier = direction === 'asc' ? 1 : -1;
 
-            rows.sort((a, b) => {
+            currentRows.sort((a, b) => {
                 const aText = a.children[col].textContent.trim();
                 const bText = b.children[col].textContent.trim();
                 const aNum = parseFloat(aText.replace(',', '.'));
@@ -105,19 +341,91 @@
                 return aText.localeCompare(bText, 'tr', { sensitivity: 'base' }) * multiplier;
             });
 
-            rows.forEach(row => tbody.appendChild(row));
+            currentRows.forEach(row => tbody.appendChild(row));
+            updateRowNumbersAndStats();
         }
 
         function applyFilters() {
-            const filterValues = inputs.map(i => i.value.trim().toLowerCase());
-            tbody.querySelectorAll('tr').forEach(row => {
-                const cells = Array.from(row.children);
-                const visible = filterValues.every((value, index) => {
-                    if (!value) return true;
-                    return cells[index].textContent.trim().toLowerCase().includes(value);
-                });
-                row.style.display = visible ? '' : 'none';
+            const searchVal = filterSearch.value.trim().toLowerCase();
+            const classVal = filterClass.value.trim().toLowerCase();
+            const branchVal = filterBranch.value.trim().toLowerCase();
+            const alanVal = filterAlan ? filterAlan.value.trim().toLowerCase() : "";
+            const examVal = filterExam.value.trim().toLowerCase();
+
+            rows.forEach(row => {
+                const cells = row.children;
+                const ogrenciNo = cells[2].textContent.trim().toLowerCase();
+                const adSoyad = cells[3].textContent.trim().toLowerCase();
+                const sinif = (cells[4].getAttribute('data-val') || cells[4].textContent.trim()).toLowerCase();
+                const sube = (cells[5].getAttribute('data-val') || cells[5].textContent.trim()).toLowerCase();
+                const exam = (cells[6].getAttribute('data-val') || cells[6].textContent.trim()).toLowerCase();
+                const alan = (cells[7]?.getAttribute('data-val') || cells[7]?.textContent.trim() || "yok").toLowerCase();
+
+                // Search match
+                const matchSearch = !searchVal || ogrenciNo.includes(searchVal) || adSoyad.includes(searchVal);
+
+                // Class match
+                let matchClass = true;
+                if (classVal) {
+                    if (classVal === 'belirsiz') {
+                        matchClass = !sinif || sinif === 'belirsiz';
+                    } else {
+                        matchClass = sinif === classVal;
+                    }
+                }
+
+                // Branch match
+                let matchBranch = true;
+                if (branchVal) {
+                    if (branchVal === 'belirsiz') {
+                        matchBranch = !sube || sube === 'belirsiz';
+                    } else {
+                        matchBranch = sube === branchVal;
+                    }
+                }
+
+                // Alan match
+                let matchAlan = true;
+                if (alanVal) {
+                    matchAlan = alan === alanVal;
+                }
+
+                // Exam match
+                let matchExam = true;
+                if (examVal) {
+                    if (examVal === 'belirsiz') {
+                        matchExam = !exam || exam === 'belirsiz';
+                    } else {
+                        matchExam = exam === examVal;
+                    }
+                }
+
+                const isVisible = matchSearch && matchClass && matchBranch && matchAlan && matchExam;
+                row.style.display = isVisible ? '' : 'none';
             });
+
+            updateRowNumbersAndStats();
+            updateSelectionState();
         }
-    })();
+
+        function updateRowNumbersAndStats() {
+            const visibleRows = rows.filter(r => r.style.display !== 'none');
+            let yesCount = 0;
+            let noCount = 0;
+
+            visibleRows.forEach((row, idx) => {
+                row.children[1].textContent = idx + 1; // Re-number visible rows (# column is cell index 1)
+                const examVal = (row.children[6].getAttribute('data-val') || '').toLowerCase();
+                if (examVal === 'evet') yesCount++;
+                else if (examVal === 'hayir') noCount++;
+            });
+
+            if (statVisible) statVisible.textContent = visibleRows.length;
+            if (statExamYes) statExamYes.textContent = yesCount;
+            if (statExamNo) statExamNo.textContent = noCount;
+        }
+
+        updateRowNumbersAndStats();
+    });
 </script>
+

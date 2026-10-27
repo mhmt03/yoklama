@@ -5,7 +5,7 @@
     Layout = "_Layout";
 }
 
-<div class="container mt-4">
+<div class="mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>İzin Yönetimi</h2>
         <div>
@@ -94,6 +94,7 @@
                     <th>Başlangıç Tarihi</th>
                     <th>Bitiş Tarihi</th>
                     <th>Durum</th>
+                    <th>Talep Eden</th>
                     <th>Onaylayan</th>
                     <th class="text-end pe-3" style="min-width: 250px;">İşlemler</th>
                 </tr>
@@ -107,7 +108,29 @@
                             <td class="ps-3">@izin.OgrenciNo</td>
                             <td><strong>@izin.OgrenciAdSoyad</strong></td>
                             <td>
-                                <span class="badge bg-info text-dark">@izin.Tur.ToString()</span>
+                                @{
+                                    string turStr = izin.Tur switch
+                                    {
+                                        yoklamaWeb.Models.Enums.IzinTur.Hastalik => "Hastalık İzni",
+                                        yoklamaWeb.Models.Enums.IzinTur.AileZiyareti => "Aile Ziyareti",
+                                        yoklamaWeb.Models.Enums.IzinTur.ResmiIs => "Resmi İş",
+                                        yoklamaWeb.Models.Enums.IzinTur.Diger => "Diğer",
+                                        yoklamaWeb.Models.Enums.IzinTur.GecGelme => "Geç Gelme",
+                                        _ => izin.Tur.ToString()
+                                    };
+                                }
+                                <span class="badge bg-info text-dark">@turStr</span>
+                                @if (izin.Tur == yoklamaWeb.Models.Enums.IzinTur.GecGelme && !string.IsNullOrEmpty(izin.IzinliYoklamaNolar))
+                                {
+                                    var map = ViewBag.YoklamaTurleriMap as Dictionary<int, string> ?? new Dictionary<int, string>();
+                                    var names = izin.IzinliYoklamaNolar.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(idStr => int.TryParse(idStr, out int id) && map.ContainsKey(id) ? map[id] : idStr + ". Yoklama");
+                                    <div class="small text-muted mt-1" style="font-size: 0.75rem;">Yoklamalar: @(string.Join(", ", names))</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(izin.Aciklama))
+                                {
+                                    <div class="small text-secondary mt-1" style="font-size: 0.8rem;"><i class="bi bi-chat-left-text me-1"></i>@izin.Aciklama</div>
+                                }
                             </td>
                             <td>@izin.BaslangicTarihi.ToString("dd.MM.yyyy")</td>
                             <td>@izin.BitisTarihi.ToString("dd.MM.yyyy")</td>
@@ -129,6 +152,7 @@
                                     <span class="badge bg-secondary">İptal Edildi</span>
                                 }
                             </td>
+                            <td>@(izin.TalepEdenAdSoyad ?? "-")</td>
                             <td>@(izin.OnaylayanAdSoyad ?? "-")</td>
                             <td class="text-end pe-3">
                                 <a asp-action="Details" asp-route-id="@izin.Id" class="btn btn-sm btn-info me-1"><i class="bi bi-eye"></i> Detay</a>

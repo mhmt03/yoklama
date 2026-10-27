@@ -23,6 +23,12 @@ namespace yoklamaWeb.Models
         public string Password { get; set; } = null!;
 
         [Required]
+        [DataType(DataType.Password)]
+        [Display(Name = "Şifre (Tekrar)")]
+        [Compare("Password", ErrorMessage = "Şifreler uyuşmuyor.")]
+        public string ConfirmPassword { get; set; } = null!;
+
+        [Required]
         [Display(Name = "Rol")]
         public string Role { get; set; } = null!;
 
@@ -65,5 +71,25 @@ namespace yoklamaWeb.Models
                 }
             }
         }
+    }
+
+    public class ChangePasswordViewModel
+    {
+        [Required(ErrorMessage = "Mevcut şifre alanı zorunludur.")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Mevcut Şifre")]
+        public string CurrentPassword { get; set; } = null!;
+
+        [Required(ErrorMessage = "Yeni şifre alanı zorunludur.")]
+        [StringLength(100, ErrorMessage = "{0} en az {2} karakter uzunluğunda olmalıdır.", MinimumLength = 6)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Yeni Şifre")]
+        public string NewPassword { get; set; } = null!;
+
+        [Required(ErrorMessage = "Şifre tekrarı alanı zorunludur.")]
+        [DataType(DataType.Password)]
+        [Display(Name = "Yeni Şifre (Tekrar)")]
+        [Compare("NewPassword", ErrorMessage = "Yeni şifreler eşleşmiyor.")]
+        public string ConfirmPassword { get; set; } = null!;
     }
 }

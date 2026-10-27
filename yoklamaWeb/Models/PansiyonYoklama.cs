@@ -18,6 +18,10 @@ namespace yoklamaWeb.Models
         public TimeSpan? Saat { get; set; }
 
         [Required]
+        [Display(Name = "Yoklama No")]
+        public int YoklamaNo { get; set; } = 1;
+
+        [Required]
         [MaxLength(20)]
         public string Durum { get; set; } // "Var", "Yok", "Izinli", "Gecikmeli"
 

@@ -1,0 +1,10 @@
+[Bb]in/
+[Oo]bj/
+publish_output/
+releaseddd/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+DataProtectionKeys/

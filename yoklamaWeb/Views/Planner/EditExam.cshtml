@@ -1,0 +1,44 @@
+@model yoklamaWeb.Models.PlannerExam
+@{
+    ViewData["Title"] = "Sınav Düzenle";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <h2 class="mb-4" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Sınav Düzenle</h2>
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <form asp-action="EditExam" method="post" class="row g-3">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <input type="hidden" asp-for="Id" />
+
+                <div class="col-md-12">
+                    <label asp-for="Name" class="form-label">Sınav Adı</label>
+                    <input asp-for="Name" class="form-control" required />
+                    <span asp-validation-for="Name" class="text-danger"></span>
+                </div>
+
+                <div class="col-md-6">
+                    <label asp-for="ExamDate" class="form-label">Sınav Tarihi</label>
+                    <input asp-for="ExamDate" class="form-control" type="date" required />
+                    <span asp-validation-for="ExamDate" class="text-danger"></span>
+                </div>
+
+                <div class="col-md-6">
+                    <label asp-for="StartTime" class="form-label">Başlangıç Saati</label>
+                    <input asp-for="StartTime" class="form-control" type="time" required />
+                    <span asp-validation-for="StartTime" class="text-danger"></span>
+                </div>
+
+                <div class="col-12 mt-4">
+                    <button type="submit" class="btn btn-primary btn-sm">Kaydet</button>
+                    <a asp-action="Exams" class="btn btn-outline-secondary btn-sm ms-2">İptal</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

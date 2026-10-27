@@ -32,8 +32,14 @@ namespace yoklamaWeb.Models
         [MaxLength(500)]
         public string Aciklama { get => _aciklama; set => _aciklama = value ?? string.Empty; }
 
+        [Display(Name = "İzinli Yoklama Numaraları")]
+        public string? IzinliYoklamaNolar { get; set; }
+
+        public int? TalepEdenId { get; set; }
+        public PansiyonGorevlisi? TalepEden { get; set; }
+
         public int? OnaylayanId { get; set; }
-        public PansiyonGorevlisi Onaylayan { get; set; }
+        public PansiyonGorevlisi? Onaylayan { get; set; }
 
         public DateTime? OnayTarihi { get; set; }
 

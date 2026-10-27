@@ -1,0 +1,48 @@
+@model yoklamaWeb.Models.YoklamaTuru
+@{
+    ViewData["Title"] = "Yeni Yoklama Çeşidi Ekle";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 500px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0 fw-bold">Yeni Yoklama Çeşidi Ekle</h4>
+        </div>
+        <div class="card-body p-4">
+            <form method="post" asp-action="Create">
+                @Html.AntiForgeryToken()
+                
+                <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+                <div class="mb-3">
+                    <label asp-for="Ad" class="form-label fw-bold">Yoklama Adı</label>
+                    <input asp-for="Ad" class="form-control" placeholder="Örn: Yemek Yoklaması, Etüt Yoklaması..." required />
+                    <span asp-validation-for="Ad" class="text-danger"></span>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="Sira" class="form-label fw-bold">Sıra Numarası</label>
+                    <input asp-for="Sira" type="number" class="form-control" min="1" required />
+                    <span asp-validation-for="Sira" class="text-danger"></span>
+                    <div class="form-text">Günlük yoklama alım ekranında listelenecek sıralama düzeni.</div>
+                </div>
+
+                <div class="mb-3 form-check">
+                    <input asp-for="Aktif" class="form-check-input" type="checkbox" id="aktifCheck" checked />
+                    <label class="form-check-label fw-bold" for="aktifCheck">Aktif mi?</label>
+                    <span asp-validation-for="Aktif" class="text-danger"></span>
+                </div>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    <button type="submit" class="btn btn-primary px-4">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

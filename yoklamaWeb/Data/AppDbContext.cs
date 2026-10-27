@@ -49,6 +49,10 @@ namespace yoklamaWeb.Data
         public DbSet<Sinif> Siniflar { get; set; }
         public DbSet<ClassAttendance> ClassAttendances { get; set; }
         public DbSet<ClassAttendanceStudent> ClassAttendanceStudents { get; set; }
+        public DbSet<DailyClassAttendance> DailyClassAttendances { get; set; }
+        public DbSet<DailyClassAttendanceStudent> DailyClassAttendanceStudents { get; set; }
+        public DbSet<GunlukYoklamaci> GunlukYoklamacilar { get; set; }
+        public DbSet<GunlukYoklamaciProgram> GunlukYoklamaciProgramlari { get; set; }
         public DbSet<Exam> Exams { get; set; }
         public DbSet<ExamSeat> ExamSeats { get; set; }
         public DbSet<TemporaryProctor> TemporaryProctors { get; set; }
@@ -59,6 +63,23 @@ namespace yoklamaWeb.Data
         public DbSet<NobetciPlan> NobetciPlanlar { get; set; }
         public DbSet<PansiyonYoklama> PansiyonYoklamalar { get; set; }
         public DbSet<IzinGirisi> IzinGirisleri { get; set; }
+        public DbSet<Etut> Etutler { get; set; }
+        public DbSet<YoklamaTuru> YoklamaTurleri { get; set; }
+
+        // Oturma Planlayıcı Module
+        public DbSet<PlannerRoom> PlannerRooms { get; set; }
+        public DbSet<PlannerExam> PlannerExams { get; set; }
+        public DbSet<PlannerExamRoom> PlannerExamRooms { get; set; }
+        public DbSet<PlannerSeating> PlannerSeatings { get; set; }
+        public DbSet<SystemLog> SystemLogs { get; set; }
+
+        // Optik Okuma Modülü
+        public DbSet<OptikForm> OptikFormlar { get; set; }
+        public DbSet<OptikFormDers> OptikFormDersleri { get; set; }
+        public DbSet<OptikSinav> OptikSinavlar { get; set; }
+        public DbSet<OptikSinavDers> OptikSinavDersleri { get; set; }
+        public DbSet<OptikSinavSonuc> OptikSinavSonuclari { get; set; }
+        public DbSet<OptikSinavSonucDers> OptikSinavSonucDersleri { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -257,7 +278,59 @@ namespace yoklamaWeb.Data
                     .WithMany()
                     .HasForeignKey(e => e.OnaylayanId)
                     .OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne(e => e.TalepEden)
+                    .WithMany()
+                    .HasForeignKey(e => e.TalepEdenId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
+
+            modelBuilder.Entity<Etut>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+                entity.Property(e => e.EtutAdi).IsRequired().HasMaxLength(50);
+                entity.Property(e => e.Kapasite).IsRequired();
+                entity.Property(e => e.Aciklama).HasMaxLength(200);
+                entity.Property(e => e.Aktif).IsRequired();
+                entity.Property(e => e.OlusturmaTarihi).IsRequired();
+                entity.Property(e => e.RowVersion).IsConcurrencyToken();
+            });
+
+            modelBuilder.Entity<PansiyonOgrenci>()
+                .HasOne(e => e.Etut)
+                .WithMany(et => et.Ogrenciler)
+                .HasForeignKey(e => e.EtutId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Optik Okuma Modülü İlişkileri
+            modelBuilder.Entity<OptikFormDers>()
+                .HasOne(d => d.OptikForm)
+                .WithMany(f => f.Dersler)
+                .HasForeignKey(d => d.OptikFormId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OptikSinavDers>()
+                .HasOne(d => d.OptikSinav)
+                .WithMany(s => s.Dersler)
+                .HasForeignKey(d => d.OptikSinavId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OptikSinavSonuc>()
+                .HasOne(s => s.OptikSinav)
+                .WithMany(s => s.Sonuclar)
+                .HasForeignKey(s => s.OptikSinavId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OptikSinavSonuc>()
+                .HasOne(s => s.Ogrenci)
+                .WithMany()
+                .HasForeignKey(s => s.OgrenciNo)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<OptikSinavSonucDers>()
+                .HasOne(d => d.OptikSinavSonuc)
+                .WithMany(s => s.DersSonuclari)
+                .HasForeignKey(d => d.OptikSinavSonucId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }

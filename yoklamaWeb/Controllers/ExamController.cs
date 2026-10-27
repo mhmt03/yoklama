@@ -15,7 +15,7 @@ using System.Text.RegularExpressions;
 
 namespace yoklamaWeb.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
     public class ExamController : Controller
     {
         private readonly AppDbContext _context;
@@ -38,26 +38,53 @@ namespace yoklamaWeb.Controllers
             if (!string.IsNullOrWhiteSpace(buildingFilter))
                 exams = exams.Where(e => e.BuildingNumber.Contains(buildingFilter));
 
-            var today = DateTime.UtcNow.Date;
+            var today = DateTime.Today;
             if (statusFilter == "Active")
             {
-                exams = exams.Where(e => e.ValidFrom.Date <= today && e.ValidTo.Date >= today);
+                exams = exams.Where(e => e.ValidFrom <= today && e.ValidTo >= today);
             }
             else if (statusFilter == "Expired")
             {
-                exams = exams.Where(e => e.ValidTo.Date < today);
+                exams = exams.Where(e => e.ValidTo < today);
             }
             else if (statusFilter == "Upcoming")
             {
-                exams = exams.Where(e => e.ValidFrom.Date > today);
+                exams = exams.Where(e => e.ValidFrom > today);
             }
 
             ViewData["NameFilter"] = nameFilter;
             ViewData["BuildingFilter"] = buildingFilter;
             ViewData["StatusFilter"] = statusFilter;
 
-            var model = await exams.OrderByDescending(e => e.ApplicationDate).ToListAsync();
-            return View(model);
+            var examList = await exams.OrderByDescending(e => e.ApplicationDate).ToListAsync();
+            var examIds = examList.Select(e => e.Id).ToList();
+            var allSeats = await _context.ExamSeats
+                .Where(es => examIds.Contains(es.ExamId))
+                .ToListAsync();
+
+            var viewModel = examList.Select(e =>
+            {
+                var examSeats = allSeats.Where(es => es.ExamId == e.Id).ToList();
+                return new AdminExamItemViewModel
+                {
+                    Id = e.Id,
+                    Name = e.Name,
+                    ApplicationDate = e.ApplicationDate,
+                    BuildingNumber = e.BuildingNumber,
+                    ValidFrom = e.ValidFrom,
+                    ValidTo = e.ValidTo,
+                    StartTime = e.StartTime,
+                    EndTime = e.EndTime,
+                    YoklamaSayisi = e.YoklamaSayisi,
+                    TotalStudents = examSeats.Count,
+                    PresentCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Katildi),
+                    AbsentCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Katilmadi),
+                    LateCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Gec),
+                    PendingCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.KontrolEdilmedi)
+                };
+            }).ToList();
+
+            return View(viewModel);
         }
 
         // GET: /Exam/Create
@@ -69,10 +96,11 @@ namespace yoklamaWeb.Controllers
         // POST: /Exam/Create
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create([Bind("Name,ApplicationDate,BuildingNumber,ValidFrom,ValidTo,StartTime,EndTime,IsActive")] Exam exam)
+        public async Task<IActionResult> Create([Bind("Name,ApplicationDate,BuildingNumber,ValidFrom,ValidTo,StartTime,EndTime,IsActive,YoklamaSayisi")] Exam exam)
         {
             if (ModelState.IsValid)
             {
+                if (exam.YoklamaSayisi < 1) exam.YoklamaSayisi = 1;
                 _context.Exams.Add(exam);
                 await _context.SaveChangesAsync();
                 return RedirectToAction(nameof(Index));
@@ -80,8 +108,8 @@ namespace yoklamaWeb.Controllers
             return View(exam);
         }
 
-                // GET: /Exam/Details/5
-        public async Task<IActionResult> Details(int? id)
+        // GET: /Exam/Details/5?yoklamaNo=1
+        public async Task<IActionResult> Details(int? id, int yoklamaNo = 1)
         {
             if (id == null) return NotFound();
             var exam = await _context.Exams
@@ -90,11 +118,17 @@ namespace yoklamaWeb.Controllers
                 .FirstOrDefaultAsync(e => e.Id == id);
             if (exam == null) return NotFound();
 
+            int selectedYoklamaNo = yoklamaNo < 1 ? 1 : yoklamaNo;
+            if (selectedYoklamaNo > exam.YoklamaSayisi && exam.YoklamaSayisi > 0)
+                selectedYoklamaNo = 1;
+
             var assignments = await _context.TemporaryProctors
                 .Where(tp => tp.ExamId == id.Value)
                 .ToListAsync();
 
-            var rows = exam.ExamSeats
+            var filteredSeats = exam.ExamSeats.Where(s => s.YoklamaNo == selectedYoklamaNo || s.YoklamaNo == 0).ToList();
+
+            var rows = filteredSeats
                 .OrderBy(s => s.Sira)
                 .ThenBy(s => s.SeatNumber)
                 .ThenBy(s => s.OgrenciNo)
@@ -113,6 +147,7 @@ namespace yoklamaWeb.Controllers
                         Sira = seat.Sira,
                         BinaNo = seat.BinaNo,
                         AttendanceStatus = seat.AttendanceStatus,
+                        YoklamaNo = seat.YoklamaNo,
                         Note = seat.Note ?? string.Empty,
                         ProctorName = assignment?.ProctorName ?? string.Empty,
                         RoomNote = assignment?.RoomNote ?? string.Empty,
@@ -131,6 +166,8 @@ namespace yoklamaWeb.Controllers
                 ValidTo = exam.ValidTo,
                 StartTime = exam.StartTime,
                 EndTime = exam.EndTime,
+                YoklamaSayisi = exam.YoklamaSayisi > 0 ? exam.YoklamaSayisi : 1,
+                SelectedYoklamaNo = selectedYoklamaNo,
                 Seats = rows
             };
 
@@ -143,8 +180,63 @@ namespace yoklamaWeb.Controllers
             if (id == null) return NotFound();
             var exam = await _context.Exams.FindAsync(id);
             if (exam == null) return NotFound();
+
+            var plannerExams = await _context.PlannerExams
+                .Where(pe => _context.PlannerSeatings.Any(s => s.PlannerExamId == pe.Id))
+                .OrderByDescending(pe => pe.ExamDate)
+                .ToListAsync();
+
             ViewBag.ExamId = exam.Id;
+            ViewBag.PlannerExams = plannerExams;
             return View();
+        }
+
+        // POST: /Exam/ImportFromPlanner
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ImportFromPlanner(int examId, int plannerExamId)
+        {
+            var exam = await _context.Exams.FindAsync(examId);
+            if (exam == null) return NotFound();
+
+            var plannerExam = await _context.PlannerExams.FindAsync(plannerExamId);
+            if (plannerExam == null)
+            {
+                TempData["ErrorMessage"] = "Seçilen planlama sınavı bulunamadı.";
+                return RedirectToAction(nameof(ImportSeats), new { id = examId });
+            }
+
+            var seatings = await _context.PlannerSeatings
+                .Where(s => s.PlannerExamId == plannerExamId)
+                .ToListAsync();
+
+            if (!seatings.Any())
+            {
+                TempData["ErrorMessage"] = "Seçilen planlama sınavında yerleşim bulunmamaktadır.";
+                return RedirectToAction(nameof(ImportSeats), new { id = examId });
+            }
+
+            var oldSeats = await _context.ExamSeats.Where(es => es.ExamId == examId).ToListAsync();
+            _context.ExamSeats.RemoveRange(oldSeats);
+
+            foreach (var seat in seatings)
+            {
+                var examSeat = new ExamSeat
+                {
+                    ExamId = examId,
+                    OgrenciNo = seat.OgrenciNo,
+                    SeatNumber = seat.SeatNumber,
+                    SalonAdi = seat.RoomName,
+                    Sira = seat.Sira,
+                    BinaNo = exam.BuildingNumber ?? "1",
+                    UpdatedAt = DateTime.UtcNow
+                };
+                _context.ExamSeats.Add(examSeat);
+            }
+
+            await _context.SaveChangesAsync();
+            TempData["SuccessMessage"] = $"'{plannerExam.Name}' oturma planı başarıyla bu sınava aktarıldı.";
+            return RedirectToAction(nameof(Details), new { id = examId });
         }
 
         // POST: /Exam/ImportSeats/5
@@ -334,7 +426,7 @@ namespace yoklamaWeb.Controllers
 
                 if (user == null)
                 {
-                    var username = await GetUniqueProctorUserNameAsync(salon, id);
+                    var username = await GetUniqueProctorUserNameAsync(salon, exam.BuildingNumber);
                     user = await _userManager.FindByNameAsync(username);
                     if (user == null)
                     {
@@ -403,6 +495,169 @@ namespace yoklamaWeb.Controllers
             return RedirectToAction(nameof(Proctors), new { id });
         }
 
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> RecreateProctors(int id)
+        {
+            var exam = await _context.Exams.FindAsync(id);
+            if (exam == null) return NotFound();
+
+            var existingAssignments = await _context.TemporaryProctors
+                .Where(pa => pa.ExamId == id)
+                .ToListAsync();
+
+            foreach (var toRemove in existingAssignments)
+            {
+                var userId = toRemove.UserId;
+                _context.TemporaryProctors.Remove(toRemove);
+                if (!await _context.TemporaryProctors.AnyAsync(pa => pa.UserId == userId && pa.ExamId != id))
+                {
+                    var user = await _userManager.FindByIdAsync(userId);
+                    if (user != null)
+                    {
+                        await _userManager.DeleteAsync(user);
+                    }
+                }
+            }
+            await _context.SaveChangesAsync();
+
+            return await GenerateProctors(id);
+        }
+
+        // GET: /Exam/CreateProctor?examId=5
+        public async Task<IActionResult> CreateProctor(int examId)
+        {
+            var exam = await _context.Exams.FindAsync(examId);
+            if (exam == null) return NotFound();
+
+            var viewModel = new TemporaryProctor
+            {
+                ExamId = examId,
+                ValidFrom = exam.ValidFrom,
+                ValidTo = exam.ValidTo,
+                StartTime = exam.StartTime,
+                EndTime = exam.EndTime
+            };
+
+            ViewBag.ExamName = exam.Name;
+            ViewBag.ExamId = examId;
+            return View(viewModel);
+        }
+
+        // POST: /Exam/CreateProctor
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> CreateProctor(TemporaryProctor model)
+        {
+            if (ModelState.IsValid)
+            {
+                var exam = await _context.Exams.FindAsync(model.ExamId);
+                if (exam == null) return NotFound();
+
+                var username = await GetUniqueProctorUserNameAsync(model.Room, exam.BuildingNumber);
+                var password = string.IsNullOrWhiteSpace(model.Password) ? GenerateRandomPassword() : model.Password;
+
+                var user = new IdentityUser { UserName = username };
+                var createResult = await _userManager.CreateAsync(user, password);
+                if (createResult.Succeeded)
+                {
+                    await _userManager.AddToRoleAsync(user, "Yoklamaci");
+
+                    model.UserId = user.Id;
+                    model.Password = password;
+                    _context.TemporaryProctors.Add(model);
+                    await _context.SaveChangesAsync();
+
+                    return RedirectToAction(nameof(Proctors), new { id = model.ExamId });
+                }
+                else
+                {
+                    ModelState.AddModelError("", "Kullanıcı oluşturulurken hata: " + string.Join(", ", createResult.Errors.Select(e => e.Description)));
+                }
+            }
+
+            var ex = await _context.Exams.FindAsync(model.ExamId);
+            ViewBag.ExamName = ex?.Name;
+            ViewBag.ExamId = model.ExamId;
+            return View(model);
+        }
+
+        // GET: /Exam/EditProctor/5
+        public async Task<IActionResult> EditProctor(int id)
+        {
+            var proctor = await _context.TemporaryProctors.Include(p => p.User).FirstOrDefaultAsync(p => p.Id == id);
+            if (proctor == null) return NotFound();
+
+            var exam = await _context.Exams.FindAsync(proctor.ExamId);
+            ViewBag.ExamName = exam?.Name;
+            return View(proctor);
+        }
+
+        // POST: /Exam/EditProctor/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> EditProctor(int id, TemporaryProctor model)
+        {
+            if (id != model.Id) return NotFound();
+
+            if (ModelState.IsValid)
+            {
+                var dbProctor = await _context.TemporaryProctors.FindAsync(id);
+                if (dbProctor == null) return NotFound();
+
+                dbProctor.Room = model.Room;
+                dbProctor.ValidFrom = model.ValidFrom;
+                dbProctor.ValidTo = model.ValidTo;
+                dbProctor.StartTime = model.StartTime;
+                dbProctor.EndTime = model.EndTime;
+
+                if (!string.IsNullOrWhiteSpace(model.Password) && dbProctor.Password != model.Password)
+                {
+                    dbProctor.Password = model.Password;
+                    var user = await _userManager.FindByIdAsync(dbProctor.UserId);
+                    if (user != null)
+                    {
+                        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+                        await _userManager.ResetPasswordAsync(user, token, model.Password);
+                    }
+                }
+
+                _context.Update(dbProctor);
+                await _context.SaveChangesAsync();
+                return RedirectToAction(nameof(Proctors), new { id = dbProctor.ExamId });
+            }
+
+            var ex = await _context.Exams.FindAsync(model.ExamId);
+            ViewBag.ExamName = ex?.Name;
+            return View(model);
+        }
+
+        // POST: /Exam/DeleteProctor/5
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteProctor(int id)
+        {
+            var proctor = await _context.TemporaryProctors.FindAsync(id);
+            if (proctor == null) return NotFound();
+
+            var examId = proctor.ExamId;
+            var userId = proctor.UserId;
+
+            _context.TemporaryProctors.Remove(proctor);
+            await _context.SaveChangesAsync();
+
+            if (!await _context.TemporaryProctors.AnyAsync(p => p.UserId == userId))
+            {
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user != null)
+                {
+                    await _userManager.DeleteAsync(user);
+                }
+            }
+
+            return RedirectToAction(nameof(Proctors), new { id = examId });
+        }
+
         public async Task<IActionResult> Proctors(int? id)
         {
             if (id == null) return NotFound();
@@ -416,6 +671,7 @@ namespace yoklamaWeb.Controllers
                 .ToListAsync();
 
             ViewBag.ExamName = exam.Name;
+            ViewBag.ExamId = exam.Id;
             return View(proctors);
         }
 
@@ -486,26 +742,59 @@ namespace yoklamaWeb.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> DeleteConfirmed(int id)
         {
-            var exam = await _context.Exams.FindAsync(id);
-            if (exam != null)
+            try
             {
-                var proctors = await _context.TemporaryProctors.Where(pa => pa.ExamId == id).ToListAsync();
-                foreach (var proctor in proctors)
+                var exam = await _context.Exams.FindAsync(id);
+                if (exam != null)
                 {
-                    if (!await _context.TemporaryProctors.AnyAsync(pa => pa.UserId == proctor.UserId && pa.ExamId != id))
+                    // 1. İlişkili yoklamacıları ve kullanıcı hesaplarını temizle
+                    var proctors = await _context.TemporaryProctors.Where(pa => pa.ExamId == id).ToListAsync();
+                    foreach (var proctor in proctors)
                     {
-                        var user = await _userManager.FindByIdAsync(proctor.UserId);
-                        if (user != null)
+                        if (!await _context.TemporaryProctors.AnyAsync(pa => pa.UserId == proctor.UserId && pa.ExamId != id))
                         {
-                            await _userManager.DeleteAsync(user);
+                            var user = await _userManager.FindByIdAsync(proctor.UserId);
+                            if (user != null)
+                            {
+                                await _userManager.DeleteAsync(user);
+                            }
                         }
                     }
-                }
+                    if (proctors.Any())
+                    {
+                        _context.TemporaryProctors.RemoveRange(proctors);
+                    }
 
-                _context.TemporaryProctors.RemoveRange(proctors);
-                _context.Exams.Remove(exam);
-                await _context.SaveChangesAsync();
+                    // 2. İlişkili ExamSeats (koltuk) kayıtlarını temizle
+                    var examSeats = await _context.ExamSeats.Where(es => es.ExamId == id).ToListAsync();
+                    if (examSeats.Any())
+                    {
+                        _context.ExamSeats.RemoveRange(examSeats);
+                    }
+
+                    // 3. İlişkili Yoklamalar kayıtlarını temizle
+                    var yoklamalar = await _context.Yoklamalar.Where(y => y.SinavId == id).ToListAsync();
+                    if (yoklamalar.Any())
+                    {
+                        _context.Yoklamalar.RemoveRange(yoklamalar);
+                    }
+
+                    // 4. Sınav kaydını sil
+                    _context.Exams.Remove(exam);
+                    await _context.SaveChangesAsync();
+                    TempData["SuccessMessage"] = "Sınav ve tüm ilişkili veriler başarıyla silindi.";
+                }
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Zaten silinmiş veya eşzamanlı silme yapılmışsa kullanıcıya temiz geri bildirim ver
+                TempData["SuccessMessage"] = "Sınav başarıyla silindi.";
+            }
+            catch (Exception ex)
+            {
+                TempData["ErrorMessage"] = "Sınav silinirken bir hata oluştu: " + ex.Message;
+            }
+
             return RedirectToAction(nameof(Index));
         }
 
@@ -514,19 +803,16 @@ namespace yoklamaWeb.Controllers
             return Random.Shared.Next(10000, 100000).ToString();
         }
 
-        private async Task<string> GetUniqueProctorUserNameAsync(string room, int examId)
+        private async Task<string> GetUniqueProctorUserNameAsync(string room, string buildingNumber)
         {
-            var baseName = Regex.Replace(room.Trim(), "[^A-Za-z0-9._@+-]", "_");
-            if (string.IsNullOrWhiteSpace(baseName))
-            {
-                baseName = "salon" + examId;
-            }
-
+            var cleanRoom = Regex.Replace(room.Trim(), "[^A-Za-z0-9._@+-]", "_");
+            var cleanBina = Regex.Replace(buildingNumber.Trim(), "[^A-Za-z0-9._@+-]", "_");
+            var baseName = $"{cleanRoom}-{cleanBina}";
             var userName = baseName;
             var counter = 1;
             while (await _userManager.FindByNameAsync(userName) != null)
             {
-                userName = $"{baseName}_{examId}_{counter}";
+                userName = $"{baseName}_{counter}";
                 counter++;
             }
 
@@ -581,6 +867,10 @@ namespace yoklamaWeb.Controllers
 
             await _context.SaveChangesAsync();
             TempData["SuccessMessage"] = "Yoklama bilgisi güncellendi.";
+            if (Request.Headers["X-Requested-With"] == "XMLHttpRequest" || Request.Headers["Accept"].ToString().Contains("application/json"))
+            {
+                return Json(new { success = true, message = "Yoklama bilgisi güncellendi." });
+            }
             return RedirectToAction(nameof(Details), new { id = seat.ExamId });
         }
 
@@ -731,13 +1021,21 @@ namespace yoklamaWeb.Controllers
                 worksheet.Cells[rowIndex, 4].Value = seat.Ogrenci?.Sube ?? string.Empty;
                 worksheet.Cells[rowIndex, 5].Value = seat.SalonAdi;
                 worksheet.Cells[rowIndex, 6].Value = seat.Sira;
-                worksheet.Cells[rowIndex, 7].Value = seat.AttendanceStatus switch
+
+                var statusText = seat.AttendanceStatus switch
                 {
                     AttendanceStatus.Katildi => "Var",
                     AttendanceStatus.Katilmadi => "Yok",
                     AttendanceStatus.Gec => "Geç",
                     _ => "Belirsiz"
                 };
+                worksheet.Cells[rowIndex, 7].Value = statusText;
+                if (statusText == "Yok")
+                {
+                    worksheet.Cells[rowIndex, 7].Style.Font.Bold = true;
+                    worksheet.Cells[rowIndex, 7].Style.Font.Color.SetColor(System.Drawing.Color.Red);
+                }
+
                 worksheet.Cells[rowIndex, 8].Value = seat.BinaNo;
                 worksheet.Cells[rowIndex, 9].Value = seat.Note;
 
@@ -748,10 +1046,234 @@ namespace yoklamaWeb.Controllers
                 rowIndex++;
             }
 
+            // Set borders for the table headers and data rows
+            var lastRow = rowIndex - 1;
+            if (lastRow >= headerRow)
+            {
+                var tableRange = worksheet.Cells[headerRow, 1, lastRow, headers.Length];
+                tableRange.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.Style.Border.Left.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.Style.Border.Right.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.AutoFilter = true;
+            }
+
             worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
 
             var fileName = GetSafeFileName($"{exam.Name}_{exam.ApplicationDate:yyyyMMdd}") + ".xlsx";
             return File(package.GetAsByteArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> AttendanceReportPreview(
+            string classFilter,
+            string branchFilter,
+            string studentNameFilter,
+            int? examIdFilter,
+            DateTime? startDateFilter,
+            DateTime? endDateFilter)
+        {
+            var classes = await _context.Ogrenciler.Select(o => o.SinifDuzeyi).Distinct().OrderBy(c => c).ToListAsync();
+            var branches = await _context.Ogrenciler.Select(o => o.Sube).Distinct().OrderBy(b => b).ToListAsync();
+            var examsList = await _context.Exams.OrderByDescending(e => e.ApplicationDate).Select(e => new { e.Id, e.Name }).ToListAsync();
+
+            var query = _context.Ogrenciler.AsQueryable();
+
+            if (!string.IsNullOrEmpty(classFilter))
+                query = query.Where(o => o.SinifDuzeyi == classFilter);
+
+            if (!string.IsNullOrEmpty(branchFilter))
+                query = query.Where(o => o.Sube == branchFilter);
+
+            if (!string.IsNullOrEmpty(studentNameFilter))
+            {
+                var term = studentNameFilter.ToLower();
+                query = query.Where(o => o.AdSoyad.ToLower().Contains(term) || o.OgrenciNo.Contains(studentNameFilter));
+            }
+
+            var students = await query.ToListAsync();
+            var studentNos = students.Select(s => s.OgrenciNo).ToList();
+
+            var seatsQuery = _context.ExamSeats
+                .Include(es => es.Exam)
+                .Where(es => studentNos.Contains(es.OgrenciNo));
+
+            if (examIdFilter.HasValue)
+                seatsQuery = seatsQuery.Where(es => es.ExamId == examIdFilter.Value);
+
+            if (startDateFilter.HasValue)
+                seatsQuery = seatsQuery.Where(es => es.Exam.ApplicationDate >= startDateFilter.Value);
+
+            if (endDateFilter.HasValue)
+                seatsQuery = seatsQuery.Where(es => es.Exam.ApplicationDate <= endDateFilter.Value);
+
+            var seats = await seatsQuery.ToListAsync();
+
+            var previewItems = new List<AttendanceReportPreviewItem>();
+            foreach (var student in students)
+            {
+                var studentSeats = seats.Where(es => es.OgrenciNo == student.OgrenciNo).ToList();
+                if (studentSeats.Count == 0)
+                {
+                    if (examIdFilter.HasValue || startDateFilter.HasValue || endDateFilter.HasValue)
+                    {
+                        continue;
+                    }
+
+                    previewItems.Add(new AttendanceReportPreviewItem
+                    {
+                        OgrenciNo = student.OgrenciNo,
+                        AdSoyad = student.AdSoyad,
+                        SinifDuzeyi = student.SinifDuzeyi,
+                        Sube = student.Sube,
+                        ExamName = "—",
+                        ExamDate = "—",
+                        Status = "Yoklama Yok",
+                        YoklamaNo = 0
+                    });
+                }
+                else
+                {
+                    foreach (var seat in studentSeats)
+                    {
+                        previewItems.Add(new AttendanceReportPreviewItem
+                        {
+                            OgrenciNo = student.OgrenciNo,
+                            AdSoyad = student.AdSoyad,
+                            SinifDuzeyi = student.SinifDuzeyi,
+                            Sube = student.Sube,
+                            ExamName = seat.Exam.Name,
+                            ExamDate = seat.Exam.ApplicationDate.ToString("dd.MM.yyyy"),
+                            Status = seat.AttendanceStatus switch
+                            {
+                                AttendanceStatus.Katildi => "Var",
+                                AttendanceStatus.Katilmadi => "Yok",
+                                AttendanceStatus.Gec => "Geç",
+                                _ => "Belirsiz"
+                            },
+                            YoklamaNo = seat.YoklamaNo
+                        });
+                    }
+                }
+            }
+
+            return Json(new
+            {
+                classes,
+                branches,
+                exams = examsList,
+                data = previewItems
+            });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> ExportAttendanceReport(
+            string classFilter,
+            string branchFilter,
+            string studentNameFilter,
+            int? examIdFilter,
+            DateTime? startDateFilter,
+            DateTime? endDateFilter,
+            List<string> selectedOgrenciNos)
+        {
+            var query = _context.Ogrenciler.AsQueryable();
+
+            if (!string.IsNullOrEmpty(classFilter))
+                query = query.Where(o => o.SinifDuzeyi == classFilter);
+
+            if (!string.IsNullOrEmpty(branchFilter))
+                query = query.Where(o => o.Sube == branchFilter);
+
+            if (!string.IsNullOrEmpty(studentNameFilter))
+            {
+                var term = studentNameFilter.ToLower();
+                query = query.Where(o => o.AdSoyad.ToLower().Contains(term) || o.OgrenciNo.Contains(studentNameFilter));
+            }
+
+            if (selectedOgrenciNos != null && selectedOgrenciNos.Count > 0)
+                query = query.Where(o => selectedOgrenciNos.Contains(o.OgrenciNo));
+
+            var students = await query.ToListAsync();
+            var studentNos = students.Select(s => s.OgrenciNo).ToList();
+
+            var seatsQuery = _context.ExamSeats
+                .Include(es => es.Exam)
+                .Where(es => studentNos.Contains(es.OgrenciNo));
+
+            if (examIdFilter.HasValue)
+                seatsQuery = seatsQuery.Where(es => es.ExamId == examIdFilter.Value);
+
+            if (startDateFilter.HasValue)
+                seatsQuery = seatsQuery.Where(es => es.Exam.ApplicationDate >= startDateFilter.Value);
+
+            if (endDateFilter.HasValue)
+                seatsQuery = seatsQuery.Where(es => es.Exam.ApplicationDate <= endDateFilter.Value);
+
+            var seats = await seatsQuery.ToListAsync();
+
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            using var package = new ExcelPackage();
+            var worksheet = package.Workbook.Worksheets.Add("Katılım Raporu");
+
+            var headers = new[] { "Öğrenci No", "Adı Soyadı", "Sınıf", "Şube", "Sınav Adı", "Sınav Tarihi", "Yoklama No", "Katılım Durumu" };
+            for (int i = 0; i < headers.Length; i++)
+            {
+                var cell = worksheet.Cells[1, i + 1];
+                cell.Value = headers[i];
+                cell.Style.Font.Bold = true;
+                cell.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                cell.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.LightGray);
+            }
+
+            var rowIndex = 2;
+            foreach (var student in students)
+            {
+                var studentSeats = seats.Where(es => es.OgrenciNo == student.OgrenciNo).ToList();
+                if (studentSeats.Count == 0)
+                {
+                    if (examIdFilter.HasValue || startDateFilter.HasValue || endDateFilter.HasValue)
+                    {
+                        continue;
+                    }
+
+                    worksheet.Cells[rowIndex, 1].Value = student.OgrenciNo;
+                    worksheet.Cells[rowIndex, 2].Value = student.AdSoyad;
+                    worksheet.Cells[rowIndex, 3].Value = student.SinifDuzeyi;
+                    worksheet.Cells[rowIndex, 4].Value = student.Sube;
+                    worksheet.Cells[rowIndex, 5].Value = "—";
+                    worksheet.Cells[rowIndex, 6].Value = "—";
+                    worksheet.Cells[rowIndex, 7].Value = "—";
+                    worksheet.Cells[rowIndex, 8].Value = "Yoklama Yok";
+                    rowIndex++;
+                }
+                else
+                {
+                    foreach (var seat in studentSeats)
+                    {
+                        worksheet.Cells[rowIndex, 1].Value = student.OgrenciNo;
+                        worksheet.Cells[rowIndex, 2].Value = student.AdSoyad;
+                        worksheet.Cells[rowIndex, 3].Value = student.SinifDuzeyi;
+                        worksheet.Cells[rowIndex, 4].Value = student.Sube;
+                        worksheet.Cells[rowIndex, 5].Value = seat.Exam.Name;
+                        worksheet.Cells[rowIndex, 6].Value = seat.Exam.ApplicationDate.ToString("yyyy-MM-dd");
+                        worksheet.Cells[rowIndex, 7].Value = seat.YoklamaNo;
+                        worksheet.Cells[rowIndex, 8].Value = seat.AttendanceStatus switch
+                        {
+                            AttendanceStatus.Katildi => "Var",
+                            AttendanceStatus.Katilmadi => "Yok",
+                            AttendanceStatus.Gec => "Geç",
+                            _ => "Belirsiz"
+                        };
+                        rowIndex++;
+                    }
+                }
+            }
+
+            worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
+
+            var finalFileName = "Ogrenci_Katilim_Raporu_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".xlsx";
+            return File(package.GetAsByteArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", finalFileName);
         }
 
         private static string GetSafeFileName(string fileName)

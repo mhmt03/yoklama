@@ -28,6 +28,7 @@ namespace yoklamaWeb.Controllers
             var query = _context.IzinGirisleri
                 .Include(i => i.Ogrenci)
                 .Include(i => i.Onaylayan)
+                .Include(i => i.TalepEden)
                 .AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(filter.Arama))
@@ -35,7 +36,8 @@ namespace yoklamaWeb.Controllers
                 query = query.Where(i => i.Ogrenci.AdSoyad.Contains(filter.Arama)
                     || i.Ogrenci.OgrenciNo.Contains(filter.Arama)
                     || i.Aciklama.Contains(filter.Arama)
-                    || i.Onaylayan.AdSoyad.Contains(filter.Arama));
+                    || (i.Onaylayan != null && i.Onaylayan.AdSoyad.Contains(filter.Arama))
+                    || (i.TalepEden != null && i.TalepEden.AdSoyad.Contains(filter.Arama)));
             }
 
             if (filter.OgrenciId.HasValue)
@@ -82,6 +84,8 @@ namespace yoklamaWeb.Controllers
                     GunSayisi = i.GunSayisi,
                     Durum = i.Durum,
                     Aciklama = i.Aciklama,
+                    TalepEdenId = i.TalepEdenId,
+                    TalepEdenAdSoyad = i.TalepEden?.AdSoyad,
                     OnaylayanId = i.OnaylayanId,
                     OnaylayanAdSoyad = i.Onaylayan?.AdSoyad,
                     OnayTarihi = i.OnayTarihi,
@@ -107,6 +111,9 @@ namespace yoklamaWeb.Controllers
                 .Select(t => new SelectListItem { Value = ((int)t).ToString(), Text = t.ToString() })
                 .ToList();
 
+            ViewBag.YoklamaTurleriMap = await _context.YoklamaTurleri
+                .ToDictionaryAsync(y => y.Id, y => y.Ad);
+
             return View(viewModel);
         }
 
@@ -122,6 +129,7 @@ namespace yoklamaWeb.Controllers
             var izin = await _context.IzinGirisleri
                 .Include(i => i.Ogrenci)
                 .Include(i => i.Onaylayan)
+                .Include(i => i.TalepEden)
                 .FirstOrDefaultAsync(m => m.Id == id);
 
             if (izin == null)
@@ -141,6 +149,8 @@ namespace yoklamaWeb.Controllers
                 GunSayisi = izin.GunSayisi,
                 Durum = izin.Durum,
                 Aciklama = izin.Aciklama,
+                TalepEdenId = izin.TalepEdenId,
+                TalepEdenAdSoyad = izin.TalepEden?.AdSoyad,
                 OnaylayanId = izin.OnaylayanId,
                 OnaylayanAdSoyad = izin.Onaylayan?.AdSoyad,
                 OnayTarihi = izin.OnayTarihi,
@@ -148,20 +158,21 @@ namespace yoklamaWeb.Controllers
                 RowVersion = izin.RowVersion
             };
 
+            ViewBag.YoklamaTurleriMap = await _context.YoklamaTurleri
+                .ToDictionaryAsync(y => y.Id, y => y.Ad);
+
             return View(viewModel);
         }
 
         // GET: Izin/Create
-        public IActionResult Create()
+        public async Task<IActionResult> Create()
         {
             var viewModel = new IzinCreateViewModel
             {
                 BaslangicTarihi = DateTime.Today,
                 BitisTarihi = DateTime.Today.AddDays(1)
             };
-            ViewBag.Ogrenciler = GetOgrencilerSelectList();
-            ViewBag.Turler = GetTurlerSelectList();
-            ViewBag.Durumlar = GetDurumlarSelectList();
+            await LoadIzinFormViewBagsAsync();
             return View(viewModel);
         }
 
@@ -177,9 +188,7 @@ namespace yoklamaWeb.Controllers
                 if (ogrenci == null || !ogrenci.Aktif)
                 {
                     ModelState.AddModelError("OgrenciId", "Seçilen öğrenci bulunamadı veya aktif değil.");
-                    ViewBag.Ogrenciler = GetOgrencilerSelectList();
-                    ViewBag.Turler = GetTurlerSelectList();
-                    ViewBag.Durumlar = GetDurumlarSelectList();
+                    await LoadIzinFormViewBagsAsync();
                     return View(viewModel);
                 }
 
@@ -187,50 +196,135 @@ namespace yoklamaWeb.Controllers
                 if (viewModel.BitisTarihi < viewModel.BaslangicTarihi)
                 {
                     ModelState.AddModelError("BitisTarihi", "Bitiş tarihi başlangıç tarihinden önce olamaz.");
-                    ViewBag.Ogrenciler = GetOgrencilerSelectList();
-                    ViewBag.Turler = GetTurlerSelectList();
-                    ViewBag.Durumlar = GetDurumlarSelectList();
+                    await LoadIzinFormViewBagsAsync();
                     return View(viewModel);
                 }
 
-                // Çakışan izin var mı kontrol et
-                var cakisanIzin = await _context.IzinGirisleri
-                    .FirstOrDefaultAsync(i => i.OgrenciId == viewModel.OgrenciId
-                        && i.Durum != IzinDurum.Reddedildi
-                        && i.Durum != IzinDurum.IptalEdildi
-                        && i.BaslangicTarihi <= viewModel.BitisTarihi
-                        && i.BitisTarihi >= viewModel.BaslangicTarihi);
-
-                if (cakisanIzin != null)
+                // Seçilen günlere denk gelen tarihleri bul
+                var tumTarihler = new List<DateTime>();
+                for (var date = viewModel.BaslangicTarihi.Date; date <= viewModel.BitisTarihi.Date; date = date.AddDays(1))
                 {
-                    ModelState.AddModelError(string.Empty, "Bu öğrenci için belirtilen tarih aralığında onaylanmış veya bekleyen bir izin zaten var.");
-                    ViewBag.Ogrenciler = GetOgrencilerSelectList();
-                    ViewBag.Turler = GetTurlerSelectList();
-                    ViewBag.Durumlar = GetDurumlarSelectList();
+                    if (viewModel.SecilenGunler == null || !viewModel.SecilenGunler.Any() || viewModel.SecilenGunler.Contains(date.DayOfWeek))
+                    {
+                        tumTarihler.Add(date);
+                    }
+                }
+
+                if (!tumTarihler.Any())
+                {
+                    ModelState.AddModelError(string.Empty, "Seçtiğiniz tarih aralığında belirlediğiniz günlere denk gelen bir tarih bulunamadı.");
+                    await LoadIzinFormViewBagsAsync();
                     return View(viewModel);
                 }
 
-                var gunSayisi = (viewModel.BitisTarihi - viewModel.BaslangicTarihi).Days + 1;
+                // Ardışık günleri gruplayarak izin blokları oluştur
+                var izinBloklari = new List<(DateTime Baslangic, DateTime Bitis)>();
+                DateTime? blokBaslangic = null;
+                DateTime? blokSon = null;
 
-                var izin = new IzinGirisi
+                foreach (var t in tumTarihler)
                 {
-                    OgrenciId = viewModel.OgrenciId,
-                    Tur = viewModel.Tur,
-                    BaslangicTarihi = viewModel.BaslangicTarihi,
-                    BitisTarihi = viewModel.BitisTarihi,
-                    GunSayisi = gunSayisi,
-                    Durum = viewModel.Durum,
-                    Aciklama = viewModel.Aciklama
-                };
+                    if (!blokBaslangic.HasValue)
+                    {
+                        blokBaslangic = t;
+                        blokSon = t;
+                    }
+                    else if (blokSon.HasValue && t == blokSon.Value.AddDays(1))
+                    {
+                        blokSon = t;
+                    }
+                    else
+                    {
+                        izinBloklari.Add((blokBaslangic.Value, blokSon.Value));
+                        blokBaslangic = t;
+                        blokSon = t;
+                    }
+                }
+                if (blokBaslangic.HasValue && blokSon.HasValue)
+                {
+                    izinBloklari.Add((blokBaslangic.Value, blokSon.Value));
+                }
 
-                _context.Add(izin);
+                bool isAdmin = await IsUserPansiyonAdminAsync();
+                if (!isAdmin)
+                {
+                    viewModel.Durum = IzinDurum.Bekliyor;
+                }
+
+                var username = User.Identity?.Name ?? "";
+                var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi.ToLower() == username.ToLower());
+                int? talepEdenId = gorevlisi?.Id;
+
+                int? onaylayanId = null;
+                DateTime? onayTarihi = null;
+                if (viewModel.Durum == IzinDurum.Onaylandi)
+                {
+                    onaylayanId = gorevlisi?.Id ?? 1;
+                    onayTarihi = DateTime.Now;
+                }
+
+                int eklenenSayi = 0;
+                int cakisanSayi = 0;
+
+                foreach (var blok in izinBloklari)
+                {
+                    // Çakışan izin var mı kontrol et
+                    var cakisanIzin = await _context.IzinGirisleri
+                        .FirstOrDefaultAsync(i => i.OgrenciId == viewModel.OgrenciId
+                            && i.Durum != IzinDurum.Reddedildi
+                            && i.Durum != IzinDurum.IptalEdildi
+                            && i.BaslangicTarihi <= blok.Bitis
+                            && i.BitisTarihi >= blok.Baslangic);
+
+                    if (cakisanIzin != null)
+                    {
+                        cakisanSayi++;
+                        continue;
+                    }
+
+                    var gunSayisi = (blok.Bitis - blok.Baslangic).Days + 1;
+                    var izin = new IzinGirisi
+                    {
+                        OgrenciId = viewModel.OgrenciId,
+                        Tur = viewModel.Tur,
+                        BaslangicTarihi = blok.Baslangic,
+                        BitisTarihi = blok.Bitis,
+                        GunSayisi = gunSayisi,
+                        Durum = viewModel.Durum,
+                        Aciklama = viewModel.Aciklama,
+                        IzinliYoklamaNolar = viewModel.IzinliYoklamaNolar,
+                        TalepEdenId = talepEdenId,
+                        OnaylayanId = onaylayanId,
+                        OnayTarihi = onayTarihi
+                    };
+
+                    _context.Add(izin);
+                    eklenenSayi++;
+                }
+
+                if (eklenenSayi == 0)
+                {
+                    ModelState.AddModelError(string.Empty, "Belirtilen günlerde zaten onaylanmış veya bekleyen izinler bulunduğu için izin eklenemedi.");
+                    await LoadIzinFormViewBagsAsync();
+                    return View(viewModel);
+                }
+
                 await _context.SaveChangesAsync();
-                TempData["SuccessMessage"] = "İzin talebi başarıyla oluşturuldu.";
+                
+                if (cakisanSayi > 0)
+                {
+                    TempData["SuccessMessage"] = $"{eklenenSayi} adet izin kaydı oluşturuldu ({cakisanSayi} adet çakışan tarih atlandı).";
+                }
+                else
+                {
+                    TempData["SuccessMessage"] = eklenenSayi > 1 
+                        ? $"{eklenenSayi} adet izin kaydı başarıyla oluşturuldu." 
+                        : "İzin talebi başarıyla oluşturuldu.";
+                }
+
                 return RedirectToAction(nameof(Index));
             }
-            ViewBag.Ogrenciler = GetOgrencilerSelectList();
-            ViewBag.Turler = GetTurlerSelectList();
-            ViewBag.Durumlar = GetDurumlarSelectList();
+            await LoadIzinFormViewBagsAsync();
             return View(viewModel);
         }
 
@@ -265,12 +359,11 @@ namespace yoklamaWeb.Controllers
                 BitisTarihi = izin.BitisTarihi,
                 Durum = izin.Durum,
                 Aciklama = izin.Aciklama,
+                IzinliYoklamaNolar = izin.IzinliYoklamaNolar,
                 RowVersion = izin.RowVersion
             };
 
-            ViewBag.Ogrenciler = GetOgrencilerSelectList();
-            ViewBag.Turler = GetTurlerSelectList();
-            ViewBag.Durumlar = GetDurumlarSelectList();
+            await LoadIzinFormViewBagsAsync();
             return View(viewModel);
         }
 
@@ -306,9 +399,7 @@ namespace yoklamaWeb.Controllers
                     if (!viewModel.RowVersion.SequenceEqual(izin.RowVersion))
                     {
                         ModelState.AddModelError(string.Empty, "Bu kayıt başka bir kullanıcı tarafından güncellendi. Lütfen sayfayı yenileyip tekrar deneyin.");
-                        ViewBag.Ogrenciler = GetOgrencilerSelectList();
-                        ViewBag.Turler = GetTurlerSelectList();
-                        ViewBag.Durumlar = GetDurumlarSelectList();
+                        await LoadIzinFormViewBagsAsync();
                         return View(viewModel);
                     }
 
@@ -317,9 +408,7 @@ namespace yoklamaWeb.Controllers
                     if (ogrenci == null || !ogrenci.Aktif)
                     {
                         ModelState.AddModelError("OgrenciId", "Seçilen öğrenci bulunamadı veya aktif değil.");
-                        ViewBag.Ogrenciler = GetOgrencilerSelectList();
-                        ViewBag.Turler = GetTurlerSelectList();
-                        ViewBag.Durumlar = GetDurumlarSelectList();
+                        await LoadIzinFormViewBagsAsync();
                         return View(viewModel);
                     }
 
@@ -327,9 +416,7 @@ namespace yoklamaWeb.Controllers
                     if (viewModel.BitisTarihi < viewModel.BaslangicTarihi)
                     {
                         ModelState.AddModelError("BitisTarihi", "Bitiş tarihi başlangıç tarihinden önce olamaz.");
-                        ViewBag.Ogrenciler = GetOgrencilerSelectList();
-                        ViewBag.Turler = GetTurlerSelectList();
-                        ViewBag.Durumlar = GetDurumlarSelectList();
+                        await LoadIzinFormViewBagsAsync();
                         return View(viewModel);
                     }
 
@@ -345,9 +432,7 @@ namespace yoklamaWeb.Controllers
                     if (cakisanIzin != null)
                     {
                         ModelState.AddModelError(string.Empty, "Bu öğrenci için belirtilen tarih aralığında onaylanmış veya bekleyen bir izin zaten var.");
-                        ViewBag.Ogrenciler = GetOgrencilerSelectList();
-                        ViewBag.Turler = GetTurlerSelectList();
-                        ViewBag.Durumlar = GetDurumlarSelectList();
+                        await LoadIzinFormViewBagsAsync();
                         return View(viewModel);
                     }
 
@@ -360,6 +445,7 @@ namespace yoklamaWeb.Controllers
                     izin.GunSayisi = gunSayisi;
                     izin.Durum = viewModel.Durum;
                     izin.Aciklama = viewModel.Aciklama;
+                    izin.IzinliYoklamaNolar = viewModel.IzinliYoklamaNolar;
 
                     _context.Update(izin);
                     await _context.SaveChangesAsync();
@@ -380,7 +466,7 @@ namespace yoklamaWeb.Controllers
             }
             ViewBag.Ogrenciler = GetOgrencilerSelectList();
             ViewBag.Turler = GetTurlerSelectList();
-            ViewBag.Durumlar = GetDurumlarSelectList();
+            ViewBag.Durumlar = await GetDurumlarSelectListAsync();
             return View(viewModel);
         }
 
@@ -482,8 +568,8 @@ namespace yoklamaWeb.Controllers
                 return RedirectToAction(nameof(Index));
             }
 
-            var username = User.Identity?.Name;
-            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi == username);
+            var username = User.Identity?.Name ?? "";
+            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi.ToLower() == username.ToLower());
 
             izin.Durum = IzinDurum.Onaylandi;
             izin.OnaylayanId = gorevlisi?.Id ?? 1;
@@ -520,8 +606,8 @@ namespace yoklamaWeb.Controllers
                 return RedirectToAction(nameof(Index));
             }
 
-            var username = User.Identity?.Name;
-            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi == username);
+            var username = User.Identity?.Name ?? "";
+            var gorevlisi = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi.ToLower() == username.ToLower());
 
             izin.Durum = IzinDurum.Reddedildi;
             izin.OnaylayanId = gorevlisi?.Id ?? 1;
@@ -589,6 +675,7 @@ namespace yoklamaWeb.Controllers
             var query = _context.IzinGirisleri
                 .Include(i => i.Ogrenci)
                 .Include(i => i.Onaylayan)
+                .Include(i => i.TalepEden)
                 .Where(i => i.OgrenciId == id)
                 .AsQueryable();
 
@@ -631,6 +718,8 @@ namespace yoklamaWeb.Controllers
                     GunSayisi = i.GunSayisi,
                     Durum = i.Durum,
                     Aciklama = i.Aciklama,
+                    TalepEdenId = i.TalepEdenId,
+                    TalepEdenAdSoyad = i.TalepEden?.AdSoyad,
                     OnaylayanId = i.OnaylayanId,
                     OnaylayanAdSoyad = i.Onaylayan?.AdSoyad,
                     OnayTarihi = i.OnayTarihi,
@@ -651,6 +740,9 @@ namespace yoklamaWeb.Controllers
                 .Select(t => new SelectListItem { Value = ((int)t).ToString(), Text = t.ToString() })
                 .ToList();
 
+            ViewBag.YoklamaTurleriMap = await _context.YoklamaTurleri
+                .ToDictionaryAsync(y => y.Id, y => y.Ad);
+
             return View(viewModel);
         }
 
@@ -665,23 +757,63 @@ namespace yoklamaWeb.Controllers
 
         private List<SelectListItem> GetTurlerSelectList()
         {
-            return Enum.GetValues(typeof(IzinTur))
-                .Cast<IzinTur>()
-                .Select(t => new SelectListItem { Value = ((int)t).ToString(), Text = t.ToString() })
-                .ToList();
+            return new List<SelectListItem>
+            {
+                new SelectListItem { Value = "0", Text = "Hastalık İzni" },
+                new SelectListItem { Value = "1", Text = "Aile Ziyareti İzni" },
+                new SelectListItem { Value = "2", Text = "Resmi İş İzni" },
+                new SelectListItem { Value = "3", Text = "Diğer İzin" },
+                new SelectListItem { Value = "4", Text = "Geç Gelme İzni" }
+            };
         }
 
-        private List<SelectListItem> GetDurumlarSelectList()
+        private async Task<bool> IsUserPansiyonAdminAsync()
         {
-            return Enum.GetValues(typeof(IzinDurum))
-                .Cast<IzinDurum>()
-                .Select(d => new SelectListItem { Value = ((int)d).ToString(), Text = d.ToString() })
-                .ToList();
+            if (User.IsInRole("Admin"))
+                return true;
+
+            if (User.IsInRole("PansiyonGorevlisi") && User.Identity?.Name != null)
+            {
+                var username = User.Identity.Name ?? "";
+                var isPansiyonAdmin = await _context.PansiyonGorevlileri
+                    .AnyAsync(g => g.KullaniciAdi.ToLower() == username.ToLower() && g.Aktif && g.Rol == "Admin");
+                return isPansiyonAdmin;
+            }
+
+            return false;
+        }
+
+        private async Task<List<SelectListItem>> GetDurumlarSelectListAsync()
+        {
+            bool isAdmin = await IsUserPansiyonAdminAsync();
+            if (isAdmin)
+            {
+                return new List<SelectListItem>
+                {
+                    new SelectListItem { Value = "0", Text = "Bekliyor" },
+                    new SelectListItem { Value = "1", Text = "Onaylandı" },
+                    new SelectListItem { Value = "2", Text = "Reddedildi" },
+                    new SelectListItem { Value = "3", Text = "İptal Edildi" }
+                };
+            }
+
+            return new List<SelectListItem>
+            {
+                new SelectListItem { Value = "0", Text = "Bekliyor" }
+            };
         }
 
         private bool IzinExists(int id)
         {
             return _context.IzinGirisleri.Any(e => e.Id == id);
+        }
+
+        private async Task LoadIzinFormViewBagsAsync()
+        {
+            ViewBag.Ogrenciler = GetOgrencilerSelectList();
+            ViewBag.Turler = GetTurlerSelectList();
+            ViewBag.Durumlar = await GetDurumlarSelectListAsync();
+            ViewBag.YoklamaTurleri = await _context.YoklamaTurleri.Where(y => y.Aktif).OrderBy(y => y.Sira).ToListAsync();
         }
     }
 }

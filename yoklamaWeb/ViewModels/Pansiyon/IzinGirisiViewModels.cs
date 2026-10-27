@@ -122,6 +122,12 @@ namespace yoklamaWeb.ViewModels.Pansiyon
         [StringLength(500, ErrorMessage = "Açıklama en fazla 500 karakter olabilir")]
         [Display(Name = "Açıklama")]
         public string? Aciklama { get; set; }
+
+        [Display(Name = "İzinli Yoklama Numaraları")]
+        public string? IzinliYoklamaNolar { get; set; }
+
+        [Display(Name = "İzinli Olacağı Günler")]
+        public List<DayOfWeek> SecilenGunler { get; set; } = new List<DayOfWeek>();
     }
     public class IzinEditViewModel
     {
@@ -140,6 +146,7 @@ namespace yoklamaWeb.ViewModels.Pansiyon
         public IzinDurum Durum { get; set; } = IzinDurum.Bekliyor;
         [MaxLength(500)]
         public string? Aciklama { get; set; }
+        public string? IzinliYoklamaNolar { get; set; }
         public byte[] RowVersion { get; set; } = Array.Empty<byte>();
     }
     // Replaced alias with full ViewModel definition to match controller expectations
@@ -155,6 +162,9 @@ namespace yoklamaWeb.ViewModels.Pansiyon
         public int GunSayisi { get; set; }
         public IzinDurum Durum { get; set; }
         public string? Aciklama { get; set; }
+        public string? IzinliYoklamaNolar { get; set; }
+        public int? TalepEdenId { get; set; }
+        public string? TalepEdenAdSoyad { get; set; }
         public int? OnaylayanId { get; set; }
         public string? OnaylayanAdSoyad { get; set; }
         public DateTime? OnayTarihi { get; set; }
@@ -174,6 +184,9 @@ namespace yoklamaWeb.ViewModels.Pansiyon
         public int GunSayisi { get; set; }
         public IzinDurum Durum { get; set; }
         public string? Aciklama { get; set; }
+        public string? IzinliYoklamaNolar { get; set; }
+        public int? TalepEdenId { get; set; }
+        public string? TalepEdenAdSoyad { get; set; }
         public int? OnaylayanId { get; set; }
         public string? OnaylayanAdSoyad { get; set; }
         public DateTime? OnayTarihi { get; set; }

@@ -23,6 +23,9 @@ namespace yoklamaWeb.Models
         // Attendance status for the seat
         public AttendanceStatus AttendanceStatus { get; set; } = AttendanceStatus.KontrolEdilmedi;
 
+        // Yoklama sayısı / Numarası (Varsayılan 1)
+        public int YoklamaNo { get; set; } = 1;
+
         // Timestamp for last update (used for polling)
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 

@@ -6,7 +6,7 @@
     Layout = "_Layout";
 }
 
-<div class="container mt-4">
+<div class="mt-4">
     <div class="mb-3">
         <a asp-controller="PansiyonOgrenci" asp-action="Details" asp-route-id="@ogrenci?.Id" class="btn btn-outline-secondary"><i class="bi bi-arrow-left"></i> Öğrenci Profiline Dön</a>
     </div>
@@ -77,6 +77,7 @@
                     <th>Bitiş Tarihi</th>
                     <th>Gün Sayısı</th>
                     <th>Durum</th>
+                    <th>Talep Eden</th>
                     <th>Onaylayan</th>
                     <th class="text-end pe-3">İşlemler</th>
                 </tr>
@@ -87,7 +88,31 @@
                     @foreach (var izin in Model.Izinler)
                     {
                         <tr>
-                            <td class="ps-3"><strong class="text-warning">@izin.Tur.ToString()</strong></td>
+                            <td class="ps-3">
+                                @{
+                                    string turStr = izin.Tur switch
+                                    {
+                                        IzinTur.Hastalik => "Hastalık İzni",
+                                        IzinTur.AileZiyareti => "Aile Ziyareti",
+                                        IzinTur.ResmiIs => "Resmi İş",
+                                        IzinTur.Diger => "Diğer",
+                                        IzinTur.GecGelme => "Geç Gelme",
+                                        _ => izin.Tur.ToString()
+                                    };
+                                }
+                                <strong class="text-warning">@turStr</strong>
+                                @if (izin.Tur == IzinTur.GecGelme && !string.IsNullOrEmpty(izin.IzinliYoklamaNolar))
+                                {
+                                    var map = ViewBag.YoklamaTurleriMap as Dictionary<int, string> ?? new Dictionary<int, string>();
+                                    var names = izin.IzinliYoklamaNolar.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(idStr => int.TryParse(idStr, out int id) && map.ContainsKey(id) ? map[id] : idStr + ". Yoklama");
+                                    <div class="small text-muted mt-1" style="font-size: 0.75rem;">Yoklamalar: @(string.Join(", ", names))</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(izin.Aciklama))
+                                {
+                                    <div class="small text-secondary mt-1" style="font-size: 0.8rem;"><i class="bi bi-chat-left-text me-1"></i>@izin.Aciklama</div>
+                                }
+                            </td>
                             <td>@izin.BaslangicTarihi.ToString("dd.MM.yyyy")</td>
                             <td>@izin.BitisTarihi.ToString("dd.MM.yyyy")</td>
                             <td>@izin.GunSayisi Gün</td>
@@ -109,6 +134,7 @@
                                     <span class="badge bg-secondary">İptal Edildi</span>
                                 }
                             </td>
+                            <td>@(izin.TalepEdenAdSoyad ?? "-")</td>
                             <td>@(izin.OnaylayanAdSoyad ?? "-")</td>
                             <td class="text-end pe-3">
                                 <a asp-action="Details" asp-route-id="@izin.Id" class="btn btn-sm btn-info me-1"><i class="bi bi-eye"></i> Detay</a>

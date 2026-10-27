@@ -56,6 +56,18 @@
         text-decoration: none;
     }
     .yk-logout:hover { background: rgba(239,68,68,.3); color: #fca5a5; }
+    .yk-changepass {
+        background: rgba(79,70,229,.15);
+        border: 1px solid rgba(79,70,229,.3);
+        color: #a5b4fc;
+        padding: 8px 20px;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all .2s;
+        text-decoration: none;
+    }
+    .yk-changepass:hover { background: rgba(79,70,229,.3); color: #c7d2fe; }
 
     .yk-main { padding: 32px; max-width: 900px; margin: 0 auto; }
 
@@ -145,10 +157,13 @@
         <h1>⚡ Süper Yoklamacı Kontrol Paneli</h1>
         <p>Tüm sınavları yönetin — Hoş geldiniz, <strong style="color:#d8b4fe">@userName</strong></p>
     </div>
-    <form method="post" asp-controller="Account" asp-action="Logout">
-        @Html.AntiForgeryToken()
-        <button type="submit" class="yk-logout">⏏ Çıkış Yap</button>
-    </form>
+    <div style="display: flex; gap: 8px; align-items: center;">
+        <a class="yk-changepass" asp-controller="Account" asp-action="ChangePassword">🔑 Şifre Değiştir</a>
+        <form method="post" asp-controller="Account" asp-action="Logout" style="margin: 0;">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="yk-logout">⏏ Çıkış Yap</button>
+        </form>
+    </div>
 </div>
 
 <div class="yk-main">
@@ -180,7 +195,7 @@
             foreach (var exam in openExams)
             {
                 <a class="exam-card"
-                   asp-controller="SuperYoklamaci" asp-action="Rooms"
+                   asp-controller="SuperYoklamaci" asp-action="TakeAttendance"
                    asp-route-examId="@exam.ExamId">
                     <div class="exam-icon open">⚡</div>
                     <div class="exam-info">
@@ -191,6 +206,12 @@
                             {
                                 <span>🕐 @exam.StartTime.Value.ToString(@"hh\:mm") – @exam.EndTime.Value.ToString(@"hh\:mm")</span>
                             }
+                        </div>
+                        <div class="exam-stats" style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; font-weight: 600;">
+                            <span style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #6ee7b7; padding: 2px 8px; border-radius: 12px;">Var: @exam.PresentCount</span>
+                            <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; padding: 2px 8px; border-radius: 12px;">Yok: @exam.AbsentCount</span>
+                            <span style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fcd34d; padding: 2px 8px; border-radius: 12px;">Geç: @exam.LateCount</span>
+                            <span style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.3); color: #cbd5e1; padding: 2px 8px; border-radius: 12px;">Belirsiz: @exam.PendingCount</span>
                         </div>
                     </div>
                     <span class="badge-bina">Bina: @exam.BuildingNumber</span>
@@ -205,7 +226,7 @@
             foreach (var exam in closedExams)
             {
                 <a class="exam-card"
-                   asp-controller="SuperYoklamaci" asp-action="Rooms"
+                   asp-controller="SuperYoklamaci" asp-action="TakeAttendance"
                    asp-route-examId="@exam.ExamId">
                     <div class="exam-icon closed">🔒</div>
                     <div class="exam-info">
@@ -216,6 +237,12 @@
                             {
                                 <span>🕐 @exam.StartTime.Value.ToString(@"hh\:mm") – @exam.EndTime.Value.ToString(@"hh\:mm")</span>
                             }
+                        </div>
+                        <div class="exam-stats" style="margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; font-weight: 600;">
+                            <span style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #6ee7b7; padding: 2px 8px; border-radius: 12px;">Var: @exam.PresentCount</span>
+                            <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; padding: 2px 8px; border-radius: 12px;">Yok: @exam.AbsentCount</span>
+                            <span style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fcd34d; padding: 2px 8px; border-radius: 12px;">Geç: @exam.LateCount</span>
+                            <span style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.3); color: #cbd5e1; padding: 2px 8px; border-radius: 12px;">Belirsiz: @exam.PendingCount</span>
                         </div>
                     </div>
                     <span class="badge-bina" style="opacity:0.7">Bina: @exam.BuildingNumber</span>

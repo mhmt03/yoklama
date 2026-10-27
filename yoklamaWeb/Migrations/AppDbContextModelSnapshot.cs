@@ -15,7 +15,7 @@ namespace yoklamaWeb.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
+            modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
@@ -315,6 +315,135 @@ namespace yoklamaWeb.Migrations
                     b.ToTable("ClassAttendanceStudents");
                 });
 
+            modelBuilder.Entity("yoklamaWeb.Models.DailyClassAttendance", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ClassAttendanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("GozetmenNotu")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("KayitZamani")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SalonNotu")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Tarih")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("YoklamaYapanKullaniciAdi")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClassAttendanceId");
+
+                    b.ToTable("DailyClassAttendances");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.DailyClassAttendanceStudent", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AdSoyad")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DailyClassAttendanceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Durum")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("KayitZamani")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Not")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OgrenciNo")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OturumNo")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Salon")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SinifDuzeyi")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sira")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sube")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("YoklamaYapanKullaniciAdi")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DailyClassAttendanceId");
+
+                    b.ToTable("DailyClassAttendanceStudents");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.Etut", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Aciklama")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Aktif")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EtutAdi")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Kapasite")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("OlusturmaTarihi")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Etutler");
+                });
+
             modelBuilder.Entity("yoklamaWeb.Models.Exam", b =>
                 {
                     b.Property<int>("Id")
@@ -346,6 +475,9 @@ namespace yoklamaWeb.Migrations
 
                     b.Property<DateTime>("ValidTo")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("YoklamaSayisi")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 
@@ -389,6 +521,9 @@ namespace yoklamaWeb.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("YoklamaNo")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ExamId");
@@ -396,6 +531,66 @@ namespace yoklamaWeb.Migrations
                     b.HasIndex("OgrenciNo");
 
                     b.ToTable("ExamSeats");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.GunlukYoklamaci", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AdSoyad")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Brans")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("KullaniciAdi")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sifre")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("GunlukYoklamacilar");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.GunlukYoklamaciProgram", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Gun")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GunlukYoklamaciId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OturumNo")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Salon")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GunlukYoklamaciId");
+
+                    b.ToTable("GunlukYoklamaciProgramlari");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.IzinGirisi", b =>
@@ -421,6 +616,9 @@ namespace yoklamaWeb.Migrations
                     b.Property<int>("GunSayisi")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("IzinliYoklamaNolar")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("OgrenciId")
                         .HasColumnType("INTEGER");
 
@@ -441,6 +639,9 @@ namespace yoklamaWeb.Migrations
                         .IsRequired()
                         .HasColumnType("BLOB");
 
+                    b.Property<int?>("TalepEdenId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("Tur")
                         .HasColumnType("INTEGER");
 
@@ -451,6 +652,8 @@ namespace yoklamaWeb.Migrations
                     b.HasIndex("OnaylayanId");
 
                     b.HasIndex("PansiyonGorevlisiId");
+
+                    b.HasIndex("TalepEdenId");
 
                     b.ToTable("IzinGirisleri");
                 });
@@ -557,6 +760,9 @@ namespace yoklamaWeb.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("SinavlaraKatilacak")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("SinifDuzeyi")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -573,6 +779,223 @@ namespace yoklamaWeb.Migrations
                         .IsUnique();
 
                     b.ToTable("Ogrenciler");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikForm", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AdSoyadBaslangic")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AdSoyadUzunluk")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FormAdi")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("KitapcikTuruBaslangic")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("KitapcikTuruUzunluk")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NumaraBaslangic")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("NumaraUzunluk")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SinifBaslangic")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SinifUzunluk")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OptikFormlar");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikFormDers", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BaslangicSutun")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DersAdi")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("KarakterSayisi")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("OptikFormId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OptikFormId");
+
+                    b.ToTable("OptikFormDersleri");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinav", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HedefOgrenciler")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HedefSiniflar")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("KitapcikTurleri")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SinavAdi")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UygulamaTarihi")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("YanlisDogruyuGotururSayisi")
+                        .HasColumnType("REAL");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OptikSinavlar");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinavDers", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CevapAnahtari")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CevapAnahtariB")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CevapAnahtariC")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CevapAnahtariD")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DersAdi")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OptikSinavId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SoruSayisi")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OptikSinavId");
+
+                    b.ToTable("OptikSinavDersleri");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinavSonuc", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("KitapcikTuru")
+                        .HasMaxLength(5)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OgrenciNo")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("OptikSinavId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OrijinalSatir")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ToplamBos")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ToplamDogru")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("ToplamNet")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("ToplamYanlis")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OgrenciNo");
+
+                    b.HasIndex("OptikSinavId");
+
+                    b.ToTable("OptikSinavSonuclari");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinavSonucDers", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Bos")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DersAdi")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Dogru")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("Net")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("OptikSinavSonucId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Yanlis")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OptikSinavSonucId");
+
+                    b.ToTable("OptikSinavSonucDersleri");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.PansiyonGorevlisi", b =>
@@ -647,6 +1070,9 @@ namespace yoklamaWeb.Migrations
                     b.Property<bool>("Aktif")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("EtutId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("KayitTarihi")
                         .HasColumnType("TEXT");
 
@@ -662,6 +1088,11 @@ namespace yoklamaWeb.Migrations
                         .IsConcurrencyToken()
                         .IsRequired()
                         .HasColumnType("BLOB");
+
+                    b.Property<string>("Sifre")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("SinifDuzeyi")
                         .IsRequired()
@@ -684,6 +1115,8 @@ namespace yoklamaWeb.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("EtutId");
 
                     b.HasIndex("OdaId");
 
@@ -726,6 +1159,9 @@ namespace yoklamaWeb.Migrations
                     b.Property<DateTime>("Tarih")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("YoklamaNo")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("YoklamaYapanId")
                         .HasColumnType("INTEGER");
 
@@ -736,6 +1172,120 @@ namespace yoklamaWeb.Migrations
                     b.HasIndex("YoklamaYapanId");
 
                     b.ToTable("PansiyonYoklamalar");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.PlannerExam", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("ExamDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StartTime")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PlannerExams");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.PlannerExamRoom", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PlannerExamId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PlannerRoomId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlannerExamId");
+
+                    b.HasIndex("PlannerRoomId");
+
+                    b.ToTable("PlannerExamRooms");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.PlannerRoom", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Capacity")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RoomGroup")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RoomName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("PlannerRooms");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.PlannerSeating", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AdSoyad")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OgrenciNo")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PlannerExamId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RoomName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SeatNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SinifDuzeyi")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Sira")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Sube")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlannerExamId");
+
+                    b.ToTable("PlannerSeatings");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.Sinav", b =>
@@ -812,6 +1362,54 @@ namespace yoklamaWeb.Migrations
                         .IsUnique();
 
                     b.ToTable("SuperYoklamacilar");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.SystemLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ActionName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ControllerName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IpAdresi")
+                        .IsRequired()
+                        .HasMaxLength(45)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("KullaniciAdi")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Metot")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Parametreler")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Rol")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Tarih")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SystemLogs");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.TemporaryProctor", b =>
@@ -923,6 +1521,34 @@ namespace yoklamaWeb.Migrations
                     b.HasIndex("SinavId");
 
                     b.ToTable("Yoklamalar");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.YoklamaTuru", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Ad")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Aktif")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("OlusturmaTarihi")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("RowVersion")
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("Sira")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("YoklamaTurleri");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.Yoklamaci", b =>
@@ -1041,6 +1667,28 @@ namespace yoklamaWeb.Migrations
                     b.Navigation("ClassAttendance");
                 });
 
+            modelBuilder.Entity("yoklamaWeb.Models.DailyClassAttendance", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.ClassAttendance", "ClassAttendance")
+                        .WithMany()
+                        .HasForeignKey("ClassAttendanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ClassAttendance");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.DailyClassAttendanceStudent", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.DailyClassAttendance", "DailyClassAttendance")
+                        .WithMany("Students")
+                        .HasForeignKey("DailyClassAttendanceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("DailyClassAttendance");
+                });
+
             modelBuilder.Entity("yoklamaWeb.Models.ExamSeat", b =>
                 {
                     b.HasOne("yoklamaWeb.Models.Exam", "Exam")
@@ -1060,6 +1708,17 @@ namespace yoklamaWeb.Migrations
                     b.Navigation("Ogrenci");
                 });
 
+            modelBuilder.Entity("yoklamaWeb.Models.GunlukYoklamaciProgram", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.GunlukYoklamaci", "GunlukYoklamaci")
+                        .WithMany()
+                        .HasForeignKey("GunlukYoklamaciId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("GunlukYoklamaci");
+                });
+
             modelBuilder.Entity("yoklamaWeb.Models.IzinGirisi", b =>
                 {
                     b.HasOne("yoklamaWeb.Models.PansiyonOgrenci", "Ogrenci")
@@ -1077,9 +1736,16 @@ namespace yoklamaWeb.Migrations
                         .WithMany("IzinGirisleri")
                         .HasForeignKey("PansiyonGorevlisiId");
 
+                    b.HasOne("yoklamaWeb.Models.PansiyonGorevlisi", "TalepEden")
+                        .WithMany()
+                        .HasForeignKey("TalepEdenId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Ogrenci");
 
                     b.Navigation("Onaylayan");
+
+                    b.Navigation("TalepEden");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.NobetciPlan", b =>
@@ -1100,12 +1766,71 @@ namespace yoklamaWeb.Migrations
                     b.Navigation("PansiyonGorevlisi");
                 });
 
+            modelBuilder.Entity("yoklamaWeb.Models.OptikFormDers", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.OptikForm", "OptikForm")
+                        .WithMany("Dersler")
+                        .HasForeignKey("OptikFormId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("OptikForm");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinavDers", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.OptikSinav", "OptikSinav")
+                        .WithMany("Dersler")
+                        .HasForeignKey("OptikSinavId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("OptikSinav");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinavSonuc", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.Ogrenci", "Ogrenci")
+                        .WithMany()
+                        .HasForeignKey("OgrenciNo")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("yoklamaWeb.Models.OptikSinav", "OptikSinav")
+                        .WithMany("Sonuclar")
+                        .HasForeignKey("OptikSinavId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Ogrenci");
+
+                    b.Navigation("OptikSinav");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinavSonucDers", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.OptikSinavSonuc", "OptikSinavSonuc")
+                        .WithMany("DersSonuclari")
+                        .HasForeignKey("OptikSinavSonucId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("OptikSinavSonuc");
+                });
+
             modelBuilder.Entity("yoklamaWeb.Models.PansiyonOgrenci", b =>
                 {
+                    b.HasOne("yoklamaWeb.Models.Etut", "Etut")
+                        .WithMany("Ogrenciler")
+                        .HasForeignKey("EtutId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("yoklamaWeb.Models.Oda", "Oda")
                         .WithMany("Ogrenciler")
                         .HasForeignKey("OdaId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Etut");
 
                     b.Navigation("Oda");
                 });
@@ -1127,6 +1852,36 @@ namespace yoklamaWeb.Migrations
                     b.Navigation("PansiyonOgrenci");
 
                     b.Navigation("YoklamaYapan");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.PlannerExamRoom", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.PlannerExam", "PlannerExam")
+                        .WithMany()
+                        .HasForeignKey("PlannerExamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("yoklamaWeb.Models.PlannerRoom", "PlannerRoom")
+                        .WithMany()
+                        .HasForeignKey("PlannerRoomId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PlannerExam");
+
+                    b.Navigation("PlannerRoom");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.PlannerSeating", b =>
+                {
+                    b.HasOne("yoklamaWeb.Models.PlannerExam", "PlannerExam")
+                        .WithMany()
+                        .HasForeignKey("PlannerExamId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PlannerExam");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.TemporaryProctor", b =>
@@ -1172,6 +1927,16 @@ namespace yoklamaWeb.Migrations
                     b.Navigation("Students");
                 });
 
+            modelBuilder.Entity("yoklamaWeb.Models.DailyClassAttendance", b =>
+                {
+                    b.Navigation("Students");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.Etut", b =>
+                {
+                    b.Navigation("Ogrenciler");
+                });
+
             modelBuilder.Entity("yoklamaWeb.Models.Exam", b =>
                 {
                     b.Navigation("ExamSeats");
@@ -1180,6 +1945,23 @@ namespace yoklamaWeb.Migrations
             modelBuilder.Entity("yoklamaWeb.Models.Oda", b =>
                 {
                     b.Navigation("Ogrenciler");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikForm", b =>
+                {
+                    b.Navigation("Dersler");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinav", b =>
+                {
+                    b.Navigation("Dersler");
+
+                    b.Navigation("Sonuclar");
+                });
+
+            modelBuilder.Entity("yoklamaWeb.Models.OptikSinavSonuc", b =>
+                {
+                    b.Navigation("DersSonuclari");
                 });
 
             modelBuilder.Entity("yoklamaWeb.Models.PansiyonGorevlisi", b =>

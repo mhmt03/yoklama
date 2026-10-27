@@ -1,0 +1,197 @@
+@model IEnumerable<yoklamaWeb.Models.OptikForm>
+@{
+    ViewData["Title"] = "Optik Form Tanımla";
+}
+
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0"><i class="bi bi-file-earmark-text text-primary me-2"></i>Optik Form Tanımlama</h2>
+        <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#yeniFormModal">
+            <i class="bi bi-plus-lg me-1"></i> Yeni Form Ekle
+        </button>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show shadow-sm" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    }
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Form Adı</th>
+                            <th>Öğrenci No (Sütun/Krk)</th>
+                            <th>Ad Soyad (Sütun/Krk)</th>
+                            <th>Sınıf (Sütun/Krk)</th>
+                            <th>Ders Sayısı</th>
+                            <th class="text-end">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!Model.Any())
+                        {
+                            <tr>
+                                <td colspan="6" class="text-center py-4 text-muted">Henüz tanımlanmış form bulunmamaktadır.</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            foreach (var form in Model)
+                            {
+                                <tr>
+                                    <td class="fw-bold">@form.FormAdi</td>
+                                    <td>@form.NumaraBaslangic / @form.NumaraUzunluk</td>
+                                    <td>@form.AdSoyadBaslangic / @form.AdSoyadUzunluk</td>
+                                    <td>@form.SinifBaslangic / @form.SinifUzunluk</td>
+                                    <td><span class="badge bg-info text-dark">@(form.Dersler?.Count ?? 0) Ders</span></td>
+                                    <td class="text-end">
+                                        <a asp-action="FormDuzenle" asp-route-id="@form.Id" class="btn btn-sm btn-outline-primary me-1"><i class="bi bi-pencil"></i> Düzenle</a>
+                                        <form asp-action="FormSil" asp-route-id="@form.Id" method="post" class="d-inline" onsubmit="return confirm('Bu formu silmek istediğinize emin misiniz? Sınav bağlantıları etkilenebilir.');">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i> Sil</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Yeni Form Modal -->
+<div class="modal fade" id="yeniFormModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form asp-action="FormKaydet" method="post" id="formEkleForm">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title"><i class="bi bi-file-earmark-plus me-2"></i>Yeni Optik Form Tanımla</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-12">
+                            <label class="form-label fw-bold">Form Adı</label>
+                            <input type="text" name="FormAdi" class="form-control" required placeholder="Örn: 9. Sınıf Tyt Deneme Formu">
+                        </div>
+                        
+                        <h6 class="mt-4 mb-2 fw-bold text-primary border-bottom pb-2">Öğrenci Bilgileri Parametreleri (0'dan Başlar)</h6>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Öğrenci No Başlangıç Sütunu</label>
+                            <input type="number" name="NumaraBaslangic" class="form-control" required min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Öğrenci No Karakter Sayısı</label>
+                            <input type="number" name="NumaraUzunluk" class="form-control" required min="1">
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Ad Soyad Başlangıç Sütunu</label>
+                            <input type="number" name="AdSoyadBaslangic" class="form-control" required min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Ad Soyad Karakter Sayısı</label>
+                            <input type="number" name="AdSoyadUzunluk" class="form-control" required min="1">
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Sınıf Başlangıç Sütunu</label>
+                            <input type="number" name="SinifBaslangic" class="form-control" required min="0">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Sınıf Karakter Sayısı</label>
+                            <input type="number" name="SinifUzunluk" class="form-control" required min="1">
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label text-muted">Kitapçık Türü Bşl. Sütunu (Opsiyonel)</label>
+                            <input type="number" name="KitapcikTuruBaslangic" class="form-control" min="0" placeholder="Örn: 15">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label text-muted">Kitapçık Türü Krk. Sayısı (Opsiyonel)</label>
+                            <input type="number" name="KitapcikTuruUzunluk" class="form-control" min="1" placeholder="Genelde 1">
+                        </div>
+                    </div>
+
+                    <h6 class="mt-4 mb-2 fw-bold text-primary border-bottom pb-2 d-flex justify-content-between align-items-center">
+                        Ders Parametreleri
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="btnDersEkle">
+                            <i class="bi bi-plus"></i> Ders Ekle
+                        </button>
+                    </h6>
+                    
+                    <div id="derslerContainer">
+                        <!-- Dinamik dersler buraya eklenecek -->
+                        <div class="alert alert-info text-center" id="noDersAlert">Henüz ders eklenmedi. Sınavdaki derslerin optik formdaki konumlarını ekleyin.</div>
+                    </div>
+
+                    <input type="hidden" name="derslerJson" id="derslerJson">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">İptal</button>
+                    <button type="submit" class="btn btn-primary" onclick="prepareJson()">Kaydet</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<template id="dersTemplate">
+    <div class="row g-2 mb-2 pb-2 border-bottom ders-row align-items-end">
+        <div class="col-md-4">
+            <label class="form-label small text-muted">Ders Adı</label>
+            <input type="text" class="form-control ders-adi" required placeholder="Örn: Türkçe">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Başlangıç Sütunu</label>
+            <input type="number" class="form-control ders-baslangic" required min="0">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small text-muted">Karakter(Soru) Sayısı</label>
+            <input type="number" class="form-control ders-karakter" required min="1">
+        </div>
+        <div class="col-md-2">
+            <button type="button" class="btn btn-outline-danger w-100 btnDersSil"><i class="bi bi-trash"></i></button>
+        </div>
+    </div>
+</template>
+
+@section Scripts {
+    <script>
+        document.getElementById('btnDersEkle').addEventListener('click', function() {
+            document.getElementById('noDersAlert').style.display = 'none';
+            var template = document.getElementById('dersTemplate').content.cloneNode(true);
+            document.getElementById('derslerContainer').appendChild(template);
+        });
+
+        document.getElementById('derslerContainer').addEventListener('click', function(e) {
+            if(e.target.closest('.btnDersSil')) {
+                e.target.closest('.ders-row').remove();
+                if(document.querySelectorAll('.ders-row').length === 0) {
+                    document.getElementById('noDersAlert').style.display = 'block';
+                }
+            }
+        });
+
+        function prepareJson() {
+            var dersler = [];
+            var rows = document.querySelectorAll('.ders-row');
+            rows.forEach(function(row) {
+                dersler.push({
+                    DersAdi: row.querySelector('.ders-adi').value,
+                    BaslangicSutun: parseInt(row.querySelector('.ders-baslangic').value),
+                    KarakterSayisi: parseInt(row.querySelector('.ders-karakter').value)
+                });
+            });
+            document.getElementById('derslerJson').value = JSON.stringify(dersler);
+        }
+    </script>
+}

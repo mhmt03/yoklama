@@ -1,0 +1,44 @@
+@model yoklamaWeb.Models.Exam
+@{
+    ViewData["Title"] = "Sınav Sil";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 500px;">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-danger text-white">
+            <h4 class="mb-0 fw-bold">Sınav Silme Onayı</h4>
+        </div>
+        <div class="card-body p-4 text-center">
+            <div class="mb-4">
+                <i class="bi bi-exclamation-triangle text-danger" style="font-size: 3rem;"></i>
+            </div>
+            
+            <p class="lead"><strong>@Model.Name</strong> sınavını silmek istediğinizden emin misiniz?</p>
+            
+            <div class="alert alert-warning text-start">
+                <strong>Sınav Detayları:</strong>
+                <ul>
+                    <li>Bina No: @Model.BuildingNumber</li>
+                    <li>Sınav Tarihi: @Model.ApplicationDate.ToString("dd.MM.yyyy")</li>
+                    <li>Geçerlilik: @Model.ValidFrom.ToString("dd.MM.yyyy") - @Model.ValidTo.ToString("dd.MM.yyyy")</li>
+                    <li>Saat: @(Model.StartTime?.ToString(@"hh\:mm") ?? "—") - @(Model.EndTime?.ToString(@"hh\:mm") ?? "—")</li>
+                </ul>
+            </div>
+
+            <div class="alert alert-danger text-start">
+                <i class="bi bi-info-circle-fill"></i> <strong>Önemli:</strong> Sınav silindiğinde bu sınava ait tüm salon/koltuk yerleşimleri ve geçici görevlendirilen gözetmen/yoklamacı hesapları da kalıcı olarak silinecektir.
+            </div>
+
+            <form method="post" asp-action="Delete">
+                @Html.AntiForgeryToken()
+                <input type="hidden" asp-for="Id" />
+
+                <div class="d-flex justify-content-between mt-4">
+                    <a asp-action="Index" class="btn btn-secondary">Vazgeç</a>
+                    <button type="submit" class="btn btn-danger fw-semibold">Evet, Sil</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

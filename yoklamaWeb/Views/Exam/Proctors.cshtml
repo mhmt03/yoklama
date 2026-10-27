@@ -10,7 +10,10 @@
             <h2>Yoklamacı Listesi</h2>
             <p class="text-muted mb-0">@ViewBag.ExamName sınavı için oluşturulmuş salon bazlı yoklamacılar.</p>
         </div>
-        <a asp-action="Details" asp-route-id="ViewBag.ExamId" class="btn btn-secondary">Geri</a>
+        <div>
+            <a asp-action="CreateProctor" asp-route-examId="@ViewBag.ExamId" class="btn btn-success me-1">Yeni Yoklamacı Ekle</a>
+            <a asp-action="Details" asp-route-id="@ViewBag.ExamId" class="btn btn-secondary">Geri</a>
+        </div>
     </div>
 
     @if (!Model.Any())
@@ -28,6 +31,7 @@
                         <th>Şifre</th>
                         <th>Geçerlilik</th>
                         <th>Saat Aralığı</th>
+                        <th style="width: 150px;">İşlemler</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -39,6 +43,13 @@
                             <td>@item.Password</td>
                             <td>@item.ValidFrom.ToString("yyyy-MM-dd") - @item.ValidTo.ToString("yyyy-MM-dd")</td>
                             <td>@(item.StartTime.HasValue ? item.StartTime.Value.ToString(@"hh\:mm") : "-") - @(item.EndTime.HasValue ? item.EndTime.Value.ToString(@"hh\:mm") : "-")</td>
+                            <td>
+                                <a asp-action="EditProctor" asp-route-id="@item.Id" class="btn btn-sm btn-outline-primary">Düzenle</a>
+                                <form asp-action="DeleteProctor" asp-route-id="@item.Id" method="post" class="d-inline" onsubmit="return confirm('Bu yoklamacıyı silmek istediğinizden emin misiniz?');">
+                                    @Html.AntiForgeryToken()
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Sil</button>
+                                </form>
+                            </td>
                         </tr>
                     }
                 </tbody>

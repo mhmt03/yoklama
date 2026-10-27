@@ -1,31 +1,73 @@
-@model IEnumerable<yoklamaWeb.Models.Exam>
+@model IEnumerable<yoklamaWeb.Models.AdminExamItemViewModel>
 
 @{
     ViewData["Title"] = "Sınav Listesi";
     Layout = "_Layout";
 }
 <link href="~/css/site.css" rel="stylesheet" />
+<style>
+    .exam-grid-card {
+        transition: all 0.25s ease-in-out;
+        border: 1px solid rgba(0,0,0,0.06);
+    }
+    .exam-grid-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 10px 25px rgba(0,0,0,0.08) !important;
+        border-color: rgba(79, 70, 229, 0.2);
+    }
+    .card-title-link {
+        color: #2c3e50;
+        font-size: 1.15rem;
+        font-weight: 700;
+        text-decoration: none;
+        transition: color 0.15s ease-in-out;
+    }
+    .card-title-link:hover {
+        color: #4f46e5;
+        text-decoration: none;
+    }
+    .badge-soft-primary {
+        background-color: rgba(79, 70, 229, 0.1);
+        color: #4f46e5;
+        font-weight: 600;
+    }
+    .badge-soft-warning {
+        background-color: rgba(245, 158, 11, 0.12);
+        color: #d97706;
+        font-weight: 600;
+    }
+    .exam-stats-summary {
+        background: #f8fafc;
+        border: 1px solid rgba(0,0,0,0.03);
+    }
+</style>
+
 <div class="d-flex flex-column flex-md-row align-items-center justify-content-between mt-4 mb-3 gap-3">
     <div>
-        <h2 class="mb-1" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Sınav Listesi</h2>
-        <p class="text-muted mb-0">Sınavları hızlıca görüntüleyin, düzenleyin veya koltuk atamalarına geçin.</p>
+        <h2 class="mb-1 fw-bold" style="font-family: 'Outfit', sans-serif; color: #1e293b; letter-spacing: -0.02em;">Sınav Listesi</h2>
+        <p class="text-muted mb-0">Sınavları hızlıca görüntüleyin, yoklama durumlarını ve atamaları analiz edin.</p>
     </div>
-    <a asp-action="Create" class="btn btn-primary btn-lg">Yeni Sınav Oluştur</a>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-primary px-4 py-2 fw-semibold rounded-3" data-bs-toggle="modal" data-bs-target="#attendanceReportModal" onclick="openReportModal()">
+                📋 Öğrenci Katılım Raporu
+            </button>
+            <a asp-action="Create" class="btn btn-primary px-4 py-2 fw-semibold rounded-3">Yeni Sınav Oluştur</a>
+        </div>
 </div>
 
-<div class="card mb-4 p-3 border-0 shadow-sm">
+<div class="card mb-4 p-3 border-0 shadow-sm rounded-4">
     <form method="get" class="row g-3">
         <div class="col-md-4">
-            <label class="form-label">Sınav Adı</label>
-            <input name="nameFilter" value="@ViewData["NameFilter"]" class="form-control" placeholder="Ara..." />
+            <label class="form-label fw-semibold text-secondary small">Sınav Adı</label>
+            <input name="nameFilter" value="@ViewData["NameFilter"]" class="form-control rounded-3" placeholder="Ara..." />
         </div>
         <div class="col-md-3">
-            <label class="form-label">Bina</label>
-            <input name="buildingFilter" value="@ViewData["BuildingFilter"]" class="form-control" placeholder="Bina..." />
+            <label class="form-label fw-semibold text-secondary small">Bina</label>
+            <input name="buildingFilter" value="@ViewData["BuildingFilter"]" class="form-control rounded-3" placeholder="Bina..." />
         </div>
         <div class="col-md-3">
-            <label class="form-label">Durum</label>
-            <select name="statusFilter" class="form-select">
+            <label class="form-label fw-semibold text-secondary small">Durum</label>
+            <select name="statusFilter" class="form-select rounded-3">
                 @{ var statusFilter = ViewData["StatusFilter"]?.ToString(); }
                 @if (statusFilter == "All")
                 {
@@ -62,33 +104,370 @@
             </select>
         </div>
         <div class="col-md-2 d-flex align-items-end">
-            <button type="submit" class="btn btn-outline-primary w-100">Filtrele</button>
+            <button type="submit" class="btn btn-outline-primary w-100 rounded-3 py-2 fw-semibold">Filtrele</button>
         </div>
     </form>
 </div>
 
-<div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4">
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-4 mb-5">
     @foreach (var exam in Model)
     {
         <div class="col">
-            <div class="card h-100 shadow-sm border-0 rounded-4 overflow-hidden">
-                <div class="card-body d-flex flex-column">
+            <div class="card h-100 shadow-sm border-0 rounded-4 overflow-hidden exam-grid-card">
+                <div class="card-body d-flex flex-column p-4">
                     <div class="d-flex justify-content-between align-items-start mb-3">
-                        <div>
-                            <h5 class="card-title mb-1" style="color: #2c3e50;">@exam.Name</h5>
-                            <span class="badge bg-secondary">@exam.ApplicationDate.ToString("yyyy-MM-dd")</span>
+                        <div style="flex: 1; min-width: 0; padding-right: 8px;">
+                            <a asp-action="Details" asp-route-id="@exam.Id" class="card-title-link d-block text-truncate mb-1" title="@exam.Name">@exam.Name</a>
+                            <span class="badge bg-light text-secondary border">📅 @exam.ApplicationDate.ToString("dd.MM.yyyy")</span>
                         </div>
-                        <span class="badge bg-warning text-dark">Bina @exam.BuildingNumber</span>
+                        <span class="badge badge-soft-warning px-2.5 py-1.5 rounded-3">Bina @exam.BuildingNumber</span>
                     </div>
-                    <p class="card-text text-muted mb-2"><strong>Geçerlilik:</strong> @exam.ValidFrom.ToString("yyyy-MM-dd") - @exam.ValidTo.ToString("yyyy-MM-dd")</p>
-                    <p class="card-text text-muted mb-3"><strong>Saat:</strong> @(exam.StartTime.HasValue ? exam.StartTime.Value.ToString(@"hh\:mm") : "N/A") - @(exam.EndTime.HasValue ? exam.EndTime.Value.ToString(@"hh\:mm") : "N/A")</p>
-                    <div class="mt-auto d-flex flex-wrap gap-2">
-                        <a asp-action="Edit" asp-route-id="@exam.Id" class="btn btn-outline-primary btn-sm">Düzenle</a>
-                        <a asp-action="Details" asp-route-id="@exam.Id" class="btn btn-primary btn-sm">Detay</a>
-                        <a asp-action="ImportSeats" asp-route-id="@exam.Id" class="btn btn-success btn-sm">Koltuk İçe Aktar</a>
+
+                    <div class="text-secondary small mb-3">
+                        <div class="d-flex align-items-center gap-1.5 mb-1">
+                            <span class="text-muted">Geçerlilik:</span>
+                            <span class="fw-medium text-dark">@exam.ValidFrom.ToString("dd.MM.yyyy") - @exam.ValidTo.ToString("dd.MM.yyyy")</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-1.5">
+                            <span class="text-muted">Saat:</span>
+                            <span class="fw-medium text-dark">@(exam.StartTime.HasValue ? exam.StartTime.Value.ToString(@"hh\:mm") : "—") - @(exam.EndTime.HasValue ? exam.EndTime.Value.ToString(@"hh\:mm") : "—")</span>
+                        </div>
+                    </div>
+
+                    <div class="exam-stats-summary p-2.5 rounded-3 d-flex justify-content-around gap-1 text-center mb-3">
+                        <div>
+                            <div class="fw-bold text-success font-monospace">@exam.PresentCount</div>
+                            <div class="text-muted" style="font-size:0.68rem">Var</div>
+                        </div>
+                        <div class="border-end" style="border-color:rgba(0,0,0,0.06)"></div>
+                        <div>
+                            <div class="fw-bold text-danger font-monospace">@exam.AbsentCount</div>
+                            <div class="text-muted" style="font-size:0.68rem">Yok</div>
+                        </div>
+                        <div class="border-end" style="border-color:rgba(0,0,0,0.06)"></div>
+                        <div>
+                            <div class="fw-bold text-warning font-monospace">@exam.LateCount</div>
+                            <div class="text-muted" style="font-size:0.68rem">Geç</div>
+                        </div>
+                        <div class="border-end" style="border-color:rgba(0,0,0,0.06)"></div>
+                        <div>
+                            <div class="fw-bold text-secondary font-monospace">@exam.PendingCount</div>
+                            <div class="text-muted" style="font-size:0.68rem">Belirsiz</div>
+                        </div>
+                    </div>
+
+                    @{
+                        var total = exam.TotalStudents;
+                        var processed = exam.PresentCount + exam.AbsentCount + exam.LateCount;
+                        var pct = total > 0 ? (int)((double)processed / total * 100) : 0;
+                    }
+                    <div class="mb-4">
+                        <div class="d-flex justify-content-between align-items-center mb-1.5">
+                            <span class="text-muted small">Katılım Oranı</span>
+                            <span class="fw-bold text-primary small">@pct%</span>
+                        </div>
+                        <div class="progress" style="height: 6px; border-radius: 10px; background-color: #e2e8f0; overflow: hidden; display: flex;">
+                            <div class="progress-bar bg-success" role="progressbar" style="width: @(total > 0 ? (exam.PresentCount * 100 / total) : 0)%" aria-valuenow="@exam.PresentCount" aria-valuemin="0" aria-valuemax="@total"></div>
+                            <div class="progress-bar bg-danger" role="progressbar" style="width: @(total > 0 ? (exam.AbsentCount * 100 / total) : 0)%" aria-valuenow="@exam.AbsentCount" aria-valuemin="0" aria-valuemax="@total"></div>
+                            <div class="progress-bar bg-warning" role="progressbar" style="width: @(total > 0 ? (exam.LateCount * 100 / total) : 0)%" aria-valuenow="@exam.LateCount" aria-valuemin="0" aria-valuemax="@total"></div>
+                        </div>
+                        <div class="text-muted mt-1.5 d-flex justify-content-between" style="font-size: 0.72rem">
+                            <span>Sınıfta Toplam: <strong>@total</strong></span>
+                            <span>Oturum: <strong>@exam.YoklamaSayisi</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="mt-auto pt-3 border-top d-grid gap-2" style="grid-template-columns: repeat(2, 1fr);">
+                        <a asp-action="Details" asp-route-id="@exam.Id" class="btn btn-primary btn-sm rounded-3 py-1.5 fw-semibold">Detay</a>
+                        <a asp-action="ImportSeats" asp-route-id="@exam.Id" class="btn btn-light border btn-sm rounded-3 py-1.5 fw-semibold text-secondary">Koltuk İçe Aktar</a>
+                        <a asp-action="Edit" asp-route-id="@exam.Id" class="btn btn-outline-secondary btn-sm rounded-3 py-1.5 fw-semibold">Düzenle</a>
+                        <a asp-action="Delete" asp-route-id="@exam.Id" class="btn btn-outline-danger btn-sm rounded-3 py-1.5 fw-semibold">Sil</a>
                     </div>
                 </div>
             </div>
         </div>
     }
 </div>
+
+<!-- Öğrenci Katılım Raporu Modal -->
+<div class="modal fade" id="attendanceReportModal" tabindex="-1" aria-labelledby="attendanceReportModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content rounded-4 border-0 shadow-lg" style="background:#fff; color:#1e293b;">
+            <div class="modal-header border-bottom-0 pb-0">
+                <h5 class="modal-title fw-bold" id="attendanceReportModalLabel">📋 Öğrenci Katılım Raporu Önizleme</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Kapat"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Filtreler Panel -->
+                <div class="p-3 mb-3 rounded-4 bg-light" style="border: 1px solid rgba(0,0,0,0.04)">
+                    <div class="row g-3">
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Öğrenci Adı / No</label>
+                            <input type="text" id="modalStudentNameFilter" class="form-control form-control-sm rounded-3" placeholder="Ara..." oninput="loadReportPreview()" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Sınıf</label>
+                            <select id="modalClassFilter" class="form-select form-select-sm rounded-3" onchange="loadReportPreview()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Şube</label>
+                            <select id="modalBranchFilter" class="form-select form-select-sm rounded-3" onchange="loadReportPreview()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Sınav</label>
+                            <select id="modalExamFilter" class="form-select form-select-sm rounded-3" onchange="loadReportPreview()">
+                                <option value="">Tümü</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Başlangıç Tarihi</label>
+                            <input type="date" id="modalStartDate" class="form-control form-control-sm rounded-3" onchange="loadReportPreview()" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold text-secondary">Bitiş Tarihi</label>
+                            <input type="date" id="modalEndDate" class="form-control form-control-sm rounded-3" onchange="loadReportPreview()" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Önizleme Tablosu -->
+                <div class="table-responsive rounded-3 border" style="max-height: 400px; overflow-y: auto;">
+                    <table class="table table-hover table-striped mb-0 align-middle">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" id="modalSelectAll" class="form-check-input" onchange="toggleSelectAll(this)" checked />
+                                </th>
+                                <th onclick="sortTable('ogrenciNo')" style="cursor: pointer; user-select: none;">Öğrenci No ⇅</th>
+                                <th onclick="sortTable('adSoyad')" style="cursor: pointer; user-select: none;">Adı Soyadı ⇅</th>
+                                <th onclick="sortTable('sinifDuzeyi')" style="cursor: pointer; user-select: none;">Sınıf / Şube ⇅</th>
+                                <th onclick="sortTable('examName')" style="cursor: pointer; user-select: none;">Sınav Adı ⇅</th>
+                                <th onclick="sortTable('examDate')" style="cursor: pointer; user-select: none;">Sınav Tarihi ⇅</th>
+                                <th onclick="sortTable('yoklamaNo')" style="cursor: pointer; user-select: none;">Yoklama No ⇅</th>
+                                <th onclick="sortTable('status')" style="cursor: pointer; user-select: none;">Durum ⇅</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalReportBody">
+                            <tr>
+                                <td colspan="8" class="text-center py-4 text-muted">Veriler yükleniyor...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-2 small text-muted">
+                    <span id="modalReportSummary">Toplam 0 kayıt listelendi.</span>
+                </div>
+            </div>
+            <div class="modal-footer border-top-0 pt-0">
+                <button type="button" class="btn btn-outline-secondary px-4 py-2 fw-semibold rounded-3" data-bs-dismiss="modal">Kapat</button>
+                <form id="exportReportForm" method="post" asp-action="ExportAttendanceReport" style="display:inline">
+                    @Html.AntiForgeryToken()
+                    <!-- Hidden fields to submit filter values -->
+                    <input type="hidden" name="classFilter" id="exportClassFilter" />
+                    <input type="hidden" name="branchFilter" id="exportBranchFilter" />
+                    <input type="hidden" name="studentNameFilter" id="exportStudentNameFilter" />
+                    <input type="hidden" name="examIdFilter" id="exportExamIdFilter" />
+                    <input type="hidden" name="startDateFilter" id="exportStartDateFilter" />
+                    <input type="hidden" name="endDateFilter" id="exportEndDateFilter" />
+                    
+                    <!-- Container for selected student nos -->
+                    <div id="exportSelectedContainer" style="display:none"></div>
+
+                    <button type="submit" class="btn btn-success px-4 py-2 fw-semibold rounded-3">📥 Raporu Al (Excel)</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let reportData = [];
+    let selectedStudentNos = new Set();
+
+    function openReportModal() {
+        loadReportFiltersAndData();
+    }
+
+    function loadReportFiltersAndData() {
+        const url = '@Url.Action("AttendanceReportPreview", "Exam")';
+        
+        fetch(url)
+            .then(res => res.json())
+            .then(json => {
+                // Populate class dropdown
+                const classSelect = document.getElementById('modalClassFilter');
+                classSelect.innerHTML = '<option value="">Tümü</option>';
+                json.classes.forEach(c => {
+                    classSelect.innerHTML += `<option value="${c}">${c}</option>`;
+                });
+
+                // Populate branch dropdown
+                const branchSelect = document.getElementById('modalBranchFilter');
+                branchSelect.innerHTML = '<option value="">Tümü</option>';
+                json.branches.forEach(b => {
+                    branchSelect.innerHTML += `<option value="${b}">${b}</option>`;
+                });
+
+                // Populate exam dropdown
+                const examSelect = document.getElementById('modalExamFilter');
+                examSelect.innerHTML = '<option value="">Tümü</option>';
+                json.exams.forEach(e => {
+                    examSelect.innerHTML += `<option value="${e.id}">${e.name}</option>`;
+                });
+
+                renderTable(json.data);
+            });
+    }
+
+    function loadReportPreview() {
+        const classFilter = document.getElementById('modalClassFilter').value;
+        const branchFilter = document.getElementById('modalBranchFilter').value;
+        const studentNameFilter = document.getElementById('modalStudentNameFilter').value;
+        const examIdFilter = document.getElementById('modalExamFilter').value;
+        const startDateFilter = document.getElementById('modalStartDate').value;
+        const endDateFilter = document.getElementById('modalEndDate').value;
+
+        const params = new URLSearchParams({
+            classFilter,
+            branchFilter,
+            studentNameFilter,
+            examIdFilter,
+            startDateFilter,
+            endDateFilter
+        });
+
+        const url = '@Url.Action("AttendanceReportPreview", "Exam")?' + params.toString();
+        
+        fetch(url)
+            .then(res => res.json())
+            .then(json => {
+                renderTable(json.data);
+            });
+    }
+
+    let currentSortCol = '';
+    let isAscending = true;
+
+    function sortTable(columnName) {
+        if (currentSortCol === columnName) {
+            isAscending = !isAscending;
+        } else {
+            currentSortCol = columnName;
+            isAscending = true;
+        }
+
+        reportData.sort((a, b) => {
+            let valA = a[columnName] !== undefined && a[columnName] !== null ? a[columnName] : '';
+            let valB = b[columnName] !== undefined && b[columnName] !== null ? b[columnName] : '';
+
+            if (typeof valA === 'string') {
+                return isAscending 
+                    ? valA.localeCompare(valB, 'tr') 
+                    : valB.localeCompare(valA, 'tr');
+            }
+            return isAscending ? (valA - valB) : (valB - valA);
+        });
+
+        renderTable(reportData, false);
+    }
+
+    function renderTable(data, resetSelection = true) {
+        reportData = data;
+        if (resetSelection) {
+            selectedStudentNos.clear();
+        }
+        
+        const body = document.getElementById('modalReportBody');
+        const summary = document.getElementById('modalReportSummary');
+        
+        if (data.length === 0) {
+            body.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-muted">Kayıt bulunamadı.</td></tr>`;
+            summary.textContent = "Toplam 0 kayıt listelendi.";
+            return;
+        }
+
+        let html = '';
+        data.forEach(item => {
+            if (resetSelection) {
+                selectedStudentNos.add(item.ogrenciNo); // Pre-check all initially
+            }
+            
+            const isChecked = selectedStudentNos.has(item.ogrenciNo) ? 'checked' : '';
+            
+            let statusBadge = '';
+            if (item.status === 'Var') {
+                statusBadge = '<span class="badge bg-success-subtle text-success">Var</span>';
+            } else if (item.status === 'Yok') {
+                statusBadge = '<span class="badge bg-danger-subtle text-danger">Yok</span>';
+            } else if (item.status === 'Geç') {
+                statusBadge = '<span class="badge bg-warning-subtle text-warning">Geç</span>';
+            } else {
+                statusBadge = '<span class="badge bg-secondary-subtle text-secondary">' + item.status + '</span>';
+            }
+
+            html += `
+                <tr>
+                    <td>
+                        <input type="checkbox" class="form-check-input student-chk" value="${item.ogrenciNo}" ${isChecked} onchange="onStudentCheckboxChange(this)" />
+                    </td>
+                    <td class="font-monospace fw-semibold">${item.ogrenciNo}</td>
+                    <td>${item.adSoyad}</td>
+                    <td>${item.sinifDuzeyi} / ${item.sube}</td>
+                    <td>${item.examName}</td>
+                    <td>${item.examDate}</td>
+                    <td>${item.yoklamaNo > 0 ? item.yoklamaNo : '—'}</td>
+                    <td>${statusBadge}</td>
+                </tr>
+            `;
+        });
+
+        body.innerHTML = html;
+        document.getElementById('modalSelectAll').checked = true;
+        summary.textContent = `Toplam ${data.length} kayıt listelendi.`;
+    }
+
+    function toggleSelectAll(master) {
+        const chks = document.querySelectorAll('.student-chk');
+        chks.forEach(chk => {
+            chk.checked = master.checked;
+            if (master.checked) {
+                selectedStudentNos.add(chk.value);
+            } else {
+                selectedStudentNos.delete(chk.value);
+            }
+        });
+    }
+
+    function onStudentCheckboxChange(chk) {
+        if (chk.checked) {
+            selectedStudentNos.add(chk.value);
+        } else {
+            selectedStudentNos.delete(chk.value);
+            document.getElementById('modalSelectAll').checked = false;
+        }
+    }
+
+    document.getElementById('exportReportForm').addEventListener('submit', function (e) {
+        document.getElementById('exportClassFilter').value = document.getElementById('modalClassFilter').value;
+        document.getElementById('exportBranchFilter').value = document.getElementById('modalBranchFilter').value;
+        document.getElementById('exportStudentNameFilter').value = document.getElementById('modalStudentNameFilter').value;
+        document.getElementById('exportExamIdFilter').value = document.getElementById('modalExamFilter').value;
+        document.getElementById('exportStartDateFilter').value = document.getElementById('modalStartDate').value;
+        document.getElementById('exportEndDateFilter').value = document.getElementById('modalEndDate').value;
+
+        const container = document.getElementById('exportSelectedContainer');
+        container.innerHTML = ''; // Clear old fields
+
+        selectedStudentNos.forEach(no => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selectedOgrenciNos';
+            input.value = no;
+            container.appendChild(input);
+        });
+    });
+</script>

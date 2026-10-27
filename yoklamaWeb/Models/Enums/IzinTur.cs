@@ -5,6 +5,7 @@ namespace yoklamaWeb.Models.Enums
         Hastalik = 0,
         AileZiyareti = 1,
         ResmiIs = 2,
-        Diger = 3
+        Diger = 3,
+        GecGelme = 4
     }
 }

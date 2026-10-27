@@ -71,7 +71,8 @@ namespace yoklamaWeb.Controllers
                 {
                     Id = n.Id,
                     PansiyonGorevlisiId = n.PansiyonGorevlisiId,
-                    GorevlisiAdSoyad = n.PansiyonGorevlisi.AdSoyad,
+                    GorevliAdSoyad = n.PansiyonGorevlisi.AdSoyad,
+                    GorevliKullaniciAdi = n.PansiyonGorevlisi.KullaniciAdi,
                     BaslangicTarihi = n.BaslangicTarihi,
                     BitisTarihi = n.BitisTarihi,
                     Gun = n.Gun,
@@ -84,12 +85,102 @@ namespace yoklamaWeb.Controllers
             ViewBag.Gorevlisiler = await _context.PansiyonGorevlileri
                 .Where(g => g.Aktif)
                 .OrderBy(g => g.AdSoyad)
-                .Select(g => new SelectListItem { Value = g.Id.ToString(), Text = g.AdSoyad })
+                .Select(g => new SelectListItem { Value = g.Id.ToString(), Text = $"{g.AdSoyad} ({g.KullaniciAdi})" })
                 .ToListAsync();
 
             ViewBag.Gunler = GetGunlerSelectList();
 
             return View(viewModel);
+        }
+
+        // GET: NobetciPlan/ExportToExcel
+        public async Task<IActionResult> ExportToExcel(NobetciPlanFilterViewModel filter)
+        {
+            var query = _context.NobetciPlanlar
+                .Include(n => n.PansiyonGorevlisi)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(filter.Arama))
+            {
+                query = query.Where(n => n.PansiyonGorevlisi.AdSoyad.Contains(filter.Arama)
+                    || n.PansiyonGorevlisi.KullaniciAdi.Contains(filter.Arama)
+                    || n.Aciklama.Contains(filter.Arama));
+            }
+
+            if (filter.GorevlisiId.HasValue)
+            {
+                query = query.Where(n => n.PansiyonGorevlisiId == filter.GorevlisiId.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.Gun))
+            {
+                query = query.Where(n => n.Gun == filter.Gun);
+            }
+
+            if (filter.BaslangicTarihi.HasValue)
+            {
+                query = query.Where(n => n.BitisTarihi >= filter.BaslangicTarihi.Value);
+            }
+
+            if (filter.BitisTarihi.HasValue)
+            {
+                query = query.Where(n => n.BaslangicTarihi <= filter.BitisTarihi.Value);
+            }
+
+            if (filter.SadeceAktif)
+            {
+                var today = DateTime.Today;
+                query = query.Where(n => n.BaslangicTarihi <= today && n.BitisTarihi >= today);
+            }
+
+            var planlar = await query
+                .OrderBy(n => n.BaslangicTarihi)
+                .ThenBy(n => n.Gun)
+                .ToListAsync();
+
+            using (var workbook = new ClosedXML.Excel.XLWorkbook())
+            {
+                var worksheet = workbook.Worksheets.Add("Nöbetçi Planları");
+
+                // Başlık Satırı
+                worksheet.Cell(1, 1).Value = "Nöbetçi Görevli";
+                worksheet.Cell(1, 2).Value = "Başlangıç Tarihi";
+                worksheet.Cell(1, 3).Value = "Bitiş Tarihi";
+                worksheet.Cell(1, 4).Value = "Gün";
+                worksheet.Cell(1, 5).Value = "Açıklama";
+                worksheet.Cell(1, 6).Value = "Durum";
+
+                var headerRow = worksheet.Row(1);
+                headerRow.Style.Font.Bold = true;
+                headerRow.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.FromHtml("#0d6efd");
+                headerRow.Style.Font.FontColor = ClosedXML.Excel.XLColor.White;
+
+                int row = 2;
+                var today = DateTime.Today;
+                foreach (var p in planlar)
+                {
+                    worksheet.Cell(row, 1).Value = p.PansiyonGorevlisi?.AdSoyad ?? "-";
+                    worksheet.Cell(row, 2).Value = p.BaslangicTarihi.ToString("dd.MM.yyyy");
+                    worksheet.Cell(row, 3).Value = p.BitisTarihi.ToString("dd.MM.yyyy");
+                    worksheet.Cell(row, 4).Value = p.Gun ?? "-";
+                    worksheet.Cell(row, 5).Value = p.Aciklama ?? "-";
+
+                    bool isAktif = p.BaslangicTarihi <= today && p.BitisTarihi >= today;
+                    worksheet.Cell(row, 6).Value = isAktif ? "Aktif" : (p.BitisTarihi < today ? "Tamamlandı" : "Gelecek");
+
+                    row++;
+                }
+
+                worksheet.Columns().AdjustToContents();
+
+                using (var stream = new System.IO.MemoryStream())
+                {
+                    workbook.SaveAs(stream);
+                    var content = stream.ToArray();
+                    string fileName = $"Nobetci_Planlari_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+                    return File(content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+                }
+            }
         }
 
         // GET: NobetciPlan/Details/5
@@ -226,6 +317,22 @@ namespace yoklamaWeb.Controllers
             {
                 return NotFound();
             }
+
+            viewModel.BitisTarihi = viewModel.BaslangicTarihi;
+            viewModel.Gun = viewModel.BaslangicTarihi.DayOfWeek switch
+            {
+                DayOfWeek.Monday => "Pazartesi",
+                DayOfWeek.Tuesday => "Salı",
+                DayOfWeek.Wednesday => "Çarşamba",
+                DayOfWeek.Thursday => "Perşembe",
+                DayOfWeek.Friday => "Cuma",
+                DayOfWeek.Saturday => "Cumartesi",
+                DayOfWeek.Sunday => "Pazar",
+                _ => ""
+            };
+
+            ModelState.Remove("BitisTarihi");
+            ModelState.Remove("Gun");
 
             if (ModelState.IsValid)
             {
@@ -391,8 +498,8 @@ namespace yoklamaWeb.Controllers
             };
 
             // Set OlusturanId if user is authenticated and matches a proctor
-            var username = User.Identity?.Name;
-            var olusturan = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi == username);
+            var username = User.Identity?.Name ?? "";
+            var olusturan = await _context.PansiyonGorevlileri.FirstOrDefaultAsync(g => g.KullaniciAdi.ToLower() == username.ToLower());
             if (olusturan != null)
             {
                 plan.OlusturanId = olusturan.Id;

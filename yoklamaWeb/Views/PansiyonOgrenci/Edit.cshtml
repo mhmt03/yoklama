@@ -62,12 +62,21 @@
                     </div>
                 </div>
 
-                <div class="mb-3">
-                    <label asp-for="OdaId" class="form-label fw-bold">Oda</label>
-                    <select asp-for="OdaId" asp-items="ViewBag.Odalar" class="form-select">
-                        <option value="">-- Oda Atanmasın (Boşta kalsın) --</option>
-                    </select>
-                    <span asp-validation-for="OdaId" class="text-danger"></span>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="OdaId" class="form-label fw-bold">Oda</label>
+                        <select asp-for="OdaId" asp-items="ViewBag.Odalar" class="form-select">
+                            <option value="">-- Oda Atanmasın --</option>
+                        </select>
+                        <span asp-validation-for="OdaId" class="text-danger"></span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label asp-for="EtutId" class="form-label fw-bold">Etüt Salonu</label>
+                        <select asp-for="EtutId" asp-items="ViewBag.Etutler" class="form-select">
+                            <option value="">-- Etüt Atanmasın --</option>
+                        </select>
+                        <span asp-validation-for="EtutId" class="text-danger"></span>
+                    </div>
                 </div>
 
                 <div class="mb-3">

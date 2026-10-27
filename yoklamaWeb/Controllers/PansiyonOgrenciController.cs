@@ -26,6 +26,7 @@ namespace yoklamaWeb.Controllers
         {
             var query = _context.PansiyonOgrenciler
                 .Include(o => o.Oda)
+                .Include(o => o.Etut)
                 .AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(filter.Arama))
@@ -39,6 +40,11 @@ namespace yoklamaWeb.Controllers
             if (filter.OdaId.HasValue)
             {
                 query = query.Where(o => o.OdaId == filter.OdaId.Value);
+            }
+
+            if (filter.EtutId.HasValue)
+            {
+                query = query.Where(o => o.EtutId == filter.EtutId.Value);
             }
 
             if (!string.IsNullOrWhiteSpace(filter.SinifDuzeyi))
@@ -74,6 +80,8 @@ namespace yoklamaWeb.Controllers
                     Adres = o.Adres,
                     OdaId = o.OdaId,
                     OdaNo = o.Oda?.OdaNo,
+                    EtutId = o.EtutId,
+                    EtutAdi = o.Etut?.EtutAdi,
                     Aktif = o.Aktif,
                     RowVersion = o.RowVersion
                 }).ToList(),
@@ -87,6 +95,8 @@ namespace yoklamaWeb.Controllers
                 .ThenBy(o => o.OdaNo)
                 .Select(o => new SelectListItem { Value = o.Id.ToString(), Text = $"{o.OdaNo} (Kat {o.Kat})" })
                 .ToListAsync();
+
+            ViewBag.Etutler = await GetEtutlerSelectListAsync();
 
             ViewBag.SinifDuzeyleri = Enum.GetValues(typeof(SinifDuzeyi))
                 .Cast<SinifDuzeyi>()
@@ -166,6 +176,7 @@ namespace yoklamaWeb.Controllers
         {
             var viewModel = new PansiyonOgrenciCreateViewModel();
             ViewBag.Odalar = await GetOdalarSelectListAsync();
+            ViewBag.Etutler = await GetEtutlerSelectListAsync();
             return View(viewModel);
         }
 
@@ -181,6 +192,7 @@ namespace yoklamaWeb.Controllers
                 {
                     ModelState.AddModelError("OgrenciNo", "Bu öğrenci numarası zaten kayıtlı.");
                     ViewBag.Odalar = await GetOdalarSelectListAsync();
+                    ViewBag.Etutler = await GetEtutlerSelectListAsync();
                     return View(viewModel);
                 }
 
@@ -194,6 +206,7 @@ namespace yoklamaWeb.Controllers
                     VeliTelefon = viewModel.VeliTelefon,
                     Adres = viewModel.Adres,
                     OdaId = viewModel.OdaId,
+                    EtutId = viewModel.EtutId,
                     Aktif = viewModel.Aktif,
                     Sifre = viewModel.Sifre ?? ""
                 };
@@ -204,6 +217,7 @@ namespace yoklamaWeb.Controllers
                 return RedirectToAction(nameof(Index));
             }
             ViewBag.Odalar = await GetOdalarSelectListAsync();
+            ViewBag.Etutler = await GetEtutlerSelectListAsync();
             return View(viewModel);
         }
 
@@ -232,12 +246,14 @@ namespace yoklamaWeb.Controllers
                 VeliTelefon = ogrenci.VeliTelefon,
                 Adres = ogrenci.Adres,
                 OdaId = ogrenci.OdaId,
+                EtutId = ogrenci.EtutId,
                 Aktif = ogrenci.Aktif,
                 Sifre = ogrenci.Sifre,
                 RowVersion = ogrenci.RowVersion
             };
 
             ViewBag.Odalar = await GetOdalarSelectListAsync();
+            ViewBag.Etutler = await GetEtutlerSelectListAsync();
             return View(viewModel);
         }
 
@@ -266,6 +282,7 @@ namespace yoklamaWeb.Controllers
                     {
                         ModelState.AddModelError(string.Empty, "Bu kayıt başka bir kullanıcı tarafından güncellendi. Lütfen sayfayı yenileyip tekrar deneyin.");
                         ViewBag.Odalar = await GetOdalarSelectListAsync();
+                        ViewBag.Etutler = await GetEtutlerSelectListAsync();
                         return View(viewModel);
                     }
 
@@ -274,6 +291,7 @@ namespace yoklamaWeb.Controllers
                     {
                         ModelState.AddModelError("OgrenciNo", "Bu öğrenci numarası zaten kayıtlı.");
                         ViewBag.Odalar = await GetOdalarSelectListAsync();
+                        ViewBag.Etutler = await GetEtutlerSelectListAsync();
                         return View(viewModel);
                     }
 
@@ -285,6 +303,7 @@ namespace yoklamaWeb.Controllers
                     ogrenci.VeliTelefon = viewModel.VeliTelefon;
                     ogrenci.Adres = viewModel.Adres;
                     ogrenci.OdaId = viewModel.OdaId;
+                    ogrenci.EtutId = viewModel.EtutId;
                     ogrenci.Aktif = viewModel.Aktif;
 
                     if (!string.IsNullOrWhiteSpace(viewModel.Sifre))
@@ -310,6 +329,7 @@ namespace yoklamaWeb.Controllers
                 }
             }
             ViewBag.Odalar = await GetOdalarSelectListAsync();
+            ViewBag.Etutler = await GetEtutlerSelectListAsync();
             return View(viewModel);
         }
 
@@ -535,6 +555,15 @@ namespace yoklamaWeb.Controllers
                 .OrderBy(o => o.Kat)
                 .ThenBy(o => o.OdaNo)
                 .Select(o => new SelectListItem { Value = o.Id.ToString(), Text = $"{o.OdaNo} (Kat {o.Kat}, Kap.{o.Kapasite})" })
+                .ToListAsync();
+        }
+
+        private async Task<List<SelectListItem>> GetEtutlerSelectListAsync()
+        {
+            return await _context.Etutler
+                .Where(e => e.Aktif)
+                .OrderBy(e => e.EtutAdi)
+                .Select(e => new SelectListItem { Value = e.Id.ToString(), Text = $"{e.EtutAdi} (Kapasite: {e.Kapasite})" })
                 .ToListAsync();
         }
 

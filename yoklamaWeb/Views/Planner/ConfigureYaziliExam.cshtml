@@ -1,0 +1,597 @@
+@{
+    ViewData["Title"] = "Yazılı Oturma Planı Ayarları";
+    Layout = "_Layout";
+    var exam = (yoklamaWeb.Models.PlannerExam)ViewBag.Exam;
+    var rooms = (List<yoklamaWeb.Models.PlannerRoom>)ViewBag.Rooms;
+    var currentRooms = (List<int>)ViewBag.CurrentRooms;
+    var branches = (List<yoklamaWeb.Controllers.YaziliBranchViewModel>)ViewBag.Branches;
+    var hasSeating = (bool)ViewBag.HasSeating;
+}
+
+<div class="container mt-4 mb-5">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <a asp-action="YaziliExams" class="btn btn-sm btn-outline-secondary mb-2">
+                <i class="bi bi-arrow-left me-1"></i> Yazılı Planları
+            </a>
+            <h2 class="fw-bold mb-1" style="font-family: 'Outfit', sans-serif; color: #1e293b;">Yazılı Yerleşim Ayarları</h2>
+            <div class="text-muted">
+                <strong>@exam.Name</strong> — 
+                <span><i class="bi bi-calendar3 me-1"></i>@exam.ExamDate.ToString("dd MMMM yyyy dddd", new System.Globalization.CultureInfo("tr-TR"))</span> — 
+                <span><i class="bi bi-clock me-1"></i>Saat: <strong>@(string.IsNullOrEmpty(exam.StartTime) ? "-" : exam.StartTime)</strong> (24s)</span>
+            </div>
+        </div>
+        @if (hasSeating)
+        {
+            <div class="d-flex gap-2">
+                <a asp-action="SeatingDetails" asp-route-id="@exam.Id" class="btn btn-outline-success">
+                    <i class="bi bi-table me-1"></i> Mevcut Oturma Planı & Excel
+                </a>
+            </div>
+        }
+    </div>
+
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show shadow-sm border-0" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Kapat"></button>
+        </div>
+    }
+
+    <!-- Capacity Bar Sticky or Top Summary -->
+    <div class="card border-0 shadow-sm mb-4 bg-white sticky-top" style="top: 15px; z-index: 1000; border-radius: 12px; border: 1px solid #e2e8f0 !important;">
+        <div class="card-body py-3 px-4">
+            <div class="row align-items-center g-3">
+                <div class="col-md-4">
+                    <span class="text-muted small d-block">Seçilen Toplam Öğrenci</span>
+                    <span class="fs-4 fw-bold text-primary" id="selectedStudentCount">0</span>
+                    <span class="text-muted small">öğrenci sınava girecek</span>
+                </div>
+                <div class="col-md-4">
+                    <span class="text-muted small d-block">Seçilen Salon Kapasitesi</span>
+                    <span class="fs-4 fw-bold text-success" id="selectedRoomCapacity">0</span>
+                    <span class="text-muted small" id="selectedRoomCountText">0 salon seçildi</span>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <span id="capacityStatusBadge" class="badge bg-secondary px-3 py-2 fs-6">Seçim Yapınız</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form asp-action="PlaceYaziliStudents" method="post" id="placementForm" onsubmit="return validateYaziliSelection();">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="examId" value="@exam.Id" />
+
+        <!-- 3-Column Settings Card -->
+        <div class="row g-3 mb-4">
+            <!-- 1. Katılım Kriteri -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0 h-100 rounded-3">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="badge bg-primary-subtle text-primary p-2 rounded-circle me-2"><i class="bi bi-funnel-fill"></i></span>
+                            <h6 class="fw-bold mb-0 text-dark">1. Katılım Kriteri</h6>
+                        </div>
+                        <p class="text-muted small mb-3">Sınava kimler dahil edilsin?</p>
+                        
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="participationFilter" id="filterTumu" value="tumu" checked onchange="updateSummary()" />
+                            <label class="form-check-label fw-semibold" for="filterTumu">
+                                Tüm Şube Öğrencileri
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="participationFilter" id="filterKatilacaklar" value="sadeceKatilacaklar" onchange="updateSummary()" />
+                            <label class="form-check-label fw-semibold text-danger" for="filterKatilacaklar">
+                                Sadece Sınava Katılacaklar (Evet)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Yerleşim / Dağıtım Türü -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0 h-100 rounded-3">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="badge bg-success-subtle text-success p-2 rounded-circle me-2"><i class="bi bi-distribute-horizontal"></i></span>
+                            <h6 class="fw-bold mb-0 text-dark">2. Salon Dağıtım Türü</h6>
+                        </div>
+                        <p class="text-muted small mb-3">Salonlar nasıl doldurulsun?</p>
+
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="placementType" id="typeHomogeneous" value="homogeneous" checked />
+                            <label class="form-check-label fw-semibold text-success" for="typeHomogeneous">
+                                Homojen Dağıt (Önerilen)
+                            </label>
+                            <div class="text-muted small ms-4">Tüm salonlara kapasite oranında eşit paylaştırır.</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="placementType" id="typeSequential" value="sequential" />
+                            <label class="form-check-label fw-semibold" for="typeSequential">
+                                Sırayla Doldurarak Git
+                            </label>
+                            <div class="text-muted small ms-4">1. salon dolmadan 2. salona geçmez.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Kelebek Sistemi -->
+            <div class="col-lg-4">
+                <div class="card shadow-sm border-0 h-100 rounded-3">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="badge bg-danger-subtle text-danger p-2 rounded-circle me-2"><i class="bi bi-shuffle"></i></span>
+                            <h6 class="fw-bold mb-0 text-dark">3. Kelebek Dağıtım</h6>
+                        </div>
+                        <p class="text-muted small mb-3">Farklı ders yazılıları ardışık oturtulsun mu?</p>
+
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="isButterfly" id="butterflyYes" value="true" checked />
+                            <label class="form-check-label fw-semibold text-danger" for="butterflyYes">
+                                Kelebek Sistemi Uygula (Aktif)
+                            </label>
+                            <div class="text-muted small ms-4">Aynı ders/sınıf öğrencilerini peş peşe oturtmaz.</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="isButterfly" id="butterflyNo" value="false" />
+                            <label class="form-check-label fw-semibold" for="butterflyNo">
+                                Normal Rastgele Dağıt
+                            </label>
+                            <div class="text-muted small ms-4">Ders ayrımı gözetmeksizin rastgele yerleştirir.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Datalist for common high school subjects -->
+        <datalist id="commonSubjects">
+            <option value="Matematik"></option>
+            <option value="Fizik"></option>
+            <option value="Kimya"></option>
+            <option value="Biyoloji"></option>
+            <option value="Türk Dili ve Edebiyatı"></option>
+            <option value="Tarih"></option>
+            <option value="Coğrafya"></option>
+            <option value="Felsefe"></option>
+            <option value="İngilizce"></option>
+            <option value="Almanca"></option>
+            <option value="Din Kültürü ve Ahlak Bilgisi"></option>
+            <option value="Sağlık Bilgisi ve Trafik"></option>
+            <option value="Temel Matematik"></option>
+            <option value="İleri Matematik"></option>
+        </datalist>
+
+        <div class="row g-4">
+            <!-- Left Side: Şubeler ve Yazılı Dersi Belirleme -->
+            <div class="col-xl-7 col-lg-7">
+                <div class="card shadow-sm border-0 rounded-3 h-100">
+                    <div class="card-header bg-dark text-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <h5 class="mb-0 fw-bold"><i class="bi bi-people-fill me-2 text-warning"></i>4. Sınava Girecek Şubeler & Yazılı Dersleri</h5>
+                            <span class="small text-white-50">Şubeyi seçip sağındaki kutucuğa gireceği yazılı dersini yazınız.</span>
+                        </div>
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="selectAllBranches" onclick="toggleAllBranches(this)" />
+                            <label class="form-check-label text-white small fw-bold" for="selectAllBranches">Tümünü Seç</label>
+                        </div>
+                    </div>
+
+                    <!-- Quick Lesson Fill Bar (Geliştirilmiş Sınıf Bazlı Hızlı Atama) -->
+                    <div class="bg-light p-3 border-bottom">
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                            <span class="small fw-bold text-dark"><i class="bi bi-filter-circle-fill text-primary me-1"></i>Sınıf Düzeyi Seç:</span>
+                            <div class="btn-group btn-group-sm" id="gradeSelectGroup">
+                                <button type="button" class="btn btn-outline-primary fw-bold px-3" onclick="selectGradeOnly('9')">9'lar</button>
+                                <button type="button" class="btn btn-outline-primary fw-bold px-3" onclick="selectGradeOnly('10')">10'lar</button>
+                                <button type="button" class="btn btn-outline-primary fw-bold px-3" onclick="selectGradeOnly('11')">11'ler</button>
+                                <button type="button" class="btn btn-outline-primary fw-bold px-3" onclick="selectGradeOnly('12')">12'ler</button>
+                            </div>
+                            <div class="btn-group btn-group-sm ms-auto">
+                                <button type="button" class="btn btn-outline-success" onclick="selectBranchesWithLessons()" title="Ders adı yazılmış tüm şubeleri seçer">
+                                    <i class="bi bi-check2-all me-1"></i>Dersi Olanları Seç
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="toggleAllBranchesDirect(true)">Tümünü Seç</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="toggleAllBranchesDirect(false)">Temizle</button>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2">
+                            <span class="small fw-bold text-dark"><i class="bi bi-lightning-charge-fill text-warning me-1"></i>Ders Adı:</span>
+                            <div class="input-group input-group-sm" style="max-width: 320px;">
+                                <input type="text" id="quickLessonInput" class="form-control" placeholder="Ders adı yazın (Örn: Matematik)" list="commonSubjects" onkeydown="if(event.key==='Enter'){event.preventDefault(); applyLessonToSelected();}" />
+                                <button type="button" class="btn btn-primary fw-bold px-3" onclick="applyLessonToSelected()" title="İşaretli şubelere bu dersi atar">
+                                    <i class="bi bi-check-lg me-1"></i>Seçilenlere Uygula
+                                </button>
+                            </div>
+                            <span class="small text-muted" id="selectedBranchesHelpText">Sınıf düzeyine tıklayın, ders adını yazıp 'Seçilenlere Uygula' deyin.</span>
+                        </div>
+                    </div>
+
+                    <div class="card-body p-0">
+                        <div class="table-responsive" style="max-height: 540px; overflow-y: auto;">
+                            <table class="table table-hover align-middle mb-0" id="branchesTable">
+                                <thead class="table-light sticky-top small text-muted text-uppercase">
+                                    <tr>
+                                        <th style="width: 45px;" class="text-center">#</th>
+                                        <th style="width: 120px;">Sınıf/Şube</th>
+                                        <th style="width: 90px;" class="text-center">Öğrenci</th>
+                                        <th style="width: 110px;">Alan(lar)</th>
+                                        <th>Gireceği Yazılı Dersi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (int i = 0; i < branches.Count; i++)
+                                    {
+                                        var b = branches[i];
+                                        <tr class="branch-row" data-grade="@b.SinifDuzeyi">
+                                            <td class="text-center">
+                                                <input class="form-check-input branch-cb" type="checkbox" 
+                                                       name="selectedBranches" 
+                                                       value="@b.BranchKey" 
+                                                       data-total="@b.StudentCount" 
+                                                       data-participating="@b.ParticipatingCount"
+                                                       data-branch="@b.BranchKey"
+                                                       id="cb_branch_@i"
+                                                       onchange="updateSummary()" />
+                                            </td>
+                                            <td>
+                                                <label for="cb_branch_@i" class="fw-bold mb-0 text-dark cursor-pointer">
+                                                    @b.SinifDuzeyi-@b.Sube
+                                                </label>
+                                            </td>
+                                            <td class="text-center">
+                                                <span class="badge bg-light text-dark border branch-count-badge" 
+                                                      data-total="@b.StudentCount" 
+                                                      data-part="@b.ParticipatingCount">
+                                                    @b.StudentCount
+                                                </span>
+                                            </td>
+                                            <td>
+                                                @if (b.Alans != null && b.Alans.Any())
+                                                {
+                                                    foreach (var alan in b.Alans)
+                                                    {
+                                                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle small me-1">@alan</span>
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted small">-</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <input type="hidden" name="branchKeys" value="@b.BranchKey" />
+                                                <input type="text" 
+                                                       name="branchLessons" 
+                                                       id="lesson_@b.BranchKey"
+                                                       class="form-control form-control-sm branch-lesson-input" 
+                                                       placeholder="Yazılı Dersi (Örn: Matematik)" 
+                                                       list="commonSubjects" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: Salon Seçimi -->
+            <div class="col-xl-5 col-lg-5">
+                <div class="card shadow-sm border-0 rounded-3 h-100">
+                    <div class="card-header bg-dark text-white py-3 d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0 fw-bold"><i class="bi bi-door-open-fill me-2 text-info"></i>5. Kullanılacak Salonlar</h5>
+                            <span class="small text-white-50">Sınav yapılacak salonları seçiniz.</span>
+                        </div>
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="selectAllRooms" onclick="toggleAllRooms(this)" />
+                            <label class="form-check-label text-white small fw-bold" for="selectAllRooms">Tümünü Seç</label>
+                        </div>
+                    </div>
+
+                    <div class="card-body p-0">
+                        @if (!rooms.Any())
+                        {
+                            <div class="p-4 text-center">
+                                <p class="text-muted mb-2">Tanımlı salon bulunamadı.</p>
+                                <a asp-action="CreateRoom" class="btn btn-sm btn-outline-primary">+ Yeni Salon Tanımla</a>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="table-responsive" style="max-height: 595px; overflow-y: auto;">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-light sticky-top small text-muted text-uppercase">
+                                        <tr>
+                                            <th style="width: 45px;" class="text-center">#</th>
+                                            <th>Salon Adı</th>
+                                            <th>Grup / Kat</th>
+                                            <th class="text-end pe-3" style="width: 100px;">Kapasite</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var r in rooms)
+                                        {
+                                            var isChecked = currentRooms.Contains(r.Id);
+                                            <tr>
+                                                <td class="text-center">
+                                                    <input class="form-check-input room-cb" type="checkbox" 
+                                                           name="selectedRoomIds" 
+                                                           value="@r.Id" 
+                                                           data-cap="@r.Capacity" 
+                                                           id="room_@r.Id" 
+                                                           @(isChecked ? "checked" : "")
+                                                           onchange="updateSummary()" />
+                                                </td>
+                                                <td>
+                                                    <label for="room_@r.Id" class="fw-semibold text-dark mb-0 cursor-pointer">
+                                                        @r.RoomName
+                                                    </label>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-light text-secondary border small">
+                                                        @(string.IsNullOrEmpty(r.RoomGroup) ? "Genel" : r.RoomGroup)
+                                                    </span>
+                                                </td>
+                                                <td class="text-end pe-3">
+                                                    <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle fs-6 px-2">
+                                                        @r.Capacity
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Submit Bar -->
+        <div class="card shadow-sm border-0 rounded-3 mt-4 bg-light">
+            <div class="card-body p-4 d-flex flex-column flex-md-row justify-content-between align-items-center gap-3">
+                <div>
+                    <h6 class="fw-bold mb-1 text-dark"><i class="bi bi-magic me-2 text-primary"></i>Yerleşimi Başlatmaya Hazır Mısınız?</h6>
+                    <span class="small text-muted">Öğrenciler belirlediğiniz ders ve salon kurallarına göre dağıtılacak, yoklama ve bilgilendirme listeleri hazırlanacaktır.</span>
+                </div>
+                <div class="d-flex gap-2">
+                    <a asp-action="YaziliExams" class="btn btn-outline-secondary px-3">İptal</a>
+                    <button type="submit" class="btn btn-success btn-lg px-4 shadow" id="btnSubmit">
+                        <i class="bi bi-play-circle-fill me-2"></i>Yazılı Oturma Planını Oluştur
+                    </button>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+<script>
+    function updateSummary() {
+        const isSadeceKatilacak = document.getElementById("filterKatilacaklar").checked;
+
+        // Calculate student count
+        let totalStudents = 0;
+        const branchCheckboxes = document.querySelectorAll(".branch-cb");
+        branchCheckboxes.forEach(cb => {
+            const row = cb.closest("tr");
+            const countBadge = row.querySelector(".branch-count-badge");
+            const total = parseInt(cb.getAttribute("data-total")) || 0;
+            const participating = parseInt(cb.getAttribute("data-participating")) || 0;
+
+            const activeCount = isSadeceKatilacak ? participating : total;
+            countBadge.innerText = activeCount;
+
+            if (cb.checked) {
+                totalStudents += activeCount;
+            }
+        });
+        document.getElementById("selectedStudentCount").innerText = totalStudents;
+
+        // Calculate room capacity
+        let totalCapacity = 0;
+        let selectedRoomCount = 0;
+        const roomCheckboxes = document.querySelectorAll(".room-cb");
+        roomCheckboxes.forEach(cb => {
+            if (cb.checked) {
+                totalCapacity += parseInt(cb.getAttribute("data-cap")) || 0;
+                selectedRoomCount++;
+            }
+        });
+        document.getElementById("selectedRoomCapacity").innerText = totalCapacity;
+        document.getElementById("selectedRoomCountText").innerText = selectedRoomCount + " salon seçildi";
+
+        // Status Badge
+        const badge = document.getElementById("capacityStatusBadge");
+        const submitBtn = document.getElementById("btnSubmit");
+
+        if (totalStudents === 0 && totalCapacity === 0) {
+            badge.className = "badge bg-secondary px-3 py-2 fs-6";
+            badge.innerText = "Seçim Yapınız";
+            submitBtn.disabled = false;
+        } else if (totalStudents === 0) {
+            badge.className = "badge bg-warning text-dark px-3 py-2 fs-6";
+            badge.innerText = "Şube Seçilmedi";
+            submitBtn.disabled = false;
+        } else if (totalCapacity === 0) {
+            badge.className = "badge bg-warning text-dark px-3 py-2 fs-6";
+            badge.innerText = "Salon Seçilmedi";
+            submitBtn.disabled = false;
+        } else if (totalStudents > totalCapacity) {
+            badge.className = "badge bg-danger px-3 py-2 fs-6";
+            badge.innerText = `Kapasite Yetersiz! (${totalStudents - totalCapacity} Kişi Açık)`;
+            submitBtn.disabled = true;
+        } else {
+            badge.className = "badge bg-success px-3 py-2 fs-6";
+            badge.innerText = `Kapasite Uygun (${totalCapacity - totalStudents} Boş Yer)`;
+            submitBtn.disabled = false;
+        }
+    }
+
+    function selectGradeOnly(grade) {
+        // Otomatik olarak diğer işaretler kaldırılıp sadece seçilen sınıf düzeyindeki şubeler işaretlenir
+        let count = 0;
+        document.querySelectorAll(".branch-cb").forEach(cb => {
+            const tr = cb.closest("tr");
+            const rowGrade = tr.getAttribute("data-grade");
+            if (rowGrade === grade) {
+                cb.checked = true;
+                count++;
+            } else {
+                cb.checked = false;
+            }
+        });
+
+        // Buton aktiflik efekti
+        document.querySelectorAll("#gradeSelectGroup button").forEach(btn => {
+            if (btn.innerText.includes(grade)) {
+                btn.classList.remove("btn-outline-primary");
+                btn.classList.add("btn-primary");
+            } else {
+                btn.classList.remove("btn-primary");
+                btn.classList.add("btn-outline-primary");
+            }
+        });
+
+        updateSummary();
+
+        const help = document.getElementById("selectedBranchesHelpText");
+        if (help) {
+            help.innerHTML = `<strong class="text-primary">${grade}. Sınıflar (${count} şube) işaretlendi.</strong> Şimdi ders adını yazıp <strong>'Seçilenlere Uygula'</strong> butonuna tıklayın.`;
+        }
+
+        const input = document.getElementById("quickLessonInput");
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    }
+
+    function selectBranchesWithLessons() {
+        let count = 0;
+        document.querySelectorAll(".branch-row").forEach(tr => {
+            const input = tr.querySelector(".branch-lesson-input");
+            const cb = tr.querySelector(".branch-cb");
+            if (input && input.value.trim() !== "") {
+                cb.checked = true;
+                count++;
+            }
+        });
+        updateSummary();
+        const help = document.getElementById("selectedBranchesHelpText");
+        if (help) {
+            help.innerHTML = `<strong class="text-success">${count} şube işaretlendi</strong> (Ders adı girilmiş olanlar).`;
+        }
+    }
+
+    function toggleAllBranchesDirect(state) {
+        document.querySelectorAll(".branch-cb").forEach(cb => {
+            cb.checked = state;
+        });
+        const headerCb = document.getElementById("selectAllBranches");
+        if (headerCb) headerCb.checked = state;
+        updateSummary();
+    }
+
+    function toggleAllBranches(source) {
+        document.querySelectorAll(".branch-cb").forEach(cb => {
+            cb.checked = source.checked;
+        });
+        updateSummary();
+    }
+
+    function toggleAllRooms(source) {
+        const checkboxes = document.querySelectorAll(".room-cb");
+        checkboxes.forEach(cb => cb.checked = source.checked);
+        updateSummary();
+    }
+
+    function applyLessonToSelected() {
+        const lesson = document.getElementById("quickLessonInput").value.trim();
+        if (!lesson) {
+            alert("Lütfen atanacak yazılı dersi adını yazın (örn: Matematik).");
+            return;
+        }
+        let appliedCount = 0;
+        document.querySelectorAll(".branch-cb").forEach(cb => {
+            if (cb.checked) {
+                const tr = cb.closest("tr");
+                const input = tr.querySelector(".branch-lesson-input");
+                if (input) {
+                    input.value = lesson;
+                    appliedCount++;
+                }
+            }
+        });
+        if (appliedCount === 0) {
+            alert("Lütfen önce yukarıdan bir sınıf düzeyi (örn: 9'lar) seçin veya listeden şubeleri işaretleyin.");
+        } else {
+            const help = document.getElementById("selectedBranchesHelpText");
+            if (help) {
+                help.innerHTML = `<span class="badge bg-success p-2"><i class="bi bi-check-circle me-1"></i>${appliedCount} şubeye "${lesson}" dersi atandı. Başka bir sınıf seçip ders atamaya devam edebilirsiniz.</span>`;
+            }
+        }
+    }
+
+    function validateYaziliSelection() {
+        // Dersi yazılmış ama şu an işareti kaldırılmış şubeler varsa kullanıcıya sor
+        let branchesWithLessonsNotChecked = [];
+        document.querySelectorAll(".branch-row").forEach(tr => {
+            const input = tr.querySelector(".branch-lesson-input");
+            const cb = tr.querySelector(".branch-cb");
+            if (input && input.value.trim() !== "" && !cb.checked) {
+                branchesWithLessonsNotChecked.push(cb.getAttribute("data-branch") || "");
+            }
+        });
+
+        if (branchesWithLessonsNotChecked.length > 0) {
+            const msg = `Ders adı atanmış fakat şu an işareti kaldırılmış ${branchesWithLessonsNotChecked.length} şube bulunuyor (${branchesWithLessonsNotChecked.slice(0, 4).join(", ")}...).\n\nBu şubeleri de oturma planına dahil etmek istiyor musunuz?`;
+            if (confirm(msg)) {
+                document.querySelectorAll(".branch-row").forEach(tr => {
+                    const input = tr.querySelector(".branch-lesson-input");
+                    const cb = tr.querySelector(".branch-cb");
+                    if (input && input.value.trim() !== "") {
+                        cb.checked = true;
+                    }
+                });
+                updateSummary();
+            }
+        }
+
+        const selectedBranches = document.querySelectorAll(".branch-cb:checked");
+        if (selectedBranches.length === 0) {
+            alert("Lütfen sınava girecek en az bir şube seçin.");
+            return false;
+        }
+
+        const selectedRooms = document.querySelectorAll(".room-cb:checked");
+        if (selectedRooms.length === 0) {
+            alert("Lütfen sınav için en az bir salon seçin.");
+            return false;
+        }
+
+        const totalStudents = parseInt(document.getElementById("selectedStudentCount").innerText) || 0;
+        const totalCapacity = parseInt(document.getElementById("selectedRoomCapacity").innerText) || 0;
+
+        if (totalStudents > totalCapacity) {
+            alert(`Öğrenci sayısı (${totalStudents}) seçilen salonların kapasitesini (${totalCapacity}) aşıyor. Lütfen daha fazla salon seçin.`);
+            return false;
+        }
+
+        return true;
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+        updateSummary();
+    });
+</script>
+}

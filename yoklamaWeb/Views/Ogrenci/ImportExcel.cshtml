@@ -1,69 +1,404 @@
 @model object
 @{
-    ViewData["Title"] = "Öğrenci Excel İçe Aktar";
+    ViewData["Title"] = "Öğrenci Excel İçe Aktar (Önizlemeli)";
 }
-<h2 class="mt-4">Öğrenci Excel İçe Aktar</h2>
-<p>Excel dosyasında aşağıdaki sütun sırası ve formatı beklenmektedir (ilk satır başlık olmalıdır):</p>
-<div class="table-responsive" style="max-width: 600px;">
-    <table class="table table-bordered table-sm text-center mb-3 align-middle bg-white shadow-sm">
-        <thead class="table-dark">
-            <tr>
-                <th>A Sütunu (1)</th>
-                <th>B Sütunu (2)</th>
-                <th>C Sütunu (3)</th>
-                <th>D Sütunu (4)</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr class="table-secondary fw-semibold">
-                <td>OgrenciNo</td>
-                <td>AdSoyad</td>
-                <td>SinifDuzeyi</td>
-                <td>Sube</td>
-            </tr>
-            <tr class="text-muted">
-                <td>123</td>
-                <td>Ahmet Yılmaz</td>
-                <td>9</td>
-                <td>A</td>
-            </tr>
-            <tr class="text-muted">
-                <td>124</td>
-                <td>Zeynep Kaya</td>
-                <td>10</td>
-                <td>B</td>
-            </tr>
-        </tbody>
-    </table>
+
+<div class="container-fluid px-3 py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="fw-bold mb-1"><i class="bi bi-file-earmark-spreadsheet text-success me-2"></i>Öğrenci Excel İçe Aktar</h3>
+            <p class="text-muted mb-0">Excel dosyasını seçtiğinizde veriler önce sayfada listelenir, onayladığınızda sisteme yüklenir.</p>
+        </div>
+        <a asp-action="Index" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Öğrenci Listesine Dön
+        </a>
+    </div>
+
+    <!-- Sütun Sırası Bilgilendirme -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-light py-2">
+            <span class="fw-semibold text-secondary"><i class="bi bi-info-circle me-1"></i>Beklenen Excel Sütun Düzeni</span>
+        </div>
+        <div class="card-body py-2">
+            <p class="small text-muted mb-2">Başlık isimlerinin ne olduğu önemli değildir; sütunların soldan sağa aşağıdaki sırada olması yeterlidir:</p>
+            <div class="table-responsive" style="max-width: 850px;">
+                <table class="table table-bordered table-sm text-center mb-1 align-middle bg-white">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>1. Sütun (A)</th>
+                            <th>2. Sütun (B)</th>
+                            <th>3. Sütun (C)</th>
+                            <th>4. Sütun (D)</th>
+                            <th>5. Sütun (E)</th>
+                            <th>6. Sütun (F)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="table-light fw-semibold">
+                            <td>Öğrenci No</td>
+                            <td>Ad Soyad</td>
+                            <td>Sınıf Düzeyi</td>
+                            <td>Şube</td>
+                            <td>Sınava Katılım</td>
+                            <td>Alanı</td>
+                        </tr>
+                        <tr class="text-muted small">
+                            <td>101</td>
+                            <td>Ahmet Yılmaz</td>
+                            <td>11</td>
+                            <td>A</td>
+                            <td><span class="badge bg-success-subtle text-success">Evet / Hayır</span></td>
+                            <td><span class="badge bg-info-subtle text-dark">SAY / TM / SÖZ / DİL / YOK</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="small text-muted mt-2">
+                * 5. ve 6. sütunlar isteğe bağlıdır. Boş bırakılırsa katılım "Evet", alan ise "YOK" olarak kabul edilir.
+            </div>
+        </div>
+    </div>
+
+    <!-- Dosya Seçim Kartı -->
+    <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body p-4">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold" for="excelFileInput">
+                        <i class="bi bi-upload me-1 text-primary"></i>Excel Dosyası Seçin (.xlsx, .xls)
+                    </label>
+                    <input class="form-control form-control-lg" type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-bold" for="startRowInput">Veri Başlangıç Satırı</label>
+                    <input class="form-control form-control-lg text-center" type="number" id="startRowInput" value="2" min="1" />
+                    <div class="form-text small">Başlık satırı varsa 2, yoksa 1 seçin.</div>
+                </div>
+                <div class="col-md-3">
+                    <button type="button" id="btnParseExcel" class="btn btn-outline-primary btn-lg w-100" style="display: none;">
+                        <i class="bi bi-arrow-repeat me-1"></i>Yeniden Oku
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Önizleme Kartı (Başlangıçta Gizli) -->
+    <div id="previewCard" class="card shadow-sm border-0 mb-4" style="display: none;">
+        <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h5 class="fw-bold mb-0">
+                    <i class="bi bi-table text-primary me-2"></i>Excel Önizleme Listesi
+                </h5>
+                <span id="previewSummary" class="badge bg-primary fs-6 mt-1">0 Öğrenci Bulundu</span>
+                <span id="validSummary" class="badge bg-success fs-6 mt-1 ms-1">0 Geçerli</span>
+                <span id="invalidSummary" class="badge bg-danger fs-6 mt-1 ms-1" style="display:none;">0 Eksik Bilgi</span>
+            </div>
+            <div class="d-flex gap-2">
+                <button type="button" id="btnUploadToSystem" class="btn btn-success btn-lg px-4 fw-bold shadow-sm">
+                    <i class="bi bi-cloud-arrow-up-fill me-2"></i>Sisteme Yükle
+                </button>
+                <button type="button" id="btnClearPreview" class="btn btn-outline-secondary">
+                    Temizle
+                </button>
+            </div>
+        </div>
+
+        <div class="card-body p-0">
+            <!-- Tablo içi hızlı arama -->
+            <div class="p-3 bg-light border-bottom">
+                <div class="input-group" style="max-width: 350px;">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" id="previewFilter" class="form-control" placeholder="Önizlemede ara (No, İsim, Sınıf, Alan)..." />
+                </div>
+            </div>
+
+            <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
+                <table class="table table-hover table-striped mb-0 align-middle text-center" id="studentsTable">
+                    <thead class="table-dark sticky-top">
+                        <tr>
+                            <th style="width: 60px;">Satır</th>
+                            <th>Öğrenci No</th>
+                            <th>Adı Soyadı</th>
+                            <th>Sınıf</th>
+                            <th>Şube</th>
+                            <th>Katılım</th>
+                            <th>Alanı</th>
+                            <th style="width: 120px;">Durum</th>
+                        </tr>
+                    </thead>
+                    <tbody id="previewTableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
-<p>İlk veri satırının başlık satırının hemen altında (varsayılan 2. satır) başladığından emin olun. Farklı bir satırdan başlatmak isterseniz "Başlangıç Satırı" alanını değiştirin.</p>
-@if (ViewData["Errors"] != null)
-{
-    var errors = (IEnumerable<string>)ViewData["Errors"];
-    <div class="alert alert-danger">
-        <strong>İçe aktarma hataları:</strong>
-        <ul>
-            @foreach (var err in errors)
-            {
-                <li>@err</li>
-            }
-        </ul>
-    </div>
-}
-<form asp-action="ImportExcel" method="post" enctype="multipart/form-data" class="needs-validation" novalidate>
-    <div class="mb-3">
-<label class="form-label">Excel Dosyası</label>
-<input class="form-control" type="file" name="excelFile" accept=".xlsx,.xls" required />
-        <span class="text-danger"></span>
-    </div>
-    <div class="mb-3">
-        <label class="form-label" for="startRow">Başlangıç Satırı</label>
-        <input class="form-control" type="number" name="startRow" value="2" min="1" />
-        <div class="form-text">Veri satırının başladığı satır numarası (başlık satırı sonrası).</div>
-    </div>
-    <button type="submit" class="btn btn-primary">İçe Aktar</button>
-    <a asp-action="Index" class="btn btn-secondary ms-2">İptal</a>
-</form>
+
 @section Scripts {
-    <partial name="_ValidationScriptsPartial" />
+    <!-- SheetJS (Excel okuma) kütüphanesi -->
+    <script src="~/lib/xlsx/xlsx.full.min.js"></script>
+    <script>
+        // CDN yedek kontrolü (eğer yerel yüklenemezse CDN'den çeker)
+        if (typeof XLSX === 'undefined') {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"><\/script>');
+        }
+    </script>
+
+    <script>
+        let parsedStudents = [];
+        let rawWorkbook = null;
+
+        const fileInput = document.getElementById('excelFileInput');
+        const startRowInput = document.getElementById('startRowInput');
+        const previewCard = document.getElementById('previewCard');
+        const previewTableBody = document.getElementById('previewTableBody');
+        const btnUploadToSystem = document.getElementById('btnUploadToSystem');
+        const btnClearPreview = document.getElementById('btnClearPreview');
+        const previewFilter = document.getElementById('previewFilter');
+        const previewSummary = document.getElementById('previewSummary');
+        const validSummary = document.getElementById('validSummary');
+        const invalidSummary = document.getElementById('invalidSummary');
+        const btnParseExcel = document.getElementById('btnParseExcel');
+
+        // Dosya seçildiğinde otomatik oku
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) {
+                previewCard.style.display = 'none';
+                btnParseExcel.style.display = 'none';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    rawWorkbook = XLSX.read(data, { type: 'array' });
+                    renderPreview();
+                    btnParseExcel.style.display = 'block';
+                } catch (err) {
+                    alert("Excel dosyası okunurken hata oluştu:\n" + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // Başlangıç satırı değiştiğinde yeniden render et
+        startRowInput.addEventListener('change', function() {
+            if (rawWorkbook) {
+                renderPreview();
+            }
+        });
+
+        btnParseExcel.addEventListener('click', function() {
+            if (rawWorkbook) {
+                renderPreview();
+            }
+        });
+
+        // Excel verisini tabloya dökme
+        function renderPreview() {
+            if (!rawWorkbook || !rawWorkbook.SheetNames.length) return;
+
+            const firstSheetName = rawWorkbook.SheetNames[0];
+            const worksheet = rawWorkbook.Sheets[firstSheetName];
+
+            // 2D dizi olarak al (satırlar ve sütunlar)
+            const rawData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+
+            parsedStudents = [];
+            previewTableBody.innerHTML = '';
+
+            const startRow = Math.max(1, parseInt(startRowInput.value) || 2);
+            let validCount = 0;
+            let invalidCount = 0;
+
+            for (let i = startRow - 1; i < rawData.length; i++) {
+                const row = rawData[i];
+                if (!row || row.length === 0) continue;
+
+                const ogrenciNo = (row[0] !== undefined && row[0] !== null) ? String(row[0]).trim() : '';
+                const adSoyad = (row[1] !== undefined && row[1] !== null) ? String(row[1]).trim() : '';
+                const sinif = (row[2] !== undefined && row[2] !== null) ? String(row[2]).trim() : '';
+                const sube = (row[3] !== undefined && row[3] !== null) ? String(row[3]).trim() : '';
+                const katilimRaw = (row[4] !== undefined && row[4] !== null) ? String(row[4]).trim() : '';
+                const alanRaw = (row[5] !== undefined && row[5] !== null) ? String(row[5]).trim() : '';
+
+                // Bütün sütunlar boşsa atla
+                if (!ogrenciNo && !adSoyad && !sinif && !sube) continue;
+
+                // Başlık satırı kontrolü (Kullanıcı yanlışlıkla startRow=1 seçmişse ve satır başlık ise)
+                if (i === 0 && (ogrenciNo.toLowerCase().includes('no') || ogrenciNo.toLowerCase().includes('öğrenci') || adSoyad.toLowerCase().includes('ad'))) {
+                    continue;
+                }
+
+                // Katılım Durumu
+                let sinavlaraKatilacak = true;
+                const katilimClean = katilimRaw.toLowerCase();
+                if (katilimClean === 'hayır' || katilimClean === 'hayir' || katilimClean === 'h' || katilimClean === '0' || katilimClean === 'false' || katilimClean === 'katılmayacak') {
+                    sinavlaraKatilacak = false;
+                }
+
+                // Alanı normalizasyonu
+                let alan = 'YOK';
+                if (alanRaw) {
+                    const up = alanRaw.toUpperCase().trim();
+                    if (up.includes('SAY')) alan = 'SAY';
+                    else if (up.includes('TM') || up.includes('EA') || up.includes('EŞİT') || up.includes('ESIT')) alan = 'TM';
+                    else if (up.includes('SÖZ') || up.includes('SOZ')) alan = 'SÖZ';
+                    else if (up.includes('DİL') || up.includes('DIL')) alan = 'DİL';
+                    else if (up.includes('YOK') || up === '-') alan = 'YOK';
+                    else alan = up;
+                }
+
+                const isValid = ogrenciNo.length > 0 && adSoyad.length > 0;
+                if (isValid) {
+                    validCount++;
+                } else {
+                    invalidCount++;
+                }
+
+                const studentObj = {
+                    rowNum: i + 1,
+                    ogrenciNo: ogrenciNo,
+                    adSoyad: adSoyad,
+                    sinifDuzeyi: sinif,
+                    sube: sube,
+                    sinavlaraKatilacak: sinavlaraKatilacak,
+                    alan: alan,
+                    isValid: isValid
+                };
+
+                parsedStudents.push(studentObj);
+
+                const tr = document.createElement('tr');
+                if (!isValid) tr.classList.add('table-danger');
+
+                tr.innerHTML = `
+                    <td class="fw-semibold text-muted">${studentObj.rowNum}</td>
+                    <td class="fw-bold">${escapeHtml(studentObj.ogrenciNo || '-')}</td>
+                    <td class="text-start">${escapeHtml(studentObj.adSoyad || '-')}</td>
+                    <td>${escapeHtml(studentObj.sinifDuzeyi || '-')}</td>
+                    <td>${escapeHtml(studentObj.sube || '-')}</td>
+                    <td>
+                        <span class="badge ${studentObj.sinavlaraKatilacak ? 'bg-success' : 'bg-secondary'}">
+                            ${studentObj.sinavlaraKatilacak ? 'Evet' : 'Hayır'}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="badge ${studentObj.alan !== 'YOK' ? 'bg-primary' : 'bg-light text-muted border'}">
+                            ${escapeHtml(studentObj.alan)}
+                        </span>
+                    </td>
+                    <td>
+                        ${isValid 
+                            ? '<span class="badge bg-success-subtle text-success border border-success px-2 py-1"><i class="bi bi-check-circle me-1"></i>Hazır</span>' 
+                            : '<span class="badge bg-danger-subtle text-danger border border-danger px-2 py-1"><i class="bi bi-exclamation-triangle me-1"></i>Eksik Bilgi</span>'}
+                    </td>
+                `;
+                previewTableBody.appendChild(tr);
+            }
+
+            // Özet rozetlerini güncelle
+            previewSummary.textContent = `${parsedStudents.length} Öğrenci Okundu`;
+            validSummary.textContent = `${validCount} Geçerli`;
+            
+            if (invalidCount > 0) {
+                invalidSummary.style.display = 'inline-block';
+                invalidSummary.textContent = `${invalidCount} Satırda Eksik Bilgi Var`;
+            } else {
+                invalidSummary.style.display = 'none';
+            }
+
+            btnUploadToSystem.disabled = validCount === 0;
+            btnUploadToSystem.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-2"></i>Sisteme Yükle (${validCount} Öğrenci)`;
+
+            previewCard.style.display = 'block';
+            previewCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // Temizle Butonu
+        btnClearPreview.addEventListener('click', function() {
+            fileInput.value = '';
+            rawWorkbook = null;
+            parsedStudents = [];
+            previewTableBody.innerHTML = '';
+            previewCard.style.display = 'none';
+            btnParseExcel.style.display = 'none';
+        });
+
+        // Tablo içi filtreleme
+        previewFilter.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            const rows = previewTableBody.querySelectorAll('tr');
+            rows.forEach(r => {
+                const text = r.textContent.toLowerCase();
+                r.style.display = text.includes(query) ? '' : 'none';
+            });
+        });
+
+        // Sisteme Yükle Butonu (AJAX POST)
+        btnUploadToSystem.addEventListener('click', async function() {
+            const validStudents = parsedStudents
+                .filter(s => s.isValid)
+                .map(s => ({
+                    ogrenciNo: s.ogrenciNo,
+                    adSoyad: s.adSoyad,
+                    sinifDuzeyi: s.sinifDuzeyi,
+                    sube: s.sube,
+                    sinavlaraKatilacak: s.sinavlaraKatilacak,
+                    alan: s.alan
+                }));
+
+            if (!validStudents.length) {
+                alert("Yüklenecek geçerli öğrenci kaydı bulunamadı.");
+                return;
+            }
+
+            const confirmUpload = confirm(`${validStudents.length} adet öğrenci sisteme kaydedilecek. Onaylıyor musunuz?`);
+            if (!confirmUpload) return;
+
+            btnUploadToSystem.disabled = true;
+            btnUploadToSystem.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Yükleniyor...';
+
+            try {
+                const response = await fetch('/Ogrenci/ImportJson', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(validStudents)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    alert("İŞLEM BAŞARILI!\n\n" + (result.message || "Öğrenciler başarıyla kaydedildi."));
+                    window.location.href = '/Ogrenci';
+                } else {
+                    let errorDetail = "";
+                    try {
+                        const errJson = await response.json();
+                        errorDetail = errJson.message || JSON.stringify(errJson);
+                    } catch (e) {
+                        errorDetail = await response.text();
+                    }
+
+                    alert("HATA OLUŞTU!\n\nHTTP Durum Kodu: " + response.status + " (" + response.statusText + ")\n\nHata Açıklaması:\n" + errorDetail);
+                    btnUploadToSystem.disabled = false;
+                    btnUploadToSystem.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-2"></i>Tekrar Dene (${validStudents.length} Öğrenci)`;
+                }
+            } catch (networkError) {
+                alert("BAĞLANTI VEYA SUNUCU HATASI!\n\n" + networkError.message);
+                btnUploadToSystem.disabled = false;
+                btnUploadToSystem.innerHTML = `<i class="bi bi-cloud-arrow-up-fill me-2"></i>Tekrar Dene (${validStudents.length} Öğrenci)`;
+            }
+        });
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
 }

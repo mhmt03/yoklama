@@ -1,0 +1,43 @@
+@model yoklamaWeb.Models.PlannerRoom
+@{
+    ViewData["Title"] = "Yeni Salon Ekle";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4" style="max-width: 600px;">
+    <h2 class="mb-4" style="font-family: 'Outfit', sans-serif; color: #2c3e50;">Yeni Salon Ekle</h2>
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <form asp-action="CreateRoom" method="post" class="row g-3">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+                <div class="col-md-12">
+                    <label asp-for="RoomName" class="form-label">Salon Adı</label>
+                    <input asp-for="RoomName" class="form-control" placeholder="Örn: Salon A, 101 vb." required />
+                    <span asp-validation-for="RoomName" class="text-danger"></span>
+                </div>
+
+                <div class="col-md-12">
+                    <label asp-for="RoomGroup" class="form-label">Grup</label>
+                    <input asp-for="RoomGroup" class="form-control" placeholder="Örn: Grup 1, Tekli, Çiftli vb." />
+                    <span asp-validation-for="RoomGroup" class="text-danger"></span>
+                </div>
+
+                <div class="col-md-12">
+                    <label asp-for="Capacity" class="form-label">Kapasite</label>
+                    <input asp-for="Capacity" class="form-control" type="number" placeholder="Kapasite" min="1" max="1000" required />
+                    <span asp-validation-for="Capacity" class="text-danger"></span>
+                </div>
+
+                <div class="col-12 mt-4">
+                    <button type="submit" class="btn btn-primary btn-sm">Kaydet</button>
+                    <a asp-action="Rooms" class="btn btn-outline-secondary btn-sm ms-2">İptal</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

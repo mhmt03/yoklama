@@ -13,7 +13,7 @@ using yoklamaWeb.Models;
 
 namespace yoklamaWeb.Controllers
 {
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Idareci,SinavYoneticisi,gunlukYoklamaci,SuperYoklamaci")]
     public class ClassAttendanceController : Controller
     {
         private readonly AppDbContext _context;
@@ -23,7 +23,7 @@ namespace yoklamaWeb.Controllers
             _context = context;
         }
 
-        public async Task<IActionResult> Index(string nameFilter = "", string buildingFilter = "", string statusFilter = "All")
+        public async Task<IActionResult> Index(string nameFilter = "", string buildingFilter = "", string statusFilter = "All", DateTime? dateFilter = null, string sortOrder = "date_desc")
         {
             var items = _context.ClassAttendances.AsQueryable();
 
@@ -43,19 +43,40 @@ namespace yoklamaWeb.Controllers
                 items = items.Where(x => x.ValidTo.Date < today);
             }
 
+            if (dateFilter.HasValue)
+            {
+                var targetDate = dateFilter.Value.Date;
+                items = items.Where(x => x.ValidFrom.Date <= targetDate && x.ValidTo.Date >= targetDate);
+            }
+
+            switch (sortOrder)
+            {
+                case "date_asc":
+                    items = items.OrderBy(x => x.ValidFrom);
+                    break;
+                case "date_desc":
+                default:
+                    items = items.OrderByDescending(x => x.ValidFrom);
+                    break;
+            }
+
             ViewData["NameFilter"] = nameFilter;
             ViewData["BuildingFilter"] = buildingFilter;
             ViewData["StatusFilter"] = statusFilter;
+            ViewData["DateFilter"] = dateFilter?.ToString("yyyy-MM-dd");
+            ViewData["SortOrder"] = sortOrder;
 
-            var model = await items.OrderByDescending(x => x.ValidFrom).ToListAsync();
+            var model = await items.ToListAsync();
             return View(model);
         }
 
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
         public IActionResult Create()
         {
             return View();
         }
 
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Create(ClassAttendance model)
@@ -70,6 +91,7 @@ namespace yoklamaWeb.Controllers
             return RedirectToAction(nameof(Index));
         }
 
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
         public async Task<IActionResult> Edit(int? id)
         {
             if (id == null) return NotFound();
@@ -80,6 +102,7 @@ namespace yoklamaWeb.Controllers
             return View(attendance);
         }
 
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> Edit(int id, ClassAttendance model)
@@ -157,6 +180,7 @@ namespace yoklamaWeb.Controllers
             return View(viewModel);
         }
 
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
         public async Task<IActionResult> ImportStudents(int? id)
         {
             if (id == null) return NotFound();
@@ -169,6 +193,7 @@ namespace yoklamaWeb.Controllers
             return View();
         }
 
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
         [HttpPost]
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> ImportStudents(int id, IFormFile excelFile, int startRow = 2)
@@ -372,9 +397,10 @@ namespace yoklamaWeb.Controllers
             return File(package.GetAsByteArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         }
 
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> CreateDailyAttendanceLists(int id, DateTime startDate, DateTime endDate)
+        public async Task<IActionResult> CreateDailyAttendanceLists(int id, DateTime startDate, DateTime endDate, int dailyCount = 1)
         {
             var attendance = await _context.ClassAttendances
                 .Include(x => x.Students)
@@ -396,46 +422,366 @@ namespace yoklamaWeb.Controllers
                 return RedirectToAction(nameof(Details), new { id });
             }
 
+            if (dailyCount < 1) dailyCount = 1;
+
             var createdCount = 0;
             var currentDate = startDate.Date;
 
             while (currentDate <= endDate.Date)
             {
-                // Create new attendance for this specific date
-                var newAttendance = new ClassAttendance
+                // Check if already exists for this date and template
+                var dailyAttendance = await _context.DailyClassAttendances
+                    .Include(d => d.Students)
+                    .FirstOrDefaultAsync(d => d.ClassAttendanceId == id && d.Tarih == currentDate);
+
+                if (dailyAttendance == null)
                 {
-                    Name = $"{attendance.Name} {currentDate:yyyy-MM-dd}",
-                    BuildingNumber = attendance.BuildingNumber,
-                    ValidFrom = currentDate,
-                    ValidTo = currentDate,
-                    StartTime = attendance.StartTime,
-                    EndTime = attendance.EndTime,
-                    OnlyCurrentDayAttendance = true // Each copy is only valid for 1 day
-                };
+                    dailyAttendance = new DailyClassAttendance
+                    {
+                        ClassAttendanceId = id,
+                        Tarih = currentDate,
+                        SalonNotu = "",
+                        GozetmenNotu = "",
+                        YoklamaYapanKullaniciAdi = User.Identity?.Name,
+                        KayitZamani = DateTime.UtcNow
+                    };
 
-                _context.ClassAttendances.Add(newAttendance);
-                await _context.SaveChangesAsync(); // Save to get the new ID
+                    _context.DailyClassAttendances.Add(dailyAttendance);
+                    await _context.SaveChangesAsync(); // Save to get ID
+                    createdCount++;
+                }
 
-                // Copy all students to the new attendance
-                var studentsToCopy = attendance.Students.Select(s => new ClassAttendanceStudent
+                // Add student sessions up to dailyCount
+                var existingOturumlar = dailyAttendance.Students.Select(s => s.OturumNo).Distinct().ToList();
+                var studentsToInsert = new List<DailyClassAttendanceStudent>();
+
+                for (int i = 1; i <= dailyCount; i++)
                 {
-                    ClassAttendanceId = newAttendance.Id,
-                    OgrenciNo = s.OgrenciNo,
-                    AdSoyad = s.AdSoyad,
-                    SinifDuzeyi = s.SinifDuzeyi,
-                    Sube = s.Sube,
-                    Salon = s.Salon,
-                    Sira = s.Sira
-                }).ToList();
+                    if (!existingOturumlar.Contains(i))
+                    {
+                        var studentsToCopy = attendance.Students.Select(s => new DailyClassAttendanceStudent
+                        {
+                            DailyClassAttendanceId = dailyAttendance.Id,
+                            OgrenciNo = s.OgrenciNo,
+                            AdSoyad = s.AdSoyad,
+                            SinifDuzeyi = s.SinifDuzeyi,
+                            Sube = s.Sube,
+                            Salon = s.Salon,
+                            Sira = s.Sira,
+                            Durum = "Belirsiz",
+                            OturumNo = i,
+                            Not = ""
+                        }).ToList();
 
-                _context.ClassAttendanceStudents.AddRange(studentsToCopy);
-                await _context.SaveChangesAsync();
+                        studentsToInsert.AddRange(studentsToCopy);
+                    }
+                }
 
-                createdCount++;
+                if (studentsToInsert.Any())
+                {
+                    _context.DailyClassAttendanceStudents.AddRange(studentsToInsert);
+                    await _context.SaveChangesAsync();
+                }
+
                 currentDate = currentDate.AddDays(1);
             }
 
             TempData["SuccessMessage"] = $"{createdCount} adet günlük yoklama listesi başarıyla oluşturuldu.";
+            return RedirectToAction(nameof(DailyAttendance));
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> DailyAttendance(DateTime? tarih, int? classAttendanceId, int? oturumNo)
+        {
+            var secilenTarih = tarih ?? DateTime.Today;
+
+            // Fetch all active ClassAttendance templates
+            var templates = await _context.ClassAttendances.OrderBy(c => c.Name).ToListAsync();
+            ViewBag.Templates = templates;
+
+            // If template ID is not passed, find any active daily attendance today to show
+            if (!classAttendanceId.HasValue)
+            {
+                var dailyToday = await _context.DailyClassAttendances
+                    .FirstOrDefaultAsync(d => d.Tarih == secilenTarih);
+                if (dailyToday != null)
+                {
+                    classAttendanceId = dailyToday.ClassAttendanceId;
+                }
+            }
+
+            var secilenTemplateId = classAttendanceId ?? templates.FirstOrDefault()?.Id ?? 0;
+            ViewBag.SelectedTemplateId = secilenTemplateId;
+            ViewBag.SelectedTarih = secilenTarih;
+
+            // Load the DailyClassAttendance
+            var dailyAttendance = await _context.DailyClassAttendances
+                .FirstOrDefaultAsync(d => d.ClassAttendanceId == secilenTemplateId && d.Tarih == secilenTarih);
+
+            // Authorization & Schedule Check
+            bool isAuthorized = true;
+            List<string> assignedSalons = null!;
+            List<int> teacherSessions = null!;
+
+            if (User.IsInRole("gunlukYoklamaci"))
+            {
+                var username = User.Identity?.Name;
+                var teacher = await _context.GunlukYoklamacilar.FirstOrDefaultAsync(y => y.KullaniciAdi == username);
+                if (teacher == null)
+                {
+                    isAuthorized = false;
+                }
+                else
+                {
+                    // Get Turkish day name
+                    string dayName = secilenTarih.ToString("dddd", new System.Globalization.CultureInfo("tr-TR"));
+                    
+                    // Filter available sessions for the teacher
+                    teacherSessions = await _context.GunlukYoklamaciProgramlari
+                        .Where(p => p.GunlukYoklamaciId == teacher.Id && p.Gun == dayName)
+                        .Select(p => p.OturumNo)
+                        .Distinct()
+                        .OrderBy(o => o)
+                        .ToListAsync();
+
+                    if (teacherSessions.Any())
+                    {
+                        if (!oturumNo.HasValue || !teacherSessions.Contains(oturumNo.Value))
+                        {
+                            oturumNo = teacherSessions.First();
+                        }
+                    }
+                    else
+                    {
+                        isAuthorized = false;
+                    }
+
+                    // Get assigned salons for this teacher's selected day and session
+                    if (oturumNo.HasValue)
+                    {
+                        assignedSalons = await _context.GunlukYoklamaciProgramlari
+                            .Where(p => p.GunlukYoklamaciId == teacher.Id && p.Gun == dayName && p.OturumNo == oturumNo.Value)
+                            .Select(p => p.Salon)
+                            .ToListAsync();
+                    }
+
+                    // Get today's classes info banner
+                    var todaysProgram = await _context.GunlukYoklamaciProgramlari
+                        .Where(p => p.GunlukYoklamaciId == teacher.Id && p.Gun == dayName)
+                        .OrderBy(p => p.OturumNo)
+                        .Select(p => new { p.OturumNo, p.Salon })
+                        .ToListAsync();
+
+                    ViewBag.TodaysProgramInfo = todaysProgram.Select(p => $"{p.OturumNo}. Oturum: {p.Salon}").ToList();
+                }
+            }
+
+            ViewBag.IsAuthorized = isAuthorized;
+            ViewBag.TeacherAssignedSalons = assignedSalons;
+
+            // Fetch available sessions from the student list
+            var availableSessions = new List<int>();
+            if (dailyAttendance != null)
+            {
+                if (User.IsInRole("gunlukYoklamaci") && teacherSessions != null)
+                {
+                    availableSessions = teacherSessions;
+                }
+                else
+                {
+                    availableSessions = await _context.DailyClassAttendanceStudents
+                        .Where(s => s.DailyClassAttendanceId == dailyAttendance.Id)
+                        .Select(s => s.OturumNo)
+                        .Distinct()
+                        .OrderBy(o => o)
+                        .ToListAsync();
+                }
+            }
+
+            ViewBag.AvailableSessions = availableSessions;
+
+            var secilenOturum = oturumNo ?? (availableSessions.Any() ? availableSessions.First() : 1);
+            ViewBag.SelectedOturum = secilenOturum;
+
+            if (dailyAttendance != null)
+            {
+                var queryStudents = _context.DailyClassAttendanceStudents
+                    .Where(s => s.DailyClassAttendanceId == dailyAttendance.Id && s.OturumNo == secilenOturum);
+
+                if (User.IsInRole("gunlukYoklamaci") && assignedSalons != null)
+                {
+                    queryStudents = queryStudents.Where(s => assignedSalons.Contains(s.Salon ?? ""));
+                }
+
+                dailyAttendance.Students = await queryStudents
+                    .OrderBy(s => s.SinifDuzeyi).ThenBy(s => s.Sube).ThenBy(s => s.AdSoyad)
+                    .ToListAsync();
+
+                // Retrieve audit details
+                var auditStudent = dailyAttendance.Students.FirstOrDefault(s => !string.IsNullOrEmpty(s.YoklamaYapanKullaniciAdi));
+                if (auditStudent != null)
+                {
+                    ViewBag.SubmittedBy = auditStudent.YoklamaYapanKullaniciAdi;
+                    ViewBag.SubmittedAt = auditStudent.KayitZamani?.AddHours(3).ToString("dd.MM.yyyy HH:mm");
+
+                    var teacher = await _context.GunlukYoklamacilar.FirstOrDefaultAsync(y => y.KullaniciAdi == auditStudent.YoklamaYapanKullaniciAdi);
+                    ViewBag.SubmittedByFullName = teacher != null ? teacher.AdSoyad : auditStudent.YoklamaYapanKullaniciAdi;
+                }
+            }
+
+            return View(dailyAttendance);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> SaveDailyAttendance(int dailyAttendanceId, int oturumNo, Dictionary<int, string> studentDurum, Dictionary<int, string> studentNot, string salonNotu, string gozetmenNotu)
+        {
+            var dailyAttendance = await _context.DailyClassAttendances
+                .FirstOrDefaultAsync(d => d.Id == dailyAttendanceId);
+
+            if (dailyAttendance == null)
+            {
+                TempData["ErrorMessage"] = "Yoklama kaydı bulunamadı.";
+                return RedirectToAction(nameof(DailyAttendance));
+            }
+
+            // Authorization & Schedule Check on POST
+            List<string> assignedSalons = null!;
+            if (User.IsInRole("gunlukYoklamaci"))
+            {
+                var username = User.Identity?.Name;
+                var teacher = await _context.GunlukYoklamacilar.FirstOrDefaultAsync(y => y.KullaniciAdi == username);
+                if (teacher == null)
+                {
+                    TempData["ErrorMessage"] = "Yoklama alma yetkiniz bulunmamaktadır.";
+                    return RedirectToAction(nameof(DailyAttendance));
+                }
+
+                string dayName = dailyAttendance.Tarih.ToString("dddd", new System.Globalization.CultureInfo("tr-TR"));
+                assignedSalons = await _context.GunlukYoklamaciProgramlari
+                    .Where(p => p.GunlukYoklamaciId == teacher.Id && p.Gun == dayName && p.OturumNo == oturumNo)
+                    .Select(p => p.Salon)
+                    .ToListAsync();
+
+                if (!assignedSalons.Any())
+                {
+                    TempData["ErrorMessage"] = "Bu gün ve oturumda ders programınız bulunmadığı için yoklama kaydedilemez.";
+                    return RedirectToAction(nameof(DailyAttendance), new { tarih = dailyAttendance.Tarih.ToString("yyyy-MM-dd"), classAttendanceId = dailyAttendance.ClassAttendanceId, oturumNo = oturumNo });
+                }
+            }
+
+            dailyAttendance.SalonNotu = salonNotu;
+            dailyAttendance.GozetmenNotu = gozetmenNotu;
+            dailyAttendance.YoklamaYapanKullaniciAdi = User.Identity?.Name;
+            dailyAttendance.KayitZamani = DateTime.UtcNow;
+
+            var students = await _context.DailyClassAttendanceStudents
+                .Where(s => s.DailyClassAttendanceId == dailyAttendanceId && s.OturumNo == oturumNo)
+                .ToListAsync();
+
+            foreach (var student in students)
+            {
+                // If the user is a daily proctor, they can only edit students in their assigned salons
+                if (assignedSalons != null && !assignedSalons.Contains(student.Salon ?? ""))
+                {
+                    continue;
+                }
+
+                if (studentDurum != null && studentDurum.ContainsKey(student.Id))
+                {
+                    student.Durum = studentDurum[student.Id];
+                }
+                if (studentNot != null && studentNot.ContainsKey(student.Id))
+                {
+                    student.Not = studentNot[student.Id];
+                }
+                student.YoklamaYapanKullaniciAdi = User.Identity?.Name;
+                student.KayitZamani = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+            TempData["SuccessMessage"] = "Yoklama başarıyla kaydedildi.";
+
+            return RedirectToAction(nameof(DailyAttendance), new { 
+                tarih = dailyAttendance.Tarih.ToString("yyyy-MM-dd"), 
+                classAttendanceId = dailyAttendance.ClassAttendanceId, 
+                oturumNo = oturumNo 
+            });
+        }
+        [HttpGet]
+        public async Task<IActionResult> DailyAttendanceList(DateTime? dateFilter, int? classAttendanceId)
+        {
+            var templates = await _context.ClassAttendances.OrderBy(c => c.Name).ToListAsync();
+            ViewBag.Templates = templates;
+
+            var query = _context.DailyClassAttendances
+                .Include(d => d.ClassAttendance)
+                .Include(d => d.Students)
+                .AsQueryable();
+
+            if (dateFilter.HasValue)
+            {
+                query = query.Where(d => d.Tarih == dateFilter.Value.Date);
+            }
+
+            if (classAttendanceId.HasValue && classAttendanceId.Value > 0)
+            {
+                query = query.Where(d => d.ClassAttendanceId == classAttendanceId.Value);
+            }
+
+            var list = await query
+                .OrderByDescending(d => d.Tarih)
+                .ThenBy(d => d.ClassAttendance.Name)
+                .ToListAsync();
+
+            ViewBag.DateFilter = dateFilter?.ToString("yyyy-MM-dd");
+            ViewBag.SelectedTemplateId = classAttendanceId;
+
+            return View(list);
+        }
+
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteDailyAttendance(int id)
+        {
+            var dailyAttendance = await _context.DailyClassAttendances.FindAsync(id);
+            if (dailyAttendance != null)
+            {
+                _context.DailyClassAttendances.Remove(dailyAttendance);
+                await _context.SaveChangesAsync();
+                TempData["SuccessMessage"] = "Günlük yoklama listesi başarıyla silindi.";
+            }
+            else
+            {
+                TempData["ErrorMessage"] = "Silinecek yoklama listesi bulunamadı.";
+            }
+
+            return RedirectToAction(nameof(DailyAttendanceList));
+        }
+
+        // GET: ClassAttendance/Delete/5
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
+        public async Task<IActionResult> Delete(int? id)
+        {
+            if (id == null) return NotFound();
+            var attendance = await _context.ClassAttendances.FindAsync(id);
+            if (attendance == null) return NotFound();
+            return View(attendance);
+        }
+
+        // POST: ClassAttendance/Delete/5
+        [Authorize(Roles = "Admin,Idareci,SinavYoneticisi")]
+        [HttpPost, ActionName("Delete")]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> DeleteConfirmed(int id)
+        {
+            var attendance = await _context.ClassAttendances.FindAsync(id);
+            if (attendance != null)
+            {
+                _context.ClassAttendances.Remove(attendance);
+                await _context.SaveChangesAsync();
+            }
             return RedirectToAction(nameof(Index));
         }
 

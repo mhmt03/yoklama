@@ -1,85 +1,166 @@
-@model yoklamaWeb.ViewModels.Pansiyon.GunlukYoklamaViewModel
+@model yoklamaWeb.ViewModels.Pansiyon.YoklamaListViewModel
 @{
     ViewData["Title"] = "Günlük Pansiyon Yoklaması";
+
+
+
     Layout = "_Layout";
-
-    // Statistics calculations
-    var totalStudents = Model.Yoklamalar.Count;
-    var presentCount = Model.Yoklamalar.Count(y => y.Durum == "Var");
-    var absentCount = Model.Yoklamalar.Count(y => y.Durum == "Yok");
-    var leaveCount = Model.Yoklamalar.Count(y => y.Durum == "Izinli");
-    var lateCount = Model.Yoklamalar.Count(y => y.Durum == "Gecikmeli");
-    var unsavedCount = Model.Yoklamalar.Count(y => y.Id == 0);
 }
+<style>
+    @@media (max-width: 576px) {
+        .card-body h6 {font-size: 0.75rem;}
+        .card-body .h3 {font-size: 1.25rem;}
+        .btn-group-sm .btn {font-size: 0.6rem; padding: 0.25rem 0.5rem;}
+        .form-control-sm {font-size: 0.75rem;}
+    }
+    /* Desktop table layout */
+    .table th, .table td {
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .table th:nth-child(1), .table td:nth-child(1) { width: 80px; text-align: center; }
+    .table th:nth-child(3), .table td:nth-child(3) { width: 120px; }
+    .attendance-controls .btn-group { flex-wrap: nowrap; }
+    @@media (min-width: 768px) {
+        .info-inline { flex-wrap: nowrap; }
+    }
 
+    /* Status row backgrounds */
+    .table tbody tr.status-present { background-color: rgba(25, 135, 84, 0.08) !important; }
+    .table tbody tr.status-present:hover { background-color: rgba(25, 135, 84, 0.12) !important; }
+    
+    .table tbody tr.status-absent { background-color: rgba(220, 53, 69, 0.08) !important; }
+    .table tbody tr.status-absent:hover { background-color: rgba(220, 53, 69, 0.12) !important; }
+    
+    .table tbody tr.status-leave { background-color: rgba(255, 193, 7, 0.08) !important; }
+    .table tbody tr.status-leave:hover { background-color: rgba(255, 193, 7, 0.12) !important; }
+    
+    .table tbody tr.status-late { background-color: rgba(13, 202, 240, 0.08) !important; }
+    .table tbody tr.status-late:hover { background-color: rgba(13, 202, 240, 0.12) !important; }
+    
+    .table tbody tr.status-unknown { background-color: rgba(108, 117, 125, 0.08) !important; }
+    .table tbody tr.status-unknown:hover { background-color: rgba(108, 117, 125, 0.12) !important; }
+</style>
+@{
+    // Statistics calculations
+
+
+
+    var totalStudents = Model.Yoklamalar.Count;
+
+
+
+    var presentCount = Model.Yoklamalar.Count(y => y.Durum == "Var");
+
+
+
+    var absentCount = Model.Yoklamalar.Count(y => y.Durum == "Yok");
+
+
+
+    var leaveCount = Model.Yoklamalar.Count(y => y.Durum == "Izinli" || y.Durum == "İzinli");
+
+
+
+    var lateCount = Model.Yoklamalar.Count(y => y.Durum == "Gecikmeli");
+
+
+
+    var unsavedCount = Model.Yoklamalar.Count(y => y.Durum == "blrsiz" || string.IsNullOrWhiteSpace(y.Durum));
+}
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2 class="fw-bold mb-0">Günlük Pansiyon Yoklaması</h2>
-        <a asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-clock-history"></i> Yoklama Geçmişi</a>
+        <div class="d-flex align-items-center">
+            <a asp-action="ExportExcel" asp-route-tarih='@Model.Tarih.ToString("yyyy-MM-dd")' class="btn btn-success btn-sm me-2"><i class="bi bi-file-earmark-excel"></i> Excel Raporu Al</a>
+        </div>
     </div>
 
     <!-- İstatistik Kartları -->
-    <div class="row g-3 mb-4">
-        <div class="col">
-            <div class="card border-0 shadow-sm bg-primary text-white h-100">
-                <div class="card-body py-3">
-                    <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Toplam Öğrenci</h6>
-                    <div class="h3 mb-0 fw-bold">@totalStudents</div>
-                </div>
+    <div class="d-flex mb-4" style="gap:0.35rem; flex-wrap:nowrap; overflow-x:auto;">
+        <div class="card border-0 shadow-sm bg-primary text-white flex-fill" style="font-size:0.7rem; min-width:0;">
+            <div class="card-body p-1 text-center">
+                <h6 class="text-white-50 mb-0" style="font-size:0.65rem;">Toplam</h6>
+                <div class="fw-bold" id="stat-total">@totalStudents</div>
             </div>
         </div>
-        <div class="col">
-            <div class="card border-0 shadow-sm bg-success text-white h-100">
-                <div class="card-body py-3">
-                    <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Mevcut (Var)</h6>
-                    <div class="h3 mb-0 fw-bold">@presentCount</div>
-                </div>
+
+        <div class="card border-0 shadow-sm bg-success text-white flex-fill" style="font-size:0.7rem; min-width:0;">
+            <div class="card-body p-1 text-center">
+                <h6 class="text-white-50 mb-0" style="font-size:0.65rem;">Var</h6>
+                <div class="fw-bold" id="stat-var">@presentCount</div>
             </div>
         </div>
-        <div class="col">
-            <div class="card border-0 shadow-sm bg-danger text-white h-100">
-                <div class="card-body py-3">
-                    <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Olmayan (Yok)</h6>
-                    <div class="h3 mb-0 fw-bold">@absentCount</div>
-                </div>
+
+        <div class="card border-0 shadow-sm bg-danger text-white flex-fill" style="font-size:0.7rem; min-width:0;">
+            <div class="card-body p-1 text-center">
+                <h6 class="text-white-50 mb-0" style="font-size:0.65rem;">Yok</h6>
+                <div class="fw-bold" id="stat-yok">@absentCount</div>
             </div>
         </div>
-        <div class="col">
-            <div class="card border-0 shadow-sm bg-warning text-dark h-100">
-                <div class="card-body py-3">
-                    <h6 class="text-dark-50 small fw-bold text-uppercase mb-1">İzinli</h6>
-                    <div class="h3 mb-0 fw-bold">@leaveCount</div>
-                </div>
+
+        <div class="card border-0 shadow-sm bg-warning text-dark flex-fill" style="font-size:0.7rem; min-width:0;">
+            <div class="card-body p-1 text-center">
+                <h6 class="text-dark-50 mb-0" style="font-size:0.65rem;">İzinli</h6>
+                <div class="fw-bold" id="stat-izinli">@leaveCount</div>
             </div>
         </div>
-        <div class="col">
-            <div class="card border-0 shadow-sm bg-info text-dark h-100">
-                <div class="card-body py-3">
-                    <h6 class="text-dark-50 small fw-bold text-uppercase mb-1">Gecikmeli</h6>
-                    <div class="h3 mb-0 fw-bold">@lateCount</div>
-                </div>
+
+        <div class="card border-0 shadow-sm bg-info text-dark flex-fill" style="font-size:0.7rem; min-width:0;">
+            <div class="card-body p-1 text-center">
+                <h6 class="text-dark-50 mb-0" style="font-size:0.65rem;">Geç</h6>
+                <div class="fw-bold" id="stat-gec">@lateCount</div>
             </div>
         </div>
-        @if (unsavedCount > 0)
-        {
-            <div class="col">
-                <div class="card border-0 shadow-sm bg-secondary text-white h-100 animate-pulse">
-                    <div class="card-body py-3">
-                        <h6 class="text-white-50 small fw-bold text-uppercase mb-1">Girilmemiş</h6>
-                        <div class="h3 mb-0 fw-bold">@unsavedCount</div>
-                    </div>
-                </div>
+
+        <div class="card border-0 shadow-sm bg-secondary text-white flex-fill animate-pulse" id="stat-girilmemis-card" style="font-size:0.7rem; min-width:0; @(unsavedCount > 0 ? "" : "display:none;")">
+            <div class="card-body p-1 text-center">
+                <h6 class="text-white-50 mb-0" style="font-size:0.65rem;">Girilmemiş</h6>
+                <div class="fw-bold" id="stat-girilmemis">@unsavedCount</div>
             </div>
-        }
+        </div>
     </div>
 
-    <!-- Tarih Seçim Kartı -->
-    <div class="card mb-4 shadow-sm border-0 bg-light">
-        <div class="card-body">
-            <form method="get" asp-action="GunlukYoklama" class="row g-3">
-                <div class="col-md-4 col-sm-6">
-                    <label class="form-label fw-bold"><i class="bi bi-calendar3"></i> Yoklama Tarihi</label>
-                    <input type="date" name="tarih" value="@Model.Tarih.ToString("yyyy-MM-dd")" class="form-control" onchange="this.form.submit()" />
+    <!-- Filtre Kartı -->
+    <div class="card mb-4 shadow-sm border-0 bg-light sticky-top sticky-filter-card" style="top: 56px; z-index: 990;">
+        <div class="card-body p-3">
+            <form method="get" asp-action="GunlukYoklama" id="filterForm" class="row g-2 align-items-end">
+                <div class="col-md-3 col-sm-6">
+                    <label class="form-label fw-bold small mb-1"><i class="bi bi-calendar3"></i> Tarih</label>
+                    <input type="date" name="tarih" value="@Model.Tarih.ToString("yyyy-MM-dd")" class="form-control form-control-sm" onchange="this.form.submit()" />
+                </div>
+                <div class="col-md-2 col-sm-6">
+                    <label class="form-label fw-bold small mb-1"><i class="bi bi-list-ol"></i> Yoklama Seçimi</label>
+                    <select name="YoklamaNo" class="form-select form-select-sm" onchange="this.form.submit()">
+                        @foreach (var tur in (IEnumerable<yoklamaWeb.Models.YoklamaTuru>)ViewBag.YoklamaTurleri)
+                        {
+                            <option value="@tur.Id" selected="@(Model.Filter.YoklamaNo == tur.Id ? "selected" : null)">@tur.Ad</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2 col-sm-6">
+                    <label class="form-label fw-bold small mb-1"><i class="bi bi-door-closed"></i> Oda</label>
+                    <select name="OdaNo" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">Tüm Odalar</option>
+                        @foreach (var room in (IEnumerable<string>)ViewBag.RoomList)
+                        {
+                            <option value="@room" selected="@(Model.Filter.OdaNo == room ? "selected" : null)">@room</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <label class="form-label fw-bold small mb-1"><i class="bi bi-book"></i> Etüt Salonu</label>
+                    <select name="EtutId" class="form-select form-select-sm" onchange="this.form.submit()">
+                        <option value="">Tüm Etütler</option>
+                        @foreach (var etut in (IEnumerable<SelectListItem>)ViewBag.EtutList)
+                        {
+                            <option value="@etut.Value" selected="@(Model.Filter.EtutId?.ToString() == etut.Value ? "selected" : null)">@etut.Text</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2 col-sm-12">
+                    <label class="form-label fw-bold small mb-1"><i class="bi bi-search"></i> İsim Ara</label>
+                    <input type="text" id="studentFilter" class="form-control form-control-sm" placeholder="Öğrenci adı..." />
                 </div>
             </form>
         </div>
@@ -88,24 +169,21 @@
     <form method="post" asp-action="TopluYoklama">
         @Html.AntiForgeryToken()
         <input type="hidden" name="Tarih" value="@Model.Tarih.ToString("yyyy-MM-dd")" />
+        <input type="hidden" name="YoklamaNo" value="@Model.Filter.YoklamaNo" />
 
         <div class="table-responsive bg-white rounded shadow-sm">
             <table class="table table-striped table-hover align-middle mb-0" id="yoklamaTablosu">
                 <thead class="table-dark">
                     <tr>
-                        <th onclick="sortTable(0, true)" style="cursor: pointer; width: 140px;" class="ps-3">
-                            Öğrenci No <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
-                        </th>
+                        <th onclick="sortTable(0, true)" style="cursor: pointer; width: fit-content;" class="ps-3">No <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i></th>
                         <th onclick="sortTable(1)" style="cursor: pointer;">
                             Ad Soyad <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
                         </th>
-                        <th onclick="sortTable(2)" style="cursor: pointer; width: 130px;">
-                            Oda No <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
+                        <th style="width: fit-content;">
+                            <span onclick="sortCustomTable('oda')" style="cursor: pointer;" class="me-2">Oda <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon-oda small"></i></span>
+                            / 
+                            <span onclick="sortCustomTable('etut')" style="cursor: pointer;" class="ms-2">Etüt <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon-etut small"></i></span>
                         </th>
-                        <th onclick="sortTable(3)" style="cursor: pointer; width: 340px;">
-                            Yoklama Durumu <i class="bi bi-arrow-down-up ms-1 text-muted sort-icon small"></i>
-                        </th>
-                        <th>Açıklama</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -114,60 +192,84 @@
                         @for (int i = 0; i < Model.Yoklamalar.Count; i++)
                         {
                             var yoklama = Model.Yoklamalar[i];
-                            <tr>
+                            var rowClass = yoklama.Durum switch
+                            {
+                                "Var" => "status-present",
+                                "Yok" => "status-absent",
+                                "İzinli" => "status-leave",
+                                "Izinli" => "status-leave",
+                                "Gecikmeli" => "status-late",
+                                _ => "status-unknown"
+                            };
+                            <tr class="@rowClass">
                                 <td class="ps-3">
                                     @yoklama.OgrenciNo
                                     <input type="hidden" name="Yoklamalar[@i].PansiyonOgrenciId" value="@yoklama.PansiyonOgrenciId" />
                                     <input type="hidden" name="Yoklamalar[@i].Id" value="@yoklama.Id" />
                                 </td>
                                 <td>
-                                    <strong>@yoklama.OgrenciAdSoyad</strong>
-                                    @if (!string.IsNullOrWhiteSpace(yoklama.IzinBilgisi))
-                                    {
-                                        <span class="badge bg-warning text-dark ms-2 small"><i class="bi bi-person-slash"></i> @yoklama.IzinBilgisi</span>
-                                    }
-                                    @if (yoklama.Id > 0 && !string.IsNullOrWhiteSpace(yoklama.YoklamaYapanAdSoyad))
-                                    {
-                                        <div class="text-muted small mt-1">
-                                            <i class="bi bi-person-check-fill text-secondary"></i>
-                                            Yoklamacı: @yoklama.YoklamaYapanAdSoyad
-                                            @if (yoklama.Saat.HasValue)
+                                    <div class="d-flex flex-column flex-lg-row align-items-start align-items-lg-center flex-wrap gap-2 mt-1">
+                                        <!-- İsim + izin bilgisi -->
+                                        <div class="info-inline d-flex flex-wrap align-items-center gap-2">
+                                             <strong style="cursor: pointer;" class="text-primary text-decoration-underline" onclick="toggleContactDetails(@i)" title="İletişim bilgilerini göster/gizle">
+                                                 <i class="bi bi-person-fill me-1"></i>@yoklama.OgrenciAdSoyad <i class="bi bi-chevron-down small text-muted ms-1" id="chevron_@i"></i>
+                                             </strong>
+                                            @if (!string.IsNullOrWhiteSpace(yoklama.IzinBilgisi))
                                             {
-                                                <span class="ms-2">(@yoklama.Saat.Value.ToString(@"hh\:mm"))</span>
+                                                <span class="badge bg-warning text-dark small"><i class="bi bi-person-slash"></i> @yoklama.IzinBilgisi</span>
                                             }
+                                            <span class="yoklama-info text-muted small">
+                                                @if (yoklama.Id > 0 && !string.IsNullOrWhiteSpace(yoklama.YoklamaYapanAdSoyad))
+                                                {
+                                                    <i class="bi bi-person-check-fill text-secondary"></i> @yoklama.YoklamaYapanAdSoyad
+                                                    @if (yoklama.Saat.HasValue)
+                                                    {
+                                                        <span class="ms-1">(@yoklama.Tarih.ToString("dd.MM.yyyy") @yoklama.Saat.Value.ToString(@"hh\:mm"))</span>
+                                                    }
+                                                }
+                                            </span>
                                         </div>
-                                    }
-                                </td>
-                                <td>
-                                    @if (!string.IsNullOrWhiteSpace(yoklama.OdaNo))
-                                    {
-                                        <span class="badge bg-secondary">Oda @yoklama.OdaNo</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="text-muted small">Odasız</span>
-                                    }
-                                </td>
-                                <td>
-                                    <div class="btn-group btn-group-sm" role="group" aria-label="Yoklama Durumu">
-                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="belirtilmemis_@i" value="Belirtilmemiş" @(string.IsNullOrWhiteSpace(yoklama.Durum) || yoklama.Durum == "Belirtilmemiş" ? "checked" : "") />
-                                        <label class="btn btn-outline-secondary px-3 fw-bold" for="belirtilmemis_@i">Belirtilmemiş</label>
-                                        
-                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="var_@i" value="Var" @(yoklama.Durum == "Var" ? "checked" : "") />
-                                        <label class="btn btn-outline-success px-3 fw-bold" for="var_@i">Var</label>
-                                        
-                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="yok_@i" value="Yok" @(yoklama.Durum == "Yok" ? "checked" : "") />
-                                        <label class="btn btn-outline-danger px-3 fw-bold" for="yok_@i">Yok</label>
-                                        
-                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="izinli_@i" value="Izinli" @(yoklama.Durum == "Izinli" ? "checked" : "") />
-                                        <label class="btn btn-outline-warning px-3 fw-bold" for="izinli_@i">İzinli</label>
-                                        
-                                        <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="gecikmeli_@i" value="Gecikmeli" @(yoklama.Durum == "Gecikmeli" ? "checked" : "") />
-                                        <label class="btn btn-outline-info px-3 fw-bold" for="gecikmeli_@i">Gecikmeli</label>
+
+                                        <!-- Açılır / Kapanır İletişim Detay Alanı -->
+                                        <div id="contactDetails_@i" class="w-100 mt-2 p-2 bg-light border rounded small" style="display: none;">
+                                            <div class="d-flex flex-wrap gap-3 align-items-center text-secondary">
+                                                <span><i class="bi bi-telephone-fill text-success me-1"></i> <strong>Öğrenci Tel:</strong> @(!string.IsNullOrWhiteSpace(yoklama.Telefon) ? Html.Raw($"<a href='tel:{yoklama.Telefon}' class='text-decoration-none fw-bold'>{yoklama.Telefon}</a>") : "-")</span>
+                                                <span><i class="bi bi-telephone-forward-fill text-primary me-1"></i> <strong>Veli Tel:</strong> @(!string.IsNullOrWhiteSpace(yoklama.VeliTelefon) ? Html.Raw($"<a href='tel:{yoklama.VeliTelefon}' class='text-decoration-none fw-bold'>{yoklama.VeliTelefon}</a>") : "-")</span>
+                                            </div>
+                                        </div>
+
+                                        <!-- Yoklama durumu radyo butonları -->
+                                        <div class="btn-group btn-group-sm ms-lg-auto" role="group" aria-label="Yoklama Durumu">
+                                            <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="blrsiz_@i" value="blrsiz" @(string.IsNullOrWhiteSpace(yoklama.Durum) || yoklama.Durum == "Belirtilmemiş" || yoklama.Durum == "blrsiz" ? "checked" : "") />
+                                            <label class="btn btn-outline-secondary px-3 fw-bold" for="blrsiz_@i">blrsiz</label>
+                                            <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="var_@i" value="Var" @(yoklama.Durum == "Var" ? "checked" : "") />
+                                            <label class="btn btn-outline-success px-3 fw-bold" for="var_@i">Var</label>
+                                            <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="yok_@i" value="Yok" @(yoklama.Durum == "Yok" ? "checked" : "") />
+                                            <label class="btn btn-outline-danger px-3 fw-bold" for="yok_@i">Yok</label>
+                                            <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="izinli_@i" value="İzinli" @(yoklama.Durum == "İzinli" ? "checked" : "") />
+                                            <label class="btn btn-outline-warning px-3 fw-bold" for="izinli_@i">İzinli</label>
+                                            <input type="radio" class="btn-check" name="Yoklamalar[@i].Durum" id="gecikmeli_@i" value="Gecikmeli" @(yoklama.Durum == "Gecikmeli" ? "checked" : "") />
+                                            <label class="btn btn-outline-info px-3 fw-bold" for="gecikmeli_@i">Geç</label>
+                                        </div>
+
+                                        <!-- Not alanı -->
+                                        <div class="d-flex align-items-center">
+                                            <input type="text" name="Yoklamalar[@i].Aciklama" value="@yoklama.Aciklama" class="form-control form-control-sm me-1" placeholder="Not" style="max-width:120px;" />
+                                            <button type="button" class="btn btn-outline-primary btn-sm" data-index="@i" onclick="saveNote(this)"><i class="bi bi-save"></i></button>
+                                        </div>
                                     </div>
                                 </td>
                                 <td>
-                                    <input type="text" name="Yoklamalar[@i].Aciklama" value="@yoklama.Aciklama" class="form-control form-control-sm" placeholder="Not / Açıklama" />
+                                    <div class="d-flex flex-column gap-1">
+                                        @if (!string.IsNullOrWhiteSpace(yoklama.OdaNo))
+                                        {
+                                            <span class="badge bg-secondary">Oda: @yoklama.OdaNo</span>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(yoklama.EtutAdi))
+                                        {
+                                            <span class="badge bg-dark">Etüt: @yoklama.EtutAdi</span>
+                                        }
+                                    </div>
                                 </td>
                             </tr>
                         }
@@ -175,7 +277,7 @@
                     else
                     {
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">Yoklama alınacak aktif öğrenci bulunamadı.</td>
+                            <td colspan="3" class="text-center text-muted py-4">Yoklama alınacak aktif öğrenci bulunamadı.</td>
                         </tr>
                     }
                 </tbody>
@@ -185,10 +287,6 @@
         @if (Model.Yoklamalar.Any())
         {
             <div class="mt-3 text-end pb-5">
-                @if (ViewBag.IsAdmin != null && (bool)ViewBag.IsAdmin)
-                {
-                    <a asp-action="ExportExcel" asp-route-tarih="@Model.Tarih.ToString("yyyy-MM-dd")" class="btn btn-success btn-sm me-2"><i class="bi bi-file-earmark-excel"></i> Excel Raporu Al</a>
-                }
                 <button type="submit" class="btn btn-primary btn-lg fw-bold"><i class="bi bi-save"></i> Yoklamayı Kaydet</button>
             </div>
         }
@@ -196,93 +294,264 @@
 </div>
 
 @section Scripts {
-    <script>
-        let sortDirections = {};
+            <script>
+                let sortDirections = {};
+                let sortDirectionsCustom = {};
 
-        function sortTable(columnIndex, isNumeric = false) {
-            const table = document.getElementById("yoklamaTablosu");
-            const tbody = table.querySelector("tbody");
-            const rows = Array.from(tbody.querySelectorAll("tr"));
-            if (rows.length === 0) return;
-            
-            // Toggle direction
-            const currentDirection = sortDirections[columnIndex] || 'asc';
-            const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
-            sortDirections[columnIndex] = newDirection;
-            
-            // Update header icons
-            table.querySelectorAll("th .sort-icon").forEach(icon => {
-                icon.className = "bi bi-arrow-down-up ms-1 text-muted sort-icon small";
-            });
-            
-            const activeHeader = table.querySelectorAll("th")[columnIndex];
-            const activeIcon = activeHeader.querySelector(".sort-icon");
-            if (activeIcon) {
-                activeIcon.className = newDirection === 'asc' 
-                    ? "bi bi-arrow-up ms-1 text-primary sort-icon small" 
-                    : "bi bi-arrow-down ms-1 text-primary sort-icon small";
-            }
+                function sortCustomTable(sortBy) {
+                    const table = document.getElementById("yoklamaTablosu");
+                    const tbody = table.querySelector("tbody");
+                    const rows = Array.from(tbody.querySelectorAll("tr"));
+                    if (rows.length === 0) return;
 
-            rows.sort((rowA, rowB) => {
-                let cellA = rowA.cells[columnIndex].innerText.trim();
-                let cellB = rowB.cells[columnIndex].innerText.trim();
-                
-                // If sorting status column, check the selected radio value
-                if (columnIndex === 3) {
-                    const radioA = rowA.querySelector('input[type="radio"]:checked');
-                    const radioB = rowB.querySelector('input[type="radio"]:checked');
-                    cellA = radioA ? radioA.value : "";
-                    cellB = radioB ? radioB.value : "";
+                    const currentDirection = sortDirectionsCustom[sortBy] || 'asc';
+                    const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                    sortDirectionsCustom[sortBy] = newDirection;
+
+                    // Update all icons
+                    document.querySelectorAll(".sort-icon-oda, .sort-icon-etut").forEach(icon => {
+                        icon.className = icon.classList.contains("sort-icon-oda") 
+                            ? "bi bi-arrow-down-up ms-1 text-muted sort-icon-oda small" 
+                            : "bi bi-arrow-down-up ms-1 text-muted sort-icon-etut small";
+                    });
+
+                    const activeIcon = document.querySelector(`.sort-icon-${sortBy}`);
+                    if (activeIcon) {
+                        activeIcon.className = newDirection === 'asc' 
+                            ? `bi bi-arrow-up ms-1 text-primary sort-icon-${sortBy} small` 
+                            : `bi bi-arrow-down ms-1 text-primary sort-icon-${sortBy} small`;
+                    }
+
+                    rows.sort((rowA, rowB) => {
+                        let valA = "";
+                        let valB = "";
+                        
+                        if (sortBy === 'oda') {
+                            const badgeA = rowA.cells[2].querySelector(".badge.bg-secondary");
+                            const badgeB = rowB.cells[2].querySelector(".badge.bg-secondary");
+                            valA = badgeA ? badgeA.innerText.replace("Oda:", "").trim() : "";
+                            valB = badgeB ? badgeB.innerText.replace("Oda:", "").trim() : "";
+                        } else {
+                            const badgeA = rowA.cells[2].querySelector(".badge.bg-dark");
+                            const badgeB = rowB.cells[2].querySelector(".badge.bg-dark");
+                            valA = badgeA ? badgeA.innerText.replace("Etüt:", "").trim() : "";
+                            valB = badgeB ? badgeB.innerText.replace("Etüt:", "").trim() : "";
+                        }
+
+                        const numA = parseFloat(valA);
+                        const numB = parseFloat(valB);
+                        if (!isNaN(numA) && !isNaN(numB)) {
+                            return newDirection === 'asc' ? numA - numB : numB - numA;
+                        }
+
+                        return newDirection === 'asc' 
+                            ? valA.localeCompare(valB, 'tr') 
+                            : valB.localeCompare(valA, 'tr');
+                    });
+
+                    rows.forEach(row => tbody.appendChild(row));
                 }
 
-                if (isNumeric) {
-                    const numA = parseFloat(cellA) || 0;
-                    const numB = parseFloat(cellB) || 0;
-                    return newDirection === 'asc' ? numA - numB : numB - numA;
-                } else {
-                    return newDirection === 'asc' 
-                        ? cellA.localeCompare(cellB, 'tr') 
-                        : cellB.localeCompare(cellA, 'tr');
+                function sortTable(columnIndex, isNumeric = false) {
+                    const table = document.getElementById("yoklamaTablosu");
+                    const tbody = table.querySelector("tbody");
+                    const rows = Array.from(tbody.querySelectorAll("tr"));
+                    if (rows.length === 0) return;
+
+                    // Toggle direction
+                    const currentDirection = sortDirections[columnIndex] || 'asc';
+                    const newDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                    sortDirections[columnIndex] = newDirection;
+
+                    // Update header icons
+                    table.querySelectorAll("th .sort-icon").forEach(icon => {
+                        icon.className = "bi bi-arrow-down-up ms-1 text-muted sort-icon small";
+                    });
+
+                    const activeHeader = table.querySelectorAll("th")[columnIndex];
+                    const activeIcon = activeHeader.querySelector(".sort-icon");
+                    if (activeIcon) {
+                        activeIcon.className = newDirection === 'asc' 
+                            ? "bi bi-arrow-up ms-1 text-primary sort-icon small" 
+                            : "bi bi-arrow-down ms-1 text-primary sort-icon small";
+                    }
+
+                    rows.sort((rowA, rowB) => {
+                        let cellA = rowA.cells[columnIndex].innerText.trim();
+                        let cellB = rowB.cells[columnIndex].innerText.trim();
+
+                        // If sorting status column, check the selected radio value
+                        if (columnIndex === 3) {
+                            const radioA = rowA.querySelector('input[type="radio"]:checked');
+                            const radioB = rowB.querySelector('input[type="radio"]:checked');
+                            cellA = radioA ? radioA.value : "";
+                            cellB = radioB ? radioB.value : "";
+                        }
+
+                        if (isNumeric) {
+                            const numA = parseFloat(cellA) || 0;
+                            const numB = parseFloat(cellB) || 0;
+                            return newDirection === 'asc' ? numA - numB : numB - numA;
+                        } else {
+                            return newDirection === 'asc' 
+                                ? cellA.localeCompare(cellB, 'tr') 
+                                : cellB.localeCompare(cellA, 'tr');
+                        }
+                    });
+
+                    // Re-append rows in sorted order (doesn't affect form input index values)
+
+                    // Filter rows based on student name
+                    function filterRows() {
+                        const nameFilter = document.getElementById('studentFilter').value.trim().toLowerCase();
+                        const rows = document.querySelectorAll('#yoklamaTablosu tbody tr');
+                        rows.forEach(row => {
+                            const nameCell = row.cells[1].innerText.toLowerCase();
+                            let visible = true;
+                            if (nameFilter && !nameCell.includes(nameFilter)) visible = false;
+                            row.style.display = visible ? '' : 'none';
+                        });
+                    }
+
+                    // Attach filter event listener
+                    const studentInput = document.getElementById('studentFilter');
+                    if (studentInput) {
+                        studentInput.addEventListener('input', filterRows);
+                    }
+                    rows.forEach(row => tbody.appendChild(row));
                 }
-            });
 
-            // Re-append rows in sorted order (doesn't affect form input index values)
-            rows.forEach(row => tbody.appendChild(row));
-        }
+                function updateStats() {
+                    const total = document.querySelectorAll('#yoklamaTablosu tbody tr').length;
+                    const countVar = document.querySelectorAll('input[type="radio"][value="Var"]:checked').length;
+                    const countYok = document.querySelectorAll('input[type="radio"][value="Yok"]:checked').length;
+                    const countIzinli = document.querySelectorAll('input[type="radio"][value="İzinli"]:checked').length;
+                    const countGec = document.querySelectorAll('input[type="radio"][value="Gecikmeli"]:checked').length;
+                    const countGirilmemis = document.querySelectorAll('input[type="radio"][value="blrsiz"]:checked').length;
 
-        // Auto‑save on status change (global listener)
-        document.addEventListener('change', function (e) {
-            if (e.target.matches('input[name^="Yoklamalar"][type="radio"]')) {
-                const tr = e.target.closest('tr');
-                const id = tr.querySelector('input[name$=".Id"]').value;
-                const ogrenciId = tr.querySelector('input[name$=".PansiyonOgrenciId"]').value;
-                const durum = e.target.value;
-                const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
-                fetch('/Yoklama/UpdateAttendanceStatus', {
-                    method: 'POST',
-                    headers: {
-                        'RequestVerificationToken': token,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ id: parseInt(id), pansiyonOgrenciId: parseInt(ogrenciId), durum, tarih: document.querySelector('input[name="Tarih"]').value })
-                }).then(r => r.json()).then(data => {
-                    if (!data.success) console.error('Attendance save failed');
-                }).catch(console.error);
-            }
-        });
-    </script>
+                    const elTotal = document.getElementById('stat-total');
+                    const elVar = document.getElementById('stat-var');
+                    const elYok = document.getElementById('stat-yok');
+                    const elIzinli = document.getElementById('stat-izinli');
+                    const elGec = document.getElementById('stat-gec');
+                    const elGirilmemis = document.getElementById('stat-girilmemis');
+                    const elGirilmemisCard = document.getElementById('stat-girilmemis-card');
 
-    <style>
-        .animate-pulse {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        @@keyframes pulse {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: .7;
-            }
-        }
-    </style>
+                    if (elTotal) elTotal.innerText = total;
+                    if (elVar) elVar.innerText = countVar;
+                    if (elYok) elYok.innerText = countYok;
+                    if (elIzinli) elIzinli.innerText = countIzinli;
+                    if (elGec) elGec.innerText = countGec;
+                    if (elGirilmemis) {
+                        elGirilmemis.innerText = countGirilmemis;
+                        if (elGirilmemisCard) {
+                            if (countGirilmemis > 0) {
+                                elGirilmemisCard.style.display = '';
+                            } else {
+                                elGirilmemisCard.style.display = 'none';
+                            }
+                        }
+                    }
+                }
+
+                // Auto‑save on status change (global listener)
+                document.addEventListener('change', function (e) {
+                    if (e.target.matches('input[name^="Yoklamalar"][type="radio"]')) {
+                        const tr = e.target.closest('tr');
+                        const id = tr.querySelector('input[name$=".Id"]').value;
+                        const ogrenciId = tr.querySelector('input[name$=".PansiyonOgrenciId"]').value;
+                        const durum = e.target.value;
+                        const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+
+                        // UPDATE ROW BACKGROUND
+                        tr.className = '';
+                        if (durum === 'Var') tr.classList.add('status-present');
+                        else if (durum === 'Yok') tr.classList.add('status-absent');
+                        else if (durum === 'İzinli' || durum === 'Izinli') tr.classList.add('status-leave');
+                        else if (durum === 'Gecikmeli') tr.classList.add('status-late');
+                        else tr.classList.add('status-unknown');
+
+                        updateStats();
+
+                        fetch('/Yoklama/UpdateAttendanceStatus', {
+                            method: 'POST',
+                            headers: {
+                                'RequestVerificationToken': token,
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ 
+                                id: parseInt(id), 
+                                pansiyonOgrenciId: parseInt(ogrenciId), 
+                                durum, 
+                                tarih: document.querySelector('input[name="Tarih"]').value,
+                                yoklamaNo: parseInt(document.querySelector('input[name="YoklamaNo"]').value)
+                            })
+                        }).then(r => r.json()).then(data => {
+                            if (data.success) {
+                                tr.querySelector('input[name$=".Id"]').value = data.id;
+                                const infoSpan = tr.querySelector('.yoklama-info');
+                                if (infoSpan) {
+                                    infoSpan.innerHTML = `<i class="bi bi-person-check-fill text-secondary"></i> ${data.yoklamaYapanAdSoyad} <span class="ms-1">(${data.tarih} ${data.saat})</span>`;
+                                }
+                            } else {
+                                console.error('Attendance save failed');
+                            }
+                        }).catch(console.error);
+                    }
+                });
+                function toggleContactDetails(index) {
+                    const el = document.getElementById('contactDetails_' + index);
+                    const chevron = document.getElementById('chevron_' + index);
+                    if (el) {
+                        if (el.style.display === 'none' || !el.style.display) {
+                            el.style.display = 'block';
+                            if (chevron) {
+                                chevron.className = 'bi bi-chevron-up small text-primary ms-1';
+                            }
+                        } else {
+                            el.style.display = 'none';
+                            if (chevron) {
+                                chevron.className = 'bi bi-chevron-down small text-muted ms-1';
+                            }
+                        }
+                    }
+                }
+
+                function saveNote(button) {
+                    const tr = button.closest('tr');
+                    const id = tr.querySelector('input[name$=".Id"]').value;
+                    const note = tr.querySelector('input[name$=".Aciklama"]').value;
+                    const token = document.querySelector('input[name="__RequestVerificationToken"]').value;
+                    fetch('/Yoklama/UpdateNote', {
+                        method: 'POST',
+                        headers: {
+                            'RequestVerificationToken': token,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ Id: parseInt(id), Note: note })
+                    }).then(r => r.json()).then(data => {
+                        if (!data.success) {
+                            console.error('Note save failed');
+                        }
+                    }).catch(console.error);
+                }
+
+                // Initial load stats check
+                document.addEventListener('DOMContentLoaded', updateStats);
+                updateStats();
+            </script>
+
+            <style>
+                .animate-pulse {
+                    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+                }
+                @@keyframes pulse {
+                    0%, 100% {
+                        opacity: 1;
+                    }
+                    50% {
+                        opacity: .7;
+                    }
+                }
+            </style>
 }

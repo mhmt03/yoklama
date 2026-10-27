@@ -24,6 +24,23 @@
         <input asp-for="Sube" class="form-control" />
         <span asp-validation-for="Sube" class="text-danger"></span>
     </div>
+    <div class="mb-3">
+        <label asp-for="Alan" class="form-label">Alanı</label>
+        <select asp-for="Alan" class="form-select">
+            <option value="YOK">YOK (Alansız / 9-10. Sınıf)</option>
+            <option value="SAY">SAY (Sayısal)</option>
+            <option value="TM">TM (Eşit Ağırlık)</option>
+            <option value="SÖZ">SÖZ (Sözel)</option>
+            <option value="DİL">DİL (Yabancı Dil)</option>
+        </select>
+        <span asp-validation-for="Alan" class="text-danger"></span>
+    </div>
+    <div class="mb-3 form-check">
+        <input asp-for="SinavlaraKatilacak" class="form-check-input" type="checkbox" id="sinavlaraKatilacak" checked />
+        <label class="form-check-label" for="sinavlaraKatilacak">
+            Sınavlara Katılacak Mı
+        </label>
+    </div>
     <button type="submit" class="btn btn-primary">Kaydet</button>
     <a asp-action="Index" class="btn btn-secondary ms-2">İptal</a>
 </form>

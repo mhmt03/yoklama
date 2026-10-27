@@ -32,28 +32,18 @@ namespace yoklamaWeb.Filters
                 return;
             }
 
-            // 1. Global Admin (Identity Role: Admin) has access to everything
-            if (user.IsInRole("Admin"))
+            // 1. Global Admin & Idareci have access to boarding administrative modules
+            if (user.IsInRole("Admin") || user.IsInRole("Idareci"))
             {
                 await next();
                 return;
             }
 
-            // 2. PansiyonGorevlisi with database Rol == "Admin" has access to boarding administrative modules
-            if (user.IsInRole("PansiyonGorevlisi"))
+            // 2. PansiyonGorevlisi and PansiyonNobetcisi have access to boarding modules
+            if (user.IsInRole("PansiyonGorevlisi") || user.IsInRole("PansiyonNobetcisi"))
             {
-                var username = user.Identity.Name;
-                if (!string.IsNullOrEmpty(username))
-                {
-                    var gorevli = await _context.PansiyonGorevlileri
-                        .FirstOrDefaultAsync(g => g.KullaniciAdi == username && g.Aktif);
-
-                    if (gorevli != null && gorevli.Rol == "Admin")
-                    {
-                        await next();
-                        return;
-                    }
-                }
+                await next();
+                return;
             }
 
             context.Result = new ForbidResult();

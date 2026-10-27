@@ -28,6 +28,11 @@ namespace yoklamaWeb.Controllers
             var now = DateTime.UtcNow;
             var exams = await _context.Exams.OrderBy(e => e.ApplicationDate).ToListAsync();
 
+            var examIds = exams.Select(e => e.Id).ToList();
+            var allSeats = await _context.ExamSeats
+                .Where(es => examIds.Contains(es.ExamId))
+                .ToListAsync();
+
             var viewModel = exams.Select(e =>
             {
                 var start = e.ValidFrom.Date;
@@ -40,6 +45,8 @@ namespace yoklamaWeb.Controllers
                 else
                     end = e.ValidTo.Date.AddDays(1).AddTicks(-1);
 
+                var examSeats = allSeats.Where(s => s.ExamId == e.Id).ToList();
+
                 return new SuperYoklamaciExamItemViewModel
                 {
                     ExamId = e.Id,
@@ -50,7 +57,12 @@ namespace yoklamaWeb.Controllers
                     ValidTo = e.ValidTo,
                     StartTime = e.StartTime,
                     EndTime = e.EndTime,
-                    IsAccessible = now >= start && now <= end
+                    IsAccessible = now >= start && now <= end,
+                    TotalCount = examSeats.Count,
+                    PresentCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Katildi),
+                    AbsentCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Katilmadi),
+                    LateCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Gec),
+                    PendingCount = examSeats.Count(s => s.AttendanceStatus == AttendanceStatus.KontrolEdilmedi)
                 };
             }).ToList();
 
@@ -71,7 +83,11 @@ namespace yoklamaWeb.Controllers
                 .Select(g => new
                 {
                     RoomName = g.Key,
-                    Count = g.Count()
+                    Count = g.Count(),
+                    Present = g.Count(es => es.AttendanceStatus == AttendanceStatus.Katildi),
+                    Absent = g.Count(es => es.AttendanceStatus == AttendanceStatus.Katilmadi),
+                    Late = g.Count(es => es.AttendanceStatus == AttendanceStatus.Gec),
+                    Pending = g.Count(es => es.AttendanceStatus == AttendanceStatus.KontrolEdilmedi)
                 })
                 .ToListAsync();
 
@@ -84,7 +100,11 @@ namespace yoklamaWeb.Controllers
             {
                 RoomName = rg.RoomName,
                 StudentCount = rg.Count,
-                ProctorName = proctors.FirstOrDefault(p => p.Room == rg.RoomName)?.ProctorName
+                ProctorName = proctors.FirstOrDefault(p => p.Room == rg.RoomName)?.ProctorName,
+                PresentCount = rg.Present,
+                AbsentCount = rg.Absent,
+                LateCount = rg.Late,
+                PendingCount = rg.Pending
             }).ToList();
 
             var viewModel = new SuperYoklamaciRoomsViewModel
@@ -106,11 +126,6 @@ namespace yoklamaWeb.Controllers
             var exam = await _context.Exams.FindAsync(examId);
             if (exam == null) return NotFound();
 
-            if (string.IsNullOrEmpty(room))
-            {
-                return RedirectToAction(nameof(Rooms), new { examId = examId });
-            }
-
             // Zaman kontrolü
             var now = DateTime.UtcNow;
             var start = exam.ValidFrom.Date;
@@ -126,14 +141,24 @@ namespace yoklamaWeb.Controllers
             bool isTimeValid = now >= start && now <= end;
 
             // Salonun yoklamacısını veya notunu çek
-            var proctorAssignment = await _context.TemporaryProctors
-                .FirstOrDefaultAsync(tp => tp.ExamId == examId && tp.Room == room);
+            TemporaryProctor? proctorAssignment = null;
+            if (!string.IsNullOrEmpty(room) && room != "Tümü")
+            {
+                proctorAssignment = await _context.TemporaryProctors
+                    .FirstOrDefaultAsync(tp => tp.ExamId == examId && tp.Room == room);
+            }
 
-            // Salonun koltuklarını ve öğrencilerini çek
-            var seats = await _context.ExamSeats
+            // Salonun koltuklarını ve öğrencilerini çek (eğer room boşsa tüm salonları çek)
+            var seatsQuery = _context.ExamSeats
                 .Include(es => es.Ogrenci)
-                .Where(es => es.ExamId == examId && es.SalonAdi == room)
-                .ToListAsync();
+                .Where(es => es.ExamId == examId);
+
+            if (!string.IsNullOrEmpty(room) && room != "Tümü")
+            {
+                seatsQuery = seatsQuery.Where(es => es.SalonAdi == room);
+            }
+
+            var seats = await seatsQuery.ToListAsync();
 
             // Filtrele
             if (filterStatus != "Tumu")
@@ -162,7 +187,8 @@ namespace yoklamaWeb.Controllers
                 SeatNumber = s.SeatNumber,
                 Sira = s.Sira,
                 Status = s.AttendanceStatus,
-                Not = s.Note ?? string.Empty
+                Not = s.Note ?? string.Empty,
+                SalonName = s.SalonAdi ?? string.Empty
             }).ToList();
 
             var vm = new SuperYoklamaciTakeAttendanceViewModel
@@ -170,12 +196,12 @@ namespace yoklamaWeb.Controllers
                 ExamId = examId,
                 ExamName = exam.Name,
                 ApplicationDate = exam.ApplicationDate,
-                Room = room,
+                Room = room ?? "Tümü",
                 Seats = rows,
                 SortBy = sortBy,
                 FilterStatus = filterStatus,
                 IsTimeValid = isTimeValid,
-                ProctorName = proctorAssignment?.ProctorName,
+                ProctorName = proctorAssignment?.ProctorName ?? "Süper Yoklamacı",
                 ExamNote = proctorAssignment?.ExamNote
             };
 
@@ -185,6 +211,7 @@ namespace yoklamaWeb.Controllers
         // POST /SuperYoklamaci/SaveAttendance
         [HttpPost("SaveAttendance")]
         [ValidateAntiForgeryToken]
+        [RequestFormLimits(ValueCountLimit = 8192)]
         public async Task<IActionResult> SaveAttendance(SaveAttendanceViewModel model)
         {
             var exam = await _context.Exams.FindAsync(model.ExamId);
@@ -202,64 +229,88 @@ namespace yoklamaWeb.Controllers
             else
                 end = exam.ValidTo.Date.AddDays(1).AddTicks(-1);
 
+            var redirectRoom = model.Room == "Tümü" ? null : model.Room;
+
             if (now < start || now > end)
             {
                 TempData["ErrorMessage"] = "Yoklama geçerlilik saat aralığı dışında olduğundan kaydedilemedi.";
-                return RedirectToAction(nameof(TakeAttendance), new { examId = model.ExamId, room = model.Room });
+                return RedirectToAction(nameof(TakeAttendance), new { examId = model.ExamId, room = redirectRoom });
             }
 
             if (string.IsNullOrWhiteSpace(model.YoklamaciIsmi))
             {
                 TempData["ErrorMessage"] = "Yoklamacı ismi zorunludur.";
-                return RedirectToAction(nameof(TakeAttendance), new { examId = model.ExamId, room = model.Room });
+                return RedirectToAction(nameof(TakeAttendance), new { examId = model.ExamId, room = redirectRoom });
             }
 
-            // Sınavın TemporaryProctor kaydını bul veya yoksa oluştur (Süper yoklamacı her salona müdahale edebilir)
-            var proctorAssignment = await _context.TemporaryProctors
-                .FirstOrDefaultAsync(tp => tp.ExamId == model.ExamId && tp.Room == model.Room);
+            // Sadece durumu veya notu değiştirilmiş öğrencileri tespit et ve güncelle
+            var modifiedRooms = new HashSet<string>();
+            int updateCount = 0;
 
-            if (proctorAssignment != null)
+            if (model.Seats != null)
             {
-                proctorAssignment.ProctorName = model.YoklamaciIsmi;
-                proctorAssignment.ExamNote = model.SinavNotu;
-            }
-            else
-            {
-                // Yoklamacı ataması yapılmamış olsa bile süper yoklamacının ismini ve notunu saklamak için
-                // sahte bir user id ile assignment kaydı oluşturuyoruz
-                var defaultUserId = _userManager.GetUserId(User) ?? "system";
-                var newAssignment = new TemporaryProctor
+                foreach (var row in model.Seats)
                 {
-                    ExamId = model.ExamId,
-                    Room = model.Room,
-                    UserId = defaultUserId,
-                    Password = "N/A",
-                    ValidFrom = exam.ValidFrom,
-                    ValidTo = exam.ValidTo,
-                    StartTime = exam.StartTime,
-                    EndTime = exam.EndTime,
-                    ProctorName = model.YoklamaciIsmi,
-                    ExamNote = model.SinavNotu
-                };
-                _context.TemporaryProctors.Add(newAssignment);
+                    var seat = await _context.ExamSeats.FindAsync(row.SeatId);
+                    if (seat == null || seat.ExamId != model.ExamId) continue;
+
+                    if (seat.AttendanceStatus != row.Status || seat.Note != row.Not)
+                    {
+                        seat.AttendanceStatus = row.Status;
+                        seat.Note = row.Not;
+                        seat.UpdatedAt = DateTime.UtcNow;
+                        updateCount++;
+
+                        if (!string.IsNullOrEmpty(seat.SalonAdi))
+                        {
+                            modifiedRooms.Add(seat.SalonAdi);
+                        }
+                    }
+                }
             }
 
-            // Her koltuk kaydını güncelle
-            foreach (var row in model.Seats)
+            // Sadece durumunu değiştirdiği öğrencilerin salonlarında TemporaryProctor güncelleyelim
+            if (modifiedRooms.Any())
             {
-                var seat = await _context.ExamSeats.FindAsync(row.SeatId);
-                if (seat == null || seat.ExamId != model.ExamId) continue;
+                var defaultUserId = _userManager.GetUserId(User) ?? "system";
+                foreach (var roomName in modifiedRooms)
+                {
+                    var proctorAssignment = await _context.TemporaryProctors
+                        .FirstOrDefaultAsync(tp => tp.ExamId == model.ExamId && tp.Room == roomName);
 
-                seat.AttendanceStatus = row.Status;
-                seat.Note = row.Not;
-                seat.UpdatedAt = DateTime.UtcNow;
+                    if (proctorAssignment != null)
+                    {
+                        proctorAssignment.ProctorName = model.YoklamaciIsmi;
+                        if (!string.IsNullOrWhiteSpace(model.SinavNotu))
+                        {
+                            proctorAssignment.ExamNote = model.SinavNotu;
+                        }
+                    }
+                    else
+                    {
+                        var newAssignment = new TemporaryProctor
+                        {
+                            ExamId = model.ExamId,
+                            Room = roomName,
+                            UserId = defaultUserId,
+                            Password = "N/A",
+                            ValidFrom = exam.ValidFrom,
+                            ValidTo = exam.ValidTo,
+                            StartTime = exam.StartTime,
+                            EndTime = exam.EndTime,
+                            ProctorName = model.YoklamaciIsmi,
+                            ExamNote = model.SinavNotu
+                        };
+                        _context.TemporaryProctors.Add(newAssignment);
+                    }
+                }
             }
 
             await _context.SaveChangesAsync();
 
-            TempData["SuccessMessage"] = $"Yoklama başarıyla kaydedildi. Salon: {model.Room} | Yoklamacı: {model.YoklamaciIsmi}";
+            TempData["SuccessMessage"] = $"Yoklama başarıyla kaydedildi. {updateCount} öğrenci güncellendi. Yoklamacı: {model.YoklamaciIsmi}";
 
-            return RedirectToAction(nameof(Rooms), new { examId = model.ExamId });
+            return RedirectToAction(nameof(TakeAttendance), new { examId = model.ExamId, room = redirectRoom });
         }
     }
 }

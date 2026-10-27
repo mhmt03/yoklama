@@ -19,5 +19,13 @@ namespace yoklamaWeb.Models
         [Required]
         [MaxLength(20)]
         public string Sube { get; set; } = null!;
+
+        [Required]
+        [Display(Name = "Sınavlara Katılacak Mı")]
+        public bool SinavlaraKatilacak { get; set; } = true;
+
+        [MaxLength(20)]
+        [Display(Name = "Alanı")]
+        public string Alan { get; set; } = "YOK";
     }
 }

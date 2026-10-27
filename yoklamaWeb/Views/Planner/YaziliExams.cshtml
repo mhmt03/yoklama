@@ -1,0 +1,155 @@
+@model IEnumerable<yoklamaWeb.Models.PlannerExam>
+@{
+    ViewData["Title"] = "Yazılı Sınav Oturma Planı";
+    Layout = "_Layout";
+    var seatingCounts = ViewBag.SeatingCounts as Dictionary<int, int> ?? new Dictionary<int, int>();
+}
+
+<div class="container mt-4">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4">
+        <div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-primary px-3 py-2 rounded-pill fs-6"><i class="bi bi-pencil-square me-1"></i> Yeni Modül</span>
+                <h2 class="mb-0 fw-bold" style="font-family: 'Outfit', sans-serif; color: #1e293b;">Yazılı Sınav Oturma Planı</h2>
+            </div>
+            <p class="text-muted mb-0 mt-1">Şubelere özel yazılı dersleri tanımlayın; kelebek veya homojen dağıtımla salon yoklama ve oturma planları hazırlayın.</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a asp-action="Exams" class="btn btn-outline-secondary">
+                <i class="bi bi-journal-text me-1"></i> Deneme Sınavları
+            </a>
+            <a asp-action="CreateYaziliExam" class="btn btn-primary px-3 shadow-sm">
+                <i class="bi bi-plus-circle me-1"></i> Yeni Yazılı Planı Başlat
+            </a>
+        </div>
+    </div>
+
+    @if (TempData["SuccessMessage"] != null)
+    {
+        <div class="alert alert-success alert-dismissible fade show shadow-sm border-0" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>@TempData["SuccessMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Kapat"></button>
+        </div>
+    }
+    @if (TempData["ErrorMessage"] != null)
+    {
+        <div class="alert alert-danger alert-dismissible fade show shadow-sm border-0" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>@TempData["ErrorMessage"]
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Kapat"></button>
+        </div>
+    }
+
+    <!-- Info banner -->
+    <div class="card border-0 shadow-sm mb-4 bg-gradient" style="background: linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%);">
+        <div class="card-body p-3 p-md-4">
+            <div class="row align-items-center g-3">
+                <div class="col-md-8">
+                    <h5 class="fw-bold text-dark mb-1"><i class="bi bi-stars text-warning me-2"></i>Yazılı Sınavı Oturma Planlama Özellikleri</h5>
+                    <p class="small text-muted mb-0">
+                        • Her şubeye farklı yazılı dersi atayabilirsiniz (örn: 9'lar <strong>Matematik</strong>, 10'lar <strong>Fizik</strong>, 11-SAY <strong>Kimya</strong>, 11-TM <strong>Coğrafya</strong>).<br />
+                        • <strong>Kelebek Dağıtım</strong> ile aynı dersin yazılısına giren öğrencilerin ardışık oturması engellenir.<br />
+                        • <strong>A4 Uyumlu Excel Çıktısı</strong> ile sınav saati (24 saat formatında) ve listenin altında <strong>Ders / Alan bazlı detaylı öğrenci sayıları</strong> tek sayfaya sığacak şekilde listelenir.
+                    </p>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <a asp-action="Rooms" class="btn btn-outline-dark btn-sm">
+                        <i class="bi bi-door-open me-1"></i> Salonları Yönet (@ViewBag.TotalRooms)
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm border-0 rounded-3">
+        <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+            <span class="fw-bold text-secondary"><i class="bi bi-list-check me-2"></i>Kayıtlı Yazılı Oturma Planları</span>
+            <span class="badge bg-light text-dark border">@Model.Count() Plan</span>
+        </div>
+        <div class="card-body p-0">
+            @if (!Model.Any())
+            {
+                <div class="p-5 text-center">
+                    <div class="display-6 text-muted mb-3"><i class="bi bi-clipboard-x"></i></div>
+                    <h5 class="text-secondary">Henüz kayıtlı yazılı oturma planı bulunmuyor</h5>
+                    <p class="text-muted small">İlk yazılı oturma planınızı oluşturmak için aşağıdaki butona tıklayın.</p>
+                    <a asp-action="CreateYaziliExam" class="btn btn-primary btn-sm">
+                        <i class="bi bi-plus-lg me-1"></i> Yazılı Planı Oluştur
+                    </a>
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light text-uppercase small text-muted">
+                            <tr>
+                                <th class="ps-4">Sınav Adı</th>
+                                <th>Sınav Tarihi ve Saati</th>
+                                <th>Durum</th>
+                                <th class="text-end pe-4">İşlemler</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in Model)
+                            {
+                                var count = seatingCounts.GetValueOrDefault(item.Id, 0);
+                                var hasSeating = count > 0;
+                                <tr>
+                                    <td class="ps-4">
+                                        <div class="fw-bold text-dark fs-6">@item.Name</div>
+                                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle small">Yazılı Oturma Planı</span>
+                                    </td>
+                                    <td>
+                                        <div class="fw-semibold text-dark">
+                                            <i class="bi bi-calendar-event me-1 text-primary"></i>
+                                            @item.ExamDate.ToString("dd MMMM yyyy dddd", new System.Globalization.CultureInfo("tr-TR"))
+                                        </div>
+                                        <div class="small text-muted">
+                                            <i class="bi bi-clock me-1"></i> Saat: <strong class="text-dark">@(string.IsNullOrEmpty(item.StartTime) ? "-" : item.StartTime)</strong> (24s)
+                                        </div>
+                                    </td>
+                                    <td>
+                                        @if (hasSeating)
+                                        {
+                                            <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle px-2 py-1">
+                                                <i class="bi bi-check-circle me-1"></i> @count Öğrenci Yerleştirildi
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle px-2 py-1">
+                                                <i class="bi bi-hourglass-split me-1"></i> Henüz Yerleşim Yapılmadı
+                                            </span>
+                                        }
+                                    </td>
+                                    <td class="text-end pe-4">
+                                        <div class="btn-group" role="group">
+                                            <a asp-action="ConfigureYaziliExam" asp-route-id="@item.Id" class="btn btn-sm btn-primary" title="Şube, Ders ve Salon Seçimi">
+                                                <i class="bi bi-sliders me-1"></i> Yerleşim Ayarları
+                                            </a>
+                                            @if (hasSeating)
+                                            {
+                                                <a asp-action="SeatingDetails" asp-route-id="@item.Id" class="btn btn-sm btn-outline-success" title="Oturma Planını Gör ve Excel İndir">
+                                                    <i class="bi bi-eye me-1"></i> Plan & Excel
+                                                </a>
+                                            }
+                                            <a asp-action="EditExam" asp-route-id="@item.Id" class="btn btn-sm btn-outline-secondary" title="Sınav Bilgisini Düzenle">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                            <form asp-action="DeleteExam" asp-route-id="@item.Id" method="post" class="d-inline" onsubmit="return confirm('Bu yazılı oturma planını ve oluşturulan tüm yerleşimleri silmek istediğinizden emin misiniz?');">
+                                                @Html.AntiForgeryToken()
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Sil">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+</div>

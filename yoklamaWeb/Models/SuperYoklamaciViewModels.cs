@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace yoklamaWeb.Models
@@ -14,6 +14,13 @@ namespace yoklamaWeb.Models
         public TimeSpan? StartTime { get; set; }
         public TimeSpan? EndTime { get; set; }
         public bool IsAccessible { get; set; }
+
+        // İstatistikler
+        public int TotalCount { get; set; }
+        public int PresentCount { get; set; }
+        public int AbsentCount { get; set; }
+        public int LateCount { get; set; }
+        public int PendingCount { get; set; }
     }
 
     public class SuperYoklamaciRoomsViewModel
@@ -29,6 +36,10 @@ namespace yoklamaWeb.Models
         public string RoomName { get; set; } = string.Empty;
         public int StudentCount { get; set; }
         public string? ProctorName { get; set; }
+        public int PresentCount { get; set; }
+        public int AbsentCount { get; set; }
+        public int LateCount { get; set; }
+        public int PendingCount { get; set; }
     }
 
     public class SuperYoklamaciTakeAttendanceViewModel

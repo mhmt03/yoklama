@@ -43,6 +43,9 @@ public string SinifDuzeyi { get; set; } = string.Empty;
         [Display(Name = "Oda")]
         public int? OdaId { get; set; }
 
+        [Display(Name = "Etüt")]
+        public int? EtutId { get; set; }
+
         [Display(Name = "Aktif")]
         public bool Aktif { get; set; } = true;
 
@@ -73,6 +76,8 @@ public string SinifDuzeyi { get; set; } = string.Empty;
         public int? OdaId { get; set; }
         public string? OdaNo { get; set; }
         public int? OdaKapasite { get; set; }
+        public int? EtutId { get; set; }
+        public string? EtutAdi { get; set; }
         public List<PansiyonYoklamaListViewModel> Yoklamalar { get; set; } = new();
         public List<IzinGirisiListViewModel> Izinler { get; set; } = new();
     }
@@ -84,6 +89,7 @@ public string SinifDuzeyi { get; set; } = string.Empty;
         public string? SinifDuzeyi { get; set; }
         public string? Sube { get; set; }
         public int? OdaId { get; set; }
+        public int? EtutId { get; set; }
         public bool? Aktif { get; set; }
         public bool SadeceAktif => Aktif ?? false;
         public int Page { get; set; } = 1;

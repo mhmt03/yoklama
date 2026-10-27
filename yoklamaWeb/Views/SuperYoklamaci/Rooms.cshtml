@@ -126,15 +126,15 @@
                     @if (!string.IsNullOrEmpty(room.ProctorName))
                     {
                         <div>
-                            <div class="proctor-info">✍️ Yoklamacı: @room.ProctorName</div>
+                            <div class="proctor-info" style="margin-bottom: 6px;">✍️ Yoklamacı: @room.ProctorName</div>
                         </div>
                     }
-                    else
-                    {
-                        <div>
-                            <div class="proctor-info" style="color:var(--text-muted);background:rgba(255,255,255,.03);border-color:var(--border)">✍️ Yoklama Alınmamış</div>
-                        </div>
-                    }
+                    <div style="font-size: 0.78rem; font-weight: 600; display: flex; gap: 6px; flex-wrap: wrap;">
+                        <span style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #6ee7b7; padding: 2px 8px; border-radius: 12px;">Var: @room.PresentCount</span>
+                        <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; padding: 2px 8px; border-radius: 12px;">Yok: @room.AbsentCount</span>
+                        <span style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.3); color: #fcd34d; padding: 2px 8px; border-radius: 12px;">Geç: @room.LateCount</span>
+                        <span style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.3); color: #cbd5e1; padding: 2px 8px; border-radius: 12px;">Belirsiz: @room.PendingCount</span>
+                    </div>
                 </a>
             }
         </div>

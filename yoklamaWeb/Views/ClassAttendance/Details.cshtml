@@ -15,11 +15,17 @@
         </div>
         <div class="text-end">
             <a asp-action="Index" class="btn btn-outline-secondary me-2">Geri</a>
-            <a asp-action="ImportStudents" asp-route-id="@Model.Id" class="btn btn-success me-2">Excel İçe Aktar</a>
+            @if (User.IsInRole("Admin") || User.IsInRole("Idareci") || User.IsInRole("SinavYoneticisi"))
+            {
+                <a asp-action="ImportStudents" asp-route-id="@Model.Id" class="btn btn-success me-2">Excel İçe Aktar</a>
+            }
             <a asp-action="ExportStudents" asp-route-id="@Model.Id" class="btn btn-outline-success me-2">Excel Dışa Aktar</a>
-            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createDailyAttendanceModal">
-                Günlük Yoklama Listesi Oluştur
-            </button>
+            @if (User.IsInRole("Admin") || User.IsInRole("Idareci") || User.IsInRole("SinavYoneticisi"))
+            {
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createDailyAttendanceModal">
+                    Günlük Yoklama Listesi Oluştur
+                </button>
+            }
         </div>
     </div>
 
@@ -40,22 +46,56 @@
         </div>
     </div>
 
+    <!-- Interactive Filters -->
+    <div class="row g-2 mb-3 bg-light p-3 rounded-4 shadow-sm border">
+        <div class="col-md-4">
+            <label class="form-label small fw-bold mb-1 text-secondary"><i class="bi bi-funnel"></i> Sınıf Filtresi</label>
+            <select id="classFilter" class="form-select form-select-sm" onchange="applyFilters()">
+                <option value="">Tümü</option>
+                @foreach (var val in Model.Students.Select(s => s.SinifDuzeyi).Distinct().OrderBy(x => x))
+                {
+                    <option value="@val">@val</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-bold mb-1 text-secondary"><i class="bi bi-funnel"></i> Şube Filtresi</label>
+            <select id="subeFilter" class="form-select form-select-sm" onchange="applyFilters()">
+                <option value="">Tümü</option>
+                @foreach (var val in Model.Students.Select(s => s.Sube).Distinct().OrderBy(x => x))
+                {
+                    <option value="@val">@val</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-bold mb-1 text-secondary"><i class="bi bi-funnel"></i> Salon Filtresi</label>
+            <select id="salonFilter" class="form-select form-select-sm" onchange="applyFilters()">
+                <option value="">Tümü</option>
+                @foreach (var val in Model.Students.Select(s => s.Salon).Where(x => !string.IsNullOrEmpty(x)).Distinct().OrderBy(x => x))
+                {
+                    <option value="@val">@val</option>
+                }
+            </select>
+        </div>
+    </div>
+
     <div class="table-responsive">
         <table class="table table-bordered table-hover">
             <thead class="table-dark">
                 <tr>
-                    <th>Öğrenci No</th>
-                    <th>Ad Soyad</th>
-                    <th>Sınıf</th>
-                    <th>Şube</th>
-                    <th>Salon</th>
-                    <th>Sıra</th>
+                    <th style="cursor: pointer;" onclick="sortTable(0)">Öğrenci No <i class="bi bi-arrow-down-up ms-1 text-muted"></i></th>
+                    <th style="cursor: pointer;" onclick="sortTable(1)">Ad Soyad <i class="bi bi-arrow-down-up ms-1 text-muted"></i></th>
+                    <th style="cursor: pointer;" onclick="sortTable(2)">Sınıf <i class="bi bi-arrow-down-up ms-1 text-muted"></i></th>
+                    <th style="cursor: pointer;" onclick="sortTable(3)">Şube <i class="bi bi-arrow-down-up ms-1 text-muted"></i></th>
+                    <th style="cursor: pointer;" onclick="sortTable(4)">Salon <i class="bi bi-arrow-down-up ms-1 text-muted"></i></th>
+                    <th style="cursor: pointer;" onclick="sortTable(5)">Sıra <i class="bi bi-arrow-down-up ms-1 text-muted"></i></th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="studentTableBody">
                 @foreach (var student in Model.Students)
                 {
-                    <tr>
+                    <tr data-no="@student.OgrenciNo" data-ad="@student.AdSoyad" data-class="@student.SinifDuzeyi" data-sube="@student.Sube" data-salon="@(student.Salon ?? "")" data-sira="@(student.Sira ?? "")">
                         <td>@student.OgrenciNo</td>
                         <td>@student.AdSoyad</td>
                         <td>@student.SinifDuzeyi</td>
@@ -94,6 +134,11 @@
                                min="@Model.ValidFrom.ToString("yyyy-MM-dd")" 
                                max="@Model.ValidTo.ToString("yyyy-MM-dd")"
                                value="@Model.ValidTo.ToString("yyyy-MM-dd")" />
+                    </div>
+                    <div class="mb-3">
+                        <label for="dailyCount" class="form-label">Günde Kaç Kez Yoklama Alınacak?</label>
+                        <input type="number" class="form-control" id="dailyCount" name="dailyCount" min="1" max="10" value="1" required />
+                        <div class="form-text">Günde 1'den fazla yoklama seçilirse listeler "(1. Oturum)", "(2. Oturum)" şeklinde adlandırılır.</div>
                     </div>
                     <div class="alert alert-info">
                         <small>
@@ -134,5 +179,83 @@
                 startDateInput.max = endDateInput.value;
             });
         });
+
+        function applyFilters() {
+            const classVal = document.getElementById("classFilter").value.toUpperCase();
+            const subeVal = document.getElementById("subeFilter").value.toUpperCase();
+            const salonVal = document.getElementById("salonFilter").value.toUpperCase();
+
+            const rows = document.querySelectorAll("#studentTableBody tr");
+            rows.forEach(row => {
+                const classText = row.getAttribute("data-class").toUpperCase();
+                const subeText = row.getAttribute("data-sube").toUpperCase();
+                const salonText = row.getAttribute("data-salon").toUpperCase();
+
+                const classMatch = !classVal || classText === classVal;
+                const subeMatch = !subeVal || subeText === subeVal;
+                const salonMatch = !salonVal || salonText === salonVal;
+
+                if (classMatch && subeMatch && salonMatch) {
+                    row.style.display = "";
+                } else {
+                    row.style.display = "none";
+                }
+            });
+        }
+
+        let sortDirections = [true, true, true, true, true, true];
+        function sortTable(columnIndex) {
+            const tbody = document.getElementById("studentTableBody");
+            const rows = Array.from(tbody.querySelectorAll("tr"));
+            const direction = sortDirections[columnIndex];
+            sortDirections[columnIndex] = !direction;
+
+            rows.sort((a, b) => {
+                let aVal = "";
+                let bVal = "";
+
+                if (columnIndex === 0) {
+                    aVal = a.getAttribute("data-no");
+                    bVal = b.getAttribute("data-no");
+                    const aNum = parseInt(aVal, 10);
+                    const bNum = parseInt(bVal, 10);
+                    if (!isNaN(aNum) && !isNaN(bNum)) {
+                        return direction ? aNum - bNum : bNum - aNum;
+                    }
+                } else if (columnIndex === 1) {
+                    aVal = a.getAttribute("data-ad");
+                    bVal = b.getAttribute("data-ad");
+                } else if (columnIndex === 2) {
+                    aVal = a.getAttribute("data-class");
+                    bVal = b.getAttribute("data-class");
+                    const aNum = parseInt(aVal, 10);
+                    const bNum = parseInt(bVal, 10);
+                    if (!isNaN(aNum) && !isNaN(bNum)) {
+                        return direction ? aNum - bNum : bNum - aNum;
+                    }
+                } else if (columnIndex === 3) {
+                    aVal = a.getAttribute("data-sube");
+                    bVal = b.getAttribute("data-sube");
+                } else if (columnIndex === 4) {
+                    aVal = a.getAttribute("data-salon");
+                    bVal = b.getAttribute("data-salon");
+                } else if (columnIndex === 5) {
+                    aVal = a.getAttribute("data-sira");
+                    bVal = b.getAttribute("data-sira");
+                    const aNum = parseInt(aVal, 10);
+                    const bNum = parseInt(bVal, 10);
+                    if (!isNaN(aNum) && !isNaN(bNum)) {
+                        return direction ? aNum - bNum : bNum - aNum;
+                    }
+                }
+
+                return direction 
+                    ? aVal.localeCompare(bVal, 'tr', { sensitivity: 'base' })
+                    : bVal.localeCompare(aVal, 'tr', { sensitivity: 'base' });
+            });
+
+            tbody.innerHTML = "";
+            rows.forEach(row => tbody.appendChild(row));
+        }
     </script>
 }

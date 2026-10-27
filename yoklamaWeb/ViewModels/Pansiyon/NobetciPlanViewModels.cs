@@ -8,6 +8,7 @@ namespace yoklamaWeb.ViewModels.Pansiyon
         public int Id { get; set; }
         public int PansiyonGorevlisiId { get; set; }
         public string GorevliAdSoyad { get; set; } = string.Empty;
+        public string GorevliKullaniciAdi { get; set; } = string.Empty;
         public string GorevlisiAdSoyad { get => GorevliAdSoyad; set => GorevliAdSoyad = value; }
         public DateTime BaslangicTarihi { get; set; }
         public DateTime BitisTarihi { get; set; }

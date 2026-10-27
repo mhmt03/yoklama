@@ -34,10 +34,28 @@
                         <td>@user.UserName</td>
                         <td>@user.Role</td>
                         <td class="text-end">
-                            <a asp-action="EditUser" asp-route-id="@user.Id" class="btn btn-sm btn-primary me-2">Düzenle</a>
-                            <form asp-action="DeleteUser" asp-route-id="@user.Id" method="post" class="d-inline" onsubmit="return confirm('Kullanıcıyı silmek istediğinizden emin misiniz?');">
-                                <button type="submit" class="btn btn-sm btn-danger">Sil</button>
-                            </form>
+                            @{
+                                bool hasPermission = true;
+                                if (User.IsInRole("Idareci") && (user.Role == "Admin" || user.Role == "Idareci" || user.Role == "SuperYoklamaci"))
+                                {
+                                    hasPermission = false;
+                                }
+                                else if (User.IsInRole("SinavYoneticisi") && (user.Role == "Admin" || user.Role == "Idareci" || user.Role == "PansiyonGorevlisi"))
+                                {
+                                    hasPermission = false;
+                                }
+                            }
+                            @if (hasPermission)
+                            {
+                                <a asp-action="EditUser" asp-route-id="@user.Id" class="btn btn-sm btn-primary me-2">Düzenle</a>
+                                <form asp-action="DeleteUser" asp-route-id="@user.Id" method="post" class="d-inline" onsubmit="return confirm('Kullanıcıyı silmek istediğinizden emin misiniz?');">
+                                    <button type="submit" class="btn btn-sm btn-danger">Sil</button>
+                                </form>
+                            }
+                            else
+                            {
+                                <span class="text-muted small">Yetkiniz Yok</span>
+                            }
                         </td>
                     </tr>
                 }

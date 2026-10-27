@@ -36,6 +36,11 @@ namespace yoklamaWeb.Controllers
                 .OrderBy(tp => tp.Exam.ApplicationDate)
                 .ToListAsync();
 
+            var examIds = assignments.Select(tp => tp.ExamId).Distinct().ToList();
+            var allSeats = await _context.ExamSeats
+                .Where(es => examIds.Contains(es.ExamId))
+                .ToListAsync();
+
             var viewModel = assignments.Select(tp =>
             {
                 // Sınavın geçerlilik aralığını hesapla
@@ -49,6 +54,8 @@ namespace yoklamaWeb.Controllers
                 else
                     end = tp.ValidTo.Date.AddDays(1).AddTicks(-1);
 
+                var assignmentSeats = allSeats.Where(es => es.ExamId == tp.ExamId && es.SalonAdi == tp.Room).ToList();
+
                 return new YoklamaciExamItemViewModel
                 {
                     ExamId = tp.ExamId,
@@ -59,7 +66,12 @@ namespace yoklamaWeb.Controllers
                     ValidTo = tp.ValidTo,
                     StartTime = tp.StartTime,
                     EndTime = tp.EndTime,
-                    IsAccessible = now >= start && now <= end
+                    IsAccessible = now >= start && now <= end,
+                    TotalCount = assignmentSeats.Count,
+                    PresentCount = assignmentSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Katildi),
+                    AbsentCount = assignmentSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Katilmadi),
+                    LateCount = assignmentSeats.Count(s => s.AttendanceStatus == AttendanceStatus.Gec),
+                    PendingCount = assignmentSeats.Count(s => s.AttendanceStatus == AttendanceStatus.KontrolEdilmedi)
                 };
             }).ToList();
 
@@ -129,7 +141,8 @@ namespace yoklamaWeb.Controllers
                 SeatNumber = s.SeatNumber,
                 Sira = s.Sira,
                 Status = s.AttendanceStatus,
-                Not = s.Note ?? string.Empty
+                Not = s.Note ?? string.Empty,
+                SalonName = s.SalonAdi ?? string.Empty
             }).ToList();
 
             var vm = new TakeAttendanceViewModel
@@ -143,7 +156,7 @@ namespace yoklamaWeb.Controllers
                 FilterStatus = filterStatus,
                 IsTimeValid = isTimeValid,
                 ProctorName = assignment.ProctorName,
-                ExamNote = assignment.ExamNote
+                ExamNote = assignment.RoomNote ?? assignment.ExamNote
             };
 
             return View(vm);
@@ -191,6 +204,7 @@ namespace yoklamaWeb.Controllers
             // Yoklamacı adı ve sınav notunu güncelle
             assignment.ProctorName = model.YoklamaciIsmi;
             assignment.ExamNote = model.SinavNotu;
+            assignment.RoomNote = model.SinavNotu;
 
             // Her koltuk kaydını güncelle
             foreach (var row in model.Seats)
