@@ -4054,14 +4054,52 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       return;
     }
 
+    let gradeVal = newStudentGrade.trim();
+    let sectionVal = newStudentSection.trim().toUpperCase();
+
+    // Roma rakamları desteği
+    const romanMap: Record<string, string> = { IX: '9', X: '10', XI: '11', XII: '12' };
+
+    // Eğer şubeye "11-A", "11/A", "11A", "XI-A" yazılmışsa
+    if (!gradeVal && sectionVal) {
+      const match = sectionVal.match(/^(\d{1,2}|IX|X|XI|XII)[\s\-\/_]*(.*)$/i);
+      if (match) {
+        const prefix = match[1].toUpperCase();
+        gradeVal = romanMap[prefix] || match[1];
+        sectionVal = match[2]?.trim().replace(/^[\s\-\/_]+/, '') || '';
+      }
+    } else if (gradeVal && (!sectionVal || sectionVal.length > 2)) {
+      // Eğer kademeye "11-A" yazılmışsa
+      const match = gradeVal.match(/^(\d{1,2}|IX|X|XI|XII)[\s\-\/_]*(.*)$/i);
+      if (match && match[2]) {
+        const prefix = match[1].toUpperCase();
+        gradeVal = romanMap[prefix] || match[1];
+        if (!sectionVal) {
+          sectionVal = match[2]?.trim().replace(/^[\s\-\/_]+/, '').toUpperCase() || '';
+        }
+      }
+    }
+
+    if (romanMap[gradeVal.toUpperCase()]) {
+      gradeVal = romanMap[gradeVal.toUpperCase()];
+    }
+
+    if (!gradeVal) {
+      Alert.alert(
+        'Sınıf Düzeyi Zorunludur',
+        'Lütfen öğrencinin sınıf düzeyini (örn: 9, 10, 11, 12) giriniz veya şube alanına "11-A" şeklinde belirtiniz.'
+      );
+      return;
+    }
+
     setAddingStudent(true);
     try {
       const res = await apiRequest('sync/students/single', 'POST', {
         schoolId: selectedSchool.id,
         studentNumber: newStudentNo.trim(),
         fullName: newStudentName.trim(),
-        grade: newStudentGrade.trim(),
-        section: newStudentSection.trim().toUpperCase(),
+        grade: gradeVal,
+        section: sectionVal,
         parentName: newStudentParentName.trim() || undefined,
         parentPhone: newStudentParentPhone.trim() || undefined,
         studentPhone: newStudentPhone.trim() || undefined,
@@ -4072,6 +4110,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setAddStudentModalVisible(false);
         setNewStudentNo('');
         setNewStudentName('');
+        setNewStudentGrade('');
+        setNewStudentSection('');
         setNewStudentParentName('');
         setNewStudentParentPhone('');
         setNewStudentPhone('');
@@ -4079,8 +4119,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           id: String(Date.now()),
           studentNumber: newStudentNo.trim(),
           fullName: newStudentName.trim(),
-          grade: newStudentGrade.trim(),
-          section: newStudentSection.trim().toUpperCase(),
+          grade: gradeVal,
+          section: sectionVal,
           parentName: newStudentParentName.trim(),
           parentPhone: newStudentParentPhone.trim(),
           studentPhone: newStudentPhone.trim(),
@@ -4106,13 +4146,30 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       return;
     }
 
+    let gradeVal = (editingStudent.grade || '').trim();
+    let sectionVal = (editingStudent.section || '').trim().toUpperCase();
+
+    const romanMap: Record<string, string> = { IX: '9', X: '10', XI: '11', XII: '12' };
+    if (!gradeVal && sectionVal) {
+      const match = sectionVal.match(/^(\d{1,2}|IX|X|XI|XII)[\s\-\/_]*(.*)$/i);
+      if (match) {
+        const prefix = match[1].toUpperCase();
+        gradeVal = romanMap[prefix] || match[1];
+        sectionVal = match[2]?.trim().replace(/^[\s\-\/_]+/, '') || '';
+      }
+    }
+
+    if (romanMap[gradeVal.toUpperCase()]) {
+      gradeVal = romanMap[gradeVal.toUpperCase()];
+    }
+
     setUpdatingStudent(true);
     try {
       const res = await apiRequest(`sync/students/${editingStudent.id}`, 'PUT', {
         studentNumber: editingStudent.studentNumber.trim(),
         fullName: editingStudent.fullName.trim(),
-        grade: editingStudent.grade.trim(),
-        section: editingStudent.section.trim().toUpperCase(),
+        grade: gradeVal || '9',
+        section: sectionVal || 'A',
         parentName: editingStudent.parentName || undefined,
         parentPhone: editingStudent.parentPhone || undefined,
         studentPhone: editingStudent.studentPhone || undefined,
@@ -4123,7 +4180,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         Alert.alert('Başarılı', 'Öğrenci bilgileri doğrudan sunucuda güncellendi.');
         setEditStudentModalVisible(false);
         const updated = students.map((s: any) =>
-          s.id === editingStudent.id ? { ...s, ...editingStudent } : s
+          s.id === editingStudent.id ? { ...s, ...editingStudent, grade: gradeVal || '9', section: sectionVal || 'A' } : s
         );
         setStudents(updated);
         if (selectedSchool) {

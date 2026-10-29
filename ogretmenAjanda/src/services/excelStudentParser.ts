@@ -22,14 +22,27 @@ export interface ParseExcelResult {
 }
 
 export function normalizeGradeAndSection(rawGrade?: string, rawSection?: string): { grade: string; section: string } {
-  const g = (rawGrade || '').trim();
-  const s = (rawSection || '').trim();
+  let g = (rawGrade || '').trim();
+  let s = (rawSection || '').trim();
 
+  const convertRoman = (text: string) => {
+    return text
+      .replace(/\bXII\b/gi, '12')
+      .replace(/\bXI\b/gi, '11')
+      .replace(/\bX\b/gi, '10')
+      .replace(/\bIX\b/gi, '9');
+  };
+
+  g = convertRoman(g);
+  s = convertRoman(s);
+
+  // Eğer şubede "11-A", "11/A", "11A" varsa
   const matchS = s.match(/^(\d{1,2})[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
   if (matchS) {
     return { grade: matchS[1], section: matchS[2].toUpperCase() };
   }
 
+  // Eğer kademede "11-A", "11/A", "11A" varsa
   const matchG = g.match(/^(\d{1,2})[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
   if (matchG) {
     const finalSec = s && s.length <= 2 ? s.toUpperCase() : matchG[2].toUpperCase();
@@ -37,14 +50,21 @@ export function normalizeGradeAndSection(rawGrade?: string, rawSection?: string)
   }
 
   const numG = g.match(/\d+/);
-  let cleanGrade = numG ? numG[0] : g;
+  let cleanGrade = numG ? numG[0] : '';
 
-  let cleanSection = s.replace(/şubesi/gi, '').replace(/şube/gi, '').trim().toUpperCase();
+  let cleanSection = s.replace(/şubesi/gi, '').replace(/şube/gi, '').replace(/sınıfı/gi, '').replace(/sınıf/gi, '').trim().toUpperCase();
   if (!cleanGrade && cleanSection) {
     const numS = cleanSection.match(/\d+/);
     if (numS) {
       cleanGrade = numS[0];
-      cleanSection = cleanSection.replace(/\d+/g, '').trim();
+      cleanSection = cleanSection.replace(/\d+/g, '').replace(/[-/.\s]+/g, '').trim();
+    }
+  }
+
+  if (!cleanSection && g) {
+    const letterG = g.match(/[A-Za-zÇĞİÖŞÜçğıöşü]+/);
+    if (letterG) {
+      cleanSection = letterG[0].toUpperCase();
     }
   }
 
@@ -179,14 +199,27 @@ export async function parseStudentsFromExcel(fileUri: string): Promise<ParseExce
           }
         }
 
-        // Sınıf / Şube tespiti (Örn: "AL -  9. Sınıf / A Şubesi")
-        const classMatch = firstCell.match(/(\d+)\.\s*Sınıf\s*\/\s*([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*Şubesi/i);
-        if (classMatch) {
-          currentGrade = classMatch[1].trim();
-          currentSection = classMatch[2].trim().toUpperCase();
-          classSet.add(`${currentGrade}-${currentSection}`);
-          continue;
+        // Sınıf / Şube tespiti (Örn: "AL -  9. Sınıf / A Şubesi", "11. Sınıf / B Şubesi", "12-C")
+        let foundClassMatch = false;
+        for (let c = 0; c < Math.min(row.length, 5); c++) {
+          const cellStr = String(row[c] || '').trim();
+          if (!cellStr) continue;
+          const classMatch = cellStr.match(/(?:AL\s*-\s*)?(\d{1,2}|IX|X|XI|XII)\.?\s*(?:Sınıf)?\s*[\/\-]?\s*([A-Za-zÇĞİÖŞÜçğıöşü]+)\s*(?:Şubesi|Şube)?/i);
+          if (classMatch && (cellStr.toLowerCase().includes('sınıf') || cellStr.toLowerCase().includes('şube') || cellStr.includes('/'))) {
+            let gFound = classMatch[1].toUpperCase();
+            if (gFound === 'IX') gFound = '9';
+            else if (gFound === 'X') gFound = '10';
+            else if (gFound === 'XI') gFound = '11';
+            else if (gFound === 'XII') gFound = '12';
+
+            currentGrade = gFound;
+            currentSection = classMatch[2].trim().toUpperCase();
+            classSet.add(`${currentGrade}-${currentSection}`);
+            foundClassMatch = true;
+            break;
+          }
         }
+        if (foundClassMatch) continue;
 
         // Öğrenci Satırı (Öğrenci No genelde sütun 1'de, Ad sütun 3'te, Soyad sütun 7'de bulunur)
         const possibleNo = parseInt(String(row[1]));

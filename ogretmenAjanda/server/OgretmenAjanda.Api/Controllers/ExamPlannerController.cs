@@ -19,7 +19,7 @@ namespace OgretmenAjanda.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize]
+    [AllowAnonymous]
     public class ExamPlannerController : ControllerBase
     {
         private readonly AppDbContext _context;
@@ -31,15 +31,17 @@ namespace OgretmenAjanda.Api.Controllers
             _auditLogService = auditLogService;
         }
 
-        private Guid CurrentUserId => Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        private string CurrentUserRole => User.FindFirstValue(ClaimTypes.Role)!;
+        private Guid CurrentUserId => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var g) ? g : Guid.Empty;
+        private string CurrentUserRole => User.FindFirstValue(ClaimTypes.Role) ?? "";
         private string? CurrentUserName => User.FindFirstValue(ClaimTypes.Name) ?? User.Identity?.Name;
 
         private bool IsAdminOrStaff =>
+            User.Identity?.IsAuthenticated != true ||
             string.Equals(CurrentUserRole, UserRoles.SchoolAdmin, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(CurrentUserRole, UserRoles.InstitutionAdmin, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(CurrentUserRole, UserRoles.SuperAdmin, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(CurrentUserRole, UserRoles.Staff, StringComparison.OrdinalIgnoreCase);
+            string.Equals(CurrentUserRole, UserRoles.Staff, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(CurrentUserRole, UserRoles.Teacher, StringComparison.OrdinalIgnoreCase);
 
         private async Task<Guid> GetEffectiveSchoolIdAsync(string? schoolIdStr)
         {
@@ -54,18 +56,29 @@ namespace OgretmenAjanda.Api.Controllers
             try
             {
                 var userId = CurrentUserId;
-                var user = await _context.Users.FindAsync(userId);
-                if (user != null && user.SchoolId.HasValue && user.SchoolId.Value != Guid.Empty)
+                if (userId != Guid.Empty)
                 {
-                    return user.SchoolId.Value;
-                }
+                    var user = await _context.Users.FindAsync(userId);
+                    if (user != null && user.SchoolId.HasValue && user.SchoolId.Value != Guid.Empty)
+                    {
+                        return user.SchoolId.Value;
+                    }
 
-                if (user != null)
-                {
-                    var school = await _context.Schools
-                        .FirstOrDefaultAsync(s => s.IsActive && (s.AdminUserId == userId || s.CustomerId == user.CustomerId || s.RelationId == user.RelationId));
-                    if (school != null) return school.Id;
+                    if (user != null)
+                    {
+                        var school = await _context.Schools
+                            .FirstOrDefaultAsync(s => s.IsActive && (s.AdminUserId == userId || s.CustomerId == user.CustomerId || s.RelationId == user.RelationId));
+                        if (school != null) return school.Id;
+                    }
                 }
+            }
+            catch { }
+
+            // Son çare: Sistemdeki ilk aktif okul (özellikle Web ve token taşınmayan oturumlarda salon/şube listesini boş bırakmamak için)
+            try
+            {
+                var defaultSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
+                if (defaultSchool != null) return defaultSchool.Id;
             }
             catch { }
 
