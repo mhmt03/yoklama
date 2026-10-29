@@ -129,6 +129,31 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
     );
   };
 
+  const handleOpenExamPlanner = () => {
+    onClose();
+    if (currentRole === 'admin' || currentRole === 'staff') {
+      if (navigation && navigation.navigate) {
+        navigation.navigate('ExamPlanner');
+      }
+    } else {
+      Alert.alert(
+        '🔒 Yönetici Erişimi Gerekli',
+        'Ortak Yazılı Sınavı Oturma Planı modülü yalnızca Okul Yöneticilerine (Müdür / İdareci) açıktır. Öğretmen kullanıcılarının erişim yetkisi bulunmamaktadır.\n\nYönetici moduna geçmek istiyor musunuz?',
+        [
+          { text: 'Kapat', style: 'cancel' },
+          {
+            text: 'Yönetici Moduna Geç',
+            style: 'default',
+            onPress: async () => {
+              await setActiveUserRole('admin');
+              onRoleChanged('admin');
+            },
+          },
+        ]
+      );
+    }
+  };
+
   const navigateToScreen = (screenName: string) => {
     onClose();
     if (navigation && navigation.navigate) {
@@ -183,9 +208,36 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
             </View>
 
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {/* SECTION: ÖĞRETMEN MENÜSÜ */}
+              {/* SECTION: YÖNETİCİ & SINAV MENÜSÜ */}
+              <View style={styles.menuSection}>
+                <Text style={[styles.sectionTitle, { color: '#7C3AED' }]}>🏛️ SINAV & YÖNETİM MODÜLÜ</Text>
 
-              {/* SECTION: ÖĞRETMEN İŞLEMLERİ */}
+                <TouchableOpacity
+                  style={[styles.menuItem, { backgroundColor: '#F5F3FF', borderRadius: 12, paddingVertical: 11, borderWidth: 1, borderColor: '#DDD6FE' }]}
+                  onPress={handleOpenExamPlanner}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.menuIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                    <Ionicons name="grid" size={19} color="#7C3AED" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={[styles.menuItemTitle, { color: '#6D28D9', fontWeight: '800' }]}>
+                        Yazılı Oturma Planı
+                      </Text>
+                      <View style={{ backgroundColor: '#7C3AED', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#fff' }}>YÖNETİCİ</Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.menuItemSub, { color: '#7C3AED' }]}>
+                      Kelebek dağıtım, salon ve ders saati gözetmen planı
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#7C3AED" />
+                </TouchableOpacity>
+              </View>
+
+              {/* SECTION: ÖĞRETMEN MENÜSÜ */}
               <View style={styles.menuSection}>
                 <Text style={styles.sectionTitle}>👨‍🏫 ÖĞRETMEN MENÜSÜ</Text>
 

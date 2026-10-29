@@ -45,6 +45,7 @@ import { SuperAdminScreen } from './src/screens/SuperAdminScreen';
 import { SchoolAdminScreen } from './src/screens/SchoolAdminScreen';
 import { ClassCockpitScreen } from './src/screens/ClassCockpitScreen';
 import { MessagesScreen } from './src/screens/MessagesScreen';
+import { ExamPlannerScreen } from './src/screens/ExamPlannerScreen';
 import { requestNotificationPermission } from './src/services/notificationPermissionService';
 
 
@@ -172,6 +173,7 @@ function AppContent() {
   const [currentRole, setCurrentRole] = useState<UserRole | null>(null);
   const [roleLoaded, setRoleLoaded] = useState(false);
   const [activeSchool, setActiveSchool] = useState<School | null>(null);
+  const [adminSubView, setAdminSubView] = useState<'admin' | 'exam_planner'>('admin');
   const { isDrawerOpen, closeDrawer } = useDrawer();
 
   const loadRoleAndSchool = async () => {
@@ -239,11 +241,24 @@ function AppContent() {
 
   // 3. Okul Admini / İdareci rolü -> Doğrudan Okul Yönetim Paneli (AI Çarşaf, Öğretmenler, Okul Kodu)
   if (currentRole === 'admin' || currentRole === 'staff') {
+    if (adminSubView === 'exam_planner') {
+      return (
+        <ExamPlannerScreen
+          navigation={{
+            goBack: () => setAdminSubView('admin'),
+          }}
+        />
+      );
+    }
     return (
       <SchoolAdminScreen
         navigation={{
           goBack: () => handleRoleChange(null),
           switchToTeacher: () => handleRoleChange('teacher'),
+          openExamPlanner: () => setAdminSubView('exam_planner'),
+          navigate: (scr: string) => {
+            if (scr === 'ExamPlanner') setAdminSubView('exam_planner');
+          },
         }}
         onRoleChange={handleRoleChange}
       />
@@ -282,6 +297,7 @@ function AppContent() {
           <Stack.Screen name="Agenda" component={AgendaScreen} />
           <Stack.Screen name="SuperAdmin" component={SuperAdminScreen} />
           <Stack.Screen name="SchoolAdmin" component={SchoolAdminScreen} />
+          <Stack.Screen name="ExamPlanner" component={ExamPlannerScreen} />
           <Stack.Screen name="ClassCockpit" component={ClassCockpitScreen} />
           <Stack.Screen name="Messages" component={MessagesScreen} />
         </Stack.Navigator>

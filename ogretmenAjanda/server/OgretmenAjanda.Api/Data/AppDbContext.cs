@@ -23,6 +23,9 @@ namespace OgretmenAjanda.Api.Data
         public DbSet<SchoolClass> SchoolClasses => Set<SchoolClass>();
         public DbSet<SchoolLesson> SchoolLessons => Set<SchoolLesson>();
         public DbSet<TeacherDuty> TeacherDuties => Set<TeacherDuty>();
+        public DbSet<ExamHall> ExamHalls => Set<ExamHall>();
+        public DbSet<WrittenExam> WrittenExams => Set<WrittenExam>();
+        public DbSet<ExamSeating> ExamSeatings => Set<ExamSeating>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -55,6 +58,17 @@ namespace OgretmenAjanda.Api.Data
             // Audit log için index
             modelBuilder.Entity<AuditLog>()
                 .HasIndex(a => new { a.SchoolId, a.Timestamp });
+
+            // Sınav salonları okul bazında indeks
+            modelBuilder.Entity<ExamHall>()
+                .HasIndex(h => new { h.SchoolId, h.RoomName });
+
+            // Sınav oturma kayıtları indeks
+            modelBuilder.Entity<ExamSeating>()
+                .HasIndex(s => new { s.WrittenExamId, s.StudentNumber });
+
+            modelBuilder.Entity<ExamSeating>()
+                .HasIndex(s => new { s.SchoolId, s.WrittenExamId });
         }
     }
 }

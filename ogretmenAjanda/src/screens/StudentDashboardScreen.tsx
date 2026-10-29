@@ -23,13 +23,14 @@ import { logoutUserRole } from '../utils/roleService';
 import { fetchStudentPortalFeed } from '../services/syncService';
 import { markMessageAsRead, markAllMessagesAsRead, setCachedUnreadCount } from '../services/messageNotificationService';
 import { FloatingMessageBubble } from '../components/FloatingMessageBubble';
+import { fetchStudentExamSeatings } from '../database/operations/examPlannerOperations';
 
 interface StudentDashboardScreenProps {
   onLogout: () => void;
   initialMode?: 'student' | 'parent';
 }
 
-type PortalTab = 'schedule' | 'teachers' | 'assignments' | 'quizzes' | 'evaluations' | 'messages';
+type PortalTab = 'schedule' | 'exam_seatings' | 'teachers' | 'assignments' | 'quizzes' | 'evaluations' | 'messages';
 
 const DAYS = [
   { day: 1, label: 'Pazartesi' },
@@ -77,6 +78,9 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
   const [newPassword, setNewPassword] = useState('');
   const [changingPass, setChangingPass] = useState(false);
 
+  // Yazılı Sınav Oturma Yerleri State
+  const [examSeatings, setExamSeatings] = useState<any[]>([]);
+
   useEffect(() => {
     checkActiveSession();
   }, []);
@@ -88,6 +92,9 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
       if (active && (active.role === 'STUDENT' || active.role === 'PARENT')) {
         setSession(active);
         await loadPortalData(active.userId, active.role);
+        if (active.schoolId && active.username) {
+          fetchStudentExamSeatings(active.schoolId, active.username).then(setExamSeatings);
+        }
       }
     } catch (e) {
       console.warn('Oturum denetimi hatası:', e);
@@ -101,6 +108,11 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
       const activeRole = role || session?.role || (loginMode === 'parent' ? 'PARENT' : 'STUDENT');
       const data = await fetchStudentPortalFeed(studentId, activeRole);
       setFeed(data);
+      if (data?.student?.studentNumber && (session?.schoolId || data?.student?.schoolId)) {
+        const sId = session?.schoolId || data.student.schoolId;
+        const seatings = await fetchStudentExamSeatings(sId, data.student.studentNumber);
+        setExamSeatings(seatings);
+      }
     } catch (e: any) {
       console.warn('Portal verisi çekilemedi:', e?.message || e);
     } finally {
@@ -544,6 +556,26 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
             </Text>
           </TouchableOpacity>
 
+          {/* 📝 YAZILI SINAV OTURMA YERLERİ SEKMESİ */}
+          <TouchableOpacity
+            style={[styles.portalTab, activeTab === 'exam_seatings' && styles.portalTabActive]}
+            onPress={() => setActiveTab('exam_seatings')}
+          >
+            <Ionicons
+              name={activeTab === 'exam_seatings' ? 'school' : 'school-outline'}
+              size={16}
+              color={activeTab === 'exam_seatings' ? '#7C3AED' : '#64748B'}
+            />
+            <Text
+              style={[
+                styles.portalTabText,
+                activeTab === 'exam_seatings' && { color: '#7C3AED', fontWeight: '800' },
+              ]}
+            >
+              Sınav Yerlerim {examSeatings.length > 0 ? `(${examSeatings.length})` : ''}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.portalTab, activeTab === 'teachers' && styles.portalTabActive]}
             onPress={() => setActiveTab('teachers')}
@@ -644,6 +676,48 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
         {/* ===================================== */}
         {activeTab === 'schedule' && (
           <View>
+            {/* Ortak Yazılı Sınav Oturma Yeri Hızlı Bilgi Kartı */}
+            {examSeatings.length > 0 && (
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#F5F3FF',
+                  borderWidth: 1.5,
+                  borderColor: '#DDD6FE',
+                  borderRadius: 14,
+                  padding: 14,
+                  marginBottom: 14,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+                onPress={() => setActiveTab('exam_seatings')}
+                activeOpacity={0.85}
+              >
+                <View
+                  style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
+                    backgroundColor: '#EDE9FE',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Ionicons name="school" size={24} color="#7C3AED" />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#6D28D9' }}>
+                      Ortak Yazılı Sınavı Oturma Yeriniz Belli Oldu!
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: '#7C3AED', marginTop: 2 }}>
+                    {examSeatings[0].examName} • {examSeatings[0].roomName} Salonu, Sıra: {examSeatings[0].seatNumber}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#7C3AED" />
+              </TouchableOpacity>
+            )}
+
             {/* Gün Seçici Çubuk */}
             <View style={styles.daySelectorRow}>
               {DAYS.map((d) => {
@@ -703,6 +777,108 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
                       ) : null}
                     </View>
                   </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* ===================================== */}
+        {/* TAB 1.5: YAZILI SINAV OTURMA YERLERİ */}
+        {/* ===================================== */}
+        {activeTab === 'exam_seatings' && (
+          <View>
+            <View style={styles.sectionHeaderCard}>
+              <Text style={styles.sectionHeaderTitle}>📋 Ortak Yazılı Sınavı Oturma Yerleri</Text>
+              <Text style={styles.sectionHeaderSub}>
+                Okul yönetimi tarafından kelebek sistemiyle belirlenmiş güncel sınav salonu ve sıra numaranız.
+              </Text>
+            </View>
+
+            {examSeatings.length === 0 ? (
+              <View style={styles.emptyPortal}>
+                <Ionicons name="school-outline" size={52} color="#94A3B8" />
+                <Text style={styles.emptyPortalTitle}>Tanımlı Sınav Oturma Yeri Bulunamadı</Text>
+                <Text style={styles.emptyPortalSub}>
+                  Şu an için adınıza tanımlanmış aktif bir ortak yazılı sınav oturma yeri bulunmuyor. İdareniz planlamayı tamamladığında burada görüntülenecektir.
+                </Text>
+              </View>
+            ) : (
+              examSeatings.map((seat: any, idx: number) => (
+                <View
+                  key={seat.id || idx}
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: 16,
+                    padding: 16,
+                    marginBottom: 14,
+                    borderWidth: 1.5,
+                    borderColor: '#DDD6FE',
+                    shadowColor: '#7C3AED',
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.08,
+                    shadowRadius: 8,
+                    elevation: 3,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View style={{ backgroundColor: '#EDE9FE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: '#7C3AED' }}>{seat.examName}</Text>
+                    </View>
+                    <View style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>
+                        📅 {seat.examDate} ({seat.dayOfWeekStr})
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 14 }}>
+                    <View
+                      style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: 14,
+                        backgroundColor: '#7C3AED',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: '#EDE9FE' }}>SIRA NO</Text>
+                      <Text style={{ fontSize: 22, fontWeight: '900', color: '#FFFFFF' }}>{seat.seatNumber}</Text>
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                        🚪 {seat.roomName} Salonu
+                      </Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: '#4F46E5', marginTop: 2 }}>
+                        📖 {seat.lessonName}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                        ⏰ {seat.lessonHour} {seat.startTime ? `(${seat.startTime})` : ''}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {seat.proctorTeacherName ? (
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        marginTop: 12,
+                        paddingTop: 10,
+                        borderTopWidth: 1,
+                        borderTopColor: '#F1F5F9',
+                      }}
+                    >
+                      <Ionicons name="person-circle-outline" size={16} color="#64748B" />
+                      <Text style={{ fontSize: 12, color: '#64748B' }}>Salon Gözetmeni:</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                        {seat.proctorTeacherName}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               ))
             )}
@@ -901,7 +1077,7 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
               <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 10 }}>
                 <TouchableOpacity
                   style={styles.markAllReadBtn}
-                  onPress={handleMarkAllMessagesRead}
+                  onPress={() => handleMarkAllMessagesRead()}
                   activeOpacity={0.8}
                 >
                   <Ionicons name="checkmark-done" size={15} color="#4F46E5" />

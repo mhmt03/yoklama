@@ -414,7 +414,6 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
 
           const defaultSchools = [
             { name: 'Atatürk Anadolu Lisesi', code: 'OKL-10001', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
-            { name: 'Cumhuriyet Fen Lisesi', code: 'OKL-10002', geminiApiKey: DEFAULT_GEMINI_API_KEY, geminiModel: DEFAULT_GEMINI_MODEL },
           ];
           await syncAffiliatedSchools(defaultSchools, 'OKL-10001');
           await setGeminiApiKey(DEFAULT_GEMINI_API_KEY);

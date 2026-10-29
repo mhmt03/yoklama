@@ -491,5 +491,99 @@ namespace OgretmenAjanda.Api.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
+
+    public class ExamHall
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string RoomName { get; set; } = string.Empty; // Salon Adı (Örn: 9-A, Konferans Salonu, Salon 1)
+
+        public int Capacity { get; set; } = 30;
+
+        [Required, MaxLength(50)]
+        public string Tag { get; set; } = "İkili Oturum"; // "İkili Oturum", "Tekli Oturum", "Laboratuvar" vb.
+
+        public int OrderIndex { get; set; } = 0;
+
+        public bool IsActive { get; set; } = true;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    public class WrittenExam
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(200)]
+        public string Name { get; set; } = string.Empty; // Örn: 1. Dönem 1. Ortak Yazılı Sınavı
+
+        public DateTime ExamDate { get; set; } = DateTime.Today;
+
+        public int LessonHour { get; set; } = 3; // Yazılının yapılacağı ders saati (1..10)
+
+        [MaxLength(10)]
+        public string? StartTime { get; set; } // Örn: "09:50"
+
+        [MaxLength(50)]
+        public string? AcademicYear { get; set; }
+
+        [MaxLength(50)]
+        public string? Term { get; set; }
+
+        public bool IsActive { get; set; } = true;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    public class ExamSeating
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid WrittenExamId { get; set; }
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        public Guid? StudentId { get; set; }
+
+        [Required, MaxLength(30)]
+        public string StudentNumber { get; set; } = string.Empty;
+
+        [Required, MaxLength(120)]
+        public string FullName { get; set; } = string.Empty;
+
+        [Required, MaxLength(20)]
+        public string Grade { get; set; } = string.Empty;
+
+        [Required, MaxLength(20)]
+        public string Section { get; set; } = string.Empty;
+
+        [Required, MaxLength(100)]
+        public string LessonName { get; set; } = string.Empty;
+
+        [Required, MaxLength(100)]
+        public string RoomName { get; set; } = string.Empty;
+
+        public int SeatNumber { get; set; }
+
+        [MaxLength(120)]
+        public string? ProctorTeacherName { get; set; } // O saatte o salonda görevli gözetmen öğretmen
+
+        public Guid? ProctorTeacherId { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
 }
+
 

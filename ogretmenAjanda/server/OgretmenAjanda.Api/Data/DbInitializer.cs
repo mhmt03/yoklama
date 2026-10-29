@@ -69,6 +69,65 @@ namespace OgretmenAjanda.Api.Data
             try
             {
                 await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""ExamHalls"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""RoomName"" TEXT NOT NULL,
+                        ""Capacity"" INTEGER NOT NULL DEFAULT 30,
+                        ""Tag"" TEXT NOT NULL DEFAULT 'İkili Oturum',
+                        ""OrderIndex"" INTEGER NOT NULL DEFAULT 0,
+                        ""IsActive"" INTEGER NOT NULL DEFAULT 1,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""WrittenExams"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""Name"" TEXT NOT NULL,
+                        ""ExamDate"" TEXT NOT NULL,
+                        ""LessonHour"" INTEGER NOT NULL DEFAULT 3,
+                        ""StartTime"" TEXT,
+                        ""AcademicYear"" TEXT,
+                        ""Term"" TEXT,
+                        ""IsActive"" INTEGER NOT NULL DEFAULT 1,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""ExamSeatings"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""WrittenExamId"" TEXT NOT NULL,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""StudentId"" TEXT,
+                        ""StudentNumber"" TEXT NOT NULL,
+                        ""FullName"" TEXT NOT NULL,
+                        ""Grade"" TEXT NOT NULL,
+                        ""Section"" TEXT NOT NULL,
+                        ""LessonName"" TEXT NOT NULL,
+                        ""RoomName"" TEXT NOT NULL,
+                        ""SeatNumber"" INTEGER NOT NULL,
+                        ""ProctorTeacherName"" TEXT,
+                        ""ProctorTeacherId"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
                     CREATE TABLE IF NOT EXISTS ""SchoolClasses"" (
                         ""Id"" TEXT NOT NULL PRIMARY KEY,
                         ""SchoolId"" TEXT NOT NULL,
@@ -215,31 +274,12 @@ namespace OgretmenAjanda.Api.Data
                 testSchool.AdminUserId = schoolAdmin.Id;
             }
 
-            // 3.1. Deneme Okulu 2: Cumhuriyet Fen Lisesi (OKL-10002) - Aynı Müşteri birden fazla okul yönetebilir
-            var testSchool2 = await context.Schools.FirstOrDefaultAsync(s => s.Code == "OKL-10002");
-            if (testSchool2 == null)
+            // 3.1. Kullanıcının sildiği Cumhuriyet Fen Lisesi (OKL-10002) varsa kalıcı olarak temizle
+            var testSchool2 = await context.Schools.FirstOrDefaultAsync(s => s.Code == "OKL-10002" || s.Name == "Cumhuriyet Fen Lisesi");
+            if (testSchool2 != null)
             {
-                testSchool2 = new School
-                {
-                    Id = Guid.NewGuid(),
-                    Name = "Cumhuriyet Fen Lisesi",
-                    Code = "OKL-10002",
-                    AdminUserId = schoolAdmin.Id,
-                    CustomerId = "mg-egitim",
-                    RelationId = "ILK-10001",
-                    Address = "Gazi Cad. No:45",
-                    Phone = "0212 555 0202",
-                    CreatedAt = DateTime.UtcNow,
-                    LicenseExpiresAt = DateTime.UtcNow.AddYears(1),
-                    IsActive = true
-                };
-                await context.Schools.AddAsync(testSchool2);
-            }
-            else
-            {
-                testSchool2.CustomerId = "mg-egitim";
-                if (string.IsNullOrEmpty(testSchool2.RelationId)) testSchool2.RelationId = "ILK-10001";
-                testSchool2.AdminUserId = schoolAdmin.Id;
+                context.Schools.Remove(testSchool2);
+                await context.SaveChangesAsync();
             }
 
             // 4. Öğretmen: mehmetogretmen / 1234 (Fizik Öğretmeni) - Okul ve İlişki ID ile bağlı
@@ -366,52 +406,69 @@ namespace OgretmenAjanda.Api.Data
                 await context.Students.AddRangeAsync(defaultStudents);
             }
 
-            // 7. Öğretmen kullanıcı adlarını 'isim.soyisim' formatına normalize et / eksikleri doldur
-            var teachersToNormalize = await context.Users
-                .Where(u => (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff) && (string.IsNullOrEmpty(u.Username) || !u.Username.Contains(".")))
-                .ToListAsync();
-
-            if (teachersToNormalize.Any())
+            // 7. Öğretmen kullanıcı adlarındaki son sayıları güvenle temizle
+            try
             {
-                var existingUsernames = await context.Users
-                    .Where(u => !string.IsNullOrEmpty(u.Username))
-                    .Select(u => u.Username.ToLower())
-                    .ToListAsync();
+                var allUsers = await context.Users.ToListAsync();
+                var allUsernames = new HashSet<string>(
+                    allUsers.Where(u => !string.IsNullOrEmpty(u.Username)).Select(u => u.Username.Trim().ToLowerInvariant()),
+                    StringComparer.OrdinalIgnoreCase
+                );
 
-                foreach (var t in teachersToNormalize)
+                bool anyModified = false;
+                foreach (var u in allUsers)
                 {
-                    if (string.IsNullOrWhiteSpace(t.FullName)) continue;
+                    if (u.Role != UserRoles.Teacher && u.Role != UserRoles.Staff) continue;
+                    if (string.IsNullOrWhiteSpace(u.Username)) continue;
 
-                    var clean = t.FullName.Trim().ToLowerInvariant()
-                        .Replace("ı", "i")
-                        .Replace("ğ", "g")
-                        .Replace("ü", "u")
-                        .Replace("ş", "s")
-                        .Replace("ö", "o")
-                        .Replace("ç", "c");
+                    var trimmed = u.Username.Trim();
+                    // Sadece sonu 1 veya daha fazla rakamla bitenleri hedefle (ör: ali.kaya1 -> ali.kaya)
+                    var cleaned = System.Text.RegularExpressions.Regex.Replace(trimmed, @"\d+$", "");
 
-                    clean = System.Text.RegularExpressions.Regex.Replace(clean, @"[^a-z\s]", " ").Trim();
-                    var parts = clean.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-
-                    string baseUsername = "ogretmen";
-                    if (parts.Length == 1) baseUsername = parts[0];
-                    else if (parts.Length == 2) baseUsername = $"{parts[0]}.{parts[1]}";
-                    else if (parts.Length > 2) baseUsername = $"{string.Join("", parts.Take(parts.Length - 1))}.{parts.Last()}";
-
-                    var username = baseUsername;
-                    int counter = 1;
-                    while (existingUsernames.Contains(username.ToLower()) && t.Username?.ToLower() != username.ToLower())
+                    // Eğer sayı yoksa veya temizlendiğinde boş kalıyorsa geç
+                    if (string.Equals(trimmed, cleaned, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(cleaned))
                     {
-                        username = $"{baseUsername}{counter++}";
+                        continue;
                     }
 
-                    t.Username = username;
-                    if (!existingUsernames.Contains(username.ToLower()))
+                    // Eğer temizlenmiş kullanıcı adı başka bir kullanıcı tarafından KULLANILMIYORSA güncelle
+                    if (!allUsernames.Contains(cleaned.ToLowerInvariant()))
                     {
-                        existingUsernames.Add(username.ToLower());
+                        allUsernames.Remove(trimmed.ToLowerInvariant());
+                        allUsernames.Add(cleaned.ToLowerInvariant());
+                        u.Username = cleaned;
+                        anyModified = true;
                     }
                 }
+
+                if (anyModified)
+                {
+                    await context.SaveChangesAsync();
+                }
             }
+            catch { }
+
+            // Mevcut veritabanındaki tüm öğrencilerin sınıf düzeyi ve şube bilgilerini otomatik normalize et
+            try
+            {
+                var allStudents = await context.Students.ToListAsync();
+                bool studentModified = false;
+                foreach (var st in allStudents)
+                {
+                    var (normGrade, normSection) = OgretmenAjanda.Api.Helpers.GradeSectionNormalizer.Normalize(st.Grade, st.Section);
+                    if (st.Grade != normGrade || st.Section != normSection)
+                    {
+                        st.Grade = normGrade;
+                        st.Section = normSection;
+                        studentModified = true;
+                    }
+                }
+                if (studentModified)
+                {
+                    await context.SaveChangesAsync();
+                }
+            }
+            catch { }
 
             await context.SaveChangesAsync();
         }

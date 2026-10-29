@@ -323,6 +323,46 @@ const runSchema = async (db: SQLite.SQLiteDatabase): Promise<void> => {
       FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE SET NULL,
       UNIQUE(school_id, teacher_name, class_id, course_id)
     );
+
+    CREATE TABLE IF NOT EXISTS exam_halls (
+      id TEXT PRIMARY KEY,
+      school_id INTEGER,
+      room_name TEXT NOT NULL,
+      capacity INTEGER DEFAULT 30,
+      tag TEXT DEFAULT 'İkili Oturum',
+      order_index INTEGER DEFAULT 0,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS written_exams (
+      id TEXT PRIMARY KEY,
+      school_id INTEGER,
+      name TEXT NOT NULL,
+      exam_date TEXT NOT NULL,
+      lesson_hour INTEGER DEFAULT 3,
+      start_time TEXT,
+      academic_year TEXT,
+      term TEXT,
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS exam_seatings (
+      id TEXT PRIMARY KEY,
+      written_exam_id TEXT NOT NULL,
+      school_id INTEGER,
+      student_id INTEGER,
+      student_number TEXT NOT NULL,
+      full_name TEXT NOT NULL,
+      grade TEXT NOT NULL,
+      section TEXT NOT NULL,
+      lesson_name TEXT NOT NULL,
+      room_name TEXT NOT NULL,
+      seat_number INTEGER NOT NULL,
+      proctor_teacher_name TEXT,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Migrate: ensure school_id column exists in classes table

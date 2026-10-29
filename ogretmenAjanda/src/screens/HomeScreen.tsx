@@ -38,6 +38,7 @@ import {
 } from '../database/operations/scheduleOperations';
 import { getClasses } from '../database/operations/classOperations';
 import { getAssignments } from '../database/operations/assignmentOperations';
+import { checkTeacherExamAlert } from '../database/operations/examPlannerOperations';
 import {
   getCurrentTopicForClass,
   getSurroundingTopicsForLesson,
@@ -102,6 +103,9 @@ export const HomeScreen: React.FC = () => {
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [editSchoolName, setEditSchoolName] = useState('');
   const [editSchoolColor, setEditSchoolColor] = useState(SCHOOL_COLORS[0].color);
+
+  // Yazılı Sınav Uyarısı State
+  const [currentExamAlert, setCurrentExamAlert] = useState<any | null>(null);
 
   const todayIndex = getDayOfWeekIndex();
   const [selectedDay, setSelectedDay] = useState<number>(todayIndex);
@@ -810,6 +814,25 @@ export const HomeScreen: React.FC = () => {
           setHeroTopicLoading(false);
         }
       });
+
+    // Yazılı Sınav Uyarısı Denetimi
+    (async () => {
+      try {
+        const session = await getActiveUserSession();
+        const sId = session?.schoolId;
+        if (sId) {
+          const res = await checkTeacherExamAlert(
+            sId,
+            session?.fullName || session?.username,
+            new Date().toISOString().substring(0, 10),
+            effectiveHeroLesson?.slot_number || effectiveHeroLesson?.slot_id
+          );
+          if (isMounted) {
+            setCurrentExamAlert(res?.hasExam ? res : null);
+          }
+        }
+      } catch {}
+    })();
 
     return () => {
       isMounted = false;
@@ -1560,6 +1583,33 @@ export const HomeScreen: React.FC = () => {
                     </View>
                   )}
                 </View>
+
+                {/* 📝 YAZILI SINAV UYARI ROZETİ (Kullanıcı İsteği) */}
+                {currentExamAlert?.hasExam && (
+                  <View
+                    style={{
+                      backgroundColor: '#FEF3C7',
+                      borderWidth: 1.5,
+                      borderColor: '#F59E0B',
+                      borderRadius: 10,
+                      padding: 10,
+                      marginBottom: 10,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <Ionicons name="alert-circle" size={22} color="#D97706" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#92400E' }}>
+                        Şu anda Yazılı Sınav Var!
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#B45309', marginTop: 1 }}>
+                        {currentExamAlert.message || `${currentExamAlert.examName} yapılmaktadır.`}
+                      </Text>
+                    </View>
+                  </View>
+                )}
 
                 {heroTopicLoading ? (
                   <View style={styles.topicLoadingContainer}>

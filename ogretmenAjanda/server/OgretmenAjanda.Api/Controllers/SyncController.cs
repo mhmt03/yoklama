@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OgretmenAjanda.Api.Data;
 using OgretmenAjanda.Api.DTOs;
+using OgretmenAjanda.Api.Helpers;
 using OgretmenAjanda.Api.Models;
 using OgretmenAjanda.Api.Services;
 
@@ -73,14 +74,16 @@ namespace OgretmenAjanda.Api.Controllers
 
             foreach (var item in request.Students)
             {
+                var (normGrade, normSection) = GradeSectionNormalizer.Normalize(item.Grade, item.Section);
+
                 var existing = await _context.Students
                     .FirstOrDefaultAsync(s => s.SchoolId == request.SchoolId && s.StudentNumber == item.StudentNumber.Trim());
 
                 if (existing != null)
                 {
                     existing.FullName = item.FullName.Trim();
-                    existing.Grade = item.Grade.Trim();
-                    existing.Section = item.Section.Trim();
+                    existing.Grade = normGrade;
+                    existing.Section = normSection;
                     if (!string.IsNullOrEmpty(item.PhotoPath)) existing.PhotoPath = item.PhotoPath;
                     if (!string.IsNullOrEmpty(item.ParentName)) existing.ParentName = item.ParentName;
                     if (!string.IsNullOrEmpty(item.ParentPhone)) existing.ParentPhone = item.ParentPhone;
@@ -103,8 +106,8 @@ namespace OgretmenAjanda.Api.Controllers
                         SchoolId = request.SchoolId,
                         StudentNumber = item.StudentNumber.Trim(),
                         FullName = item.FullName.Trim(),
-                        Grade = item.Grade.Trim(),
-                        Section = item.Section.Trim(),
+                        Grade = normGrade,
+                        Section = normSection,
                         PhotoPath = item.PhotoPath,
                         ParentName = item.ParentName,
                         ParentPhone = item.ParentPhone,
@@ -148,6 +151,8 @@ namespace OgretmenAjanda.Api.Controllers
                 return BadRequest(new { message = $"{studentNumber} numaralı öğrenci bu okulda zaten mevcut." });
             }
 
+            var (normGrade, normSection) = GradeSectionNormalizer.Normalize(request.Grade, request.Section);
+
             var student = new Student
             {
                 Id = Guid.NewGuid(),
@@ -155,8 +160,8 @@ namespace OgretmenAjanda.Api.Controllers
                 RelationId = school.RelationId,
                 StudentNumber = studentNumber,
                 FullName = request.FullName.Trim(),
-                Grade = request.Grade.Trim(),
-                Section = request.Section.Trim().ToUpper(),
+                Grade = normGrade,
+                Section = normSection,
                 ParentName = request.ParentName?.Trim(),
                 ParentPhone = request.ParentPhone?.Trim(),
                 StudentPhone = request.StudentPhone?.Trim(),
@@ -192,10 +197,12 @@ namespace OgretmenAjanda.Api.Controllers
             var student = await _context.Students.FindAsync(studentId);
             if (student == null) return NotFound(new { message = "Öğrenci bulunamadı." });
 
+            var (upNormGrade, upNormSection) = GradeSectionNormalizer.Normalize(request.Grade, request.Section);
+
             student.FullName = request.FullName.Trim();
             student.StudentNumber = request.StudentNumber.Trim();
-            student.Grade = request.Grade.Trim();
-            student.Section = request.Section.Trim().ToUpper();
+            student.Grade = upNormGrade;
+            student.Section = upNormSection;
             if (request.ParentName != null) student.ParentName = request.ParentName.Trim();
             if (request.ParentPhone != null) student.ParentPhone = request.ParentPhone.Trim();
             if (request.StudentPhone != null) student.StudentPhone = request.StudentPhone.Trim();

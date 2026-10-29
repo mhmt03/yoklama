@@ -64,7 +64,7 @@ export interface UserSession {
   userId: string;
   username: string;
   fullName: string;
-  role: 'SUPERADMIN' | 'SCHOOL_ADMIN' | 'STAFF' | 'TEACHER' | 'STUDENT';
+  role: 'SUPERADMIN' | 'SCHOOL_ADMIN' | 'STAFF' | 'TEACHER' | 'STUDENT' | 'PARENT';
   schoolId?: string;
   schoolCode?: string;
   schoolName?: string;
@@ -197,3 +197,37 @@ export async function apiRequest<T = any>(
     };
   }
 }
+
+export async function getActiveSchoolId(): Promise<string | undefined> {
+  const session = await getActiveUserSession();
+  if (session?.schoolId) return session.schoolId;
+  if (session?.affiliatedSchools && session.affiliatedSchools.length > 0) {
+    return session.affiliatedSchools[0].id;
+  }
+  return undefined;
+}
+
+export async function apiGet<T = any>(endpoint: string): Promise<T | null> {
+  const res = await apiRequest<T>(endpoint.replace(/^\//, ''), 'GET');
+  if (res.success && res.data !== undefined) return res.data as T;
+  return null;
+}
+
+export async function apiPost<T = any>(endpoint: string, body?: any): Promise<T | null> {
+  const res = await apiRequest<T>(endpoint.replace(/^\//, ''), 'POST', body);
+  if (res.success && res.data !== undefined) return res.data as T;
+  return null;
+}
+
+export async function apiPut<T = any>(endpoint: string, body?: any): Promise<T | null> {
+  const res = await apiRequest<T>(endpoint.replace(/^\//, ''), 'PUT', body);
+  if (res.success && res.data !== undefined) return res.data as T;
+  return null;
+}
+
+export async function apiDelete<T = any>(endpoint: string): Promise<T | null> {
+  const res = await apiRequest<T>(endpoint.replace(/^\//, ''), 'DELETE');
+  if (res.success && res.data !== undefined) return res.data as T;
+  return null;
+}
+

@@ -21,6 +21,39 @@ export interface ParseExcelResult {
   error?: string;
 }
 
+export function normalizeGradeAndSection(rawGrade?: string, rawSection?: string): { grade: string; section: string } {
+  const g = (rawGrade || '').trim();
+  const s = (rawSection || '').trim();
+
+  const matchS = s.match(/^(\d{1,2})[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
+  if (matchS) {
+    return { grade: matchS[1], section: matchS[2].toUpperCase() };
+  }
+
+  const matchG = g.match(/^(\d{1,2})[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
+  if (matchG) {
+    const finalSec = s && s.length <= 2 ? s.toUpperCase() : matchG[2].toUpperCase();
+    return { grade: matchG[1], section: finalSec };
+  }
+
+  const numG = g.match(/\d+/);
+  let cleanGrade = numG ? numG[0] : g;
+
+  let cleanSection = s.replace(/şubesi/gi, '').replace(/şube/gi, '').trim().toUpperCase();
+  if (!cleanGrade && cleanSection) {
+    const numS = cleanSection.match(/\d+/);
+    if (numS) {
+      cleanGrade = numS[0];
+      cleanSection = cleanSection.replace(/\d+/g, '').trim();
+    }
+  }
+
+  return {
+    grade: cleanGrade || '9',
+    section: cleanSection || 'A',
+  };
+}
+
 /**
  * Parses both standard table Excel files (ogrenci listesi.XLS)
  * and official e-Okul printable class list formats (okul liste.XLS).
@@ -102,23 +135,9 @@ export async function parseStudentsFromExcel(fileUri: string): Promise<ParseExce
         }
         if (!fullName) fullName = `Öğrenci ${studentNumber}`;
 
-        let grade = '9';
-        let section = 'A';
-
-        if (branchIdx !== -1 && row[branchIdx]) {
-          const branchStr = String(row[branchIdx]).trim().toUpperCase();
-          const parts = branchStr.split(/[-/]/);
-          if (parts.length >= 2) {
-            grade = parts[0].trim();
-            section = parts[1].trim();
-          } else {
-            section = branchStr;
-          }
-        }
-
-        if (gradeIdx !== -1 && row[gradeIdx]) {
-          grade = String(row[gradeIdx]).trim();
-        }
+        const rawGradeVal = gradeIdx !== -1 && row[gradeIdx] ? String(row[gradeIdx]) : '';
+        const rawBranchVal = branchIdx !== -1 && row[branchIdx] ? String(row[branchIdx]) : '';
+        const { grade, section } = normalizeGradeAndSection(rawGradeVal, rawBranchVal);
 
         const className = `${grade}-${section}`;
         classSet.add(className);

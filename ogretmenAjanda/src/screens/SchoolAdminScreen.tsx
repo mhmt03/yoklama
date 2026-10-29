@@ -6498,21 +6498,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
         {/* Sağ Butonlar: Yetkiler, Çıkış ve Menü */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {!isStaff && (
-            <TouchableOpacity
-              onPress={() => setPermissionsModalVisible(true)}
-              style={[
-                styles.hamburgerBtn,
-                { backgroundColor: '#EDE9FE', borderColor: '#C4B5FD', paddingHorizontal: 9, width: 'auto', flexDirection: 'row', gap: 4 }
-              ]}
-              activeOpacity={0.7}
-              accessibilityLabel="Yetki ve Erişim Yönetimi"
-            >
-              <Ionicons name="shield-checkmark" size={15} color="#7C3AED" />
-              <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#6D28D9' }}>Yetkiler</Text>
-            </TouchableOpacity>
-          )}
-
           <TouchableOpacity
             onPress={handleLogout}
             style={[styles.hamburgerBtn, { backgroundColor: '#FEE2E2', borderColor: '#FCA5A5' }]}
@@ -6564,6 +6549,57 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* 📋 YAZILI OTURMA PLANI HIZLI ERİŞİM KARTI */}
+        <TouchableOpacity
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#F5F3FF',
+            borderWidth: 1.5,
+            borderColor: '#C4B5FD',
+            borderRadius: 14,
+            padding: 14,
+            marginTop: 10,
+            marginBottom: 8,
+          }}
+          onPress={() => {
+            if (navigation?.openExamPlanner) {
+              navigation.openExamPlanner();
+            } else if (navigation?.navigate) {
+              navigation.navigate('ExamPlanner');
+            }
+          }}
+          activeOpacity={0.8}
+        >
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: '#EDE9FE',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="grid" size={24} color="#7C3AED" />
+          </View>
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 15, fontWeight: '800', color: '#6D28D9' }}>
+                Yazılı Oturma Planı
+              </Text>
+              <View style={{ backgroundColor: '#7C3AED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#FFFFFF' }}>YENİ</Text>
+              </View>
+            </View>
+            <Text style={{ fontSize: 12, color: '#7C3AED', marginTop: 2 }}>
+              Kelebek salon dağıtımı, şube ders atama ve gözetmen planı
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#7C3AED" />
+        </TouchableOpacity>
+
         {/* 🏫 BİRLEŞTİRİLMİŞ OKUL VE ÖĞRETMEN BAĞLANTI KODU KARTI */}
         <View style={styles.combinedSchoolCard}>
           <View style={styles.schoolSelectorHeader}>
@@ -20110,6 +20146,37 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   <Text style={styles.hamburgerMenuSub}>{schools.length > 0 ? `${schools.length} kayıtlı okul arasında geçiş yapın` : 'Okul seçimi yapın'}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 0.1 Yazılı Sınav Oturma Planı (Kelebek & Salon Dağıtımı) */}
+              <TouchableOpacity
+                style={[styles.hamburgerMenuItem, { backgroundColor: '#F5F3FF', borderRadius: 12, paddingVertical: 12 }]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  if (navigation?.openExamPlanner) {
+                    navigation.openExamPlanner();
+                  } else if (navigation?.navigate) {
+                    navigation.navigate('ExamPlanner');
+                  }
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                  <Ionicons name="grid" size={20} color="#7C3AED" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.hamburgerMenuLabel, { color: '#6D28D9', fontWeight: '800' }]}>
+                      Yazılı Oturma Planı
+                    </Text>
+                    <View style={{ backgroundColor: '#7C3AED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF' }}>YENİ</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.hamburgerMenuSub, { color: '#7C3AED' }]}>
+                    Kelebek dağıtım, salon ve ders saati gözetmen planı
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#7C3AED" />
               </TouchableOpacity>
 
               {/* 1. Yetki & Erişim Yönetimi (Sadece Kurum Admini) */}
