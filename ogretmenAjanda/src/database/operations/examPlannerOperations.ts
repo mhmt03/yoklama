@@ -152,27 +152,21 @@ export async function seedRoomsFromClasses(defaultTag = 'İkili Oturum', default
   }
 
   const db = await getDB();
-  const classes = await db.getAllAsync<{ name: string }>('SELECT name FROM classes ORDER BY name ASC');
-  const rows = await db.getAllAsync<any>('SELECT grade, section FROM students WHERE is_active = 1 OR is_active IS NULL');
-  const countMap: Record<string, number> = {};
-  for (const r of rows) {
-    const g = String(r.grade || '').trim();
-    const s = String(r.section || '').trim();
-    const match = s.match(/^(\d+)[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i) || g.match(/^(\d+)[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
-    const grade = match ? match[1] : (g.replace(/\D/g, '') || '9');
-    const section = match ? match[2].toUpperCase() : (s.replace(/\d/g, '').trim().toUpperCase() || 'A');
-    const key = `${grade}-${section}`;
-    countMap[key] = (countMap[key] || 0) + 1;
-  }
+  // Yerel şemada öğrenciler sınıflara class_id ile bağlıdır (grade/section sütunu yoktur)
+  const classes = await db.getAllAsync<{ name: string; student_count: number }>(
+    `SELECT c.name AS name, COUNT(s.id) AS student_count
+     FROM classes c
+     LEFT JOIN students s ON s.class_id = c.id
+     GROUP BY c.id
+     ORDER BY c.name ASC`
+  );
 
   const isTekli = defaultTag === 'Tekli Oturum';
 
   for (const c of classes) {
     if (c.name) {
       const roomName = c.name.trim();
-      const match = roomName.match(/^(\d+)[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
-      const key = match ? `${match[1]}-${match[2].toUpperCase()}` : roomName;
-      const mevcut = countMap[key] || countMap[roomName] || 0;
+      const mevcut = Number(c.student_count) || 0;
 
       let roomCapacity: number;
       if (mevcut > 0) {
@@ -428,19 +422,25 @@ export async function fetchExamBranches(schoolId?: string): Promise<BranchDistri
   // Yerel SQLite fallback (offline)
   try {
     const db = await getDB();
-    const rows = await db.getAllAsync<any>('SELECT grade, section FROM students WHERE is_active = 1 OR is_active IS NULL');
+    // Yerel şemada öğrenciler sınıflara class_id ile bağlıdır (grade/section sütunu yoktur)
+    const rows = await db.getAllAsync<any>(
+      `SELECT c.name AS name, COUNT(s.id) AS cnt
+       FROM classes c
+       LEFT JOIN students s ON s.class_id = c.id
+       GROUP BY c.id`
+    );
     const map: Record<string, { grade: string; section: string; count: number }> = {};
     for (const r of rows) {
-      const g = String(r.grade || '').trim();
-      const s = String(r.section || '').trim();
-      const match = s.match(/^(\d+)[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i) || g.match(/^(\d+)[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
-      const grade = match ? match[1] : (g.replace(/\D/g, '') || '9');
-      const section = match ? match[2].toUpperCase() : (s.replace(/\d/g, '').trim().toUpperCase() || 'A');
-      const key = `${grade}-${section}`;
+      const n = String(r.name || '').trim();
+      if (!n) continue;
+      const match = n.match(/^(\d+)[-/.\s]*([A-Za-zÇĞİÖŞÜçğıöşü]+)$/i);
+      const grade = match ? match[1] : (n.replace(/\D/g, '') || n);
+      const section = match ? match[2].toUpperCase() : (n.replace(/\d/g, '').replace(/[-/.\s]/g, '').toUpperCase() || '');
+      const key = match ? `${grade}-${section}` : n;
       if (!map[key]) {
         map[key] = { grade, section, count: 0 };
       }
-      map[key].count++;
+      map[key].count += Number(r.cnt) || 0;
     }
     return Object.keys(map).map((k) => ({
       key: k,

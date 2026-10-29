@@ -247,8 +247,20 @@ namespace OgretmenAjanda.Api.Controllers
             
             // Öğrencilerden de varsa sınıfları topla ve şube mevcutlarını hesapla
             var students = await _context.Students
+                .AsNoTracking()
                 .Where(s => s.SchoolId == effectiveId)
+                .Select(s => new { s.Grade, s.Section })
                 .ToListAsync();
+
+            var existingHalls = await _context.ExamHalls
+                .Where(r => r.SchoolId == effectiveId)
+                .ToListAsync();
+            var hallByName = new Dictionary<string, ExamHall>(StringComparer.OrdinalIgnoreCase);
+            foreach (var h in existingHalls)
+            {
+                if (!string.IsNullOrWhiteSpace(h.RoomName) && !hallByName.ContainsKey(h.RoomName.Trim()))
+                    hallByName[h.RoomName.Trim()] = h;
+            }
 
             var studentCountByBranch = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -278,7 +290,7 @@ namespace OgretmenAjanda.Api.Controllers
                     roomCapacity = isTekli ? 15 : (defaultCapacity > 0 ? defaultCapacity : 30);
                 }
 
-                var existing = await _context.ExamHalls.FirstOrDefaultAsync(r => r.SchoolId == effectiveId && r.RoomName == roomName);
+                hallByName.TryGetValue(roomName, out var existing);
                 if (existing == null)
                 {
                     _context.ExamHalls.Add(new ExamHall
