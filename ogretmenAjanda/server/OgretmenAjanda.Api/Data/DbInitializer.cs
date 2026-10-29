@@ -439,6 +439,16 @@ namespace OgretmenAjanda.Api.Data
                         u.Username = cleaned;
                         anyModified = true;
                     }
+                    else
+                    {
+                        // Temizlenen ad zaten sistemde var. Bu hesap mükerrer ve ilişkisiz bir hayalet hesapsa güvenle sil:
+                        var hasSchedules = await context.ScheduleItems.AnyAsync(s => s.TeacherId == u.Id);
+                        if (!hasSchedules)
+                        {
+                            context.Users.Remove(u);
+                            anyModified = true;
+                        }
+                    }
                 }
 
                 if (anyModified)

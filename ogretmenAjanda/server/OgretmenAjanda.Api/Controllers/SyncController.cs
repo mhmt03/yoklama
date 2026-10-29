@@ -541,7 +541,13 @@ namespace OgretmenAjanda.Api.Controllers
                         // Sadece sistemde daha önce hiç tanımlanmamış yepyeni öğretmenler için yeni hesap oluştur
                         var safeUsername = NormalizeTurkishPersonName(cleanTeacher).Replace(" ", ".");
                         if (string.IsNullOrWhiteSpace(safeUsername)) safeUsername = "ogretmen";
-                        var username = $"{safeUsername}.{Random.Shared.Next(100, 999)}";
+                        var username = safeUsername;
+                        var counter = 1;
+                        while (existingTeachers.Any(t => string.Equals(t.Username, username, StringComparison.OrdinalIgnoreCase)) ||
+                               await _context.Users.AnyAsync(u => u.Username.ToLower() == username.ToLower()))
+                        {
+                            username = $"{safeUsername}.{counter++}";
+                        }
 
                         var newTeacher = new User
                         {
