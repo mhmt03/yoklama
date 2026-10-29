@@ -22,6 +22,7 @@ export interface WrittenExamItem {
   academicYear?: string;
   term?: string;
   isActive: boolean;
+  isPublishedToStudents?: boolean;
   studentCount?: number;
   roomCount?: number;
 }
@@ -221,6 +222,7 @@ export async function fetchWrittenExams(schoolId?: string): Promise<WrittenExamI
         academicYear: e.academicYear,
         term: e.term,
         isActive: e.isActive ?? true,
+        isPublishedToStudents: e.isPublishedToStudents !== false,
         studentCount: Number(e.studentCount) || 0,
         roomCount: Number(e.roomCount) || 0,
       }));
@@ -243,6 +245,7 @@ export async function fetchWrittenExams(schoolId?: string): Promise<WrittenExamI
     academicYear: r.academic_year,
     term: r.term,
     isActive: r.is_active === 1,
+    isPublishedToStudents: true,
     studentCount: 0,
     roomCount: 0,
   }));
@@ -262,6 +265,7 @@ export async function saveWrittenExam(exam: Partial<WrittenExamItem> & { name: s
         academicYear: exam.academicYear || '2026-2027',
         term: exam.term || '1. Dönem',
         isActive: exam.isActive ?? true,
+        isPublishedToStudents: exam.isPublishedToStudents ?? true,
       });
       if (res && res.success) return res.data;
     }
@@ -298,6 +302,19 @@ export async function deleteWrittenExam(examId: string): Promise<boolean> {
   await db.runAsync('DELETE FROM exam_seatings WHERE written_exam_id = ?', examId);
   await db.runAsync('DELETE FROM written_exams WHERE id = ?', examId);
   return true;
+}
+
+export async function toggleExamPublish(examId: string, isPublished: boolean): Promise<boolean> {
+  try {
+    const res = await apiPut<{ success: boolean; isPublishedToStudents?: boolean }>(
+      `/ExamPlanner/exams/${examId}/publish`,
+      { isPublished: isPublished, isPublishedToStudents: isPublished }
+    );
+    if (res && res.success) return true;
+  } catch (err) {
+    console.warn('[ExamPlanner] toggleExamPublish hatası:', err);
+  }
+  return false;
 }
 
 export async function fetchExamDetails(examId: string): Promise<any> {

@@ -49,6 +49,7 @@ namespace OgretmenAjanda.Api.Data
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"ReplyToMessageId\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"ReplyToContent\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"Subject\" TEXT;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"WrittenExams\" ADD COLUMN \"IsPublishedToStudents\" INTEGER NOT NULL DEFAULT 1;"); } catch { }
 
             try
             {

@@ -374,6 +374,7 @@ namespace OgretmenAjanda.Api.Controllers
                 e.AcademicYear,
                 e.Term,
                 e.IsActive,
+                e.IsPublishedToStudents,
                 e.CreatedAt,
                 StudentCount = counts.ContainsKey(e.Id) ? counts[e.Id].StudentCount : 0,
                 RoomCount = counts.ContainsKey(e.Id) ? counts[e.Id].RoomCount : 0
@@ -422,9 +423,21 @@ namespace OgretmenAjanda.Api.Controllers
             exam.AcademicYear = dto.AcademicYear?.Trim();
             exam.Term = dto.Term?.Trim();
             exam.IsActive = dto.IsActive;
+            exam.IsPublishedToStudents = dto.IsPublishedToStudents;
 
             await _context.SaveChangesAsync();
             return Ok(new { success = true, data = exam });
+        }
+
+        [HttpPut("exams/{id}/publish")]
+        public async Task<IActionResult> ToggleExamPublish(Guid id, [FromBody] TogglePublishRequest req)
+        {
+            var exam = await _context.WrittenExams.FindAsync(id);
+            if (exam == null) return NotFound(new { success = false, message = "Sınav bulunamadı." });
+
+            exam.IsPublishedToStudents = req?.Value ?? true;
+            await _context.SaveChangesAsync();
+            return Ok(new { success = true, isPublishedToStudents = exam.IsPublishedToStudents });
         }
 
         [HttpDelete("exams/{id}")]
@@ -533,6 +546,7 @@ namespace OgretmenAjanda.Api.Controllers
                     DayOfWeekStr = GetTurkishDayName(exam.ExamDate.DayOfWeek),
                     exam.LessonHour,
                     exam.StartTime,
+                    exam.IsPublishedToStudents,
                     TotalStudents = seatings.Count,
                     TotalRooms = roomGroups.Count
                 },
@@ -951,7 +965,7 @@ namespace OgretmenAjanda.Api.Controllers
 
             var examIds = seatings.Select(s => s.WrittenExamId).Distinct().ToList();
             var exams = await _context.WrittenExams
-                .Where(e => examIds.Contains(e.Id) && e.IsActive)
+                .Where(e => examIds.Contains(e.Id) && e.IsActive && e.IsPublishedToStudents)
                 .ToDictionaryAsync(e => e.Id, e => e);
 
             var list = new List<object>();
@@ -2250,6 +2264,15 @@ namespace OgretmenAjanda.Api.Controllers
         public string? AcademicYear { get; set; }
         public string? Term { get; set; }
         public bool IsActive { get; set; } = true;
+        public bool IsPublishedToStudents { get; set; } = true;
+    }
+
+    public class TogglePublishRequest
+    {
+        public bool? IsPublished { get; set; }
+        public bool? IsPublishedToStudents { get; set; }
+
+        public bool Value => IsPublishedToStudents ?? IsPublished ?? true;
     }
 
     public class PlaceStudentsRequest

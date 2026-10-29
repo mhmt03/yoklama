@@ -541,6 +541,8 @@ namespace OgretmenAjanda.Api.Models
 
         public bool IsActive { get; set; } = true;
 
+        public bool IsPublishedToStudents { get; set; } = true; // Sınav yerlerinin öğrenci ve velilere görünürlüğü
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 

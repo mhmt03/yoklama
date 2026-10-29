@@ -10,6 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,6 +27,7 @@ import {
   fetchWrittenExams,
   saveWrittenExam,
   deleteWrittenExam,
+  toggleExamPublish,
   fetchExamDetails,
   placeStudentsInExam,
   updateProctorTeacher,
@@ -63,6 +65,11 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
   const [newExamDate, setNewExamDate] = useState(() => new Date().toISOString().substring(0, 10));
   const [newExamLessonHour, setNewExamLessonHour] = useState('3');
   const [newExamStartTime, setNewExamStartTime] = useState('09:50');
+  const [newExamIsPublished, setNewExamIsPublished] = useState(true);
+
+  // Öğrenci Sınav Yeri Arama & Görünürlük State
+  const [studentSearchQuery, setStudentSearchQuery] = useState('');
+  const [publishing, setPublishing] = useState(false);
 
   // Dağıtım Sihirbazı State
   const [availableBranches, setAvailableBranches] = useState<Array<{ grade: string; section: string; key: string; count: number }>>([]);
@@ -125,6 +132,72 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
   const expandAllRooms = () => {
     setCollapsedRooms({});
   };
+
+  const currentExam = useMemo(() => {
+    return exams.find((e) => e.id === selectedExamId) || examDetail?.exam;
+  }, [exams, selectedExamId, examDetail]);
+
+  const isExamPublished = currentExam?.isPublishedToStudents ?? (examDetail?.exam?.isPublishedToStudents !== false);
+
+  const handleToggleExamPublish = async (newValue: boolean) => {
+    if (!selectedExamId) return;
+    setPublishing(true);
+    try {
+      const ok = await toggleExamPublish(selectedExamId, newValue);
+      if (ok) {
+        setExams((prev) =>
+          prev.map((e) => (e.id === selectedExamId ? { ...e, isPublishedToStudents: newValue } : e))
+        );
+        if (examDetail && examDetail.exam) {
+          setExamDetail({
+            ...examDetail,
+            exam: { ...examDetail.exam, isPublishedToStudents: newValue },
+          });
+        }
+        Alert.alert(
+          'Görünürlük Güncellendi',
+          newValue
+            ? '✅ Sınav oturma yerleri öğrenci ve veli panellerinde GÖRÜNÜR yapıldı.'
+            : '🔒 Sınav oturma yerleri öğrenci ve velilerden GİZLENDİ.'
+        );
+      } else {
+        Alert.alert('Hata', 'Görünürlük ayarı kaydedilemedi.');
+      }
+    } catch (err: any) {
+      Alert.alert('Hata', err?.message || 'Görünürlük ayarı güncellenirken hata oluştu.');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const matchingStudents = useMemo(() => {
+    if (!studentSearchQuery.trim() || !examDetail?.rooms) return [];
+    const q = studentSearchQuery.trim().toLocaleLowerCase('tr');
+    const list: Array<{
+      student: any;
+      roomName: string;
+      proctorTeacherName?: string;
+    }> = [];
+
+    for (const rm of examDetail.rooms) {
+      if (!rm.students || !Array.isArray(rm.students)) continue;
+      for (const st of rm.students) {
+        const fullName = String(st.fullName || '').toLocaleLowerCase('tr');
+        const stNum = String(st.studentNumber || '');
+        const branch = `${st.grade || ''}${st.section || ''}`.toLocaleLowerCase('tr');
+        const lesson = String(st.lessonName || '').toLocaleLowerCase('tr');
+
+        if (fullName.includes(q) || stNum.includes(q) || branch.includes(q) || lesson.includes(q)) {
+          list.push({
+            student: st,
+            roomName: rm.roomName,
+            proctorTeacherName: rm.proctorTeacherName,
+          });
+        }
+      }
+    }
+    return list;
+  }, [studentSearchQuery, examDetail]);
 
   const handleOpenSeatChangeModal = (student: any) => {
     setSelectedSeatStudent(student);
@@ -441,6 +514,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
     setNewExamDate(new Date().toISOString().substring(0, 10));
     setNewExamLessonHour('3');
     setNewExamStartTime('09:50');
+    setNewExamIsPublished(true);
     setExamModalVisible(true);
   };
 
@@ -462,6 +536,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
         lessonHour: hour,
         startTime: newExamStartTime.trim(),
         isActive: true,
+        isPublishedToStudents: newExamIsPublished,
       });
       setExamModalVisible(false);
       const updated = await fetchWrittenExams();
@@ -1377,6 +1452,59 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
             </ScrollView>
           </View>
 
+          {/* ÖĞRENCİ & VELİ GÖRÜNÜRLÜK AYARI KARTI */}
+          {selectedExamId && (
+            <View style={styles.visibilityCard}>
+              <View style={styles.visibilityLeft}>
+                <View
+                  style={[
+                    styles.visibilityIconBox,
+                    { backgroundColor: isExamPublished ? '#ECFDF5' : '#FEF2F2' },
+                  ]}
+                >
+                  <Ionicons
+                    name={isExamPublished ? 'eye' : 'eye-off'}
+                    size={22}
+                    color={isExamPublished ? '#10B981' : '#EF4444'}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Text style={styles.visibilityTitle}>Sınav Yerlerini Öğrenci ve Veliler Görsün mü?</Text>
+                    <View
+                      style={[
+                        styles.statusPill,
+                        { backgroundColor: isExamPublished ? '#D1FAE5' : '#FEE2E2' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusPillText,
+                          { color: isExamPublished ? '#065F46' : '#991B1B' },
+                        ]}
+                      >
+                        {isExamPublished ? 'GÖREBİLİRLER (AÇIK)' : 'GİZLENDİ (KAPALI)'}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.visibilitySub}>
+                    {isExamPublished
+                      ? 'Öğrenci ve veliler kendi ekranlarında sınav salonu ve sıra numarasını görebilir.'
+                      : 'Sınav yerleri gizlendi. İzin verilene kadar öğrenci ve veliler sınav yerlerini göremez.'}
+                  </Text>
+                </View>
+              </View>
+
+              <Switch
+                value={isExamPublished}
+                onValueChange={handleToggleExamPublish}
+                disabled={publishing}
+                trackColor={{ false: '#CBD5E1', true: '#10B981' }}
+                thumbColor={isExamPublished ? '#FFFFFF' : '#F8FAFC'}
+              />
+            </View>
+          )}
+
           {/* EXCEL & A4 PDF RAPORLARI İNDİRME KARTI */}
           <View style={styles.reportCard}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1437,6 +1565,120 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
             </View>
           ) : (
             <>
+              {/* ÖĞRENCİ SINAV YERİ ARAMA KARTI (SALONLARIN ÜZERİNDE) */}
+              <View style={styles.studentSearchCard}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <Ionicons name="search" size={20} color="#4F46E5" />
+                  <Text style={styles.studentSearchCardTitle}>Öğrenci Sınav Yeri Arama</Text>
+                  {studentSearchQuery.trim().length > 0 && (
+                    <View style={styles.resultBadge}>
+                      <Text style={styles.resultBadgeText}>{matchingStudents.length} Eşleşme</Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.studentSearchInputWrapper}>
+                  <Ionicons name="search-outline" size={18} color="#94A3B8" style={{ marginLeft: 10 }} />
+                  <TextInput
+                    style={styles.studentSearchInput}
+                    placeholder="Öğrenci adı, soyadı, sınıfı veya okul no ile ara..."
+                    value={studentSearchQuery}
+                    onChangeText={setStudentSearchQuery}
+                    placeholderTextColor="#94A3B8"
+                    clearButtonMode="while-editing"
+                  />
+                  {studentSearchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setStudentSearchQuery('')} style={{ padding: 8 }}>
+                      <Ionicons name="close-circle" size={18} color="#94A3B8" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* Arama Sonuçları Listesi */}
+                {studentSearchQuery.trim().length > 0 && (
+                  <View style={styles.searchResultsContainer}>
+                    {matchingStudents.length === 0 ? (
+                      <View style={styles.searchEmptyBox}>
+                        <Ionicons name="alert-circle-outline" size={24} color="#94A3B8" />
+                        <Text style={styles.searchEmptyText}>
+                          "{studentSearchQuery}" ile eşleşen öğrenci bulunamadı.
+                        </Text>
+                      </View>
+                    ) : (
+                      matchingStudents.map((item, idx) => (
+                        <View key={item.student.id || idx} style={styles.searchResultItem}>
+                          <View style={{ flex: 1 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <Text style={styles.searchResultName}>{item.student.fullName}</Text>
+                              <View style={styles.studentNumberBadge}>
+                                <Text style={styles.studentNumberBadgeText}>No: {item.student.studentNumber}</Text>
+                              </View>
+                              <View style={styles.studentClassBadge}>
+                                <Text style={styles.studentClassBadgeText}>
+                                  {item.student.grade}-{item.student.section}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={styles.searchResultDetailsRow}>
+                              <View style={styles.searchRoomPill}>
+                                <Ionicons name="business" size={13} color="#4F46E5" />
+                                <Text style={styles.searchRoomPillText}>Salon: {item.roomName}</Text>
+                              </View>
+
+                              <View style={styles.searchSeatPill}>
+                                <Ionicons name="file-tray-full" size={13} color="#059669" />
+                                <Text style={styles.searchSeatPillText}>Sıra: {item.student.seatNumber}</Text>
+                              </View>
+
+                              {item.student.lessonName ? (
+                                <View style={styles.searchLessonPill}>
+                                  <Ionicons name="book" size={13} color="#D97706" />
+                                  <Text style={styles.searchLessonPillText}>{item.student.lessonName}</Text>
+                                </View>
+                              ) : null}
+                            </View>
+
+                            {item.proctorTeacherName ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                                <Ionicons name="person-outline" size={12} color="#64748B" />
+                                <Text style={{ fontSize: 11, color: '#64748B' }}>
+                                  Gözetmen: {item.proctorTeacherName}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+
+                          <View style={{ flexDirection: 'column', gap: 6, justifyContent: 'center' }}>
+                            <TouchableOpacity
+                              style={styles.goToRoomBtn}
+                              onPress={() => {
+                                setCollapsedRooms((prev) => ({ ...prev, [item.roomName]: false }));
+                                Alert.alert(
+                                  `${item.roomName} Salonu Açıldı`,
+                                  `${item.student.fullName} (No: ${item.student.studentNumber})\nSıra: ${item.student.seatNumber}\nDers: ${item.student.lessonName || '-'}\nGözetmen: ${item.proctorTeacherName || 'Belirtilmedi'}`
+                                );
+                              }}
+                            >
+                              <Ionicons name="eye-outline" size={14} color="#FFFFFF" />
+                              <Text style={styles.goToRoomBtnText}>Salonu Aç</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={styles.changeSeatBtn}
+                              onPress={() => handleOpenSeatChangeModal(item.student)}
+                            >
+                              <Ionicons name="swap-horizontal" size={13} color="#4F46E5" />
+                              <Text style={styles.changeSeatBtnText}>Sıra Değiştir</Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                )}
+              </View>
+
               {/* TÜMÜNÜ AÇ / TÜMÜNÜ KAPAT KONTROLÜ */}
               <View style={styles.roomAccordionControlBar}>
                 <Text style={styles.roomAccordionCountText}>
@@ -1742,6 +1984,24 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
             <Text style={styles.hintText}>
               ℹ️ Kaçıncı ders saatinde yapılacağını girdiğinizde sistem o saatte o salonda dersi olan öğretmeni otomatik gözetmen olarak tespit edecektir.
             </Text>
+
+            {/* Öğrenci ve Veli Görünürlüğü Seçeneği */}
+            <View style={styles.modalSwitchRow}>
+              <View style={{ flex: 1, paddingRight: 10 }}>
+                <Text style={styles.modalSwitchLabel}>Sınav Yerlerini Öğrenci ve Veliler Görsün mü?</Text>
+                <Text style={styles.modalSwitchSub}>
+                  {newExamIsPublished
+                    ? 'Açık: Öğrenci ve veliler sınav salon ve sıra bilgilerini kendi panellerinde görebilir.'
+                    : 'Kapalı: Sınav yerleri gizlenir, öğrenci panelinde oturma yeri görünmez.'}
+                </Text>
+              </View>
+              <Switch
+                value={newExamIsPublished}
+                onValueChange={setNewExamIsPublished}
+                trackColor={{ false: '#CBD5E1', true: '#10B981' }}
+                thumbColor={newExamIsPublished ? '#FFFFFF' : '#F8FAFC'}
+              />
+            </View>
 
             <View style={styles.modalActions}>
               <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setExamModalVisible(false)}>
@@ -3390,5 +3650,270 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  // Görünürlük Kartı Stilleri
+  visibilityCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  visibilityLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  visibilityIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  visibilityTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  visibilitySub: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  // Öğrenci Sınav Yeri Arama Kartı Stilleri
+  studentSearchCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#E0E7FF',
+    marginBottom: 16,
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  studentSearchCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1E1B4B',
+  },
+  resultBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  resultBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  studentSearchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    overflow: 'hidden',
+  },
+  studentSearchInput: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    fontSize: 13,
+    color: '#0F172A',
+  },
+  searchResultsContainer: {
+    marginTop: 12,
+    gap: 8,
+  },
+  searchEmptyBox: {
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
+  },
+  searchEmptyText: {
+    fontSize: 12,
+    color: '#64748B',
+    textAlign: 'center',
+  },
+  searchResultItem: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  searchResultName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  studentNumberBadge: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  studentNumberBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  studentClassBadge: {
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  studentClassBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4F46E5',
+  },
+  searchResultDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+    marginTop: 6,
+  },
+  searchRoomPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  searchRoomPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#3730A3',
+  },
+  searchSeatPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  searchSeatPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#065F46',
+  },
+  searchLessonPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFBEB',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  searchLessonPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#92400E',
+  },
+  goToRoomBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#4F46E5',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  goToRoomBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  changeSeatBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  changeSeatBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4F46E5',
+  },
+  // Modal Switch Row Stilleri
+  modalSwitchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  modalSwitchLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  modalSwitchSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 2,
+    lineHeight: 15,
   },
 });
