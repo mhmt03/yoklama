@@ -80,6 +80,13 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
   const [attendanceExportModalVisible, setAttendanceExportModalVisible] = useState(false);
   const [exportTargetRoomName, setExportTargetRoomName] = useState<string | undefined>(undefined);
   const [selectedSummaryType, setSelectedSummaryType] = useState<'course' | 'grade' | 'branch' | 'all' | 'none'>('course');
+  const [includeProctorName, setIncludeProctorName] = useState<boolean>(true);
+
+  // Öğrenci Bilgilendirme Çıktı Ayarları Modalı (A4 / A5 & Şube Seçimi)
+  const [studentInfoPrintModalVisible, setStudentInfoPrintModalVisible] = useState(false);
+  const [studentInfoPaperSize, setStudentInfoPaperSize] = useState<'A4' | 'A5'>('A4');
+  const [studentInfoIncludeAlpha, setStudentInfoIncludeAlpha] = useState(true);
+  const [studentInfoSelectedBranches, setStudentInfoSelectedBranches] = useState<string[]>([]);
 
   // Gözetmen Düzenleme Modalı & Akıllı Liste
   const [proctorModalVisible, setProctorModalVisible] = useState(false);
@@ -619,7 +626,8 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
       const baseUrl = await getBaseApiUrl();
       const token = await getAuthToken();
       const roomParam = exportTargetRoomName ? `&roomName=${encodeURIComponent(exportTargetRoomName)}` : '';
-      const url = `${baseUrl}/ExamPlanner/exams/${selectedExamId}/export-attendance-xlsx?summaryType=${selectedSummaryType}${roomParam}`;
+      const proctorParam = `&includeProctorName=${includeProctorName}`;
+      const url = `${baseUrl}/ExamPlanner/exams/${selectedExamId}/export-attendance-xlsx?summaryType=${selectedSummaryType}${roomParam}${proctorParam}`;
       const filename = `Salon_Yoklama_Listesi_${exportTargetRoomName || 'Tum_Salonlar'}.xlsx`;
 
       if (Platform.OS === 'web') {
@@ -658,7 +666,77 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
     try {
       const baseUrl = await getBaseApiUrl();
       const roomParam = exportTargetRoomName ? `&roomName=${encodeURIComponent(exportTargetRoomName)}` : '';
-      const printUrl = `${baseUrl}/ExamPlanner/exams/${selectedExamId}/print-attendance?summaryType=${selectedSummaryType}${roomParam}`;
+      const proctorParam = `&includeProctorName=${includeProctorName}`;
+      const printUrl = `${baseUrl}/ExamPlanner/exams/${selectedExamId}/print-attendance?summaryType=${selectedSummaryType}${roomParam}${proctorParam}`;
+      if (Platform.OS === 'web') {
+        window.open(printUrl, '_blank');
+      } else {
+        Alert.alert('Bilgi', 'PDF yazdırma görünümü web tarayıcısında açılacaktır.');
+      }
+    } catch (err: any) {
+      Alert.alert('Hata', err?.message || 'Yazdırma sayfası açılamadı.');
+    }
+  };
+
+  // Sınavda yerleşimi yapılmış mevcut şubelerin listesi
+  const examDistinctBranches = useMemo(() => {
+    if (!examDetail?.rooms || examDetail.rooms.length === 0) {
+      return availableBranches.map((b) => b.key);
+    }
+    const branchMap = new Map<string, number>();
+    examDetail.rooms.forEach((rm: any) => {
+      (rm.students || []).forEach((st: any) => {
+        if (st.grade && st.section) {
+          const key = `${st.grade}-${st.section}`;
+          branchMap.set(key, (branchMap.get(key) || 0) + 1);
+        }
+      });
+    });
+    if (branchMap.size === 0) {
+      return availableBranches.map((b) => b.key);
+    }
+    return Array.from(branchMap.keys()).sort((a, b) => {
+      const [gA, sA] = a.split('-');
+      const [gB, sB] = b.split('-');
+      const numA = parseInt(gA, 10) || 0;
+      const numB = parseInt(gB, 10) || 0;
+      if (numA !== numB) return numA - numB;
+      return (sA || '').localeCompare(sB || '');
+    });
+  }, [examDetail, availableBranches]);
+
+  const handleOpenStudentInfoPrintModal = () => {
+    if (!selectedExamId) {
+      Alert.alert('Uyarı', 'Lütfen önce bir sınav seçiniz.');
+      return;
+    }
+    setStudentInfoSelectedBranches(examDistinctBranches);
+    setStudentInfoIncludeAlpha(true);
+    setStudentInfoPaperSize('A4');
+    setStudentInfoPrintModalVisible(true);
+  };
+
+  const handleSelectAllStudentInfoBranches = () => {
+    setStudentInfoSelectedBranches(examDistinctBranches);
+    setStudentInfoIncludeAlpha(true);
+  };
+
+  const handleClearAllStudentInfoBranches = () => {
+    setStudentInfoSelectedBranches([]);
+    setStudentInfoIncludeAlpha(false);
+  };
+
+  const handleExecutePrintStudentInfoPdf = async () => {
+    if (!selectedExamId) return;
+    if (!studentInfoIncludeAlpha && studentInfoSelectedBranches.length === 0) {
+      Alert.alert('Seçim Yapılmadı', 'Lütfen en az bir şube veya Genel Alfabetik Listeyi seçiniz.');
+      return;
+    }
+    setStudentInfoPrintModalVisible(false);
+    try {
+      const baseUrl = await getBaseApiUrl();
+      const branchesParam = encodeURIComponent(studentInfoSelectedBranches.join(','));
+      const printUrl = `${baseUrl}/ExamPlanner/exams/${selectedExamId}/print-student-info?paperSize=${studentInfoPaperSize}&includeAllAlpha=${studentInfoIncludeAlpha}&branches=${branchesParam}`;
       if (Platform.OS === 'web') {
         window.open(printUrl, '_blank');
       } else {
@@ -708,19 +786,8 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
     }
   };
 
-  const handlePrintStudentInfoPdf = async () => {
-    if (!selectedExamId) return;
-    try {
-      const baseUrl = await getBaseApiUrl();
-      const printUrl = `${baseUrl}/ExamPlanner/exams/${selectedExamId}/print-student-info`;
-      if (Platform.OS === 'web') {
-        window.open(printUrl, '_blank');
-      } else {
-        Alert.alert('Bilgi', 'PDF yazdırma görünümü web tarayıcısında açılacaktır.');
-      }
-    } catch (err: any) {
-      Alert.alert('Hata', err?.message || 'Yazdırma sayfası açılamadı.');
-    }
+  const handlePrintStudentInfoPdf = () => {
+    handleOpenStudentInfoPrintModal();
   };
 
   const handleExportExcel = async (type: 'attendance' | 'student-info' | 'proctors', roomName?: string) => {
@@ -1345,7 +1412,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
                 disabled={exporting}
               >
                 <Ionicons name="print-outline" size={17} color="#FFFFFF" />
-                <Text style={styles.exportBtnText}>Öğrenci Bilgilendirme (A4 PDF / Yazdır)</Text>
+                <Text style={styles.exportBtnText}>Öğrenci Bilgilendirme (PDF / Yazdır)</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1975,6 +2042,39 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
               </View>
             </TouchableOpacity>
 
+            {/* Gözetmen Adı Yazsın mı Checkbox */}
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                padding: 10,
+                borderRadius: 8,
+                marginBottom: 14,
+                backgroundColor: includeProctorName ? '#F0FDF4' : '#F8FAFC',
+                borderWidth: 1,
+                borderColor: includeProctorName ? '#86EFAC' : '#E2E8F0',
+                gap: 10,
+              }}
+              onPress={() => setIncludeProctorName(!includeProctorName)}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name={includeProctorName ? 'checkbox' : 'square-outline'}
+                size={22}
+                color={includeProctorName ? '#16A34A' : '#94A3B8'}
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                  Gözetmen Adı Yazsın mı?
+                </Text>
+                <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }}>
+                  {includeProctorName
+                    ? 'Evet, atanan gözetmenin adı listelerde ve imza kutusunda yazdırılsın.'
+                    : 'Hayır, gözetmen adı boş bırakılsın (noktalı imza çizgisi açılsın).'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
             {/* Butonlar */}
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TouchableOpacity
@@ -2010,6 +2110,238 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
               >
                 <Ionicons name="print-outline" size={17} color="#FFFFFF" />
                 <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>A4 PDF / Yazdır</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ============================================================= */}
+      {/* MODAL: ÖĞRENCİ BİLGİLENDİRME ÇIKTI AYARLARI (A4/A5 & ŞUBE SEÇİMİ) */}
+      {/* ============================================================= */}
+      <Modal
+        visible={studentInfoPrintModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStudentInfoPrintModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { maxWidth: 520, maxHeight: '90%' }]}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>🖨️ Öğrenci Bilgilendirme Çıktısı</Text>
+                <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                  Kağıt boyutunu ve yazdırmak istediğiniz sınıfları belirleyin
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setStudentInfoPrintModalVisible(false)}>
+                <Ionicons name="close" size={22} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+              {/* 1. Soru: Kağıt Türü */}
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B', marginTop: 4, marginBottom: 8 }}>
+                1. Kağıt Türü Seçiniz:
+              </Text>
+
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
+                {/* A4 Seçeneği */}
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    padding: 10,
+                    borderRadius: 8,
+                    backgroundColor: studentInfoPaperSize === 'A4' ? '#EEF2FF' : '#F8FAFC',
+                    borderWidth: 1.5,
+                    borderColor: studentInfoPaperSize === 'A4' ? '#4F46E5' : '#E2E8F0',
+                  }}
+                  onPress={() => setStudentInfoPaperSize('A4')}
+                >
+                  <Ionicons
+                    name={studentInfoPaperSize === 'A4' ? 'radio-button-on' : 'radio-button-off'}
+                    size={18}
+                    color={studentInfoPaperSize === 'A4' ? '#4F46E5' : '#94A3B8'}
+                  />
+                  <View style={{ marginLeft: 8 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>📄 A4 Boyutu</Text>
+                    <Text style={{ fontSize: 11, color: '#64748B' }}>Standart tam sayfa</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* A5 Seçeneği */}
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    padding: 10,
+                    borderRadius: 8,
+                    backgroundColor: studentInfoPaperSize === 'A5' ? '#EEF2FF' : '#F8FAFC',
+                    borderWidth: 1.5,
+                    borderColor: studentInfoPaperSize === 'A5' ? '#4F46E5' : '#E2E8F0',
+                  }}
+                  onPress={() => setStudentInfoPaperSize('A5')}
+                >
+                  <Ionicons
+                    name={studentInfoPaperSize === 'A5' ? 'radio-button-on' : 'radio-button-off'}
+                    size={18}
+                    color={studentInfoPaperSize === 'A5' ? '#4F46E5' : '#94A3B8'}
+                  />
+                  <View style={{ marginLeft: 8 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>📑 A5 Boyutu</Text>
+                    <Text style={{ fontSize: 11, color: '#64748B' }}>Yarım sayfa / Kompakt</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              {/* 2. Soru: Neleri Yazdıralım? */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, marginBottom: 8 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B' }}>
+                  2. Yazdırılacak Listeleri / Sınıfları Seçiniz:
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <TouchableOpacity
+                    onPress={handleSelectAllStudentInfoBranches}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      backgroundColor: '#EEF2FF',
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderColor: '#C7D2FE',
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#4338CA' }}>Tümünü Seç</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleClearAllStudentInfoBranches}
+                    style={{
+                      paddingHorizontal: 8,
+                      paddingVertical: 4,
+                      backgroundColor: '#F1F5F9',
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderColor: '#CBD5E1',
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#64748B' }}>İşaretleri Kaldır</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Tüm Okul Alfabetik Liste Checkbox */}
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  padding: 10,
+                  borderRadius: 8,
+                  marginBottom: 8,
+                  backgroundColor: studentInfoIncludeAlpha ? '#F0FDFA' : '#F8FAFC',
+                  borderWidth: 1,
+                  borderColor: studentInfoIncludeAlpha ? '#0D9488' : '#E2E8F0',
+                  gap: 10,
+                }}
+                onPress={() => setStudentInfoIncludeAlpha(!studentInfoIncludeAlpha)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={studentInfoIncludeAlpha ? 'checkbox' : 'square-outline'}
+                  size={20}
+                  color={studentInfoIncludeAlpha ? '#0D9488' : '#94A3B8'}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                    🏢 Tüm Okul (Alfabetik Genel Liste)
+                  </Text>
+                  <Text style={{ fontSize: 11, color: '#64748B' }}>
+                    Okul panolarına asmak için sınavdaki tüm öğrencilerin isim sıralı listesi
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Şubeler Listesi Başlığı */}
+              <Text style={{ fontSize: 12, fontWeight: '600', color: '#475569', marginTop: 4, marginBottom: 6 }}>
+                Sınıf / Şube Sayfaları ({studentInfoSelectedBranches.length} / {examDistinctBranches.length} seçili):
+              </Text>
+
+              {/* Şube Seçim Grid / List */}
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+                {examDistinctBranches.map((br) => {
+                  const isChecked = studentInfoSelectedBranches.includes(br);
+                  return (
+                    <TouchableOpacity
+                      key={br}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingHorizontal: 10,
+                        paddingVertical: 7,
+                        borderRadius: 6,
+                        backgroundColor: isChecked ? '#EEF2FF' : '#F8FAFC',
+                        borderWidth: 1,
+                        borderColor: isChecked ? '#4F46E5' : '#E2E8F0',
+                        gap: 6,
+                      }}
+                      onPress={() => {
+                        if (isChecked) {
+                          setStudentInfoSelectedBranches(studentInfoSelectedBranches.filter((k) => k !== br));
+                        } else {
+                          setStudentInfoSelectedBranches([...studentInfoSelectedBranches, br]);
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name={isChecked ? 'checkbox' : 'square-outline'}
+                        size={17}
+                        color={isChecked ? '#4F46E5' : '#94A3B8'}
+                      />
+                      <Text style={{ fontSize: 12, fontWeight: isChecked ? '700' : '500', color: isChecked ? '#312E81' : '#334155' }}>
+                        {br}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            {/* Butonlar */}
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}>
+              <TouchableOpacity
+                style={{
+                  flex: 1,
+                  backgroundColor: '#F1F5F9',
+                  paddingVertical: 12,
+                  borderRadius: 8,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                onPress={() => setStudentInfoPrintModalVisible(false)}
+              >
+                <Text style={{ color: '#475569', fontWeight: '600', fontSize: 13 }}>Vazgeç</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  flex: 2,
+                  backgroundColor: '#0D9488',
+                  paddingVertical: 12,
+                  borderRadius: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+                onPress={handleExecutePrintStudentInfoPdf}
+              >
+                <Ionicons name="print-outline" size={18} color="#FFFFFF" />
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>
+                  {studentInfoPaperSize} PDF / Yazdır
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

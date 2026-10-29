@@ -1135,7 +1135,7 @@ namespace OgretmenAjanda.Api.Controllers
 
         // 6.1. SALON YOKLAMA LİSTESİ - GERÇEK XLSX (HER SALON AYRI SHEET, ÖZET SEÇENEKLİ, A4 BOYUTU)
         [HttpGet("exams/{id}/export-attendance-xlsx")]
-        public async Task<IActionResult> ExportAttendanceXlsx(Guid id, [FromQuery] string? roomName = null, [FromQuery] string summaryType = "course")
+        public async Task<IActionResult> ExportAttendanceXlsx(Guid id, [FromQuery] string? roomName = null, [FromQuery] string summaryType = "course", [FromQuery] bool includeProctorName = true)
         {
             if (!IsAdminOrStaff) return Forbid();
 
@@ -1180,6 +1180,7 @@ namespace OgretmenAjanda.Api.Controllers
                 ws.PageSetup.Margins.Right = 0.4;
 
                 var proctor = rg.FirstOrDefault()?.ProctorTeacherName ?? "Gözetmen Belirtilmedi";
+                var proctorDisplay = includeProctorName ? proctor : "....................................";
 
                 // Başlık Bloğu
                 ws.Cell("A1").Value = $"SALON YOKLAMA VE İMZA LİSTESİ - {rg.Key.ToUpper()}";
@@ -1198,7 +1199,7 @@ namespace OgretmenAjanda.Api.Controllers
                     .Alignment.SetVertical(XLAlignmentVerticalValues.Center);
                 ws.Row(2).Height = 20;
 
-                ws.Cell("A3").Value = $"Salon Gözetmeni: {proctor}  |  Toplam Öğrenci: {rg.Count()}";
+                ws.Cell("A3").Value = $"Salon Gözetmeni: {proctorDisplay}  |  Toplam Öğrenci: {rg.Count()}";
                 ws.Range("A3:F3").Merge().Style
                     .Font.SetBold().Font.SetFontSize(10).Font.SetFontColor(XLColor.FromHtml("#0F172A"))
                     .Fill.SetBackgroundColor(XLColor.FromHtml("#F1F5F9"))
@@ -1344,7 +1345,7 @@ namespace OgretmenAjanda.Api.Controllers
                 ws.Range(row, 4, row, 6).Merge().Style.Font.SetBold().Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
 
                 row++;
-                ws.Cell(row, 1).Value = proctor;
+                ws.Cell(row, 1).Value = proctorDisplay;
                 ws.Range(row, 1, row, 3).Merge().Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
                 ws.Cell(row, 4).Value = "İmza / Mühür";
                 ws.Range(row, 4, row, 6).Merge().Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
@@ -1552,7 +1553,7 @@ namespace OgretmenAjanda.Api.Controllers
         // 6.3. A4 PDF / YAZDIRMA - SALON YOKLAMA VE İMZA LİSTESİ (HTML -> TARAYICI PDF/PRINT)
         [HttpGet("exams/{id}/print-attendance")]
         [AllowAnonymous] // Doğrudan yeni sekmede açılıp yazdırılabilmesi için token veya cookie ile de çalışabilir
-        public async Task<IActionResult> PrintAttendance(Guid id, [FromQuery] string? roomName = null, [FromQuery] string summaryType = "course")
+        public async Task<IActionResult> PrintAttendance(Guid id, [FromQuery] string? roomName = null, [FromQuery] string summaryType = "course", [FromQuery] bool includeProctorName = true)
         {
             var exam = await _context.WrittenExams.FindAsync(id);
             if (exam == null) return NotFound("Sınav bulunamadı.");
@@ -1603,6 +1604,8 @@ namespace OgretmenAjanda.Api.Controllers
                 .summary-card { border: 1px solid #cbd5e1; border-radius: 4px; overflow: hidden; margin-top: 10px; font-size: 11px; }
                 .summary-header { background: #475569; color: white; padding: 4px 8px; font-weight: 600; text-align: center; }
                 .footer-sign { display: flex; justify-content: space-between; margin-top: 15px; padding-top: 10px; border-top: 1px dashed #94a3b8; font-size: 12px; font-weight: 600; }
+                tr { page-break-inside: avoid; }
+                thead { display: table-header-group; }
                 @media print {
                     body { background: white; }
                     .no-print { display: none !important; }
@@ -1624,6 +1627,7 @@ namespace OgretmenAjanda.Api.Controllers
             foreach (var rg in groupedRooms)
             {
                 var proctor = rg.FirstOrDefault()?.ProctorTeacherName ?? "Belirtilmedi";
+                var proctorDisplay = includeProctorName ? proctor : "....................................";
 
                 sb.AppendLine("<div class=\"room-page\">");
                 sb.AppendLine("<div>");
@@ -1632,7 +1636,7 @@ namespace OgretmenAjanda.Api.Controllers
                 sb.AppendLine("  <div class=\"header-box\">");
                 sb.AppendLine($"    <div class=\"header-title\">SALON YOKLAMA VE İMZA LİSTESİ - {rg.Key.ToUpper()}</div>");
                 sb.AppendLine($"    <div class=\"header-sub\">Sınav: {exam.Name} | Tarih: {exam.ExamDate:dd.MM.yyyy} ({GetTurkishDayName(exam.ExamDate.DayOfWeek)}) | Saat: {exam.LessonHour}. Ders ({exam.StartTime ?? "-"})</div>");
-                sb.AppendLine($"    <div class=\"header-meta\"><span><strong>Salon Gözetmeni:</strong> {proctor}</span><span><strong>Toplam Öğrenci:</strong> {rg.Count()}</span></div>");
+                sb.AppendLine($"    <div class=\"header-meta\"><span><strong>Salon Gözetmeni:</strong> {proctorDisplay}</span><span><strong>Toplam Öğrenci:</strong> {rg.Count()}</span></div>");
                 sb.AppendLine("  </div>");
 
                 // Tablo
@@ -1691,7 +1695,7 @@ namespace OgretmenAjanda.Api.Controllers
 
                 // İmza Alanı
                 sb.AppendLine("<div class=\"footer-sign\">");
-                sb.AppendLine($"  <div style=\"text-align:center;\">Salon Gözetmeni<br><br><strong>{proctor}</strong><br>İmza</div>");
+                sb.AppendLine($"  <div style=\"text-align:center;\">Salon Gözetmeni<br><br><strong>{proctorDisplay}</strong><br>İmza</div>");
                 sb.AppendLine("  <div style=\"text-align:center;\">Sınav Komisyon Başkanı<br><br><strong>Okul Müdürü</strong><br>İmza / Mühür</div>");
                 sb.AppendLine("</div>");
 
@@ -1704,10 +1708,14 @@ namespace OgretmenAjanda.Api.Controllers
             return Content(sb.ToString(), "text/html; charset=utf-8");
         }
 
-        // 6.4. A4 PDF / YAZDIRMA - ÖĞRENCİ BİLGİLENDİRME (GÖZETMENSİZ, NUMARAYA GÖRE SIRALI ŞUBELER VE ALFABETİK GENEL)
+        // 6.4. PDF / YAZDIRMA - ÖĞRENCİ BİLGİLENDİRME (A4 VEYA A5, SEÇİLİ ŞUBELER VEYA TÜMÜ, GÖZETMENSİZ)
         [HttpGet("exams/{id}/print-student-info")]
         [AllowAnonymous]
-        public async Task<IActionResult> PrintStudentInfo(Guid id)
+        public async Task<IActionResult> PrintStudentInfo(
+            Guid id,
+            [FromQuery] string paperSize = "A4",
+            [FromQuery] string? branches = null,
+            [FromQuery] bool includeAllAlpha = true)
         {
             var exam = await _context.WrittenExams.FindAsync(id);
             if (exam == null) return NotFound("Sınav bulunamadı.");
@@ -1716,70 +1724,94 @@ namespace OgretmenAjanda.Api.Controllers
                 .Where(s => s.WrittenExamId == id)
                 .ToListAsync();
 
+            var isA5 = string.Equals(paperSize, "A5", StringComparison.OrdinalIgnoreCase);
+            var pageStyle = isA5 ? "size: A5 portrait; margin: 6mm;" : "size: A4 portrait; margin: 10mm;";
+            var sheetWidth = isA5 ? "138mm" : "190mm";
+            var sheetMinHeight = isA5 ? "198mm" : "275mm";
+            var tableFontSize = isA5 ? "9.5px" : "11px";
+            var tableCellPadding = isA5 ? "3px 5px" : "5px 8px";
+            var headerTitleSize = isA5 ? "13px" : "15px";
+            var headerSubSize = isA5 ? "10px" : "12px";
+
             var sb = new StringBuilder();
             sb.AppendLine("<!DOCTYPE html>");
             sb.AppendLine("<html lang=\"tr\">");
             sb.AppendLine("<head>");
             sb.AppendLine("<meta charset=\"UTF-8\">");
-            sb.AppendLine($"<title>Öğrenci Sınav Bilgilendirme - {exam.Name}</title>");
+            sb.AppendLine($"<title>Öğrenci Sınav Bilgilendirme ({paperSize.ToUpper()}) - {exam.Name}</title>");
             sb.AppendLine("<style>");
-            sb.AppendLine(@"
-                @page { size: A4 portrait; margin: 10mm; }
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f1f5f9; color: #1e293b; }
-                .no-print { background: #0f766e; color: white; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-                .no-print button { background: #14b8a6; color: white; border: none; padding: 8px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; margin-left: 8px; }
-                .no-print button:hover { background: #0d9488; }
-                .sheet-page { background: white; width: 190mm; min-height: 275mm; margin: 15mm auto; padding: 8mm; box-sizing: border-box; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-radius: 4px; page-break-after: always; display: flex; flex-direction: column; justify-content: space-between; }
-                .header-box { text-align: center; border: 2px solid #0f766e; border-radius: 6px; overflow: hidden; margin-bottom: 12px; }
-                .header-title { background: #0f766e; color: white; padding: 8px; font-size: 15px; font-weight: bold; }
-                .header-sub { background: #ccfbf1; font-size: 12px; font-weight: 600; padding: 6px; color: #134e4a; }
-                table.data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-                table.data-table th, table.data-table td { border: 1px solid #cbd5e1; padding: 5px 8px; }
-                table.data-table th { background: #115e59; color: white; font-weight: 600; text-align: center; }
-                table.data-table tr:nth-child(even) { background-color: #f0fdfa; }
-                @media print {
-                    body { background: white; }
-                    .no-print { display: none !important; }
-                    .sheet-page { margin: 0; box-shadow: none; border-radius: 0; width: 100%; min-height: 100%; padding: 0; page-break-after: always; }
-                }
+            sb.AppendLine($@"
+                @page {{ {pageStyle} }}
+                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; background-color: #f1f5f9; color: #1e293b; }}
+                .no-print {{ background: #0f766e; color: white; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 1000; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }}
+                .no-print button {{ background: #14b8a6; color: white; border: none; padding: 8px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; margin-left: 8px; }}
+                .no-print button:hover {{ background: #0d9488; }}
+                .sheet-page {{ background: white; width: {sheetWidth}; min-height: {sheetMinHeight}; margin: 10mm auto; padding: {(isA5 ? "5mm" : "8mm")}; box-sizing: border-box; box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-radius: 4px; page-break-after: always; display: flex; flex-direction: column; justify-content: space-between; }}
+                .header-box {{ text-align: center; border: 2px solid #0f766e; border-radius: 6px; overflow: hidden; margin-bottom: {(isA5 ? "8px" : "12px")}; }}
+                .header-title {{ background: #0f766e; color: white; padding: {(isA5 ? "5px" : "8px")}; font-size: {headerTitleSize}; font-weight: bold; }}
+                .header-sub {{ background: #ccfbf1; font-size: {headerSubSize}; font-weight: 600; padding: {(isA5 ? "4px" : "6px")}; color: #134e4a; }}
+                table.data-table {{ width: 100%; border-collapse: collapse; font-size: {tableFontSize}; }}
+                table.data-table th, table.data-table td {{ border: 1px solid #cbd5e1; padding: {tableCellPadding}; }}
+                table.data-table th {{ background: #115e59; color: white; font-weight: 600; text-align: center; }}
+                table.data-table tr:nth-child(even) {{ background-color: #f0fdfa; }}
+                tr {{ page-break-inside: avoid; }}
+                thead {{ display: table-header-group; }}
+                @media print {{
+                    body {{ background: white; }}
+                    .no-print {{ display: none !important; }}
+                    .sheet-page {{ margin: 0; box-shadow: none; border-radius: 0; width: 100%; min-height: 100%; padding: 0; page-break-after: always; }}
+                }}
             ");
             sb.AppendLine("</style>");
             sb.AppendLine("</head>");
             sb.AppendLine("<body>");
 
             sb.AppendLine("<div class=\"no-print\">");
-            sb.AppendLine($"  <div><strong>Öğrenci Sınav Bilgilendirme Raporu:</strong> {exam.Name} (Gözetmensiz)</div>");
+            sb.AppendLine($"  <div><strong>Öğrenci Sınav Bilgilendirme ({paperSize.ToUpper()}):</strong> {exam.Name} (Gözetmensiz)</div>");
             sb.AppendLine("  <div>");
             sb.AppendLine("    <button onclick=\"window.print()\">🖨️ Yazdır / PDF Olarak Kaydet</button>");
             sb.AppendLine("    <button style=\"background:#64748b;\" onclick=\"window.close()\">Kapat</button>");
             sb.AppendLine("  </div>");
             sb.AppendLine("</div>");
 
-            // 1. TÜM OKUL ALFABETİK LİSTESİ
-            var allAlpha = seatings.OrderBy(s => s.FullName).ToList();
-            sb.AppendLine("<div class=\"sheet-page\">");
-            sb.AppendLine("<div>");
-            sb.AppendLine("  <div class=\"header-box\">");
-            sb.AppendLine($"    <div class=\"header-title\">ÖĞRENCİ SINAV YERİ BİLGİLENDİRME - TÜM OKUL (ALFABETİK)</div>");
-            sb.AppendLine($"    <div class=\"header-sub\">Sınav: {exam.Name} | Tarih: {exam.ExamDate:dd.MM.yyyy} ({GetTurkishDayName(exam.ExamDate.DayOfWeek)}) | Saat: {exam.LessonHour}. Ders ({exam.StartTime ?? "-"}) | Toplam: {allAlpha.Count} Öğrenci</div>");
-            sb.AppendLine("  </div>");
-
-            sb.AppendLine("  <table class=\"data-table\">");
-            sb.AppendLine("    <thead><tr><th style=\"width:35px;\">Sıra</th><th style=\"width:60px;\">Öğr. No</th><th>Adı Soyadı</th><th style=\"width:65px;\">Sınıf/Şube</th><th>Sınav Salonu & Sıra</th><th>Ders Sınavı</th></tr></thead>");
-            sb.AppendLine("    <tbody>");
-            int aIdx = 1;
-            foreach (var s in allAlpha)
+            HashSet<string>? allowedBranches = null;
+            if (!string.IsNullOrWhiteSpace(branches))
             {
-                sb.AppendLine($"      <tr><td style=\"text-align:center;\">{aIdx++}</td><td style=\"text-align:center;\"><strong>{s.StudentNumber}</strong></td><td>{s.FullName}</td><td style=\"text-align:center;\">{s.Grade}-{s.Section}</td><td style=\"text-align:center;\"><strong>{s.RoomName}</strong> (Sıra: {s.SeatNumber})</td><td>{s.LessonName}</td></tr>");
+                allowedBranches = new HashSet<string>(
+                    branches.Split(new[] { ',', ';', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                    StringComparer.OrdinalIgnoreCase
+                );
             }
-            sb.AppendLine("    </tbody>");
-            sb.AppendLine("  </table>");
-            sb.AppendLine("</div>");
-            sb.AppendLine("</div>");
 
-            // 2. HER ŞUBE İÇİN AYRI SAYFALAR (ÖĞRENCİ NO SIRALI, GÖZETMENSİZ)
+            // 1. TÜM OKUL ALFABETİK LİSTESİ (Sadece talep edilmişse)
+            if (includeAllAlpha)
+            {
+                var allAlpha = seatings.OrderBy(s => s.FullName).ToList();
+                sb.AppendLine("<div class=\"sheet-page\">");
+                sb.AppendLine("<div>");
+                sb.AppendLine("  <div class=\"header-box\">");
+                sb.AppendLine($"    <div class=\"header-title\">ÖĞRENCİ SINAV YERİ BİLGİLENDİRME - TÜM OKUL (ALFABETİK) [{paperSize.ToUpper()}]</div>");
+                sb.AppendLine($"    <div class=\"header-sub\">Sınav: {exam.Name} | Tarih: {exam.ExamDate:dd.MM.yyyy} ({GetTurkishDayName(exam.ExamDate.DayOfWeek)}) | Saat: {exam.LessonHour}. Ders ({exam.StartTime ?? "-"}) | Toplam: {allAlpha.Count} Öğrenci</div>");
+                sb.AppendLine("  </div>");
+
+                sb.AppendLine("  <table class=\"data-table\">");
+                sb.AppendLine("    <thead><tr><th style=\"width:35px;\">Sıra</th><th style=\"width:60px;\">Öğr. No</th><th>Adı Soyadı</th><th style=\"width:65px;\">Sınıf/Şube</th><th>Sınav Salonu & Sıra</th><th>Ders Sınavı</th></tr></thead>");
+                sb.AppendLine("    <tbody>");
+                int aIdx = 1;
+                foreach (var s in allAlpha)
+                {
+                    sb.AppendLine($"      <tr><td style=\"text-align:center;\">{aIdx++}</td><td style=\"text-align:center;\"><strong>{s.StudentNumber}</strong></td><td>{s.FullName}</td><td style=\"text-align:center;\">{s.Grade}-{s.Section}</td><td style=\"text-align:center;\"><strong>{s.RoomName}</strong> (Sıra: {s.SeatNumber})</td><td>{s.LessonName}</td></tr>");
+                }
+                sb.AppendLine("    </tbody>");
+                sb.AppendLine("  </table>");
+                sb.AppendLine("</div>");
+                sb.AppendLine("</div>");
+            }
+
+            // 2. SEÇİLEN ŞUBELER İÇİN AYRI SAYFALAR (ÖĞRENCİ NO SIRALI, GÖZETMENSİZ)
             var branchGroups = seatings
                 .GroupBy(s => $"{s.Grade}-{s.Section}")
+                .Where(g => allowedBranches == null || allowedBranches.Contains(g.Key))
                 .OrderBy(g => {
                     var (gr, sec) = GradeSectionNormalizer.Normalize(g.Key.Split('-')[0], g.Key.Split('-').Length > 1 ? g.Key.Split('-')[1] : "");
                     return int.TryParse(gr, out var gInt) ? gInt : 99;
@@ -1794,7 +1826,7 @@ namespace OgretmenAjanda.Api.Controllers
                 sb.AppendLine("<div class=\"sheet-page\">");
                 sb.AppendLine("<div>");
                 sb.AppendLine("  <div class=\"header-box\" style=\"border-color:#4338ca;\">");
-                sb.AppendLine($"    <div class=\"header-title\" style=\"background:#4338ca;\">SINAV YERİ BİLGİLENDİRME - ŞUBE: {bg.Key.ToUpper()}</div>");
+                sb.AppendLine($"    <div class=\"header-title\" style=\"background:#4338ca;\">SINAV YERİ BİLGİLENDİRME - ŞUBE: {bg.Key.ToUpper()} [{paperSize.ToUpper()}]</div>");
                 sb.AppendLine($"    <div class=\"header-sub\" style=\"background:#e0e7ff; color:#312e81;\">Sınav: {exam.Name} | Tarih: {exam.ExamDate:dd.MM.yyyy} ({GetTurkishDayName(exam.ExamDate.DayOfWeek)}) | Saat: {exam.LessonHour}. Ders ({exam.StartTime ?? "-"}) | Mevcut: {sorted.Count} Öğrenci</div>");
                 sb.AppendLine("  </div>");
 
