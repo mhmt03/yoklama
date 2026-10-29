@@ -85,6 +85,38 @@ namespace OgretmenAjanda.Api.Controllers
             return Guid.Empty;
         }
 
+        private async Task LogActionAsync(Guid schoolId, string actionType, string entityName, string? entityId, string description, string? detailsJson = null)
+        {
+            try
+            {
+                var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+                var user = CurrentUserId != Guid.Empty ? await _context.Users.FindAsync(CurrentUserId) : null;
+                var userName = user?.Username ?? CurrentUserName ?? "Sistem";
+                var userFullName = user?.FullName ?? CurrentUserName ?? "Yönetici";
+                var userRole = !string.IsNullOrEmpty(user?.Role) ? user.Role : (!string.IsNullOrEmpty(CurrentUserRole) ? CurrentUserRole : "ADMIN");
+
+                await _auditLogService.LogAsync(
+                    _context,
+                    schoolId,
+                    CurrentUserId,
+                    userName,
+                    userFullName,
+                    userRole,
+                    actionType,
+                    entityName,
+                    entityId,
+                    description,
+                    detailsJson,
+                    clientIp
+                );
+                await _context.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ExamPlanner] LogActionAsync hatası: {ex.Message}");
+            }
+        }
+
         // ==========================================
         // 1. SALON YÖNETİMİ (EXAM HALLS)
         // ==========================================
@@ -156,6 +188,7 @@ namespace OgretmenAjanda.Api.Controllers
             hall.IsActive = dto.IsActive;
 
             await _context.SaveChangesAsync();
+            await LogActionAsync(dto.SchoolId, "SAVE_ROOM", "ExamHall", hall.Id.ToString(), $"Sınav salonu kaydedildi/güncellendi: {hall.RoomName} (Kapasite: {hall.Capacity}, Tip: {hall.Tag})");
             return Ok(new { success = true, data = hall });
         }
 
@@ -172,6 +205,7 @@ namespace OgretmenAjanda.Api.Controllers
 
             _context.ExamHalls.Remove(room);
             await _context.SaveChangesAsync();
+            await LogActionAsync(room.SchoolId, "DELETE_ROOM", "ExamHall", room.Id.ToString(), $"Sınav salonu silindi: {room.RoomName}");
             return Ok(new { success = true, message = "Salon silindi." });
         }
 
@@ -416,6 +450,7 @@ namespace OgretmenAjanda.Api.Controllers
                 _context.WrittenExams.Add(exam);
             }
 
+            bool isNew = !dto.Id.HasValue || dto.Id.Value == Guid.Empty;
             exam.Name = dto.Name.Trim();
             exam.ExamDate = dto.ExamDate.Date;
             exam.LessonHour = Math.Clamp(dto.LessonHour, 1, 12);
@@ -426,6 +461,7 @@ namespace OgretmenAjanda.Api.Controllers
             exam.IsPublishedToStudents = dto.IsPublishedToStudents;
 
             await _context.SaveChangesAsync();
+            await LogActionAsync(effectiveId, isNew ? "CREATE_EXAM" : "UPDATE_EXAM", "WrittenExam", exam.Id.ToString(), $"'{exam.Name}' ortak yazılı sınavı {(isNew ? "oluşturuldu" : "güncellendi")}. Tarih: {exam.ExamDate:yyyy-MM-dd}, {exam.LessonHour}. Ders ({exam.StartTime})");
             return Ok(new { success = true, data = exam });
         }
 
@@ -437,6 +473,7 @@ namespace OgretmenAjanda.Api.Controllers
 
             exam.IsPublishedToStudents = req?.Value ?? true;
             await _context.SaveChangesAsync();
+            await LogActionAsync(exam.SchoolId, "TOGGLE_EXAM_PUBLISH", "WrittenExam", exam.Id.ToString(), $"'{exam.Name}' sınavının öğrenci ve veli görünürlüğü {(exam.IsPublishedToStudents ? "AÇILDI" : "KAPATILDI")}.");
             return Ok(new { success = true, isPublishedToStudents = exam.IsPublishedToStudents });
         }
 
@@ -456,6 +493,7 @@ namespace OgretmenAjanda.Api.Controllers
             _context.WrittenExams.Remove(exam);
 
             await _context.SaveChangesAsync();
+            await LogActionAsync(exam.SchoolId, "DELETE_EXAM", "WrittenExam", exam.Id.ToString(), $"'{exam.Name}' ortak yazılı sınavı ve oturma planı silindi.");
             return Ok(new { success = true, message = "Sınav ve tüm oturma planı silindi." });
         }
 
@@ -726,6 +764,7 @@ namespace OgretmenAjanda.Api.Controllers
 
             _context.ExamSeatings.AddRange(newSeatings);
             await _context.SaveChangesAsync();
+            await LogActionAsync(exam.SchoolId, "PLACE_STUDENTS", "WrittenExam", exam.Id.ToString(), $"'{exam.Name}' sınavı için {newSeatings.Count} öğrenci {rooms.Count} salona {(req.IsButterfly ? "kelebek sistemiyle" : "normal")} yerleştirildi.");
 
             return Ok(new
             {
@@ -760,6 +799,7 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             await _context.SaveChangesAsync();
+            await LogActionAsync(seatings.First().SchoolId, "UPDATE_PROCTOR", "ExamSeating", null, $"{dto.RoomName} salonu gözetmeni '{dto.ProctorTeacherName}' olarak güncellendi.");
             return Ok(new { success = true, message = "Gözetmen öğretmen güncellendi." });
         }
 
@@ -1060,6 +1100,63 @@ namespace OgretmenAjanda.Api.Controllers
             });
         }
 
+        [HttpGet("teacher-proctor-duties")]
+        public async Task<IActionResult> GetTeacherProctorDuties([FromQuery] Guid schoolId, [FromQuery] string? teacherName)
+        {
+            if (string.IsNullOrWhiteSpace(teacherName))
+            {
+                return Ok(new { success = true, data = new List<object>() });
+            }
+
+            var cleanName = teacherName.Trim().ToLowerInvariant();
+
+            // Öğretmenin gözetmen olduğu aktif sınav yerleşimleri
+            var seatings = await _context.ExamSeatings
+                .Where(s => s.SchoolId == schoolId && s.ProctorTeacherName != null &&
+                            s.ProctorTeacherName.ToLower() == cleanName)
+                .ToListAsync();
+
+            if (!seatings.Any())
+            {
+                return Ok(new { success = true, data = new List<object>() });
+            }
+
+            var examIds = seatings.Select(s => s.WrittenExamId).Distinct().ToList();
+            var exams = await _context.WrittenExams
+                .Where(e => examIds.Contains(e.Id) && e.IsActive)
+                .ToListAsync();
+
+            var examMap = exams.ToDictionary(e => e.Id);
+
+            var grouped = seatings
+                .Where(s => examMap.ContainsKey(s.WrittenExamId))
+                .GroupBy(s => new { s.WrittenExamId, s.RoomName })
+                .Select(g =>
+                {
+                    var exam = examMap[g.Key.WrittenExamId];
+                    var isToday = exam.ExamDate.Date == DateTime.Today;
+                    return new
+                    {
+                        examId = exam.Id,
+                        examName = exam.Name,
+                        examDate = exam.ExamDate.ToString("yyyy-MM-dd"),
+                        examDateRaw = exam.ExamDate,
+                        dayOfWeekStr = exam.ExamDate.ToString("dddd", new System.Globalization.CultureInfo("tr-TR")),
+                        lessonHour = exam.LessonHour,
+                        startTime = exam.StartTime ?? "09:50",
+                        roomName = g.Key.RoomName,
+                        studentCount = g.Count(),
+                        isToday = isToday
+                    };
+                })
+                .OrderByDescending(x => x.isToday)
+                .ThenBy(x => x.examDateRaw)
+                .ThenBy(x => x.lessonHour)
+                .ToList();
+
+            return Ok(new { success = true, data = grouped });
+        }
+
         // ==========================================
         // 5. MANUEL ÖĞRENCİ YERİ DEĞİŞTİRME / TAKAS (SWAP & MOVE)
         // ==========================================
@@ -1114,6 +1211,11 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             await _context.SaveChangesAsync();
+            await LogActionAsync(currentSeat.SchoolId, "MOVE_SEAT", "ExamSeating", currentSeat.Id.ToString(),
+                occupant != null
+                    ? $"{currentSeat.FullName} ile {occupant.FullName} isimli öğrencilerin yerleri karşılıklı takas edildi."
+                    : $"{currentSeat.FullName} (No: {currentSeat.StudentNumber}) öğrencisi {targetRoom} salonu {targetSeat}. sıraya taşındı.");
+
             return Ok(new
             {
                 success = true,

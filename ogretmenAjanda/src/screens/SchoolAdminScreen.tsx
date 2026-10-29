@@ -246,6 +246,16 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [exportingLogs, setExportingLogs] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
+  // Log Veritabanı Temizleme (Purge) State
+  const [logPurgeModalVisible, setLogPurgeModalVisible] = useState(false);
+  const [purgeStartDate, setPurgeStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [purgeEndDate, setPurgeEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [isPurgingLogs, setIsPurgingLogs] = useState(false);
+
   // Menü, Lisans ve Okul Seçim Modalları State
   const [menuDrawerVisible, setMenuDrawerVisible] = useState(false);
   const [licenseModalVisible, setLicenseModalVisible] = useState(false);
@@ -709,8 +719,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       const conflictWith = otherItems.find(ot => {
         const otClass = `${ot.grade}-${ot.section}`.toUpperCase().trim();
         return ot.dayOfWeek === myItem.dayOfWeek &&
-               ot.lessonHour === myItem.lessonHour &&
-               otClass === myClass;
+          ot.lessonHour === myItem.lessonHour &&
+          otClass === myClass;
       });
 
       if (conflictWith) {
@@ -838,8 +848,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               const conflict = otherItems.find(ot => {
                 const otClass = `${ot.grade}-${ot.section}`.toUpperCase().trim();
                 return ot.dayOfWeek === myItem.dayOfWeek &&
-                       ot.lessonHour === myItem.lessonHour &&
-                       otClass === myClass;
+                  ot.lessonHour === myItem.lessonHour &&
+                  otClass === myClass;
               });
 
               if (conflict && conflict.teacherName) {
@@ -1145,7 +1155,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     if (n1 === n2) return true;
     try {
       if (isTeacherMatch(name1, name2)) return true;
-    } catch {}
+    } catch { }
     return false;
   };
 
@@ -1458,7 +1468,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setLoadingDuties(false);
         return; // Yerel veri mevcut, çevrimdışı 0ms olarak tamamla!
       }
-    } catch {}
+    } catch { }
 
     // 3. Yalnızca cihazda hiç nöbet verisi yoksa sunucudan çekmeyi dene
     setLoadingDuties(true);
@@ -1665,8 +1675,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
             const placeCandidates = row.slice(0, dayCols[0].colIndex).map(c => String(c || '').trim()).filter(Boolean);
             const textCandidates = placeCandidates.filter(c => isNaN(Number(c)));
-            const dutyPlace = textCandidates.length > 0 
-              ? textCandidates[textCandidates.length - 1] 
+            const dutyPlace = textCandidates.length > 0
+              ? textCandidates[textCandidates.length - 1]
               : (placeCandidates[0] || 'Genel Nöbet');
 
             dayCols.forEach(({ colIndex, day }) => {
@@ -2234,9 +2244,9 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         const cleanPNum = String(p.studentNumber || '').trim();
         const fallbackMatch = cleanPNum.length > 0
           ? (students.find(s => {
-              const sNum = String(s.student_number || '').trim();
-              return sNum.length > 0 && (sNum === cleanPNum || sNum.replace(/^0+/, '') === cleanPNum.replace(/^0+/, ''));
-            }) || null)
+            const sNum = String(s.student_number || '').trim();
+            return sNum.length > 0 && (sNum === cleanPNum || sNum.replace(/^0+/, '') === cleanPNum.replace(/^0+/, ''));
+          }) || null)
           : null;
 
         return {
@@ -2842,7 +2852,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setLoadingAllSchedules(false);
         return; // Yerel veri mevcut, çevrimdışı 0ms olarak tamamla!
       }
-    } catch {}
+    } catch { }
 
     // 3. Yalnızca cihazda hiç program verisi yoksa sunucudan çekmeyi dene
     setLoadingAllSchedules(true);
@@ -2877,8 +2887,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           const sampleDetails = (res.data?.details || []).slice(0, 6).join('\n• ');
           Alert.alert(
             '🎉 Dengeleme Tamamlandı',
-            `${res.data?.message}\n\nYapılan işlemlerden örnekler:\n• ${sampleDetails}${
-              (res.data?.details || []).length > 6 ? `\n... ve ${(res.data?.details || []).length - 6} işlem daha.` : ''
+            `${res.data?.message}\n\nYapılan işlemlerden örnekler:\n• ${sampleDetails}${(res.data?.details || []).length > 6 ? `\n... ve ${(res.data?.details || []).length - 6} işlem daha.` : ''
             }`
           );
         } else {
@@ -2940,8 +2949,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   const sampleDetails = (res.data?.details || []).slice(0, 6).join('\n• ');
                   Alert.alert(
                     '🎉 Boşluklar Dolduruldu',
-                    `${res.data?.message}\n\nYerleştirilen derslerden örnekler:\n• ${sampleDetails}${
-                      (res.data?.details || []).length > 6 ? `\n... ve ${(res.data?.details || []).length - 6} ders daha.` : ''
+                    `${res.data?.message}\n\nYerleştirilen derslerden örnekler:\n• ${sampleDetails}${(res.data?.details || []).length > 6 ? `\n... ve ${(res.data?.details || []).length - 6} ders daha.` : ''
                     }`
                   );
                 } else {
@@ -3252,7 +3260,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           setRefreshing(false);
         }
       }
-    } catch {}
+    } catch { }
 
     // 2. Canlı sunucudan arka planda oku (Yerelde veri varsa UI'yi asla kilitleme)
     if (hasCached) {
@@ -3262,7 +3270,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           setSchools(res.data);
           await AsyncStorage.setItem('@cached_admin_schools', JSON.stringify(res.data));
         }
-      }).catch(() => {});
+      }).catch(() => { });
       return;
     }
 
@@ -3302,13 +3310,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   };
 
   const applySnapshotData = (snap: SchoolSnapshotData) => {
-    if (snap.teachers) {
-      const sanitizedTeachers = snap.teachers.map((t: any) => ({
-        ...t,
-        username: t.username ? t.username.replace(/\.\d+$/, '').replace(/\d+$/, '') : t.username,
-      }));
-      setTeachers(sanitizedTeachers);
-    }
+    if (snap.teachers) setTeachers(snap.teachers);
     if (snap.classes && snap.classes.length > 0) setClasses(snap.classes);
     if (snap.lessons && snap.lessons.length > 0) setLessons(snap.lessons);
     if (snap.schedules && snap.schedules.length > 0) setAllSchoolSchedules(snap.schedules);
@@ -3354,20 +3356,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
-  const loadAllSchoolData = async (schoolId: string, forceRefresh = false) => {
+  const loadAllSchoolData = async (schoolId: string) => {
     // 1. FAST OFFLINE: Önce telefondaki yerel depodan anında yükle (0ms gecikme)
-    if (!forceRefresh) {
-      const cached = await loadSchoolSnapshotFromStorage(schoolId);
-      if (cached) {
-        applySnapshotData(cached);
-        setLoading(false);
-        setRefreshing(false);
-        // Stale-While-Revalidate: Arka planda sunucudan en güncel veriyi sessizce çekip tazele
-        fetchAndCacheSchoolSnapshot(schoolId).then((freshSnap) => {
-          if (freshSnap) applySnapshotData(freshSnap);
-        }).catch(() => {});
-        return; // Yerel önbellek mevcut, 0ms anında hazır!
-      }
+    const cached = await loadSchoolSnapshotFromStorage(schoolId);
+    if (cached) {
+      applySnapshotData(cached);
+      setLoading(false);
+      setRefreshing(false);
+      return; // Yerel önbellek mevcut, 0ms anında hazır!
     }
 
     // 2. Yalnızca yerel önbellek yoksa ilk açılışta sunucudan snapshot paketini çek
@@ -3377,7 +3373,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       if (snap) {
         applySnapshotData(snap);
       }
-    } catch {} finally {
+    } catch { } finally {
       setLoading(false);
       setRefreshing(false);
     }
@@ -3487,7 +3483,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     try {
       const rRole = (adminReplyingMessage.senderRole || '').toUpperCase();
       const targetRole = rRole === 'TEACHER' ? 'SPECIFIC_TEACHER' : (rRole === 'STUDENT' ? 'SPECIFIC_STUDENT' : 'PARENT');
-      
+
       const payload = {
         schoolId: selectedSchool.id,
         receiverId: adminReplyingMessage.senderId,
@@ -3701,7 +3697,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   : s
               ),
             }));
-          } catch {}
+          } catch { }
         } catch (localErr) {
           console.warn('Yerel okul güncelleme uyarısı:', localErr);
         }
@@ -3759,7 +3755,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         (s.code && s.code.toUpperCase() !== schoolToDelete.code?.toUpperCase()) && s.id !== schoolToDelete.id
                       ),
                     }));
-                  } catch {}
+                  } catch { }
                 } catch (localErr) {
                   console.warn('Yerel okul silme uyarısı:', localErr);
                 }
@@ -4630,8 +4626,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     ];
 
     options.push({
-      text: cachedPdfPhotos.length > 0 
-        ? `📄 PDF Albümünden Seç (${cachedPdfPhotos.length} Fotoğraf)` 
+      text: cachedPdfPhotos.length > 0
+        ? `📄 PDF Albümünden Seç (${cachedPdfPhotos.length} Fotoğraf)`
         : '📄 PDF Dosyasından Seç',
       onPress: () => handleOpenPdfPickerForStudent(student),
     });
@@ -4826,11 +4822,11 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     try {
       const pickerTypes = targetFormat === 'excel'
         ? [
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'application/vnd.ms-excel',
-            'application/vnd.ms-excel.sheet.macroEnabled.12',
-            '*/*',
-          ]
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'application/vnd.ms-excel.sheet.macroEnabled.12',
+          '*/*',
+        ]
         : ['image/*', 'application/pdf'];
 
       const pickerResult = await DocumentPicker.getDocumentAsync({
@@ -5072,7 +5068,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       try {
         const usage = await getGeminiUsageStats(selectedSchool.id);
         setUsageStats(usage);
-      } catch {}
+      } catch { }
     } catch (error: any) {
       if (aiCancelledRef.current) return;
       console.error('\n❌ [ÇARŞAF UI ANALİZ HATASI]:', {
@@ -6075,7 +6071,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         setLoadingTeacherSchedule(false);
         return;
       }
-    } catch {}
+    } catch { }
 
     // 3. Sadece ve sadece cihazda hiçbir yerel veri yoksa sunucuya git
     setLoadingTeacherSchedule(true);
@@ -6554,6 +6550,25 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
+  // Belirli Tarih Aralığındaki Logları Veritabanından Temizleme (Fiziksel .log dosyaları diskte korunur)
+  const handlePurgeLogs = async () => {
+    if (!selectedSchool?.id) return;
+    try {
+      setIsPurgingLogs(true);
+      const res = await apiRequest<{ success: boolean; deletedCount: number; message: string }>(
+        `schools/${selectedSchool.id}/audit-logs?startDate=${encodeURIComponent(purgeStartDate)}&endDate=${encodeURIComponent(purgeEndDate)}`,
+        'DELETE'
+      );
+      setIsPurgingLogs(false);
+      setLogPurgeModalVisible(false);
+      Alert.alert('İşlem Başarılı', res?.message || 'Seçilen tarih aralığındaki loglar veritabanından temizlendi.');
+      await loadAuditLogs();
+    } catch (err: any) {
+      setIsPurgingLogs(false);
+      Alert.alert('Hata', err?.message || 'Loglar temizlenirken bir hata oluştu.');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* 📌 Sabit Minimal Üst Çubuk (Sadece Sistemden Çıkış, Hamburger Menü ve Yetkiler Butonları) */}
@@ -6589,19 +6604,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              if (selectedSchool) {
-                loadAllSchoolData(selectedSchool.id, true);
-              } else {
-                loadSchools();
-              }
-            }}
-          />
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSchools(); }} />}
       >
         {/* 📜 Sayfa İle Birlikte Kayan İdareci Başlık & Okul Dropdown Paneli */}
         <View style={styles.scrollableHeaderCard}>
@@ -6630,56 +6633,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             </TouchableOpacity>
           </View>
         </View>
-
-        {/* 📋 YAZILI OTURMA PLANI HIZLI ERİŞİM KARTI */}
-        <TouchableOpacity
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: '#F5F3FF',
-            borderWidth: 1.5,
-            borderColor: '#C4B5FD',
-            borderRadius: 14,
-            padding: 14,
-            marginTop: 10,
-            marginBottom: 8,
-          }}
-          onPress={() => {
-            if (navigation?.openExamPlanner) {
-              navigation.openExamPlanner();
-            } else if (navigation?.navigate) {
-              navigation.navigate('ExamPlanner');
-            }
-          }}
-          activeOpacity={0.8}
-        >
-          <View
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 12,
-              backgroundColor: '#EDE9FE',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <Ionicons name="grid" size={24} color="#7C3AED" />
-          </View>
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 15, fontWeight: '800', color: '#6D28D9' }}>
-                Yazılı Oturma Planı
-              </Text>
-              <View style={{ backgroundColor: '#7C3AED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                <Text style={{ fontSize: 10, fontWeight: '800', color: '#FFFFFF' }}>YENİ</Text>
-              </View>
-            </View>
-            <Text style={{ fontSize: 12, color: '#7C3AED', marginTop: 2 }}>
-              Kelebek salon dağıtımı, şube ders atama ve gözetmen planı
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="#7C3AED" />
-        </TouchableOpacity>
 
         {/* 🏫 BİRLEŞTİRİLMİŞ OKUL VE ÖĞRETMEN BAĞLANTI KODU KARTI */}
         <View style={styles.combinedSchoolCard}>
@@ -6723,7 +6676,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   activeOpacity={0.7}
                 >
                   <Ionicons name="add-circle" size={12} color="#166534" />
-                  <Text style={styles.addSchoolSmallBtnText}>Yeni Okul</Text>
+                  {/* <Text style={styles.addSchoolSmallBtnText}>Yeni Okul</Text> */}
                 </TouchableOpacity>
               )}
             </View>
@@ -7139,184 +7092,183 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   </View>
                 ) : (
                   filteredTeachers.map((teacher) => (
-                      <View key={teacher.id} style={styles.cardItem}>
-                        <View style={styles.cardHeaderRow}>
-                          <View style={styles.teacherAvatar}>
-                            <Text style={styles.avatarText}>{teacher.fullName?.slice(0, 2).toUpperCase()}</Text>
-                          </View>
-                          <View style={{ flex: 1, marginLeft: 12 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                              <Text style={styles.cardTitle}>{teacher.fullName}</Text>
-                              <View style={[styles.roleBadge, teacher.role === 'STAFF' ? styles.roleStaffBadge : styles.roleTeacherBadge]}>
-                                <Text style={teacher.role === 'STAFF' ? styles.roleStaffBadgeText : styles.roleTeacherBadgeText}>
-                                  {teacher.role === 'STAFF' ? '🛡️ İdareci' : '👨‍🏫 Öğretmen'}
-                                </Text>
-                              </View>
+                    <View key={teacher.id} style={styles.cardItem}>
+                      <View style={styles.cardHeaderRow}>
+                        <View style={styles.teacherAvatar}>
+                          <Text style={styles.avatarText}>{teacher.fullName?.slice(0, 2).toUpperCase()}</Text>
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 12 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                            <Text style={styles.cardTitle}>{teacher.fullName}</Text>
+                            <View style={[styles.roleBadge, teacher.role === 'STAFF' ? styles.roleStaffBadge : styles.roleTeacherBadge]}>
+                              <Text style={teacher.role === 'STAFF' ? styles.roleStaffBadgeText : styles.roleTeacherBadgeText}>
+                                {teacher.role === 'STAFF' ? '🛡️ İdareci' : '👨‍🏫 Öğretmen'}
+                              </Text>
                             </View>
-                            {/* 👤 Belirgin Kullanıcı Adı Rozeti */}
-                            {(() => {
-                              const rawUname = (teacher.username || teacher.userName || generateDefaultTeacherUsername(teacher.fullName)).trim();
-                              const displayUsername = rawUname.replace(/\.\d+$/, '').replace(/\d+$/, '');
-                              return (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4, marginBottom: 4 }}>
-                                  <View style={styles.teacherUsernameBadge}>
-                                    <Ionicons name="person" size={11} color="#4F46E5" />
-                                    <Text style={styles.teacherUsernameLabel}>Kullanıcı Adı: </Text>
-                                    <Text style={styles.teacherUsernameValue} selectable>
-                                      {displayUsername}
-                                    </Text>
-                                    <TouchableOpacity
-                                      onPress={() => {
-                                        Clipboard.setStringAsync(displayUsername);
-                                        Alert.alert('Kopyalandı', `"${displayUsername}" kullanıcı adı panoya kopyalandı.`);
-                                      }}
-                                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                      style={{ marginLeft: 4 }}
-                                    >
-                                      <Ionicons name="copy-outline" size={12} color="#4F46E5" />
-                                    </TouchableOpacity>
-                                  </View>
+                          </View>
+                          {/* 👤 Belirgin Kullanıcı Adı Rozeti */}
+                          {(() => {
+                            const displayUsername = (teacher.username || teacher.userName || generateDefaultTeacherUsername(teacher.fullName)).trim();
+                            return (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4, marginBottom: 4 }}>
+                                <View style={styles.teacherUsernameBadge}>
+                                  <Ionicons name="person" size={11} color="#4F46E5" />
+                                  <Text style={styles.teacherUsernameLabel}>Kullanıcı Adı: </Text>
+                                  <Text style={styles.teacherUsernameValue} selectable>
+                                    {displayUsername}
+                                  </Text>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      Clipboard.setStringAsync(displayUsername);
+                                      Alert.alert('Kopyalandı', `"${displayUsername}" kullanıcı adı panoya kopyalandı.`);
+                                    }}
+                                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                    style={{ marginLeft: 4 }}
+                                  >
+                                    <Ionicons name="copy-outline" size={12} color="#4F46E5" />
+                                  </TouchableOpacity>
                                 </View>
-                              );
-                            })()}
+                              </View>
+                            );
+                          })()}
 
-                            {/* Güvenlik & Son Giriş Rozeti */}
-                            {teacher.lastLoginAt ? (
-                              <View style={styles.loginStatusBadgeGreen}>
-                                <Ionicons name="checkmark-circle" size={12} color="#0D9488" />
-                                <Text style={styles.loginStatusTextGreen}>
-                                  Son Giriş: {new Date(teacher.lastLoginAt).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          {/* Güvenlik & Son Giriş Rozeti */}
+                          {teacher.lastLoginAt ? (
+                            <View style={styles.loginStatusBadgeGreen}>
+                              <Ionicons name="checkmark-circle" size={12} color="#0D9488" />
+                              <Text style={styles.loginStatusTextGreen}>
+                                Son Giriş: {new Date(teacher.lastLoginAt).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </Text>
+                            </View>
+                          ) : (
+                            <View style={styles.loginStatusBadgeGray}>
+                              <Ionicons name="time-outline" size={12} color="#64748B" />
+                              <Text style={styles.loginStatusTextGray}>
+                                Henüz Giriş Yapmadı (İlk Şifre: 1234)
+                              </Text>
+                            </View>
+                          )}
+                          {teacher.branch && (
+                            <Text style={styles.teacherBranchText}>📚 Branş: {teacher.branch}</Text>
+                          )}
+                          {(() => {
+                            const cClass = getTeacherCounselorClass(teacher, allSchoolSchedules);
+                            return (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: cClass ? '#ECFDF5' : '#F8FAFC', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, marginVertical: 3, borderWidth: 1, borderColor: cClass ? '#A7F3D0' : '#E2E8F0', alignSelf: 'flex-start' }}>
+                                <Ionicons name="ribbon-outline" size={12} color={cClass ? '#059669' : '#94A3B8'} style={{ marginRight: 4 }} />
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: cClass ? '#047857' : '#64748B' }}>
+                                  Sınıf Rehberliği: {cClass || '—'}
                                 </Text>
                               </View>
-                            ) : (
-                              <View style={styles.loginStatusBadgeGray}>
-                                <Ionicons name="time-outline" size={12} color="#64748B" />
-                                <Text style={styles.loginStatusTextGray}>
-                                  Henüz Giriş Yapmadı (İlk Şifre: 1234)
-                                </Text>
-                              </View>
-                            )}
-                            {teacher.branch && (
-                              <Text style={styles.teacherBranchText}>📚 Branş: {teacher.branch}</Text>
-                            )}
-                            {(() => {
-                              const cClass = getTeacherCounselorClass(teacher, allSchoolSchedules);
-                              return (
-                                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: cClass ? '#ECFDF5' : '#F8FAFC', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, marginVertical: 3, borderWidth: 1, borderColor: cClass ? '#A7F3D0' : '#E2E8F0', alignSelf: 'flex-start' }}>
-                                  <Ionicons name="ribbon-outline" size={12} color={cClass ? '#059669' : '#94A3B8'} style={{ marginRight: 4 }} />
-                                  <Text style={{ fontSize: 11, fontWeight: '700', color: cClass ? '#047857' : '#64748B' }}>
-                                    Sınıf Rehberliği: {cClass || '—'}
+                            );
+                          })()}
+                          {teacher.assignedClassesJson && (
+                            <Text style={styles.teacherClassesText} numberOfLines={2}>🏫 Sınıflar: {teacher.assignedClassesJson}</Text>
+                          )}
+                          {teacher.phone && (
+                            <Text style={styles.contactText}>📞 {teacher.phone}</Text>
+                          )}
+
+                          {/* Yetki Özeti Çipleri */}
+                          {(() => {
+                            let perms: any = null;
+                            if (teacher.permissionsJson) {
+                              try { perms = JSON.parse(teacher.permissionsJson); } catch (e) { }
+                            }
+                            return (
+                              <View style={styles.permissionChipsWrap}>
+                                <View style={[styles.permissionMiniChip, perms?.canMessageStudents === false && { backgroundColor: '#FEE2E2' }]}>
+                                  <Text style={[styles.permissionMiniChipText, perms?.canMessageStudents === false && { color: '#DC2626' }]}>
+                                    {perms?.canMessageStudents === false ? '🚫 Öğrenci Mesaj' : '💬 Öğrenci'}
                                   </Text>
                                 </View>
-                              );
-                            })()}
-                            {teacher.assignedClassesJson && (
-                              <Text style={styles.teacherClassesText} numberOfLines={2}>🏫 Sınıflar: {teacher.assignedClassesJson}</Text>
-                            )}
-                            {teacher.phone && (
-                              <Text style={styles.contactText}>📞 {teacher.phone}</Text>
-                            )}
-
-                            {/* Yetki Özeti Çipleri */}
-                            {(() => {
-                              let perms: any = null;
-                              if (teacher.permissionsJson) {
-                                try { perms = JSON.parse(teacher.permissionsJson); } catch (e) { }
-                              }
-                              return (
-                                <View style={styles.permissionChipsWrap}>
-                                  <View style={[styles.permissionMiniChip, perms?.canMessageStudents === false && { backgroundColor: '#FEE2E2' }]}>
-                                    <Text style={[styles.permissionMiniChipText, perms?.canMessageStudents === false && { color: '#DC2626' }]}>
-                                      {perms?.canMessageStudents === false ? '🚫 Öğrenci Mesaj' : '💬 Öğrenci'}
-                                    </Text>
-                                  </View>
-                                  <View style={[styles.permissionMiniChip, perms?.canMessageParents === false && { backgroundColor: '#FEE2E2' }]}>
-                                    <Text style={[styles.permissionMiniChipText, perms?.canMessageParents === false && { color: '#DC2626' }]}>
-                                      {perms?.canMessageParents === false ? '🚫 Veli Mesaj' : '💬 Veli'}
-                                    </Text>
-                                  </View>
-                                  <View style={[styles.permissionMiniChip, perms?.canMessageTeachers === false && { backgroundColor: '#FEE2E2' }]}>
-                                    <Text style={[styles.permissionMiniChipText, perms?.canMessageTeachers === false && { color: '#DC2626' }]}>
-                                      {perms?.canMessageTeachers === false ? '🚫 Öğretmen Mesaj' : '💬 Öğretmen'}
-                                    </Text>
-                                  </View>
-                                  <View style={styles.permissionMiniChip}>
-                                    <Text style={styles.permissionMiniChipText}>
-                                      {perms?.canViewAllClasses === false ? '🔒 Kısıtlı Şube' : '🌐 Tüm Şubeler'}
-                                    </Text>
-                                  </View>
-                                  {perms?.canUseAiAssistant === false && (
-                                    <View style={[styles.permissionMiniChip, { backgroundColor: '#FEE2E2' }]}>
-                                      <Text style={[styles.permissionMiniChipText, { color: '#DC2626' }]}>🚫 AI Kapalı</Text>
-                                    </View>
-                                  )}
+                                <View style={[styles.permissionMiniChip, perms?.canMessageParents === false && { backgroundColor: '#FEE2E2' }]}>
+                                  <Text style={[styles.permissionMiniChipText, perms?.canMessageParents === false && { color: '#DC2626' }]}>
+                                    {perms?.canMessageParents === false ? '🚫 Veli Mesaj' : '💬 Veli'}
+                                  </Text>
                                 </View>
-                              );
-                            })()}
-                          </View>
-                          <View style={[styles.statusBadge, teacher.isActive ? styles.statusActive : styles.statusPassive]}>
-                            <Text style={styles.statusText}>{teacher.isActive ? 'Aktif' : 'Pasif'}</Text>
-                          </View>
+                                <View style={[styles.permissionMiniChip, perms?.canMessageTeachers === false && { backgroundColor: '#FEE2E2' }]}>
+                                  <Text style={[styles.permissionMiniChipText, perms?.canMessageTeachers === false && { color: '#DC2626' }]}>
+                                    {perms?.canMessageTeachers === false ? '🚫 Öğretmen Mesaj' : '💬 Öğretmen'}
+                                  </Text>
+                                </View>
+                                <View style={styles.permissionMiniChip}>
+                                  <Text style={styles.permissionMiniChipText}>
+                                    {perms?.canViewAllClasses === false ? '🔒 Kısıtlı Şube' : '🌐 Tüm Şubeler'}
+                                  </Text>
+                                </View>
+                                {perms?.canUseAiAssistant === false && (
+                                  <View style={[styles.permissionMiniChip, { backgroundColor: '#FEE2E2' }]}>
+                                    <Text style={[styles.permissionMiniChipText, { color: '#DC2626' }]}>🚫 AI Kapalı</Text>
+                                  </View>
+                                )}
+                              </View>
+                            );
+                          })()}
                         </View>
-
-                        {/* Öğretmen Aksiyon Butonları */}
-                        <View style={styles.cardActionsRow}>
-                          <TouchableOpacity
-                            style={[styles.cardActionBtn, { borderColor: '#C7D2FE', backgroundColor: '#EEF2FF' }]}
-                            onPress={() => handleOpenTeacherSchedule(teacher)}
-                          >
-                            <Ionicons name="calendar-outline" size={14} color="#4F46E5" />
-                            <Text style={[styles.cardActionBtnText, { color: '#4F46E5' }]}>Ders Programı</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={styles.cardActionBtn}
-                            onPress={() => {
-                              let perms = {
-                                canMessageStudents: true,
-                                canMessageTeachers: true,
-                                canMessageParents: true,
-                                canViewAllClasses: true,
-                                canUseAiAssistant: true,
-                                canExportReports: true,
-                                canManageAttendance: true,
-                                canEditStudents: false,
-                              };
-                              if (teacher.permissionsJson) {
-                                try {
-                                  perms = { ...perms, ...JSON.parse(teacher.permissionsJson) };
-                                } catch (e) { }
-                              }
-                              setEditingTeacher({
-                                ...teacher,
-                                role: teacher.role || 'TEACHER',
-                                permissions: perms,
-                              });
-                              setEditTeacherModalVisible(true);
-                            }}
-                          >
-                            <Ionicons name="pencil" size={14} color="#4F46E5" />
-                            <Text style={styles.cardActionBtnText}>Düzenle</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={[styles.cardActionBtn, { borderColor: '#FDE68A', backgroundColor: '#FEF3C7' }]}
-                            onPress={() => handleResetTeacherPassword(teacher.id, teacher.fullName, teacher.username || teacher.userName)}
-                          >
-                            <Ionicons name="key-outline" size={14} color="#D97706" />
-                            <Text style={[styles.cardActionBtnText, { color: '#D97706' }]}>Şifre (1234)</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={[styles.cardActionBtn, { borderColor: '#FECACA', backgroundColor: '#FEE2E2' }]}
-                            onPress={() => handleDeleteTeacher(teacher.id, teacher.fullName)}
-                          >
-                            <Ionicons name="trash-outline" size={14} color="#DC2626" />
-                            <Text style={[styles.cardActionBtnText, { color: '#DC2626' }]}>Sil</Text>
-                          </TouchableOpacity>
+                        <View style={[styles.statusBadge, teacher.isActive ? styles.statusActive : styles.statusPassive]}>
+                          <Text style={styles.statusText}>{teacher.isActive ? 'Aktif' : 'Pasif'}</Text>
                         </View>
                       </View>
-                    ))
+
+                      {/* Öğretmen Aksiyon Butonları */}
+                      <View style={styles.cardActionsRow}>
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { borderColor: '#C7D2FE', backgroundColor: '#EEF2FF' }]}
+                          onPress={() => handleOpenTeacherSchedule(teacher)}
+                        >
+                          <Ionicons name="calendar-outline" size={14} color="#4F46E5" />
+                          <Text style={[styles.cardActionBtnText, { color: '#4F46E5' }]}>Ders Programı</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.cardActionBtn}
+                          onPress={() => {
+                            let perms = {
+                              canMessageStudents: true,
+                              canMessageTeachers: true,
+                              canMessageParents: true,
+                              canViewAllClasses: true,
+                              canUseAiAssistant: true,
+                              canExportReports: true,
+                              canManageAttendance: true,
+                              canEditStudents: false,
+                            };
+                            if (teacher.permissionsJson) {
+                              try {
+                                perms = { ...perms, ...JSON.parse(teacher.permissionsJson) };
+                              } catch (e) { }
+                            }
+                            setEditingTeacher({
+                              ...teacher,
+                              role: teacher.role || 'TEACHER',
+                              permissions: perms,
+                            });
+                            setEditTeacherModalVisible(true);
+                          }}
+                        >
+                          <Ionicons name="pencil" size={14} color="#4F46E5" />
+                          <Text style={styles.cardActionBtnText}>Düzenle</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { borderColor: '#FDE68A', backgroundColor: '#FEF3C7' }]}
+                          onPress={() => handleResetTeacherPassword(teacher.id, teacher.fullName, teacher.username || teacher.userName)}
+                        >
+                          <Ionicons name="key-outline" size={14} color="#D97706" />
+                          <Text style={[styles.cardActionBtnText, { color: '#D97706' }]}>Şifre (1234)</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.cardActionBtn, { borderColor: '#FECACA', backgroundColor: '#FEE2E2' }]}
+                          onPress={() => handleDeleteTeacher(teacher.id, teacher.fullName)}
+                        >
+                          <Ionicons name="trash-outline" size={14} color="#DC2626" />
+                          <Text style={[styles.cardActionBtnText, { color: '#DC2626' }]}>Sil</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))
                 )}
               </View>
             )}
@@ -8495,383 +8447,383 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
                 {scheduleSubView === 'editor' && (
                   <View style={styles.interactiveEditorCard}>
-                  <View style={styles.interactiveHeaderRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.interactiveTitle}>✏️ Canlı Ders Programı Düzenleyici</Text>
-                      <Text style={styles.interactiveSub}>
-                        Hatalı saatlere dokunarak anında ders atayın, öğretmeni değiştirin veya boşaltın.
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={styles.editorClearScopeBtn}
-                      onPress={() => {
-                        if (scheduleEditorMode === 'class') {
-                          handleClearCurrentClassSchedule();
-                        } else {
-                          handleClearCurrentTeacherSchedule();
-                        }
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="trash-outline" size={13} color="#DC2626" />
-                      <Text style={styles.editorClearScopeBtnText}>
-                        {scheduleEditorMode === 'class' ? 'Bu Şubeyi Boşalt' : 'Bu Öğretmeni Boşalt'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Mod Seçici (Şube vs Öğretmen) */}
-                  <View style={styles.editorModeSegment}>
-                    <TouchableOpacity
-                      style={[styles.editorModeBtn, scheduleEditorMode === 'class' && styles.editorModeBtnActive]}
-                      onPress={() => setScheduleEditorMode('class')}
-                    >
-                      <Ionicons name="school" size={14} color={scheduleEditorMode === 'class' ? '#4F46E5' : '#64748B'} />
-                      <Text style={[styles.editorModeBtnText, scheduleEditorMode === 'class' && styles.editorModeBtnTextActive]}>
-                        🏫 Şube Programı
-                      </Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.editorModeBtn, scheduleEditorMode === 'teacher' && styles.editorModeBtnActive]}
-                      onPress={() => setScheduleEditorMode('teacher')}
-                    >
-                      <Ionicons name="person" size={14} color={scheduleEditorMode === 'teacher' ? '#4F46E5' : '#64748B'} />
-                      <Text style={[styles.editorModeBtnText, scheduleEditorMode === 'teacher' && styles.editorModeBtnTextActive]}>
-                        👨‍🏫 Öğretmen Programı
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  {/* Şube veya Öğretmen Seçici Çipler */}
-                  {scheduleEditorMode === 'class' ? (
-                    <View style={{ marginBottom: 12 }}>
-                      <Text style={styles.editorSelectorLabel}>Düzenlenecek Şubeyi Seçin:</Text>
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.editorChipsScroll}>
-                        {classes.map((cls) => {
-                          const clsName = `${cls.grade}-${cls.section}`;
-                          const isSel = (selectedClassForEditor || (classes[0] ? `${classes[0].grade}-${classes[0].section}` : '')) === clsName;
-                          return (
-                            <TouchableOpacity
-                              key={cls.id}
-                              style={[styles.editorChip, isSel && styles.editorChipActive]}
-                              onPress={() => setSelectedClassForEditor(clsName)}
-                            >
-                              <Text style={[styles.editorChipText, isSel && styles.editorChipTextActive]}>
-                                {clsName}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </ScrollView>
-                    </View>
-                  ) : (
-                    <View style={styles.editorTeacherListBoxWrap}>
-                      {/* Üst Başlık & Aktif Öğretmen Özeti */}
-                      <View style={styles.editorTeacherHeaderRow}>
-                        <View style={{ flex: 1, minWidth: 200 }}>
-                          <Text style={styles.editorSelectorLabel}>Düzenlenecek Öğretmen (Listbox):</Text>
-                          {currentActiveTeacher && (
-                            <View style={styles.editorActiveTeacherBanner}>
-                              <View style={styles.editorActiveTeacherAvatar}>
-                                <Ionicons name="person" size={16} color="#4F46E5" />
-                              </View>
-                              <View style={{ flex: 1 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                                  <Text style={styles.editorActiveTeacherName}>
-                                    {currentActiveTeacher.fullName}
-                                  </Text>
-                                  {currentActiveTeacher.branch && (
-                                    <View style={styles.editorTeacherBranchBadge}>
-                                      <Text style={styles.editorTeacherBranchBadgeText}>
-                                        {currentActiveTeacher.branch}
-                                      </Text>
-                                    </View>
-                                  )}
-                                </View>
-                                <Text style={styles.editorActiveTeacherMeta}>
-                                  Haftalık Ders Yükü: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{getTeacherTotalHours(currentActiveTeacher.fullName)} Saat</Text>
-                                </Text>
-                              </View>
-                            </View>
-                          )}
-                        </View>
-
-                        {/* Hızlı Önceki / Sonraki Butonları */}
-                        <View style={styles.editorTeacherNavButtons}>
-                          <TouchableOpacity
-                            style={styles.editorTeacherNavBtn}
-                            onPress={handleSelectPrevTeacher}
-                            accessibilityLabel="Önceki Öğretmen"
-                          >
-                            <Ionicons name="chevron-back" size={16} color="#4F46E5" />
-                            <Text style={styles.editorTeacherNavBtnText}>Önceki</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={styles.editorTeacherNavBtn}
-                            onPress={handleSelectNextTeacher}
-                            accessibilityLabel="Sonraki Öğretmen"
-                          >
-                            <Text style={styles.editorTeacherNavBtnText}>Sonraki</Text>
-                            <Ionicons name="chevron-forward" size={16} color="#4F46E5" />
-                          </TouchableOpacity>
-                        </View>
+                    <View style={styles.interactiveHeaderRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.interactiveTitle}>✏️ Canlı Ders Programı Düzenleyici</Text>
+                        <Text style={styles.interactiveSub}>
+                          Hatalı saatlere dokunarak anında ders atayın, öğretmeni değiştirin veya boşaltın.
+                        </Text>
                       </View>
+                      <TouchableOpacity
+                        style={styles.editorClearScopeBtn}
+                        onPress={() => {
+                          if (scheduleEditorMode === 'class') {
+                            handleClearCurrentClassSchedule();
+                          } else {
+                            handleClearCurrentTeacherSchedule();
+                          }
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="trash-outline" size={13} color="#DC2626" />
+                        <Text style={styles.editorClearScopeBtnText}>
+                          {scheduleEditorMode === 'class' ? 'Bu Şubeyi Boşalt' : 'Bu Öğretmeni Boşalt'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
 
-                      {/* Arama ve Dikey Listbox */}
-                      <View style={styles.editorListBoxContainer}>
-                        {/* Arama Çubuğu */}
-                        <View style={styles.editorListBoxSearchRow}>
-                          <Ionicons name="search" size={16} color="#64748B" style={{ marginLeft: 8 }} />
-                          <TextInput
-                            style={styles.editorListBoxSearchInput}
-                            placeholder="Öğretmen veya branş ara... (örn: Matematik, Ayşe)"
-                            placeholderTextColor="#94A3B8"
-                            value={teacherListBoxSearch}
-                            onChangeText={setTeacherListBoxSearch}
-                          />
-                          {teacherListBoxSearch.length > 0 && (
+                    {/* Mod Seçici (Şube vs Öğretmen) */}
+                    <View style={styles.editorModeSegment}>
+                      <TouchableOpacity
+                        style={[styles.editorModeBtn, scheduleEditorMode === 'class' && styles.editorModeBtnActive]}
+                        onPress={() => setScheduleEditorMode('class')}
+                      >
+                        <Ionicons name="school" size={14} color={scheduleEditorMode === 'class' ? '#4F46E5' : '#64748B'} />
+                        <Text style={[styles.editorModeBtnText, scheduleEditorMode === 'class' && styles.editorModeBtnTextActive]}>
+                          🏫 Şube Programı
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.editorModeBtn, scheduleEditorMode === 'teacher' && styles.editorModeBtnActive]}
+                        onPress={() => setScheduleEditorMode('teacher')}
+                      >
+                        <Ionicons name="person" size={14} color={scheduleEditorMode === 'teacher' ? '#4F46E5' : '#64748B'} />
+                        <Text style={[styles.editorModeBtnText, scheduleEditorMode === 'teacher' && styles.editorModeBtnTextActive]}>
+                          👨‍🏫 Öğretmen Programı
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Şube veya Öğretmen Seçici Çipler */}
+                    {scheduleEditorMode === 'class' ? (
+                      <View style={{ marginBottom: 12 }}>
+                        <Text style={styles.editorSelectorLabel}>Düzenlenecek Şubeyi Seçin:</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.editorChipsScroll}>
+                          {classes.map((cls) => {
+                            const clsName = `${cls.grade}-${cls.section}`;
+                            const isSel = (selectedClassForEditor || (classes[0] ? `${classes[0].grade}-${classes[0].section}` : '')) === clsName;
+                            return (
+                              <TouchableOpacity
+                                key={cls.id}
+                                style={[styles.editorChip, isSel && styles.editorChipActive]}
+                                onPress={() => setSelectedClassForEditor(clsName)}
+                              >
+                                <Text style={[styles.editorChipText, isSel && styles.editorChipTextActive]}>
+                                  {clsName}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    ) : (
+                      <View style={styles.editorTeacherListBoxWrap}>
+                        {/* Üst Başlık & Aktif Öğretmen Özeti */}
+                        <View style={styles.editorTeacherHeaderRow}>
+                          <View style={{ flex: 1, minWidth: 200 }}>
+                            <Text style={styles.editorSelectorLabel}>Düzenlenecek Öğretmen (Listbox):</Text>
+                            {currentActiveTeacher && (
+                              <View style={styles.editorActiveTeacherBanner}>
+                                <View style={styles.editorActiveTeacherAvatar}>
+                                  <Ionicons name="person" size={16} color="#4F46E5" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                    <Text style={styles.editorActiveTeacherName}>
+                                      {currentActiveTeacher.fullName}
+                                    </Text>
+                                    {currentActiveTeacher.branch && (
+                                      <View style={styles.editorTeacherBranchBadge}>
+                                        <Text style={styles.editorTeacherBranchBadgeText}>
+                                          {currentActiveTeacher.branch}
+                                        </Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                  <Text style={styles.editorActiveTeacherMeta}>
+                                    Haftalık Ders Yükü: <Text style={{ fontWeight: '700', color: '#1E293B' }}>{getTeacherTotalHours(currentActiveTeacher.fullName)} Saat</Text>
+                                  </Text>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+
+                          {/* Hızlı Önceki / Sonraki Butonları */}
+                          <View style={styles.editorTeacherNavButtons}>
                             <TouchableOpacity
-                              onPress={() => setTeacherListBoxSearch('')}
-                              style={{ padding: 6, marginRight: 4 }}
+                              style={styles.editorTeacherNavBtn}
+                              onPress={handleSelectPrevTeacher}
+                              accessibilityLabel="Önceki Öğretmen"
                             >
-                              <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                              <Ionicons name="chevron-back" size={16} color="#4F46E5" />
+                              <Text style={styles.editorTeacherNavBtnText}>Önceki</Text>
                             </TouchableOpacity>
-                          )}
-                          <View style={styles.editorListBoxCountBadge}>
-                            <Text style={styles.editorListBoxCountBadgeText}>
-                              {filteredTeachersForListBox.length} / {teachers.length}
-                            </Text>
+
+                            <TouchableOpacity
+                              style={styles.editorTeacherNavBtn}
+                              onPress={handleSelectNextTeacher}
+                              accessibilityLabel="Sonraki Öğretmen"
+                            >
+                              <Text style={styles.editorTeacherNavBtnText}>Sonraki</Text>
+                              <Ionicons name="chevron-forward" size={16} color="#4F46E5" />
+                            </TouchableOpacity>
                           </View>
                         </View>
 
-                        {/* Dikey Kaydırılabilir Öğretmen Listbox */}
-                        <ScrollView
-                          nestedScrollEnabled={true}
-                          style={styles.editorListBoxScrollView}
-                          contentContainerStyle={styles.editorListBoxScrollContent}
-                          showsVerticalScrollIndicator={true}
-                        >
-                          {filteredTeachersForListBox.length === 0 ? (
-                            <View style={styles.editorListBoxEmptyWrap}>
-                              <Ionicons name="search-outline" size={24} color="#94A3B8" />
-                              <Text style={styles.editorListBoxEmptyText}>
-                                "{teacherListBoxSearch}" aramasına uygun öğretmen bulunamadı.
+                        {/* Arama ve Dikey Listbox */}
+                        <View style={styles.editorListBoxContainer}>
+                          {/* Arama Çubuğu */}
+                          <View style={styles.editorListBoxSearchRow}>
+                            <Ionicons name="search" size={16} color="#64748B" style={{ marginLeft: 8 }} />
+                            <TextInput
+                              style={styles.editorListBoxSearchInput}
+                              placeholder="Öğretmen veya branş ara... (örn: Matematik, Ayşe)"
+                              placeholderTextColor="#94A3B8"
+                              value={teacherListBoxSearch}
+                              onChangeText={setTeacherListBoxSearch}
+                            />
+                            {teacherListBoxSearch.length > 0 && (
+                              <TouchableOpacity
+                                onPress={() => setTeacherListBoxSearch('')}
+                                style={{ padding: 6, marginRight: 4 }}
+                              >
+                                <Ionicons name="close-circle" size={16} color="#94A3B8" />
+                              </TouchableOpacity>
+                            )}
+                            <View style={styles.editorListBoxCountBadge}>
+                              <Text style={styles.editorListBoxCountBadgeText}>
+                                {filteredTeachersForListBox.length} / {teachers.length}
                               </Text>
                             </View>
-                          ) : (
-                            filteredTeachersForListBox.map((tch: any, idx: number) => {
-                              const isSel = (currentActiveTeacher?.fullName || '') === tch.fullName;
-                              const tchHours = getTeacherTotalHours(tch.fullName);
+                          </View>
 
-                              return (
-                                <TouchableOpacity
-                                  key={tch.id || tch.fullName || idx}
-                                  style={[
-                                    styles.editorListBoxItem,
-                                    isSel && styles.editorListBoxItemActive,
-                                  ]}
-                                  onPress={() => setSelectedTeacherForEditor(tch.fullName)}
-                                  activeOpacity={0.7}
-                                >
-                                  {/* Sol: İkon & İsim */}
-                                  <View style={styles.editorListBoxItemLeft}>
-                                    <View
-                                      style={[
-                                        styles.editorListBoxItemIcon,
-                                        isSel && styles.editorListBoxItemIconActive,
-                                      ]}
-                                    >
-                                      <Ionicons
-                                        name="person"
-                                        size={13}
-                                        color={isSel ? '#FFFFFF' : '#64748B'}
-                                      />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                      <Text
+                          {/* Dikey Kaydırılabilir Öğretmen Listbox */}
+                          <ScrollView
+                            nestedScrollEnabled={true}
+                            style={styles.editorListBoxScrollView}
+                            contentContainerStyle={styles.editorListBoxScrollContent}
+                            showsVerticalScrollIndicator={true}
+                          >
+                            {filteredTeachersForListBox.length === 0 ? (
+                              <View style={styles.editorListBoxEmptyWrap}>
+                                <Ionicons name="search-outline" size={24} color="#94A3B8" />
+                                <Text style={styles.editorListBoxEmptyText}>
+                                  "{teacherListBoxSearch}" aramasına uygun öğretmen bulunamadı.
+                                </Text>
+                              </View>
+                            ) : (
+                              filteredTeachersForListBox.map((tch: any, idx: number) => {
+                                const isSel = (currentActiveTeacher?.fullName || '') === tch.fullName;
+                                const tchHours = getTeacherTotalHours(tch.fullName);
+
+                                return (
+                                  <TouchableOpacity
+                                    key={tch.id || tch.fullName || idx}
+                                    style={[
+                                      styles.editorListBoxItem,
+                                      isSel && styles.editorListBoxItemActive,
+                                    ]}
+                                    onPress={() => setSelectedTeacherForEditor(tch.fullName)}
+                                    activeOpacity={0.7}
+                                  >
+                                    {/* Sol: İkon & İsim */}
+                                    <View style={styles.editorListBoxItemLeft}>
+                                      <View
                                         style={[
-                                          styles.editorListBoxItemName,
-                                          isSel && styles.editorListBoxItemNameActive,
+                                          styles.editorListBoxItemIcon,
+                                          isSel && styles.editorListBoxItemIconActive,
                                         ]}
-                                        numberOfLines={1}
                                       >
-                                        {tch.fullName}
-                                      </Text>
-                                      {tch.branch && (
+                                        <Ionicons
+                                          name="person"
+                                          size={13}
+                                          color={isSel ? '#FFFFFF' : '#64748B'}
+                                        />
+                                      </View>
+                                      <View style={{ flex: 1 }}>
                                         <Text
                                           style={[
-                                            styles.editorListBoxItemBranch,
-                                            isSel && styles.editorListBoxItemBranchActive,
+                                            styles.editorListBoxItemName,
+                                            isSel && styles.editorListBoxItemNameActive,
                                           ]}
                                           numberOfLines={1}
                                         >
-                                          {tch.branch}
+                                          {tch.fullName}
                                         </Text>
-                                      )}
+                                        {tch.branch && (
+                                          <Text
+                                            style={[
+                                              styles.editorListBoxItemBranch,
+                                              isSel && styles.editorListBoxItemBranchActive,
+                                            ]}
+                                            numberOfLines={1}
+                                          >
+                                            {tch.branch}
+                                          </Text>
+                                        )}
+                                      </View>
                                     </View>
-                                  </View>
 
-                                  {/* Sağ: Ders Saati & Seçim Durumu */}
-                                  <View style={styles.editorListBoxItemRight}>
-                                    <View
-                                      style={[
-                                        styles.editorListBoxHourBadge,
-                                        isSel && styles.editorListBoxHourBadgeActive,
-                                      ]}
-                                    >
-                                      <Text
+                                    {/* Sağ: Ders Saati & Seçim Durumu */}
+                                    <View style={styles.editorListBoxItemRight}>
+                                      <View
                                         style={[
-                                          styles.editorListBoxHourBadgeText,
-                                          isSel && styles.editorListBoxHourBadgeTextActive,
+                                          styles.editorListBoxHourBadge,
+                                          isSel && styles.editorListBoxHourBadgeActive,
                                         ]}
                                       >
-                                        {tchHours}s
-                                      </Text>
+                                        <Text
+                                          style={[
+                                            styles.editorListBoxHourBadgeText,
+                                            isSel && styles.editorListBoxHourBadgeTextActive,
+                                          ]}
+                                        >
+                                          {tchHours}s
+                                        </Text>
+                                      </View>
+                                      <Ionicons
+                                        name={isSel ? 'radio-button-on' : 'radio-button-off'}
+                                        size={18}
+                                        color={isSel ? '#4F46E5' : '#CBD5E1'}
+                                      />
                                     </View>
-                                    <Ionicons
-                                      name={isSel ? 'radio-button-on' : 'radio-button-off'}
-                                      size={18}
-                                      color={isSel ? '#4F46E5' : '#CBD5E1'}
-                                    />
-                                  </View>
-                                </TouchableOpacity>
-                              );
-                            })
-                          )}
-                        </ScrollView>
+                                  </TouchableOpacity>
+                                );
+                              })
+                            )}
+                          </ScrollView>
+                        </View>
                       </View>
-                    </View>
-                  )}
+                    )}
 
-                  {/* 5 Günlük Haftalık Çizelge Matrisi */}
-                  <View style={styles.timetableWrap}>
-                    {['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'].map((dayName, dIdx) => {
-                      const dayNumber = dIdx + 1;
-                      const activeClass = selectedClassForEditor || (classes[0] ? `${classes[0].grade}-${classes[0].section}` : '9-A');
-                      const activeTeacher = selectedTeacherForEditor || (teachers[0] ? teachers[0].fullName : '');
+                    {/* 5 Günlük Haftalık Çizelge Matrisi */}
+                    <View style={styles.timetableWrap}>
+                      {['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma'].map((dayName, dIdx) => {
+                        const dayNumber = dIdx + 1;
+                        const activeClass = selectedClassForEditor || (classes[0] ? `${classes[0].grade}-${classes[0].section}` : '9-A');
+                        const activeTeacher = selectedTeacherForEditor || (teachers[0] ? teachers[0].fullName : '');
 
-                      return (
-                        <View key={dayName} style={styles.timetableDayBox}>
-                          <View style={styles.timetableDayHeader}>
-                            <Text style={styles.timetableDayTitle}>{dayName}</Text>
-                          </View>
+                        return (
+                          <View key={dayName} style={styles.timetableDayBox}>
+                            <View style={styles.timetableDayHeader}>
+                              <Text style={styles.timetableDayTitle}>{dayName}</Text>
+                            </View>
 
-                          <View style={styles.timetableHoursGrid}>
-                            {Array.from({ length: scheduleDailyHours }, (_, hIdx) => {
-                              const lessonHour = hIdx + 1;
+                            <View style={styles.timetableHoursGrid}>
+                              {Array.from({ length: scheduleDailyHours }, (_, hIdx) => {
+                                const lessonHour = hIdx + 1;
 
-                              // İlgili hücreyi allSchoolSchedules içinden bul
-                              let matchedItems: any[] = [];
-                              if (scheduleEditorMode === 'class') {
-                                const [g, sec] = activeClass.split('-');
-                                matchedItems = allSchoolSchedules.filter(
-                                  (s) =>
-                                    String(s.grade) === String(g) &&
-                                    (s.section || '').trim().toUpperCase() === (sec || '').trim().toUpperCase() &&
-                                    s.dayOfWeek === dayNumber &&
-                                    s.lessonHour === lessonHour
-                                );
-                              } else {
-                                matchedItems = allSchoolSchedules.filter(
-                                  (s) =>
-                                    normalizeTeacherMatch(s.teacherName, activeTeacher) &&
-                                    s.dayOfWeek === dayNumber &&
-                                    s.lessonHour === lessonHour
-                                );
-                              }
+                                // İlgili hücreyi allSchoolSchedules içinden bul
+                                let matchedItems: any[] = [];
+                                if (scheduleEditorMode === 'class') {
+                                  const [g, sec] = activeClass.split('-');
+                                  matchedItems = allSchoolSchedules.filter(
+                                    (s) =>
+                                      String(s.grade) === String(g) &&
+                                      (s.section || '').trim().toUpperCase() === (sec || '').trim().toUpperCase() &&
+                                      s.dayOfWeek === dayNumber &&
+                                      s.lessonHour === lessonHour
+                                  );
+                                } else {
+                                  matchedItems = allSchoolSchedules.filter(
+                                    (s) =>
+                                      normalizeTeacherMatch(s.teacherName, activeTeacher) &&
+                                      s.dayOfWeek === dayNumber &&
+                                      s.lessonHour === lessonHour
+                                  );
+                                }
 
-                              const matchedItem = matchedItems[0] || null;
-                              const hasConflict = matchedItems.length > 1;
-                              const isFilled = !!matchedItem && !!matchedItem.lessonName;
+                                const matchedItem = matchedItems[0] || null;
+                                const hasConflict = matchedItems.length > 1;
+                                const isFilled = !!matchedItem && !!matchedItem.lessonName;
 
-                              return (
-                                <TouchableOpacity
-                                  key={lessonHour}
-                                  style={[
-                                    styles.slotCell,
-                                    isFilled ? styles.slotCellFilled : styles.slotCellEmpty,
-                                    hasConflict && { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: '#FEF2F2' },
-                                  ]}
-                                  onPress={() => {
-                                    if (scheduleEditorMode === 'class') {
-                                      const [g, sec] = activeClass.split('-');
-                                      handleOpenSlotModal({
-                                        dayOfWeek: dayNumber,
-                                        lessonHour,
-                                        grade: g,
-                                        section: sec,
-                                        existingItem: matchedItem,
-                                        conflictingItems: matchedItems,
-                                      });
-                                    } else {
-                                      handleOpenSlotModal({
-                                        dayOfWeek: dayNumber,
-                                        lessonHour,
-                                        teacherName: activeTeacher,
-                                        existingItem: matchedItem,
-                                        conflictingItems: matchedItems,
-                                      });
-                                    }
-                                  }}
-                                  activeOpacity={0.8}
-                                >
-                                  <View style={styles.slotCellTop}>
-                                    <View style={[styles.slotHourBadge, isFilled && styles.slotHourBadgeFilled, hasConflict && { backgroundColor: '#FEE2E2' }]}>
-                                      <Text style={[styles.slotHourText, isFilled && styles.slotHourTextFilled, hasConflict && { color: '#DC2626' }]}>
-                                        {lessonHour}. Ders
-                                      </Text>
+                                return (
+                                  <TouchableOpacity
+                                    key={lessonHour}
+                                    style={[
+                                      styles.slotCell,
+                                      isFilled ? styles.slotCellFilled : styles.slotCellEmpty,
+                                      hasConflict && { borderColor: '#EF4444', borderWidth: 1.5, backgroundColor: '#FEF2F2' },
+                                    ]}
+                                    onPress={() => {
+                                      if (scheduleEditorMode === 'class') {
+                                        const [g, sec] = activeClass.split('-');
+                                        handleOpenSlotModal({
+                                          dayOfWeek: dayNumber,
+                                          lessonHour,
+                                          grade: g,
+                                          section: sec,
+                                          existingItem: matchedItem,
+                                          conflictingItems: matchedItems,
+                                        });
+                                      } else {
+                                        handleOpenSlotModal({
+                                          dayOfWeek: dayNumber,
+                                          lessonHour,
+                                          teacherName: activeTeacher,
+                                          existingItem: matchedItem,
+                                          conflictingItems: matchedItems,
+                                        });
+                                      }
+                                    }}
+                                    activeOpacity={0.8}
+                                  >
+                                    <View style={styles.slotCellTop}>
+                                      <View style={[styles.slotHourBadge, isFilled && styles.slotHourBadgeFilled, hasConflict && { backgroundColor: '#FEE2E2' }]}>
+                                        <Text style={[styles.slotHourText, isFilled && styles.slotHourTextFilled, hasConflict && { color: '#DC2626' }]}>
+                                          {lessonHour}. Ders
+                                        </Text>
+                                      </View>
+                                      {hasConflict ? (
+                                        <View style={{ backgroundColor: '#EF4444', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4 }}>
+                                          <Text style={{ fontSize: 9, fontWeight: '800', color: '#fff' }}>⚠️ Çakışma</Text>
+                                        </View>
+                                      ) : (
+                                        <Ionicons
+                                          name={isFilled ? 'pencil' : 'add-circle-outline'}
+                                          size={12}
+                                          color={isFilled ? '#4F46E5' : '#94A3B8'}
+                                        />
+                                      )}
                                     </View>
-                                    {hasConflict ? (
-                                      <View style={{ backgroundColor: '#EF4444', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 4 }}>
-                                        <Text style={{ fontSize: 9, fontWeight: '800', color: '#fff' }}>⚠️ Çakışma</Text>
+
+                                    {isFilled ? (
+                                      <View style={styles.slotContentBox}>
+                                        <Text style={[styles.slotLessonTitle, hasConflict && { color: '#B91C1C' }]} numberOfLines={1}>
+                                          {matchedItem.lessonName}{matchedItem.lessonCode ? ` (${matchedItem.lessonCode})` : ''}
+                                        </Text>
+                                        <Text style={styles.slotSubDetail} numberOfLines={1}>
+                                          {scheduleEditorMode === 'class'
+                                            ? (matchedItem.teacherName || 'Öğretmen Atanmadı')
+                                            : `${matchedItem.grade}-${matchedItem.section}`}
+                                        </Text>
+                                        {hasConflict && (
+                                          <Text style={{ fontSize: 9, color: '#DC2626', fontWeight: '700', marginTop: 1 }} numberOfLines={1}>
+                                            +{matchedItems.length - 1} çakışan ders!
+                                          </Text>
+                                        )}
+                                        {!!matchedItem.classroom && !hasConflict && (
+                                          <Text style={styles.slotRoomText} numberOfLines={1}>
+                                            📍 {matchedItem.classroom}
+                                          </Text>
+                                        )}
                                       </View>
                                     ) : (
-                                      <Ionicons
-                                        name={isFilled ? 'pencil' : 'add-circle-outline'}
-                                        size={12}
-                                        color={isFilled ? '#4F46E5' : '#94A3B8'}
-                                      />
+                                      <View style={styles.slotEmptyBox}>
+                                        <Text style={styles.slotEmptyText}>+ Ders Ata</Text>
+                                      </View>
                                     )}
-                                  </View>
-
-                                  {isFilled ? (
-                                    <View style={styles.slotContentBox}>
-                                      <Text style={[styles.slotLessonTitle, hasConflict && { color: '#B91C1C' }]} numberOfLines={1}>
-                                        {matchedItem.lessonName}{matchedItem.lessonCode ? ` (${matchedItem.lessonCode})` : ''}
-                                      </Text>
-                                      <Text style={styles.slotSubDetail} numberOfLines={1}>
-                                        {scheduleEditorMode === 'class'
-                                          ? (matchedItem.teacherName || 'Öğretmen Atanmadı')
-                                          : `${matchedItem.grade}-${matchedItem.section}`}
-                                      </Text>
-                                      {hasConflict && (
-                                        <Text style={{ fontSize: 9, color: '#DC2626', fontWeight: '700', marginTop: 1 }} numberOfLines={1}>
-                                          +{matchedItems.length - 1} çakışan ders!
-                                        </Text>
-                                      )}
-                                      {!!matchedItem.classroom && !hasConflict && (
-                                        <Text style={styles.slotRoomText} numberOfLines={1}>
-                                          📍 {matchedItem.classroom}
-                                        </Text>
-                                      )}
-                                    </View>
-                                  ) : (
-                                    <View style={styles.slotEmptyBox}>
-                                      <Text style={styles.slotEmptyText}>+ Ders Ata</Text>
-                                    </View>
-                                  )}
-                                </TouchableOpacity>
-                              );
-                            })}
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
                           </View>
-                        </View>
-                      );
-                    })}
+                        );
+                      })}
+                    </View>
                   </View>
-                </View>
-              )}
+                )}
 
                 {/* 4. DETAYLI DERS & ÖĞRETMEN DAĞILIMI VE İSTATİSTİK ANALİZ GÖRÜNÜMÜ */}
                 {scheduleSubView === 'analytics' && (
@@ -9200,6 +9152,13 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       <Text style={styles.logReportExportExcelBtnText}>Excel / CSV</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
+                      style={[styles.logReportExportBtn, { backgroundColor: '#FEE2E2', borderColor: '#FECACA' }]}
+                      onPress={() => setLogPurgeModalVisible(true)}
+                    >
+                      <Ionicons name="trash-outline" size={13} color="#DC2626" />
+                      <Text style={[styles.logReportExportBtnText, { color: '#DC2626' }]}>Logları Temizle</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
                       style={styles.logRefreshBtn}
                       onPress={() => loadAuditLogs()}
                       disabled={loadingLogs}
@@ -9409,7 +9368,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                         if (item.detailsJson.trim().startsWith('{')) {
                           parsedDetailsObj = JSON.parse(item.detailsJson);
                         }
-                      } catch {}
+                      } catch { }
                     }
 
                     return (
@@ -9535,8 +9494,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       {adminMessageScope === 'personal'
                         ? 'Doğrudan şahsınıza ve idareye gelen mesajları görüp hemen yanıtlayabilirsiniz.'
                         : adminMessageScope === 'sent'
-                        ? 'İdare olarak öğretmen, öğrenci ve velilere ilettiğiniz mesajlar.'
-                        : 'Okul genelindeki tüm öğretmen, öğrenci ve veli mesaj trafiği (denetim amaçlı).'}
+                          ? 'İdare olarak öğretmen, öğrenci ve velilere ilettiğiniz mesajlar.'
+                          : 'Okul genelindeki tüm öğretmen, öğrenci ve veli mesaj trafiği (denetim amaçlı).'}
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -9701,8 +9660,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       {adminMessageScope === 'personal'
                         ? 'Şahsınıza veya idareye gelen bir mesaj bulunmuyor.'
                         : adminMessageScope === 'sent'
-                        ? 'Henüz gönderdiğiniz bir mesaj bulunmuyor.'
-                        : 'Henüz kayıtlı bir okul mesajı bulunamadı.'}
+                          ? 'Henüz gönderdiğiniz bir mesaj bulunmuyor.'
+                          : 'Henüz kayıtlı bir okul mesajı bulunamadı.'}
                     </Text>
                   </View>
                 ) : (
@@ -11098,8 +11057,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                   <View key={h} style={[styles.radarTableHeadCell, { width: 90 }]}>
                                     <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>{h}. Ders</Text>
                                   </View>
-                                  ))}
-                                </View>
+                                ))}
+                              </View>
 
                               {/* Rows: Pazartesi -> Cuma */}
                               {[1, 2, 3, 4, 5].map(day => {
@@ -11333,24 +11292,24 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                         const slot = classScheduleMap.get(`${day}_${hour}`);
                                         return (
                                           <View key={hour} style={[styles.radarTableCell, { width: 105 }]}>
-                                          {slot ? (
-                                            <View style={[styles.radarCellOccupied, { backgroundColor: '#F0FDF4' }]}>
-                                              <Text style={[styles.radarCellOccupiedText, { color: '#166534' }]} numberOfLines={1}>
-                                                {slot.teacherName || 'Öğretmen'}
-                                              </Text>
-                                              <Text style={[styles.radarCellSubText, { color: '#15803D' }]} numberOfLines={1}>
-                                                {slot.lessonName || '-'}
-                                              </Text>
-                                            </View>
-                                          ) : (
-                                            <View style={styles.radarCellEmpty}>
-                                              <Text style={styles.radarCellEmptyText}>— BOŞ —</Text>
-                                            </View>
-                                          )}
-                                        </View>
-                                      );
-                                    })}
-                                  </View>
+                                            {slot ? (
+                                              <View style={[styles.radarCellOccupied, { backgroundColor: '#F0FDF4' }]}>
+                                                <Text style={[styles.radarCellOccupiedText, { color: '#166534' }]} numberOfLines={1}>
+                                                  {slot.teacherName || 'Öğretmen'}
+                                                </Text>
+                                                <Text style={[styles.radarCellSubText, { color: '#15803D' }]} numberOfLines={1}>
+                                                  {slot.lessonName || '-'}
+                                                </Text>
+                                              </View>
+                                            ) : (
+                                              <View style={styles.radarCellEmpty}>
+                                                <Text style={styles.radarCellEmptyText}>— BOŞ —</Text>
+                                              </View>
+                                            )}
+                                          </View>
+                                        );
+                                      })}
+                                    </View>
                                   ));
                                 })()}
                               </View>
@@ -13274,8 +13233,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   const rawPhoto = selectedAdminStudent?.photoPath || selectedAdminStudent?.photo_uri;
                   const photoUri = rawPhoto
                     ? (rawPhoto.startsWith('http') || rawPhoto.startsWith('file://') || rawPhoto.startsWith('data:image')
-                        ? rawPhoto
-                        : `${serverBaseUrl}${rawPhoto.startsWith('/') ? '' : '/'}${rawPhoto}`)
+                      ? rawPhoto
+                      : `${serverBaseUrl}${rawPhoto.startsWith('/') ? '' : '/'}${rawPhoto}`)
                     : null;
 
                   return (
@@ -13301,7 +13260,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
                       <View style={{ alignItems: 'center', marginTop: 10 }}>
                         <Text style={styles.adminDetailNameText}>{selectedAdminStudent?.fullName}</Text>
-                        
+
                         <View style={styles.adminDetailBadgeRow}>
                           <View style={styles.adminDetailTag}>
                             <Ionicons name="id-card-outline" size={12} color="#4F46E5" />
@@ -13611,12 +13570,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           const scoreColor = isNaN(numScore)
                             ? '#64748B'
                             : numScore >= 85
-                            ? '#059669'
-                            : numScore >= 70
-                            ? '#2563EB'
-                            : numScore >= 50
-                            ? '#D97706'
-                            : '#DC2626';
+                              ? '#059669'
+                              : numScore >= 70
+                                ? '#2563EB'
+                                : numScore >= 50
+                                  ? '#D97706'
+                                  : '#DC2626';
 
                           return (
                             <View key={quiz.id} style={styles.adminQuizItem}>
@@ -15893,10 +15852,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           {expectedHours == null
                             ? `${currentHours} Saat Yerleşti`
                             : isMatched
-                            ? `✅ Tam Tutarlı (${currentHours}/${expectedHours} Saat)`
-                            : diff > 0
-                            ? `⚠️ ${diff} Saat Eksik (${currentHours}/${expectedHours} Saat)`
-                            : `⚠️ ${Math.abs(diff)} Saat Fazla (${currentHours}/${expectedHours} Saat)`}
+                              ? `✅ Tam Tutarlı (${currentHours}/${expectedHours} Saat)`
+                              : diff > 0
+                                ? `⚠️ ${diff} Saat Eksik (${currentHours}/${expectedHours} Saat)`
+                                : `⚠️ ${Math.abs(diff)} Saat Fazla (${currentHours}/${expectedHours} Saat)`}
                         </Text>
                       </View>
                     </View>
@@ -15967,8 +15926,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                             {reScanningTeacher
                               ? 'Öğretmen Belgeden Taranıyor...'
                               : teacherRescanHint.trim()
-                              ? '⚡ İpucuyla Belgeden Yeniden Oku'
-                              : '⚡ Bu Öğretmeni Belgeden Yeniden Oku'}
+                                ? '⚡ İpucuyla Belgeden Yeniden Oku'
+                                : '⚡ Bu Öğretmeni Belgeden Yeniden Oku'}
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -16020,8 +15979,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                       {diff > 0
                         ? '💡 Kağıttaki programa göre eksik kalan dersler var. Aşağıdan ilgili güne gidip boş saatlere ders ekleyebilirsiniz.'
                         : diff < 0
-                        ? '⚠️ Kağıttan fazla ders girilmiş görünüyor. Mükerrer dersleri çöp kutusu simgesine basarak silebilirsiniz.'
-                        : '🎉 Bu öğretmenin haftalık ders programı kağıttaki çizelgeyle tam olarak örtüşüyor.'}
+                          ? '⚠️ Kağıttan fazla ders girilmiş görünüyor. Mükerrer dersleri çöp kutusu simgesine basarak silebilirsiniz.'
+                          : '🎉 Bu öğretmenin haftalık ders programı kağıttaki çizelgeyle tam olarak örtüşüyor.'}
                     </Text>
                   </View>
                 );
@@ -16587,7 +16546,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                           <View style={{ gap: 5, marginBottom: 6 }}>
                             {teacherLessons.map((tl, lIdx) => {
                               const isSel = editingCellSlot.lessonName.toUpperCase() === tl.name.toUpperCase() ||
-                                            (tl.code && editingCellSlot.lessonName.toUpperCase() === tl.code.toUpperCase());
+                                (tl.code && editingCellSlot.lessonName.toUpperCase() === tl.code.toUpperCase());
 
                               return (
                                 <TouchableOpacity
@@ -19123,36 +19082,36 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               {/* Sayfa Filtresi ve Yeniden Tarama */}
               {reviewAvailablePages.length > 0 && (
                 <View style={{ marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>
-                    📄 Sayfa Seçimi:
-                  </Text>
-                  <TouchableOpacity
-                    disabled={rescanningPage}
-                    onPress={handleRescanCurrentPage}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4,
-                      backgroundColor: '#F0FDF4',
-                      paddingHorizontal: 8,
-                      paddingVertical: 3.5,
-                      borderRadius: 6,
-                      borderWidth: 1,
-                      borderColor: '#86EFAC',
-                    }}
-                  >
-                    {rescanningPage ? (
-                      <ActivityIndicator size="small" color="#16A34A" />
-                    ) : (
-                      <Ionicons name="reload" size={12} color="#16A34A" />
-                    )}
-                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#15803D' }}>
-                      {reviewPageFilter === 'all' ? 'Tüm Belgeyi Tekrar Tara' : `Sayfa ${reviewPageFilter}'i Tekrar Tara`}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B', textTransform: 'uppercase' }}>
+                      📄 Sayfa Seçimi:
                     </Text>
-                  </TouchableOpacity>
-                </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                    <TouchableOpacity
+                      disabled={rescanningPage}
+                      onPress={handleRescanCurrentPage}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        backgroundColor: '#F0FDF4',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3.5,
+                        borderRadius: 6,
+                        borderWidth: 1,
+                        borderColor: '#86EFAC',
+                      }}
+                    >
+                      {rescanningPage ? (
+                        <ActivityIndicator size="small" color="#16A34A" />
+                      ) : (
+                        <Ionicons name="reload" size={12} color="#16A34A" />
+                      )}
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#15803D' }}>
+                        {reviewPageFilter === 'all' ? 'Tüm Belgeyi Tekrar Tara' : `Sayfa ${reviewPageFilter}'i Tekrar Tara`}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                     <TouchableOpacity
                       onPress={() => setReviewPageFilter('all')}
                       style={{
@@ -19527,8 +19486,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                                 matchInfo.status === 'full'
                                   ? 'checkmark-circle'
                                   : matchInfo.status === 'number_only'
-                                  ? 'alert-circle'
-                                  : 'close-circle'
+                                    ? 'alert-circle'
+                                    : 'close-circle'
                               }
                               size={12}
                               color={matchInfo.badgeText}
@@ -20526,6 +20485,72 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
             </ScrollView>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* 🗑️ LOGLARI TARİH ARALIĞIYLA VERİTABANINDAN TEMİZLEME MODALI */}
+      <Modal visible={logPurgeModalVisible} animationType="fade" transparent onRequestClose={() => setLogPurgeModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { maxWidth: 460 }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="trash-bin" size={22} color="#DC2626" />
+                <Text style={[styles.modalTitle, { color: '#991B1B' }]}>Log Kayıtlarını Temizle</Text>
+              </View>
+              <TouchableOpacity onPress={() => setLogPurgeModalVisible(false)}>
+                <Ionicons name="close" size={22} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ marginVertical: 10 }}>
+              <View style={{ backgroundColor: '#FEF2F2', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#FECACA', marginBottom: 14 }}>
+                <Text style={{ fontSize: 12, color: '#991B1B', fontWeight: '700', lineHeight: 18 }}>
+                  ⚠️ Veritabanı şişmesini önlemek amacıyla seçilen tarih aralığındaki log kayıtları veritabanından silinir.
+                </Text>
+                <Text style={{ fontSize: 11, color: '#B91C1C', marginTop: 4, lineHeight: 16 }}>
+                  🛡️ Güvenlik ve denetim amacıyla tüm işlemlerin fiziksel .log metin dosyaları sunucu diskinde süresiz korunur.
+                </Text>
+              </View>
+
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6 }}>Başlangıç Tarihi (YYYY-AA-GG):</Text>
+              <TextInput
+                style={[styles.modalInput, { marginBottom: 12 }]}
+                value={purgeStartDate}
+                onChangeText={setPurgeStartDate}
+                placeholder="2026-01-01"
+              />
+
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#374151', marginBottom: 6 }}>Bitiş Tarihi (YYYY-AA-GG):</Text>
+              <TextInput
+                style={[styles.modalInput, { marginBottom: 16 }]}
+                value={purgeEndDate}
+                onChangeText={setPurgeEndDate}
+                placeholder={new Date().toISOString().split('T')[0]}
+              />
+
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity
+                  style={[styles.modalCancelBtn, { flex: 1 }]}
+                  onPress={() => setLogPurgeModalVisible(false)}
+                  disabled={isPurgingLogs}
+                >
+                  <Text style={styles.modalCancelBtnText}>Vazgeç</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.modalSaveBtn, { flex: 1.3, backgroundColor: '#DC2626' }]}
+                  onPress={handlePurgeLogs}
+                  disabled={isPurgingLogs}
+                >
+                  {isPurgingLogs ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Text style={styles.modalSaveBtnText}>Veritabanından Temizle</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       {/* 🛡️ MÜŞTERİ & LİSANS DETAYLARI MODALI (Derin Bilgiler) */}

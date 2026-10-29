@@ -2288,24 +2288,34 @@ namespace OgretmenAjanda.Api.Controllers
                 .ToList();
 
             // 5. İdare anonsları ve mesajlar (Veli ve Öğrenci için mesajlar ortak olmayacak şekilde ayrıştırılır)
+            // 5. İdare anonsları ve mesajlar (İdare ve öğretmenlerin dahili mesajları ASLA öğrenci/veliye görünmez)
             var announcementsQuery = _context.AppMessages
                 .Where(m => m.SchoolId == student.SchoolId &&
-                           (m.TargetRole == "ALL" ||
-                            (isParent 
-                                ? (m.TargetRole == "PARENT" || m.TargetRole == "PARENTS" || m.TargetAudience == "PARENT" || m.TargetAudience == "ALL" || string.IsNullOrEmpty(m.TargetAudience))
-                                : (m.TargetRole == "STUDENT" || m.TargetRole == "MY_STUDENTS" || m.TargetAudience == "STUDENT" || m.TargetAudience == "ALL" || string.IsNullOrEmpty(m.TargetAudience))) ||
-                            (m.TargetRole == "GRADE" && m.TargetGrade == student.Grade) ||
-                            (m.TargetRole == "SECTION" && m.TargetGrade == student.Grade && m.TargetSection == student.Section) ||
-                            m.ReceiverId == studentId));
+                           m.TargetRole != "STAFF" && m.TargetRole != "ADMIN" && m.TargetRole != "SCHOOL_ADMIN" &&
+                           m.TargetRole != "TEACHER" && m.TargetRole != "TEACHERS" && m.TargetRole != "SPECIFIC_TEACHER" &&
+                           m.TargetAudience != "STAFF" && m.TargetAudience != "ADMIN" && m.TargetAudience != "TEACHER");
 
-            // Öğrenciye özel mesaj veliye görünmesin, veliye özel mesaj öğrenciye görünmesin kuralı:
             if (isParent)
             {
-                announcementsQuery = announcementsQuery.Where(m => m.TargetAudience != "STUDENT" && m.TargetRole != "STUDENT");
+                announcementsQuery = announcementsQuery.Where(m =>
+                    (m.ReceiverId == studentId && m.TargetRole == "SPECIFIC_STUDENT") ||
+                    m.TargetRole == "PARENT" || m.TargetRole == "PARENTS" || m.TargetAudience == "PARENT" ||
+                    (m.TargetRole == "ALL" && m.TargetAudience != "STUDENT") ||
+                    (m.TargetRole == "GRADE" && m.TargetGrade == student.Grade && m.TargetAudience != "STUDENT") ||
+                    (m.TargetRole == "SECTION" && m.TargetGrade == student.Grade && m.TargetSection == student.Section && m.TargetAudience != "STUDENT") ||
+                    (m.TargetRole == "MY_STUDENTS" && (m.TargetGrade == null || m.TargetGrade == student.Grade) && (m.TargetSection == null || m.TargetSection == student.Section) && m.TargetAudience != "STUDENT")
+                );
             }
             else
             {
-                announcementsQuery = announcementsQuery.Where(m => m.TargetAudience != "PARENT" && m.TargetRole != "PARENT" && m.TargetRole != "PARENTS");
+                announcementsQuery = announcementsQuery.Where(m =>
+                    (m.ReceiverId == studentId) ||
+                    m.TargetRole == "STUDENT" || m.TargetRole == "STUDENTS" || m.TargetAudience == "STUDENT" ||
+                    (m.TargetRole == "ALL" && m.TargetAudience != "PARENT") ||
+                    (m.TargetRole == "GRADE" && m.TargetGrade == student.Grade && m.TargetAudience != "PARENT") ||
+                    (m.TargetRole == "SECTION" && m.TargetGrade == student.Grade && m.TargetSection == student.Section && m.TargetAudience != "PARENT") ||
+                    (m.TargetRole == "MY_STUDENTS" && (m.TargetGrade == null || m.TargetGrade == student.Grade) && (m.TargetSection == null || m.TargetSection == student.Section) && m.TargetAudience != "PARENT")
+                );
             }
 
             var announcements = await announcementsQuery

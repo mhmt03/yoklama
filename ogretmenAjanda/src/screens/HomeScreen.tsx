@@ -38,7 +38,11 @@ import {
 } from '../database/operations/scheduleOperations';
 import { getClasses } from '../database/operations/classOperations';
 import { getAssignments } from '../database/operations/assignmentOperations';
-import { checkTeacherExamAlert } from '../database/operations/examPlannerOperations';
+import {
+  checkTeacherExamAlert,
+  fetchTeacherProctorDuties,
+  TeacherProctorDutyItem,
+} from '../database/operations/examPlannerOperations';
 import {
   getCurrentTopicForClass,
   getSurroundingTopicsForLesson,
@@ -104,8 +108,9 @@ export const HomeScreen: React.FC = () => {
   const [editSchoolName, setEditSchoolName] = useState('');
   const [editSchoolColor, setEditSchoolColor] = useState(SCHOOL_COLORS[0].color);
 
-  // Yazılı Sınav Uyarısı State
+  // Yazılı Sınav Uyarısı & Gözetmenlik State
   const [currentExamAlert, setCurrentExamAlert] = useState<any | null>(null);
+  const [teacherProctorDuties, setTeacherProctorDuties] = useState<TeacherProctorDutyItem[]>([]);
 
   const todayIndex = getDayOfWeekIndex();
   const [selectedDay, setSelectedDay] = useState<number>(todayIndex);
@@ -462,6 +467,14 @@ export const HomeScreen: React.FC = () => {
 
         setAssignedLessonsList(lessons);
         setAssignedClassesList(classList);
+
+        // Öğretmen sınav gözetmenlik görevlerini sunucudan yükle
+        try {
+          const duties = await fetchTeacherProctorDuties(activeSchool?.code || undefined, tName || session?.fullName || undefined);
+          setTeacherProctorDuties(duties || []);
+        } catch (examErr) {
+          console.warn('Error fetching proctor duties in HomeScreen:', examErr);
+        }
       } catch (profErr) {
         console.warn('Error loading teacher profile/assignments in HomeScreen:', profErr);
       }
@@ -1319,6 +1332,75 @@ export const HomeScreen: React.FC = () => {
               <Ionicons name="chevron-forward" size={14} color="#4F46E5" />
             </View>
           </TouchableOpacity>
+        )}
+
+        {/* 🏛️ SINAV GÖZETMENLİK GÖREVLERİ KARTI */}
+        {teacherProctorDuties.length > 0 && (
+          <View style={styles.proctorDutyContainer}>
+            <View style={styles.proctorDutyHeaderRow}>
+              <View style={styles.proctorDutyBadge}>
+                <Ionicons name="shield-checkmark" size={15} color="#4338CA" />
+                <Text style={styles.proctorDutyBadgeText}>SINAV GÖZETMENLİK GÖREVLERİNİZ</Text>
+              </View>
+              <Text style={styles.proctorDutyCountText}>{teacherProctorDuties.length} Görev</Text>
+            </View>
+
+            {teacherProctorDuties.map((duty, idx) => (
+              <View
+                key={`${duty.examId}-${duty.roomName}-${idx}`}
+                style={[
+                  styles.proctorDutyCard,
+                  duty.isToday ? styles.proctorDutyCardToday : null,
+                ]}
+              >
+                <View style={styles.proctorDutyCardLeft}>
+                  <View style={[styles.proctorIconWrap, duty.isToday ? { backgroundColor: '#EDE9FE' } : null]}>
+                    <Ionicons name="document-text" size={20} color={duty.isToday ? '#7C3AED' : '#4F46E5'} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.proctorRowTop}>
+                      <Text style={styles.proctorExamTitle} numberOfLines={2}>
+                        {duty.examName}
+                      </Text>
+                      {duty.isToday ? (
+                        <View style={styles.proctorTodayBadge}>
+                          <Text style={styles.proctorTodayBadgeText}>BUGÜN</Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    <View style={styles.proctorMetaRow}>
+                      <View style={styles.proctorMetaChip}>
+                        <Ionicons name="calendar-outline" size={13} color="#4B5563" />
+                        <Text style={styles.proctorMetaChipText}>
+                          {duty.examDate} {duty.dayOfWeekStr ? `(${duty.dayOfWeekStr})` : ''}
+                        </Text>
+                      </View>
+                      <View style={styles.proctorMetaChip}>
+                        <Ionicons name="time-outline" size={13} color="#4B5563" />
+                        <Text style={styles.proctorMetaChipText}>
+                          {duty.lessonHour}. Ders ({duty.startTime})
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.proctorHallHighlight}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <Ionicons name="business" size={15} color="#065F46" />
+                        <Text style={styles.proctorHallText}>
+                          Gözetmenlik Salonu: <Text style={{ fontWeight: '800' }}>{duty.roomName}</Text>
+                        </Text>
+                      </View>
+                      <View style={styles.proctorStudentCountPill}>
+                        <Ionicons name="people" size={12} color="#047857" />
+                        <Text style={styles.proctorStudentCountText}>{duty.studentCount} Öğrenci</Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
         )}
 
         {/* 🚨 TÜM GÜN EKRANDA UYARI KARTI (Günün Kritik Ajanda / Hatırlatma Notları) */}
@@ -5061,5 +5143,140 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: Colors.textSecondary,
+  },
+  proctorDutyContainer: {
+    marginBottom: 12,
+    gap: 8,
+  },
+  proctorDutyHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    marginBottom: 2,
+  },
+  proctorDutyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+  },
+  proctorDutyBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4338CA',
+    letterSpacing: 0.5,
+  },
+  proctorDutyCountText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6366F1',
+  },
+  proctorDutyCard: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1.5,
+    borderColor: '#C7D2FE',
+    borderLeftWidth: 5,
+    borderLeftColor: '#6366F1',
+    borderRadius: 14,
+    padding: 12,
+    ...Shadows.small,
+  },
+  proctorDutyCardToday: {
+    backgroundColor: '#FDF4FF',
+    borderColor: '#E9D5FF',
+    borderLeftColor: '#9333EA',
+  },
+  proctorDutyCardLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  proctorIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  proctorRowTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 4,
+  },
+  proctorExamTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  proctorTodayBadge: {
+    backgroundColor: '#9333EA',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  proctorTodayBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  proctorMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  proctorMetaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  proctorMetaChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  proctorHallHighlight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  proctorHallText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#065F46',
+  },
+  proctorStudentCountPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  proctorStudentCountText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#047857',
   },
 });

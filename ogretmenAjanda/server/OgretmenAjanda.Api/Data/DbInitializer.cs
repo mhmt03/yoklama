@@ -50,6 +50,8 @@ namespace OgretmenAjanda.Api.Data
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"ReplyToContent\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"AppMessages\" ADD COLUMN \"Subject\" TEXT;"); } catch { }
             try { await context.Database.ExecuteSqlRawAsync("ALTER TABLE \"WrittenExams\" ADD COLUMN \"IsPublishedToStudents\" INTEGER NOT NULL DEFAULT 1;"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("UPDATE \"AppMessages\" SET \"TargetAudience\" = 'STAFF' WHERE \"TargetRole\" IN ('STAFF', 'ADMIN', 'SCHOOL_ADMIN') AND (\"TargetAudience\" = 'ALL' OR \"TargetAudience\" IS NULL);"); } catch { }
+            try { await context.Database.ExecuteSqlRawAsync("UPDATE \"AppMessages\" SET \"TargetAudience\" = 'TEACHER' WHERE \"TargetRole\" IN ('TEACHER', 'TEACHERS', 'SPECIFIC_TEACHER') AND (\"TargetAudience\" = 'ALL' OR \"TargetAudience\" IS NULL);"); } catch { }
 
             try
             {

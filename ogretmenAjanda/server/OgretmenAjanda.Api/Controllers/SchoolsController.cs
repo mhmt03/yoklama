@@ -1379,6 +1379,54 @@ namespace OgretmenAjanda.Api.Controllers
             return File(content, contentType, fileName);
         }
 
+        // 17. Belirli Tarih Aralığındaki Logları Veritabanından Temizle (Fiziksel log dosyaları diskte korunur)
+        [HttpDelete("{schoolId}/audit-logs")]
+        [HttpPost("{schoolId}/audit-logs/purge")]
+        public async Task<IActionResult> PurgeSchoolAuditLogs(
+            Guid schoolId,
+            [FromQuery] DateTime? startDate,
+            [FromQuery] DateTime? endDate
+        )
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (school.AdminUserId != CurrentUserId && CurrentUserRole != UserRoles.SuperAdmin && CurrentUserRole != UserRoles.SchoolAdmin)
+                return Forbid();
+
+            var query = _context.AuditLogs.Where(l => l.SchoolId == schoolId);
+
+            if (startDate.HasValue)
+            {
+                query = query.Where(l => l.Timestamp >= startDate.Value.ToUniversalTime());
+            }
+
+            if (endDate.HasValue)
+            {
+                var end = endDate.Value.Date.AddDays(1).AddTicks(-1).ToUniversalTime();
+                query = query.Where(l => l.Timestamp <= end);
+            }
+
+            var logsToDelete = await query.ToListAsync();
+            var count = logsToDelete.Count;
+
+            _context.AuditLogs.RemoveRange(logsToDelete);
+            await _context.SaveChangesAsync();
+
+            // Silme işlemini de log dosyasına yaz (disk dosyası asla silinmez, audit trail korunur)
+            var trTime = DateTime.UtcNow.AddHours(3);
+            var purgeNote = $"[{trTime:yyyy-MM-dd HH:mm:ss}] [PURGE] {count} adet geçmiş işlem kaydı veritabanından temizlendi. (Tarih Aralığı: {startDate:yyyy-MM-dd} - {endDate:yyyy-MM-dd})";
+            try
+            {
+                var logsDirectory = Path.Combine(Directory.GetCurrentDirectory(), "logs");
+                var schoolFile = Path.Combine(logsDirectory, $"school_{schoolId}_{DateTime.UtcNow:yyyyMM}.log");
+                System.IO.File.AppendAllText(schoolFile, purgeNote + Environment.NewLine, System.Text.Encoding.UTF8);
+            }
+            catch { }
+
+            return Ok(new { success = true, deletedCount = count, message = $"{count} adet log veritabanından başarıyla temizlendi. (Fiziksel disk log dosyaları korunmuştur.)" });
+        }
+
         public static string GenerateDefaultTeacherUsername(string fullName)
         {
             if (string.IsNullOrWhiteSpace(fullName)) return "ogretmen";

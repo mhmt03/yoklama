@@ -414,6 +414,46 @@ export async function checkTeacherExamAlert(
   return { hasExam: false };
 }
 
+export interface TeacherProctorDutyItem {
+  examId: string;
+  examName: string;
+  examDate: string;
+  examDateRaw?: string;
+  dayOfWeekStr: string;
+  lessonHour: number;
+  startTime: string;
+  roomName: string;
+  studentCount: number;
+  isToday: boolean;
+}
+
+export async function fetchTeacherProctorDuties(
+  schoolId?: string,
+  teacherName?: string
+): Promise<TeacherProctorDutyItem[]> {
+  try {
+    const sId = schoolId || (await getActiveSchoolId());
+    if (!sId) return [];
+
+    let name = teacherName;
+    if (!name) {
+      const session = await import('../../services/apiClient').then((m) => m.getActiveUserSession());
+      name = session?.teacherName || session?.fullName || session?.username || '';
+    }
+    if (!name) return [];
+
+    const res = await apiGet<{ success: boolean; data: TeacherProctorDutyItem[] }>(
+      `/ExamPlanner/teacher-proctor-duties?schoolId=${encodeURIComponent(sId)}&teacherName=${encodeURIComponent(name.trim())}`
+    );
+    if (res && res.success && Array.isArray(res.data)) {
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('[ExamPlanner] Gözetmenlik görevleri alınamadı:', err);
+  }
+  return [];
+}
+
 export interface BranchDistributionItem {
   key: string;
   grade: string;
@@ -521,4 +561,5 @@ export async function fetchAvailableProctors(examId: string, roomName?: string):
   }
   return [];
 }
+
 

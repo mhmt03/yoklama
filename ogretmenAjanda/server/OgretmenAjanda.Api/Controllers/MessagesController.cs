@@ -84,6 +84,20 @@ namespace OgretmenAjanda.Api.Controllers
                 catch { }
             }
 
+            string defaultAudience = "ALL";
+            if (request.TargetRole != null)
+            {
+                var tr = request.TargetRole.ToUpperInvariant();
+                if (tr == "STAFF" || tr == "ADMIN" || tr == "SCHOOL_ADMIN")
+                    defaultAudience = "STAFF";
+                else if (tr == "TEACHER" || tr == "TEACHERS" || tr == "SPECIFIC_TEACHER")
+                    defaultAudience = "TEACHER";
+                else if (tr.Contains("PARENT"))
+                    defaultAudience = "PARENT";
+                else if (tr.Contains("STUDENT"))
+                    defaultAudience = "STUDENT";
+            }
+
             var message = new AppMessage
             {
                 Id = Guid.NewGuid(),
@@ -98,7 +112,7 @@ namespace OgretmenAjanda.Api.Controllers
                 TargetRole = request.TargetRole,
                 TargetAudience = !string.IsNullOrEmpty(request.TargetAudience) 
                     ? request.TargetAudience.ToUpperInvariant() 
-                    : (request.TargetRole?.Contains("PARENT") == true ? "PARENT" : (request.TargetRole?.Contains("STUDENT") == true ? "STUDENT" : "ALL")),
+                    : defaultAudience,
                 TargetDescription = request.TargetDescription,
                 Content = request.Content.Trim(),
                 ReplyToMessageId = request.ReplyToMessageId,
@@ -284,6 +298,12 @@ namespace OgretmenAjanda.Api.Controllers
                 var studentId = student?.Id;
                 var studentGrade = student?.Grade;
                 var studentSection = student?.Section;
+
+                // İdare veya öğretmenlere atılan dahili mesajlar asla öğrenci veya veliye gösterilmez
+                query = query.Where(m =>
+                    m.TargetRole != "STAFF" && m.TargetRole != "ADMIN" && m.TargetRole != "SCHOOL_ADMIN" &&
+                    m.TargetRole != "TEACHER" && m.TargetRole != "TEACHERS" && m.TargetRole != "SPECIFIC_TEACHER" &&
+                    m.TargetAudience != "STAFF" && m.TargetAudience != "ADMIN" && m.TargetAudience != "TEACHER");
 
                 if (isParent)
                 {

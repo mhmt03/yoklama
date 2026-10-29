@@ -61,6 +61,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
 
   // Sınav Modal State
   const [examModalVisible, setExamModalVisible] = useState(false);
+  const [editingExamId, setEditingExamId] = useState<string | null>(null);
   const [newExamName, setNewExamName] = useState('');
   const [newExamDate, setNewExamDate] = useState(() => new Date().toISOString().substring(0, 10));
   const [newExamLessonHour, setNewExamLessonHour] = useState('3');
@@ -507,14 +508,25 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
   };
 
   // -------------------------------------------------------------
-  // SINAV EKLEME & SİLME
+  // SINAV EKLEME, DÜZENLEME & SİLME
   // -------------------------------------------------------------
   const handleOpenExamModal = () => {
+    setEditingExamId(null);
     setNewExamName('');
     setNewExamDate(new Date().toISOString().substring(0, 10));
     setNewExamLessonHour('3');
     setNewExamStartTime('09:50');
     setNewExamIsPublished(true);
+    setExamModalVisible(true);
+  };
+
+  const handleOpenEditExamModal = (ex: WrittenExamItem) => {
+    setEditingExamId(ex.id);
+    setNewExamName(ex.name);
+    setNewExamDate(ex.examDate || new Date().toISOString().substring(0, 10));
+    setNewExamLessonHour(String(ex.lessonHour || 3));
+    setNewExamStartTime(ex.startTime || '09:50');
+    setNewExamIsPublished(ex.isPublishedToStudents !== false);
     setExamModalVisible(true);
   };
 
@@ -531,6 +543,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
     setLoading(true);
     try {
       const res = await saveWrittenExam({
+        id: editingExamId || undefined,
         name: newExamName.trim(),
         examDate: newExamDate,
         lessonHour: hour,
@@ -541,8 +554,12 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
       setExamModalVisible(false);
       const updated = await fetchWrittenExams();
       setExams(updated);
-      if (res?.id) setSelectedExamId(res.id);
-      Alert.alert('Başarılı', 'Yazılı sınav tanımlandı. Şimdi dağıtım sihirbazından yerleşim yapabilirsiniz.');
+      if (editingExamId) {
+        Alert.alert('Başarılı', 'Sınav bilgileri başarıyla güncellendi.');
+      } else {
+        if (res?.id) setSelectedExamId(res.id);
+        Alert.alert('Başarılı', 'Yazılı sınav tanımlandı. Şimdi dağıtım sihirbazından yerleşim yapabilirsiniz.');
+      }
     } catch (err: any) {
       Alert.alert('Hata', err?.message || 'Sınav kaydedilemedi.');
     } finally {
@@ -1029,6 +1046,14 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
 
                   <View style={styles.examActionCol}>
                     <TouchableOpacity
+                      style={[styles.actionBtnSmall, { backgroundColor: '#EEF2FF' }]}
+                      onPress={() => handleOpenEditExamModal(ex)}
+                      accessibilityLabel="Sınavı Düzenle"
+                    >
+                      <Ionicons name="pencil" size={17} color="#4F46E5" />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
                       style={styles.actionBtnSmall}
                       onPress={() => {
                         setSelectedExamId(ex.id);
@@ -1432,7 +1457,18 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Sınav Seçici */}
           <View style={styles.distributeExamPickerCard}>
-            <Text style={styles.cardHeaderLabel}>GÖRÜNTÜLENEN SINAV</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.cardHeaderLabel}>GÖRÜNTÜLENEN SINAV</Text>
+              {selectedExam && (
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: '#EEF2FF', borderRadius: 6 }}
+                  onPress={() => handleOpenEditExamModal(selectedExam)}
+                >
+                  <Ionicons name="pencil" size={13} color="#4F46E5" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>Sınav Adını / Bilgisini Düzenle</Text>
+                </TouchableOpacity>
+              )}
+            </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
               {exams.map((ex) => {
                 const isSel = selectedExamId === ex.id;
@@ -1936,7 +1972,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Yeni Ortak Yazılı Sınavı</Text>
+              <Text style={styles.modalTitle}>{editingExamId ? 'Sınavı Düzenle' : 'Yeni Ortak Yazılı Sınavı'}</Text>
               <TouchableOpacity onPress={() => setExamModalVisible(false)}>
                 <Ionicons name="close" size={22} color="#64748B" />
               </TouchableOpacity>
@@ -2008,7 +2044,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
                 <Text style={styles.modalCancelBtnText}>İptal</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.modalSaveBtn} onPress={handleSaveExam}>
-                <Text style={styles.modalSaveBtnText}>Sınavı Oluştur</Text>
+                <Text style={styles.modalSaveBtnText}>{editingExamId ? 'Değişiklikleri Kaydet' : 'Sınavı Oluştur'}</Text>
               </TouchableOpacity>
             </View>
           </View>
