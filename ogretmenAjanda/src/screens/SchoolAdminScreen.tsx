@@ -3302,7 +3302,13 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   };
 
   const applySnapshotData = (snap: SchoolSnapshotData) => {
-    if (snap.teachers) setTeachers(snap.teachers);
+    if (snap.teachers) {
+      const sanitizedTeachers = snap.teachers.map((t: any) => ({
+        ...t,
+        username: t.username ? t.username.replace(/\.\d+$/, '').replace(/\d+$/, '') : t.username,
+      }));
+      setTeachers(sanitizedTeachers);
+    }
     if (snap.classes && snap.classes.length > 0) setClasses(snap.classes);
     if (snap.lessons && snap.lessons.length > 0) setLessons(snap.lessons);
     if (snap.schedules && snap.schedules.length > 0) setAllSchoolSchedules(snap.schedules);
@@ -3348,14 +3354,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
   };
 
-  const loadAllSchoolData = async (schoolId: string) => {
+  const loadAllSchoolData = async (schoolId: string, forceRefresh = false) => {
     // 1. FAST OFFLINE: Önce telefondaki yerel depodan anında yükle (0ms gecikme)
-    const cached = await loadSchoolSnapshotFromStorage(schoolId);
-    if (cached) {
-      applySnapshotData(cached);
-      setLoading(false);
-      setRefreshing(false);
-      return; // Yerel önbellek mevcut, 0ms anında hazır!
+    if (!forceRefresh) {
+      const cached = await loadSchoolSnapshotFromStorage(schoolId);
+      if (cached) {
+        applySnapshotData(cached);
+        setLoading(false);
+        setRefreshing(false);
+        // Stale-While-Revalidate: Arka planda sunucudan en güncel veriyi sessizce çekip tazele
+        fetchAndCacheSchoolSnapshot(schoolId).then((freshSnap) => {
+          if (freshSnap) applySnapshotData(freshSnap);
+        }).catch(() => {});
+        return; // Yerel önbellek mevcut, 0ms anında hazır!
+      }
     }
 
     // 2. Yalnızca yerel önbellek yoksa ilk açılışta sunucudan snapshot paketini çek
@@ -6577,7 +6589,19 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadSchools(); }} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              setRefreshing(true);
+              if (selectedSchool) {
+                loadAllSchoolData(selectedSchool.id, true);
+              } else {
+                loadSchools();
+              }
+            }}
+          />
+        }
       >
         {/* 📜 Sayfa İle Birlikte Kayan İdareci Başlık & Okul Dropdown Paneli */}
         <View style={styles.scrollableHeaderCard}>
@@ -7131,7 +7155,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                             </View>
                             {/* 👤 Belirgin Kullanıcı Adı Rozeti */}
                             {(() => {
-                              const displayUsername = (teacher.username || teacher.userName || generateDefaultTeacherUsername(teacher.fullName)).trim();
+                              const rawUname = (teacher.username || teacher.userName || generateDefaultTeacherUsername(teacher.fullName)).trim();
+                              const displayUsername = rawUname.replace(/\.\d+$/, '').replace(/\d+$/, '');
                               return (
                                 <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 4, marginBottom: 4 }}>
                                   <View style={styles.teacherUsernameBadge}>
