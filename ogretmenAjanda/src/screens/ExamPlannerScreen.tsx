@@ -119,6 +119,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
   const [proctorTeacherName, setProctorTeacherName] = useState('');
   const [availableProctors, setAvailableProctors] = useState<AvailableProctorItem[]>([]);
   const [proctorSearchQuery, setProctorSearchQuery] = useState('');
+  const [proctorFilterTab, setProctorFilterTab] = useState<'all' | 'duty_free' | 'free'>('all');
   const [loadingProctors, setLoadingProctors] = useState(false);
 
   // Öğrenci Manuel Sıra / Salon Değiştirme Modalı
@@ -681,6 +682,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
     setProctorRoomName(roomName);
     setProctorTeacherName(currentProctor || '');
     setProctorSearchQuery('');
+    setProctorFilterTab('all');
     setProctorModalVisible(true);
 
     if (selectedExamId) {
@@ -710,17 +712,31 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
     }
   };
 
+  const dutyAndFreeCount = useMemo(() => {
+    return availableProctors.filter((p) => (p.isDutyAndFree || (p.isDuty && !p.isBusy)) && !p.assignedRoom).length;
+  }, [availableProctors]);
+
+  const freeCount = useMemo(() => {
+    return availableProctors.filter((p) => !p.isBusy && !p.assignedRoom).length;
+  }, [availableProctors]);
+
   // Filtrelenmiş Gözetmen Listesi
   const filteredProctors = useMemo(() => {
-    if (!proctorSearchQuery.trim()) return availableProctors;
+    let list = availableProctors;
+    if (proctorFilterTab === 'duty_free') {
+      list = list.filter((p) => (p.isDutyAndFree || (p.isDuty && !p.isBusy)) && !p.assignedRoom);
+    } else if (proctorFilterTab === 'free') {
+      list = list.filter((p) => !p.isBusy && !p.assignedRoom);
+    }
+    if (!proctorSearchQuery.trim()) return list;
     const q = proctorSearchQuery.toLowerCase();
-    return availableProctors.filter(
+    return list.filter(
       (p) =>
         p.teacherName.toLowerCase().includes(q) ||
         p.badge.toLowerCase().includes(q) ||
         (p.dutyPlace && p.dutyPlace.toLowerCase().includes(q))
     );
-  }, [availableProctors, proctorSearchQuery]);
+  }, [availableProctors, proctorFilterTab, proctorSearchQuery]);
 
   // -------------------------------------------------------------
   // RAPOR VE ÇIKTILAR (XLSX & A4 PDF / PRINT)
@@ -2275,7 +2291,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
             </View>
 
             {/* Arama Çubuğu */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 8, paddingHorizontal: 10, marginVertical: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', borderRadius: 8, paddingHorizontal: 10, marginTop: 10, marginBottom: 8 }}>
               <Ionicons name="search" size={18} color="#64748B" />
               <TextInput
                 style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 8, fontSize: 13, color: '#0F172A' }}
@@ -2290,10 +2306,61 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
               )}
             </View>
 
+            {/* Hızlı Filtre Butonları (Tümü / Nöbetçi & Boş / Dersi Boş) */}
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                onPress={() => setProctorFilterTab('all')}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 6,
+                  backgroundColor: proctorFilterTab === 'all' ? '#4F46E5' : '#F1F5F9',
+                  borderWidth: 1,
+                  borderColor: proctorFilterTab === 'all' ? '#4338CA' : '#E2E8F0',
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: proctorFilterTab === 'all' ? '#FFFFFF' : '#475569' }}>
+                  Tümü ({availableProctors.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setProctorFilterTab('duty_free')}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 6,
+                  backgroundColor: proctorFilterTab === 'duty_free' ? '#16A34A' : (dutyAndFreeCount > 0 ? '#DCFCE7' : '#F1F5F9'),
+                  borderWidth: 1,
+                  borderColor: proctorFilterTab === 'duty_free' ? '#15803D' : (dutyAndFreeCount > 0 ? '#86EFAC' : '#E2E8F0'),
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '800', color: proctorFilterTab === 'duty_free' ? '#FFFFFF' : (dutyAndFreeCount > 0 ? '#166534' : '#64748B') }}>
+                  🛡️ Nöbetçi & Dersi Boş ({dutyAndFreeCount})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setProctorFilterTab('free')}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 6,
+                  backgroundColor: proctorFilterTab === 'free' ? '#2563EB' : '#F1F5F9',
+                  borderWidth: 1,
+                  borderColor: proctorFilterTab === 'free' ? '#1D4ED8' : '#E2E8F0',
+                }}
+              >
+                <Text style={{ fontSize: 11, fontWeight: '700', color: proctorFilterTab === 'free' ? '#FFFFFF' : '#475569' }}>
+                  ⏳ Dersi Boş ({freeCount})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Seçili Gözetmen Önizleme */}
             <View style={{ backgroundColor: '#EEF2FF', padding: 8, borderRadius: 8, marginBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={{ fontSize: 12, color: '#3730A3', fontWeight: '600' }}>
-                Seçili: {proctorTeacherName || 'Henüz atanmadı'}
+                Seçili Gözetmen: {proctorTeacherName || 'Henüz atanmadı'}
               </Text>
             </View>
 
@@ -2304,9 +2371,11 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
                 <Text style={{ fontSize: 12, color: '#64748B', marginTop: 8 }}>Öğretmen ders programı ve nöbet durumları taranıyor...</Text>
               </View>
             ) : (
-              <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={true}>
+              <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={true}>
                 {filteredProctors.map((p, idx) => {
                   const isSelected = proctorTeacherName.trim().toLowerCase() === p.teacherName.trim().toLowerCase();
+                  const isDutyFree = (p.isDutyAndFree || (p.isDuty && !p.isBusy)) && !p.assignedRoom;
+
                   return (
                     <TouchableOpacity
                       key={p.id || idx}
@@ -2315,9 +2384,17 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
                         paddingHorizontal: 12,
                         borderRadius: 8,
                         marginBottom: 6,
-                        backgroundColor: isSelected ? '#EEF2FF' : '#F8FAFC',
-                        borderWidth: 1,
-                        borderColor: isSelected ? '#4F46E5' : '#E2E8F0',
+                        backgroundColor: isSelected
+                          ? '#EEF2FF'
+                          : isDutyFree
+                          ? '#F0FDF4'
+                          : '#F8FAFC',
+                        borderWidth: isDutyFree || isSelected ? 1.5 : 1,
+                        borderColor: isSelected
+                          ? '#4F46E5'
+                          : isDutyFree
+                          ? '#22C55E'
+                          : '#E2E8F0',
                         flexDirection: 'row',
                         alignItems: 'center',
                         justifyContent: 'space-between',
@@ -2325,12 +2402,39 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
                       onPress={() => setProctorTeacherName(p.teacherName)}
                     >
                       <View style={{ flex: 1, marginRight: 8 }}>
-                        <Text style={{ fontSize: 13, fontWeight: isSelected ? '700' : '600', color: isSelected ? '#4F46E5' : '#0F172A' }}>
-                          {p.teacherName}
-                        </Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <Text style={{ fontSize: 13, fontWeight: isSelected || isDutyFree ? '800' : '600', color: isSelected ? '#4F46E5' : isDutyFree ? '#166534' : '#0F172A' }}>
+                            {p.teacherName}
+                          </Text>
+                          {isDutyFree && (
+                            <View style={{ backgroundColor: '#16A34A', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF' }}>⭐ NÖBETÇİ & BOŞ</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Ek Bilgiler */}
+                        {p.isDuty ? (
+                          <Text style={{ fontSize: 11, color: isDutyFree ? '#15803D' : '#D97706', marginTop: 2, fontWeight: '600' }}>
+                            🛡️ Nöbet Yeri: {p.dutyPlace || 'Genel Nöbet'} {!p.isBusy ? '• ✅ Dersi Boş' : `• ⚠️ Derste: ${p.busyLesson}`}
+                          </Text>
+                        ) : p.busyLesson ? (
+                          <Text style={{ fontSize: 11, color: '#EA580C', marginTop: 2 }}>
+                            ⚠️ Derste: {p.busyLesson}
+                          </Text>
+                        ) : p.hasLessonsToday ? (
+                          <Text style={{ fontSize: 11, color: '#2563EB', marginTop: 2 }}>
+                            ⏳ Okulda & Dersi Boş
+                          </Text>
+                        ) : (
+                          <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                            🏠 Bugün Dersi Yok
+                          </Text>
+                        )}
+
                         {p.assignedRoom && (
-                          <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 1 }}>
-                            {p.assignedRoom} salonunda görevli
+                          <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 1, fontWeight: '600' }}>
+                            🚫 {p.assignedRoom} salonunda görevli
                           </Text>
                         )}
                       </View>
@@ -2339,15 +2443,15 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
                       {p.badge ? (
                         <View
                           style={{
-                            backgroundColor: p.badgeColor ? `${p.badgeColor}18` : '#F1F5F9',
+                            backgroundColor: isDutyFree ? '#DCFCE7' : p.badgeColor ? `${p.badgeColor}18` : '#F1F5F9',
                             paddingHorizontal: 8,
                             paddingVertical: 4,
                             borderRadius: 6,
                             borderWidth: 1,
-                            borderColor: p.badgeColor ? `${p.badgeColor}40` : '#CBD5E1',
+                            borderColor: isDutyFree ? '#86EFAC' : p.badgeColor ? `${p.badgeColor}40` : '#CBD5E1',
                           }}
                         >
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: p.badgeColor || '#475569' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: isDutyFree ? '#15803D' : p.badgeColor || '#475569' }}>
                             {p.badge}
                           </Text>
                         </View>
@@ -2358,7 +2462,9 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
 
                 {filteredProctors.length === 0 && (
                   <Text style={{ textAlign: 'center', color: '#94A3B8', fontSize: 12, paddingVertical: 20 }}>
-                    Aramaya uygun öğretmen bulunamadı.
+                    {proctorFilterTab === 'duty_free'
+                      ? 'Bu saatte hem nöbetçi olup hem de dersi boş olan öğretmen bulunamadı.'
+                      : 'Aramaya uygun öğretmen bulunamadı.'}
                   </Text>
                 )}
               </ScrollView>

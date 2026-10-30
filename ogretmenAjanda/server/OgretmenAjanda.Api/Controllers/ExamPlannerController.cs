@@ -890,17 +890,36 @@ namespace OgretmenAjanda.Api.Controllers
 
             var dayName = GetTurkishDayName(exam.ExamDate.DayOfWeek);
             int dayNumber = exam.ExamDate.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)exam.ExamDate.DayOfWeek;
+            var dayNumStr = dayNumber.ToString();
             var examDateStr = exam.ExamDate.ToString("yyyy-MM-dd");
 
-            // 2. O günkü nöbetçiler
-            var duties = await _context.TeacherDuties
-                .Where(t => t.SchoolId == effectiveId && (t.DayOfWeek == dayName || t.Date == examDateStr))
+            // 2. O günkü nöbetçiler (Hem gün adı, hem sayısal 1..7, hem de tarih eşleşmesi)
+            var allDuties = await _context.TeacherDuties
+                .Where(t => t.SchoolId == effectiveId)
                 .ToListAsync();
 
             var dutyMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var d in duties)
+            foreach (var d in allDuties)
             {
-                if (!string.IsNullOrWhiteSpace(d.TeacherName))
+                if (string.IsNullOrWhiteSpace(d.TeacherName)) continue;
+
+                bool isMatch = false;
+                if (!string.IsNullOrWhiteSpace(d.Date) && d.Date.Trim() == examDateStr)
+                {
+                    isMatch = true;
+                }
+                else if (!string.IsNullOrWhiteSpace(d.DayOfWeek))
+                {
+                    var dwTrim = d.DayOfWeek.Trim();
+                    if (string.Equals(dwTrim, dayName, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(dwTrim, dayNumStr, StringComparison.OrdinalIgnoreCase) ||
+                        NormalizeDayOfWeekInt(dwTrim) == dayNumber)
+                    {
+                        isMatch = true;
+                    }
+                }
+
+                if (isMatch)
                 {
                     dutyMap[d.TeacherName.Trim()] = string.IsNullOrWhiteSpace(d.DutyPlace) ? "Nöbetçi" : d.DutyPlace.Trim();
                 }
@@ -1010,7 +1029,8 @@ namespace OgretmenAjanda.Api.Controllers
                     busyLesson,
                     hasLessonsToday,
                     assignedRoom,
-                    isCurrentRoomProctor
+                    isCurrentRoomProctor,
+                    isDutyAndFree = isDuty && !isBusy && !isAlreadyAssigned
                 });
             }
 
@@ -2187,6 +2207,21 @@ namespace OgretmenAjanda.Api.Controllers
             DayOfWeek.Sunday => "Pazar",
             _ => ""
         };
+
+        private static int NormalizeDayOfWeekInt(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return 1;
+            var t = raw.Trim().ToLowerInvariant();
+            if (int.TryParse(t, out var n) && n >= 1 && n <= 7) return n;
+            if (t.Contains("pazartesi") || t.Contains("pzt")) return 1;
+            if (t.Contains("salı") || t.Contains("sali") || t.Contains("sal")) return 2;
+            if (t.Contains("çarşamba") || t.Contains("carsamba") || t.Contains("çar")) return 3;
+            if (t.Contains("perşembe") || t.Contains("persembe") || t.Contains("per")) return 4;
+            if (t.Contains("cuma") || t.Contains("cum")) return 5;
+            if (t.Contains("cumartesi") || t.Contains("cts")) return 6;
+            if (t.Contains("pazar")) return 7;
+            return 1;
+        }
 
         // ==========================================
         // 7. SERVER DB İNCELEME VE KULLANICI ADI TEMİZLEME YÖNETİMİ

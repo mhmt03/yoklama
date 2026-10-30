@@ -580,6 +580,7 @@ export interface AvailableProctorItem {
   hasLessonsToday: boolean;
   assignedRoom?: string;
   isCurrentRoomProctor: boolean;
+  isDutyAndFree?: boolean;
 }
 
 export async function fetchAvailableProctors(examId: string, roomName?: string): Promise<AvailableProctorItem[]> {
