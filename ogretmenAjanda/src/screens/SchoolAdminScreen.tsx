@@ -3598,7 +3598,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   useEffect(() => {
     loadSchools();
-    getActiveUserSession().then((session) => {
+    getActiveUserSession().then(async (session) => {
+      const role = (session?.role || '').toUpperCase();
+      if (role === 'STUDENT' || role === 'PARENT') {
+        Alert.alert('Yetkisiz Erişim', 'Öğrenci veya veli hesapları okul idare paneline erişemez.');
+        await clearAuthSession();
+        if (onRoleChange) onRoleChange(null);
+        return;
+      }
       if (session) setCurrentUserSession(session);
     });
     getActiveTeacherName().then((name) => {

@@ -71,6 +71,11 @@ namespace OgretmenAjanda.Api.Controllers
                 var currentUser = await _context.Users.FindAsync(CurrentUserId);
                 if (currentUser == null) return Unauthorized();
 
+                if (currentUser.Role == UserRoles.Student || currentUser.Role == UserRoles.Parent)
+                {
+                    return Forbid("Öğrenci ve veli hesapları okul yönetimi listelerine erişemez.");
+                }
+
                 var customerId = currentUser.CustomerId;
                 var relationId = currentUser.RelationId;
 

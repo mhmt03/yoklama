@@ -248,6 +248,35 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       });
 
       if (res.success && res.data) {
+        const returnedRole = (res.data.role || '').toUpperCase();
+        if (returnedRole === 'STUDENT' || returnedRole === 'PARENT') {
+          Alert.alert(
+            'Yetkisiz Giriş Engellendi',
+            'Bu giriş alanı yalnızca okul idaresi ve yöneticiler içindir. Öğrenci veya veli girişi için lütfen ana ekrandaki "Öğrenci / Veli Girişi" butonunu kullanınız.'
+          );
+          setAdminLoading(false);
+          return;
+        }
+        if (returnedRole === 'TEACHER') {
+          Alert.alert(
+            'Öğretmen Hesabı',
+            'Bu hesap öğretmen rolüne sahiptir. Lütfen ana ekrandaki "Öğretmen Girişi" seçeneğini kullanınız.'
+          );
+          setAdminLoading(false);
+          return;
+        }
+        if (
+          returnedRole !== 'SUPERADMIN' &&
+          returnedRole !== 'ADMIN' &&
+          returnedRole !== 'SCHOOL_ADMIN' &&
+          returnedRole !== 'STAFF' &&
+          returnedRole !== 'INSTITUTION_ADMIN'
+        ) {
+          Alert.alert('Yetkisiz Giriş', 'Bu hesap yönetici yetkisine sahip değildir.');
+          setAdminLoading(false);
+          return;
+        }
+
         const instToSave: InstitutionInfo = {
           code: res.data?.customerId || activeInstitution?.code || (kurumInput || '').trim() || 'mg-egitim',
           name: activeInstitution?.name || res.data?.schoolName || (kurumInput || '').trim() || 'Kurum',
@@ -348,6 +377,16 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
       });
 
       if (res.success && res.data) {
+        const returnedRole = (res.data.role || '').toUpperCase();
+        if (returnedRole === 'STUDENT' || returnedRole === 'PARENT') {
+          Alert.alert(
+            'Yetkisiz Giriş Engellendi',
+            'Bu giriş alanı yalnızca öğretmenler ve eğitimciler içindir. Öğrenci veya veli girişi için lütfen ana ekrandaki "Öğrenci / Veli Girişi" butonunu kullanınız.'
+          );
+          setTeacherLoading(false);
+          return;
+        }
+
         const instToSave: InstitutionInfo = {
           code: res.data?.customerId || res.data?.relationId || activeInstitution?.code || instCode,
           name: activeInstitution?.name || res.data?.schoolName || (kurumInput || '').trim() || instCode,

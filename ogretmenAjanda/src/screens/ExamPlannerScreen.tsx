@@ -1459,10 +1459,10 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
           <View style={styles.distributeExamPickerCard}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text style={styles.cardHeaderLabel}>GÖRÜNTÜLENEN SINAV</Text>
-              {selectedExam && (
+              {currentExam && (
                 <TouchableOpacity
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: '#EEF2FF', borderRadius: 6 }}
-                  onPress={() => handleOpenEditExamModal(selectedExam)}
+                  onPress={() => handleOpenEditExamModal(currentExam)}
                 >
                   <Ionicons name="pencil" size={13} color="#4F46E5" />
                   <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>Sınav Adını / Bilgisini Düzenle</Text>

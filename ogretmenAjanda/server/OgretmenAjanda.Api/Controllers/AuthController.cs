@@ -134,6 +134,12 @@ namespace OgretmenAjanda.Api.Controllers
                 return Unauthorized(new { message = "Kullanıcı adı veya şifre hatalı." });
             }
 
+            // Güvenlik Önlemi: Öğrenci ve veliler genel personel/yönetici girişinden (POST /api/auth/login) giriş yapamaz!
+            if (user.Role == UserRoles.Student || user.Role == UserRoles.Parent)
+            {
+                return StatusCode(403, new { message = "Bu giriş alanı yalnızca okul idaresi ve öğretmenler içindir. Öğrenci veya veli girişi için lütfen ana ekrandaki Öğrenci / Veli Girişi alanını kullanınız." });
+            }
+
             if (!user.IsActive)
             {
                 return StatusCode(403, new { message = "Hesabınız askıya alınmıştır. Lütfen yöneticinizle görüşün." });
