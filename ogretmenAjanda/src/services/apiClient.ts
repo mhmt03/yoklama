@@ -124,6 +124,7 @@ export async function updateActiveUserSession(
 export async function clearAuthSession(): Promise<void> {
   await AsyncStorage.removeItem(TOKEN_KEY);
   await AsyncStorage.removeItem(USER_KEY);
+  await AsyncStorage.removeItem('active_teacher_name').catch(() => {});
 }
 
 // Genel API İstek Yöneticisi

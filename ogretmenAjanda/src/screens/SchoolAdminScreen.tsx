@@ -3608,11 +3608,6 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
       }
       if (session) setCurrentUserSession(session);
     });
-    getActiveTeacherName().then((name) => {
-      if (name) {
-        setCurrentUserSession((prev: any) => (prev ? { ...prev, fullName: prev.fullName || name } : { fullName: name }));
-      }
-    });
   }, []);
 
   // --- OKUL YÖNETİMİ ---
@@ -3836,8 +3831,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     }
 
     try {
+      const cleanUsername = editingTeacher.username ? editingTeacher.username.trim().toLowerCase() : undefined;
       const res = await apiRequest(`schools/teachers/${editingTeacher.id}/details`, 'PUT', {
         fullName: editingTeacher.fullName.trim(),
+        username: cleanUsername,
         branch: editingTeacher.branch || undefined,
         phone: editingTeacher.phone || undefined,
         email: editingTeacher.email || undefined,
@@ -3850,7 +3847,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         Alert.alert('Başarılı', 'Öğretmen bilgileri ve yetkileri güncellendi.');
         setEditTeacherModalVisible(false);
         const updated = teachers.map((t: any) =>
-          t.id === editingTeacher.id ? { ...t, ...editingTeacher } : t
+          t.id === editingTeacher.id ? { ...t, ...editingTeacher, username: cleanUsername || t.username } : t
         );
         setTeachers(updated);
         if (selectedSchool) {
@@ -3858,7 +3855,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         }
         setEditingTeacher(null);
       } else {
-        Alert.alert('Hata', res.error || 'Güncellenemedi.');
+        Alert.alert('Hata', (res as any)?.message || res.error || 'Öğretmen bilgileri güncellenemedi.');
       }
     } catch (e: any) {
       Alert.alert('Hata', e.message);
@@ -7248,6 +7245,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                             }
                             setEditingTeacher({
                               ...teacher,
+                              username: teacher.username || teacher.userName || generateDefaultTeacherUsername(teacher.fullName),
                               role: teacher.role || 'TEACHER',
                               permissions: perms,
                             });
@@ -12543,28 +12541,34 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               )}
 
               <Text style={styles.inputLabel}>Sistem Kullanıcı Adı (Giriş için)</Text>
-              {(() => {
-                const editUsername = (editingTeacher?.username || editingTeacher?.userName || generateDefaultTeacherUsername(editingTeacher?.fullName)).trim();
-                return (
-                  <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F1F5F9', justifyContent: 'space-between', marginBottom: 12 }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Ionicons name="person" size={15} color="#4F46E5" />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#1E293B' }}>
-                        {editUsername}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => {
-                        Clipboard.setStringAsync(editUsername);
-                        Alert.alert('Kopyalandı', `"${editUsername}" kullanıcı adı panoya kopyalandı.`);
-                      }}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <Ionicons name="copy-outline" size={16} color="#4F46E5" />
-                    </TouchableOpacity>
-                  </View>
-                );
-              })()}
+              <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4, paddingHorizontal: 10, marginBottom: 4 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                  <Ionicons name="person" size={16} color="#4F46E5" />
+                  <TextInput
+                    style={{ flex: 1, fontSize: 13, fontWeight: '700', color: '#1E293B', paddingVertical: 6 }}
+                    value={editingTeacher?.username ?? ''}
+                    onChangeText={(val) => setEditingTeacher({ ...editingTeacher, username: val.trim().toLowerCase() })}
+                    placeholder="kullanici.adi"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    const u = (editingTeacher?.username || '').trim();
+                    if (u) {
+                      Clipboard.setStringAsync(u);
+                      Alert.alert('Kopyalandı', `"${u}" kullanıcı adı panoya kopyalandı.`);
+                    }
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="copy-outline" size={18} color="#4F46E5" />
+                </TouchableOpacity>
+              </View>
+              <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 12 }}>
+                💡 Giriş kullanıcı adıdır. Değiştirdiğinizde sistem veritabanında benzersizlik kontrolü yapılır.
+              </Text>
 
               <Text style={styles.inputLabel}>Adı Soyadı</Text>
               <TextInput

@@ -100,8 +100,11 @@ export const setActiveUserRole = async (role: UserRole | null): Promise<void> =>
         "INSERT INTO app_settings (key, value) VALUES ('active_user_role', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         role
       );
+      if (role === 'admin' || role === 'superadmin') {
+        await db.runAsync("DELETE FROM app_settings WHERE key = 'active_teacher_name'");
+      }
     } else {
-      await db.runAsync("DELETE FROM app_settings WHERE key = 'active_user_role'");
+      await db.runAsync("DELETE FROM app_settings WHERE key IN ('active_user_role', 'active_teacher_name')");
     }
   } catch (err) {
     console.warn('Aktif rol kaydedilemedi:', err);
@@ -163,7 +166,7 @@ export const logoutUserRole = async (): Promise<void> => {
 
   try {
     const db = await getDB();
-    await db.runAsync("DELETE FROM app_settings WHERE key IN ('active_user_role', 'student_session_profile')");
+    await db.runAsync("DELETE FROM app_settings WHERE key IN ('active_user_role', 'student_session_profile', 'active_teacher_name')");
   } catch (err) {
     console.warn('Çıkış işlemi SQLite hatası:', err);
   }
