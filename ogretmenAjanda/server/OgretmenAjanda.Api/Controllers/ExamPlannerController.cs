@@ -161,7 +161,7 @@ namespace OgretmenAjanda.Api.Controllers
                 return Forbid("Bu işlem için sadece okul idarecileri ve yöneticiler yetkilidir.");
             }
 
-            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId.HasValue ? dto.SchoolId.Value.ToString() : null);
+            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId);
             if (effectiveId == Guid.Empty)
             {
                 var fallbackSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
@@ -171,12 +171,17 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 return BadRequest(new { success = false, message = "Okul ve salon adı zorunludur." });
             }
-            dto.SchoolId = effectiveId;
+
+            Guid? roomGuid = null;
+            if (!string.IsNullOrWhiteSpace(dto.Id) && Guid.TryParse(dto.Id, out var parsedRoomId))
+            {
+                roomGuid = parsedRoomId;
+            }
 
             ExamHall hall;
-            if (dto.Id.HasValue && dto.Id.Value != Guid.Empty)
+            if (roomGuid.HasValue && roomGuid.Value != Guid.Empty)
             {
-                hall = await _context.ExamHalls.FindAsync(dto.Id.Value);
+                hall = await _context.ExamHalls.FindAsync(roomGuid.Value);
                 if (hall == null || hall.SchoolId != effectiveId)
                 {
                     return NotFound(new { success = false, message = "Salon bulunamadı." });
@@ -445,7 +450,7 @@ namespace OgretmenAjanda.Api.Controllers
                 return Forbid("Bu işlem için sadece okul idarecileri ve yöneticiler yetkilidir.");
             }
 
-            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId.HasValue ? dto.SchoolId.Value.ToString() : null);
+            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId);
             if (effectiveId == Guid.Empty)
             {
                 var fallbackSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
@@ -455,12 +460,17 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 return BadRequest(new { success = false, message = "Okul ve sınav adı zorunludur." });
             }
-            dto.SchoolId = effectiveId;
+
+            Guid? examGuid = null;
+            if (!string.IsNullOrWhiteSpace(dto.Id) && Guid.TryParse(dto.Id, out var parsedExamId))
+            {
+                examGuid = parsedExamId;
+            }
 
             WrittenExam exam;
-            if (dto.Id.HasValue && dto.Id.Value != Guid.Empty)
+            if (examGuid.HasValue && examGuid.Value != Guid.Empty)
             {
-                exam = await _context.WrittenExams.FindAsync(dto.Id.Value);
+                exam = await _context.WrittenExams.FindAsync(examGuid.Value);
                 if (exam == null || exam.SchoolId != effectiveId)
                 {
                     return NotFound(new { success = false, message = "Sınav bulunamadı." });
@@ -475,9 +485,17 @@ namespace OgretmenAjanda.Api.Controllers
                 _context.WrittenExams.Add(exam);
             }
 
-            bool isNew = !dto.Id.HasValue || dto.Id.Value == Guid.Empty;
+            bool isNew = !examGuid.HasValue;
             exam.Name = dto.Name.Trim();
-            exam.ExamDate = dto.ExamDate.Date;
+
+            if (!string.IsNullOrWhiteSpace(dto.ExamDate) && DateTime.TryParse(dto.ExamDate, out var parsedDate))
+            {
+                exam.ExamDate = parsedDate.Date;
+            }
+            else
+            {
+                exam.ExamDate = DateTime.Today;
+            }
             exam.LessonHour = Math.Clamp(dto.LessonHour, 1, 12);
             exam.StartTime = dto.StartTime?.Trim();
             exam.AcademicYear = dto.AcademicYear?.Trim();
@@ -2371,8 +2389,8 @@ namespace OgretmenAjanda.Api.Controllers
 
     public class ExamHallDto
     {
-        public Guid? Id { get; set; }
-        public Guid? SchoolId { get; set; }
+        public string? Id { get; set; }
+        public string? SchoolId { get; set; }
         public string RoomName { get; set; } = string.Empty;
         public int Capacity { get; set; } = 30;
         public string Tag { get; set; } = "İkili Oturum";
@@ -2382,10 +2400,10 @@ namespace OgretmenAjanda.Api.Controllers
 
     public class WrittenExamDto
     {
-        public Guid? Id { get; set; }
-        public Guid? SchoolId { get; set; }
+        public string? Id { get; set; }
+        public string? SchoolId { get; set; }
         public string Name { get; set; } = string.Empty;
-        public DateTime ExamDate { get; set; } = DateTime.Today;
+        public string? ExamDate { get; set; }
         public int LessonHour { get; set; } = 3;
         public string? StartTime { get; set; }
         public string? AcademicYear { get; set; }

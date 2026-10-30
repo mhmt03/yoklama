@@ -2010,14 +2010,24 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
             {/* Sınav Tarihi Picker */}
             <Text style={styles.inputLabel}>Sınav Tarihi</Text>
             {Platform.OS === 'web' ? (
-              <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, marginBottom: 6 }]}>
-                <Ionicons name="calendar-outline" size={18} color="#4F46E5" style={{ marginRight: 8 }} />
-                <TextInput
-                  style={{ flex: 1, fontSize: 14, color: '#0F172A', outline: 'none' } as any}
-                  value={newExamDate}
-                  onChangeText={setNewExamDate}
-                  {...({ type: 'date' } as any)}
-                />
+              <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, marginBottom: 6, backgroundColor: '#FFFFFF' }]}>
+                <Ionicons name="calendar" size={18} color="#4F46E5" style={{ marginRight: 8 }} />
+                {React.createElement('input', {
+                  type: 'date',
+                  value: newExamDate,
+                  onChange: (e: any) => setNewExamDate(e.target.value),
+                  style: {
+                    flex: 1,
+                    border: 'none',
+                    outline: 'none',
+                    backgroundColor: 'transparent',
+                    fontSize: 14,
+                    color: '#0F172A',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  },
+                })}
               </View>
             ) : (
               <TouchableOpacity
@@ -2126,14 +2136,24 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
               <View style={{ flex: 1 }}>
                 <Text style={styles.inputLabel}>Başlangıç Saati</Text>
                 {Platform.OS === 'web' ? (
-                  <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, marginBottom: 6 }]}>
-                    <Ionicons name="time-outline" size={18} color="#4F46E5" style={{ marginRight: 8 }} />
-                    <TextInput
-                      style={{ flex: 1, fontSize: 14, color: '#0F172A', outline: 'none' } as any}
-                      value={newExamStartTime}
-                      onChangeText={setNewExamStartTime}
-                      {...({ type: 'time' } as any)}
-                    />
+                  <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, marginBottom: 6, backgroundColor: '#FFFFFF' }]}>
+                    <Ionicons name="time" size={18} color="#4F46E5" style={{ marginRight: 8 }} />
+                    {React.createElement('input', {
+                      type: 'time',
+                      value: newExamStartTime,
+                      onChange: (e: any) => setNewExamStartTime(e.target.value),
+                      style: {
+                        flex: 1,
+                        border: 'none',
+                        outline: 'none',
+                        backgroundColor: 'transparent',
+                        fontSize: 14,
+                        color: '#0F172A',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      },
+                    })}
                   </View>
                 ) : (
                   <TouchableOpacity
