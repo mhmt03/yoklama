@@ -13,6 +13,7 @@ import {
   Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -67,6 +68,22 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
   const [newExamLessonHour, setNewExamLessonHour] = useState('3');
   const [newExamStartTime, setNewExamStartTime] = useState('09:50');
   const [newExamIsPublished, setNewExamIsPublished] = useState(true);
+  const [showExamDatePicker, setShowExamDatePicker] = useState(false);
+  const [showExamTimePicker, setShowExamTimePicker] = useState(false);
+
+  const formatExamDateTurkish = (dateStr: string) => {
+    if (!dateStr) return '';
+    try {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+        if (!isNaN(d.getTime())) {
+          return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' });
+        }
+      }
+    } catch {}
+    return dateStr;
+  };
 
   // Öğrenci Sınav Yeri Arama & Görünürlük State
   const [studentSearchQuery, setStudentSearchQuery] = useState('');
@@ -1986,36 +2003,200 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
               placeholder="Örn: 1. Dönem 1. Ortak Yazılı Sınavı"
             />
 
-            <Text style={styles.inputLabel}>Sınav Tarihi (YYYY-AA-GG)</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={newExamDate}
-              onChangeText={setNewExamDate}
-              placeholder="2026-10-28"
-            />
+            {/* Sınav Tarihi Picker */}
+            <Text style={styles.inputLabel}>Sınav Tarihi</Text>
+            {Platform.OS === 'web' ? (
+              <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, marginBottom: 6 }]}>
+                <Ionicons name="calendar-outline" size={18} color="#4F46E5" style={{ marginRight: 8 }} />
+                <TextInput
+                  style={{ flex: 1, fontSize: 14, color: '#0F172A', outline: 'none' } as any}
+                  value={newExamDate}
+                  onChangeText={setNewExamDate}
+                  {...({ type: 'date' } as any)}
+                />
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 12, marginBottom: 6 }]}
+                onPress={() => setShowExamDatePicker(true)}
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Ionicons name="calendar-outline" size={18} color="#4F46E5" />
+                  <Text style={{ fontSize: 14, color: '#0F172A', fontWeight: '600' }}>
+                    {newExamDate || 'Tarih Seçin'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-down" size={16} color="#64748B" />
+              </TouchableOpacity>
+            )}
+
+            {/* Hızlı Tarih Seçim Butonları & Gün Adı Gösterimi */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '600', color: '#4F46E5' }}>
+                📅 {formatExamDateTurkish(newExamDate)}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}
+                  onPress={() => setNewExamDate(new Date().toISOString().substring(0, 10))}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#4F46E5' }}>Bugün</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#CBD5E1' }}
+                  onPress={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 1);
+                    setNewExamDate(d.toISOString().substring(0, 10));
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>Yarın</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#CBD5E1' }}
+                  onPress={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 7);
+                    setNewExamDate(d.toISOString().substring(0, 10));
+                  }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>+1 Hafta</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {showExamDatePicker && Platform.OS !== 'web' && (
+              <DateTimePicker
+                value={newExamDate && !isNaN(new Date(newExamDate).getTime()) ? new Date(newExamDate) : new Date()}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, selected) => {
+                  setShowExamDatePicker(Platform.OS === 'ios');
+                  if (selected) {
+                    const yyyy = selected.getFullYear();
+                    const mm = String(selected.getMonth() + 1).padStart(2, '0');
+                    const dd = String(selected.getDate()).padStart(2, '0');
+                    setNewExamDate(`${yyyy}-${mm}-${dd}`);
+                  }
+                }}
+              />
+            )}
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.inputLabel}>Kaçıncı Ders Saati?</Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[styles.modalInput, { marginBottom: 6 }]}
                   value={newExamLessonHour}
                   onChangeText={setNewExamLessonHour}
                   keyboardType="numeric"
                   placeholder="3"
                 />
+                {/* Hızlı Ders Saati Seçiciler */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
+                  {['1', '2', '3', '4', '5', '6', '7', '8'].map((h) => {
+                    const isActive = newExamLessonHour === h;
+                    return (
+                      <TouchableOpacity
+                        key={h}
+                        onPress={() => setNewExamLessonHour(h)}
+                        style={{
+                          paddingHorizontal: 7,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          backgroundColor: isActive ? '#4F46E5' : '#F1F5F9',
+                          borderWidth: 1,
+                          borderColor: isActive ? '#4338CA' : '#E2E8F0',
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: isActive ? '#FFFFFF' : '#475569' }}>
+                          {h}.D
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.inputLabel}>Başlangıç Saati</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  value={newExamStartTime}
-                  onChangeText={setNewExamStartTime}
-                  placeholder="09:50"
-                />
+                {Platform.OS === 'web' ? (
+                  <View style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, marginBottom: 6 }]}>
+                    <Ionicons name="time-outline" size={18} color="#4F46E5" style={{ marginRight: 8 }} />
+                    <TextInput
+                      style={{ flex: 1, fontSize: 14, color: '#0F172A', outline: 'none' } as any}
+                      value={newExamStartTime}
+                      onChangeText={setNewExamStartTime}
+                      {...({ type: 'time' } as any)}
+                    />
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.modalInput, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 12, marginBottom: 6 }]}
+                    onPress={() => setShowExamTimePicker(true)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="time-outline" size={18} color="#4F46E5" />
+                      <Text style={{ fontSize: 14, color: '#0F172A', fontWeight: '600' }}>
+                        {newExamStartTime || 'Saat Seçin'}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-down" size={16} color="#64748B" />
+                  </TouchableOpacity>
+                )}
+
+                {/* Hızlı Saat Örnekleri */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 12 }}>
+                  {['08:30', '09:20', '10:10', '11:00', '11:50', '13:10'].map((timeStr) => {
+                    const isActive = newExamStartTime === timeStr;
+                    return (
+                      <TouchableOpacity
+                        key={timeStr}
+                        onPress={() => setNewExamStartTime(timeStr)}
+                        style={{
+                          paddingHorizontal: 6,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          backgroundColor: isActive ? '#4F46E5' : '#F1F5F9',
+                          borderWidth: 1,
+                          borderColor: isActive ? '#4338CA' : '#E2E8F0',
+                        }}
+                      >
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: isActive ? '#FFFFFF' : '#475569' }}>
+                          {timeStr}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </View>
             </View>
+
+            {showExamTimePicker && Platform.OS !== 'web' && (
+              <DateTimePicker
+                value={(() => {
+                  const d = new Date();
+                  if (newExamStartTime && newExamStartTime.includes(':')) {
+                    const [h, m] = newExamStartTime.split(':').map(Number);
+                    d.setHours(h || 9, m || 50, 0, 0);
+                  }
+                  return d;
+                })()}
+                mode="time"
+                is24Hour={true}
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={(event, selected) => {
+                  setShowExamTimePicker(Platform.OS === 'ios');
+                  if (selected) {
+                    const hh = String(selected.getHours()).padStart(2, '0');
+                    const mm = String(selected.getMinutes()).padStart(2, '0');
+                    setNewExamStartTime(`${hh}:${mm}`);
+                  }
+                }}
+              />
+            )}
 
             <Text style={styles.hintText}>
               ℹ️ Kaçıncı ders saatinde yapılacağını girdiğinizde sistem o saatte o salonda dersi olan öğretmeni otomatik gözetmen olarak tespit edecektir.
