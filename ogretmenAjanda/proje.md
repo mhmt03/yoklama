@@ -478,3 +478,100 @@ Yeni gereksinimler doğrultusunda tasarlanan EF Core tabloları:
 6. [ ] **Derleme, FTP Yayınlama & Test:**
    - Backend ve Web build, FTP dağıtımı ve canlı testlerin tamamlanması.
 
+> ⚠️ **Sıralama Kuralı:** FAZ 11 (Yedekleme/Geri Yükleme) en az **temel düzeyde (Adım 1-3)** FAZ 10 tablolarından ÖNCE devreye alınmalıdır; yeni tablolar eklenmeden önce otomatik yedekleme çalışır halde olmalıdır.
+
+---
+
+## 📍 FAZ 11: Veritabanı Yedekleme & Geri Yükleme Modülü (Admin Paneli)
+
+> **Gerekçe:** Optik sonuçlar, kazanım karneleri, yazılı yerleşimleri ve log kayıtlarıyla DB hızla büyüyecek. Tek dosyalı SQLite (`ogretmenajanda.db`) olası bir bozulma/yanlış silme/yanlış güncellemede tüm kurumlar için veri kaybına yol açar.  
+> **Kural:** Kodlama yapılmayacak; bu bölüm Cumartesi öncesi planlama içindir.
+
+### 🧭 1. Mevcut Durum & Yaklaşım
+- Sunucu DB: **SQLite**, tek dosya (`Data Source=ogretmenajanda.db`, EF Core `UseSqlite`). Yayın FTP ile `/wwwroot` altındadır.
+- Mevcut manuel yedek: FTP'den indirilen `backups/*.db` kopyaları (FAZ 10 §1). Bu işlem otomatik değil, kişiye bağımlı.
+- Mobil/Web tarafında önceden `src/utils/backupService.ts` (yerel yedek) bulunuyor; sunucu tarafı yedeği bundan **ayrı** ve **birincil** güvence olacaktır.
+- **Kritik teknik kural:** Canlı SQLite dosyası çalışırken düz dosya kopyası ALINMAZ (WAL/yarım yazım riski). Yedek, SQLite'ın tutarlı anlık kopya mekanizmasıyla alınır: `VACUUM INTO 'yedek.db'` veya `Microsoft.Data.Sqlite` `BackupDatabase()` API'si.
+
+### 🛡️ 2. Yetki Modeli
+| Özellik | Süper Admin | Kurum/Okul Admini | İdareci (STAFF) | Öğretmen/Öğrenci/Veli |
+|---|---|---|---|---|
+| Tüm sistem (tam DB) yedeği al / indir | ✅ | ❌ | ❌ | ❌ |
+| Tam DB geri yükleme (tüm kurumlar) | ✅ (çift onaylı) | ❌ | ❌ | ❌ |
+| Kendi okulunun yedeğini (okul bazlı JSON/ZIP) al / indir | ✅ | ✅ | ❌ | ❌ |
+| Kendi okulunu geri yükle | ✅ | ✅ (çift onaylı) | ❌ | ❌ |
+| Yedek listesini görme / otomatik yedek ayarları | ✅ | ✅ (kendi okulu) | ❌ | ❌ |
+- Tüm uçlar `[Authorize]` + rol kontrolü; öğrenci/veli/öğretmen `403`.
+- Her yedek/geri yükleme işlemi **Audit Log**'a düşer (kim, ne zaman, hangi dosya, sonuç) ve fiziksel log dosyasına da yazılır.
+
+### 🗂️ 3. İki Katmanlı Yedek Stratejisi
+1. **Katman A – Tam Sistem Yedeği (Felaket Kurtarma, Süper Admin):**
+   - `VACUUM INTO` ile tutarlı `.db` kopyası → `.zip` (sıkıştırma) → sunucuda `backups/` klasörüne zaman damgalı kaydedilir: `ogretmenajanda_YYYYMMDD_HHmmss.zip`.
+   - Bütünlük için SHA-256 özeti ve `PRAGMA integrity_check` sonucu yanına manifest olarak yazılır.
+2. **Katman B – Okul Bazlı Yedek (Kurum Admini):**
+   - Yalnızca ilgili `SchoolId` verilerinin (öğrenciler, öğretmenler, sınıflar, dersler, program, yazılı sınav/oturma planı, optik sınav/sonuç/kazanım, yoklama, mesajlar, loglar hariç/seçmeli) JSON olarak dışa aktarıldığı `.zip` paket.
+   - `manifest.json`: şema sürümü, okul kodu, kayıt sayıları, oluşturma tarihi, uygulama sürümü.
+   - Geri yüklemede başka okulun verisine yazılmasını önlemek için manifest `SchoolId`/okul kodu eşleşmesi zorunlu.
+   - Yüklü fotoğraflar (`/uploads/schools/{kod}/...`) opsiyonel olarak pakete dahil edilir (boyut uyarısı ile).
+
+### ⏰ 4. Otomatik Yedekleme (Zamanlayıcı)
+- ASP.NET Core `BackgroundService` (IIS uyumlu, uygulama uyanık kaldığı sürece): varsayılan **her gün 03:00 (TR saati)**.
+- **Saklama (Retention) politikası:** son 7 günlük + son 4 haftalık + son 3 aylık yedek tutulur (GFS), eskiler otomatik silinir; ayarlanabilir.
+- **Kritik işlem öncesi otomatik "güvenlik yedeği":** tam geri yükleme, toplu silme, log temizleme (purge), toplu öğrenci/program yüklemesi, her FAZ şema güncellemesi (EF Core migration/`DbInitializer` ALTER) öncesinde otomatik alınır.
+- Yedek alanı kotası: toplam boyut sınırı (örn. 500 MB) aşılırsa en eski yedekten silinir ve admine uyarı gösterilir.
+- Hosting (monsterasp/siteasp) disk kotası sınırlı olabileceğinden **harici kopya** seçenekleri:
+  - Admin "Yedeği Cihaza İndir" ile telefon/PC'ye indirir.
+  - İleri aşamada: Google Drive/OneDrive/FTP'ye otomatik kopya (isteğe bağlı, sonraki faz).
+
+### ♻️ 5. Geri Yükleme Akışı (Güvenli)
+1. Admin yedek listesinden yedeği seçer veya yedek dosyası yükler (`.zip`).
+2. Sunucu **doğrulama** yapar: manifest, şema sürümü uyumu, SHA-256, `integrity_check`, (okul yedeğinde) okul eşleşmesi.
+3. **Önizleme:** "Yedek tarihi: 2026-10-29 03:00 · 593 öğrenci · 42 öğretmen · 3 sınav · 1.2 MB. Geri yüklenirse bu tarihten sonraki veriler kaybolur." özeti gösterilir.
+4. **Çift onay:** Onay kutusu + admin şifresini yeniden girme (tam geri yüklemede ek olarak "GERI YUKLE" yazdırma).
+5. Sunucu otomatik **güvenlik yedeği** alır (geri dönüş garantisi).
+6. Bakım modu: `app_offline.htm` benzeri geçici bakım kilidi ile yazma istekleri durdurulur → geri yükleme uygulanır → servis yeniden açılır.
+   - Tam yedekte: DB dosyası atomik değiştirme (geçici dosyaya yaz → doğrula → yeniden adlandır).
+   - Okul yedeğinde: tek transaction içinde ilgili okulun tabloları temizlenip yedekten yazılır; hata olursa **rollback**.
+7. Sonuç raporu (başarılı/başarısız, kayıt sayıları) ekranda ve Audit Log'da.
+8. Geri yükleme sonrası şema eski yedekse `DbInitializer` ile eksik kolon/tablolar otomatik tamamlanır (ileri uyumluluk).
+
+### 🌐 6. Backend REST API (`BackupController.cs` – yeni)
+- `GET  /api/Backup/list?schoolId=...` → yedek listesi (ad, tarih, boyut, tür, otomatik/manuel)
+- `POST /api/Backup/create` → manuel yedek (`scope=full|school`)
+- `GET  /api/Backup/download/{fileName}` → yedeği indir (yetkili, yol enjeksiyonu korumalı)
+- `POST /api/Backup/upload` → yedek dosyası yükle (boyut sınırı, uzantı/imza kontrolü)
+- `POST /api/Backup/validate` → yedeği doğrula + önizleme özeti
+- `POST /api/Backup/restore` → onay token'ı + şifre ile geri yükle
+- `DELETE /api/Backup/{fileName}` → yedeği sil
+- `GET/PUT /api/Backup/settings` → otomatik yedek saati, saklama politikası, kota
+- Güvenlik: dosya adı beyaz liste (`^[A-Za-z0-9_\-\.]+\.zip$`), yedek klasörü web'e doğrudan açık olmaz (`wwwroot` DIŞINDA), indirme yalnızca yetkili endpoint'ten.
+- Hassas veri: yedekte parola hash'leri vardır → indirme/silme loglanır; isteğe bağlı AES-256 parola korumalı zip.
+
+### 📱 7. Arayüz Planı
+- **SchoolAdminScreen.tsx → yeni sekme "💾 Yedekleme"** (Süper Admin panelinde ek olarak "Tam Sistem Yedeği" kartı):
+  - Üstte durum kartı: *Son yedek: 3 saat önce ✅ · Toplam yedek: 12 · Kullanılan alan: 84 MB / 500 MB*.
+  - **"Şimdi Yedekle"** büyük butonu (ilerleme göstergesiyle).
+  - Yedek listesi: tarih, tür rozeti (Otomatik/Manuel/Güvenlik), boyut; satır eylemleri **İndir · Geri Yükle · Sil**.
+  - **Otomatik yedek ayarları:** aç/kapat, saat seçici, saklama süresi.
+  - **Yedek dosyası yükle & geri yükle** sihirbazı (doğrula → önizleme → çift onay → sonuç).
+  - Tehlikeli işlemler kırmızı uyarı kartı ve onay modalı ile ayrılır.
+- Yedek durumu Süper Admin panelinde kurum bazında özetlenir (hangi okulun son yedeği ne zaman).
+- Uyarı bildirimi: son başarılı yedek 48 saatten eskiyse admin ana ekranında sarı uyarı bandı.
+
+### 🔗 8. Diğer Modüllerle İlişki
+- **FAZ 10 (Optik Modül):** Yeni tablolar (`OptikSinav*`, `OptikSoruKazanim`, `OptikSinavSonucKazanim`) hem tam hem okul yedeğine dahil edilecek; okul yedeği "modül bazlı seçim" (ör. yalnızca optik veriler) desteği için tablo grupları tanımlanır.
+- **Log Temizleme (purge):** Log silmeden önce otomatik güvenlik yedeği önerilir; fiziksel `.log` dosyaları yedek kapsamı dışındadır, ayrıca arşivlenir.
+- **Büyüme planı:** DB 100–200 MB'ı aşarsa veya eşzamanlı yazma sorunları görülürse SQL Server/PostgreSQL'e geçiş değerlendirilecek; yedek servisi sağlayıcıdan bağımsız arayüzle (`IBackupProvider`) yazılarak geçiş kolaylaştırılacak.
+
+### ✅ 9. Uygulama Sırası (Checklist)
+1. [ ] `IBackupService` + SQLite tutarlı yedek (`VACUUM INTO`/`BackupDatabase`) + zip + SHA-256 manifest.
+2. [ ] `BackupController.cs` (list/create/download/upload/validate/delete) + rol kontrolleri + Audit Log.
+3. [ ] **Otomatik zamanlayıcı** (`BackgroundService`) + saklama politikası + kota temizliği.
+4. [ ] Kritik işlem öncesi otomatik güvenlik yedeği kancaları (şema güncelleme, purge, toplu yükleme).
+5. [ ] Tam geri yükleme (bakım modu + atomik dosya değiştirme + çift onay).
+6. [ ] Okul bazlı yedek/geri yükleme (JSON paket, transaction + rollback, okul eşleşme kontrolü).
+7. [ ] `SchoolAdminScreen.tsx` "💾 Yedekleme" sekmesi + Süper Admin tam yedek kartı + uyarı bandı.
+8. [ ] Test: yedek al → veriyi boz → geri yükle → doğrula; bozuk/yanlış okul/eski şema yedeği reddi; 403 testleri.
+9. [ ] Yedekler `wwwroot` dışında; FTP dağıtım betiği (`quick_finish_deploy.ps1`) `backups/` klasörünü **silmeyecek/ezmeyecek** şekilde doğrulanır.
+10. [ ] Canlı yayın (FTP) + canlı yedek/geri yükleme provası + Git commit & push.
+
