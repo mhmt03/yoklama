@@ -570,11 +570,15 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
       });
       setExamModalVisible(false);
       const updated = await fetchWrittenExams();
-      setExams(updated);
+      if (updated && updated.length > 0) {
+        setExams(updated);
+      } else if (res) {
+        setExams([res]);
+      }
       if (editingExamId) {
         Alert.alert('Başarılı', 'Sınav bilgileri başarıyla güncellendi.');
       } else {
-        if (res?.id) setSelectedExamId(res.id);
+        if (res?.id) setSelectedExamId(String(res.id));
         Alert.alert('Başarılı', 'Yazılı sınav tanımlandı. Şimdi dağıtım sihirbazından yerleşim yapabilirsiniz.');
       }
     } catch (err: any) {

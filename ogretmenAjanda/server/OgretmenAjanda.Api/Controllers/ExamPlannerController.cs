@@ -125,6 +125,11 @@ namespace OgretmenAjanda.Api.Controllers
         public async Task<IActionResult> GetRooms([FromQuery] string? schoolId, [FromQuery] string? tag = null)
         {
             var effectiveId = await GetEffectiveSchoolIdAsync(schoolId);
+            if (effectiveId == Guid.Empty)
+            {
+                var fallbackSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
+                if (fallbackSchool != null) effectiveId = fallbackSchool.Id;
+            }
             var query = _context.ExamHalls
                 .Where(r => r.SchoolId == effectiveId && r.IsActive);
 
@@ -156,7 +161,12 @@ namespace OgretmenAjanda.Api.Controllers
                 return Forbid("Bu işlem için sadece okul idarecileri ve yöneticiler yetkilidir.");
             }
 
-            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId.ToString());
+            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId.HasValue ? dto.SchoolId.Value.ToString() : null);
+            if (effectiveId == Guid.Empty)
+            {
+                var fallbackSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
+                if (fallbackSchool != null) effectiveId = fallbackSchool.Id;
+            }
             if (effectiveId == Guid.Empty || string.IsNullOrWhiteSpace(dto.RoomName))
             {
                 return BadRequest(new { success = false, message = "Okul ve salon adı zorunludur." });
@@ -167,7 +177,7 @@ namespace OgretmenAjanda.Api.Controllers
             if (dto.Id.HasValue && dto.Id.Value != Guid.Empty)
             {
                 hall = await _context.ExamHalls.FindAsync(dto.Id.Value);
-                if (hall == null || hall.SchoolId != dto.SchoolId)
+                if (hall == null || hall.SchoolId != effectiveId)
                 {
                     return NotFound(new { success = false, message = "Salon bulunamadı." });
                 }
@@ -176,7 +186,7 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 hall = new ExamHall
                 {
-                    SchoolId = dto.SchoolId
+                    SchoolId = effectiveId
                 };
                 _context.ExamHalls.Add(hall);
             }
@@ -188,7 +198,7 @@ namespace OgretmenAjanda.Api.Controllers
             hall.IsActive = dto.IsActive;
 
             await _context.SaveChangesAsync();
-            await LogActionAsync(dto.SchoolId, "SAVE_ROOM", "ExamHall", hall.Id.ToString(), $"Sınav salonu kaydedildi/güncellendi: {hall.RoomName} (Kapasite: {hall.Capacity}, Tip: {hall.Tag})");
+            await LogActionAsync(effectiveId, "SAVE_ROOM", "ExamHall", hall.Id.ToString(), $"Sınav salonu kaydedildi/güncellendi: {hall.RoomName} (Kapasite: {hall.Capacity}, Tip: {hall.Tag})");
             return Ok(new { success = true, data = hall });
         }
 
@@ -214,6 +224,11 @@ namespace OgretmenAjanda.Api.Controllers
         public async Task<IActionResult> GetBranches([FromQuery] string? schoolId)
         {
             var effectiveId = await GetEffectiveSchoolIdAsync(schoolId);
+            if (effectiveId == Guid.Empty)
+            {
+                var fallbackSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
+                if (fallbackSchool != null) effectiveId = fallbackSchool.Id;
+            }
             var students = await _context.Students
                 .Where(s => s.SchoolId == effectiveId)
                 .ToListAsync();
@@ -382,6 +397,11 @@ namespace OgretmenAjanda.Api.Controllers
         public async Task<IActionResult> GetExams([FromQuery] string? schoolId)
         {
             var effectiveId = await GetEffectiveSchoolIdAsync(schoolId);
+            if (effectiveId == Guid.Empty)
+            {
+                var fallbackSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
+                if (fallbackSchool != null) effectiveId = fallbackSchool.Id;
+            }
             var exams = await _context.WrittenExams
                 .Where(e => e.SchoolId == effectiveId)
                 .OrderByDescending(e => e.ExamDate)
@@ -425,7 +445,12 @@ namespace OgretmenAjanda.Api.Controllers
                 return Forbid("Bu işlem için sadece okul idarecileri ve yöneticiler yetkilidir.");
             }
 
-            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId.ToString());
+            var effectiveId = await GetEffectiveSchoolIdAsync(dto.SchoolId.HasValue ? dto.SchoolId.Value.ToString() : null);
+            if (effectiveId == Guid.Empty)
+            {
+                var fallbackSchool = await _context.Schools.Where(s => s.IsActive).OrderBy(s => s.CreatedAt).FirstOrDefaultAsync();
+                if (fallbackSchool != null) effectiveId = fallbackSchool.Id;
+            }
             if (effectiveId == Guid.Empty || string.IsNullOrWhiteSpace(dto.Name))
             {
                 return BadRequest(new { success = false, message = "Okul ve sınav adı zorunludur." });
@@ -2347,7 +2372,7 @@ namespace OgretmenAjanda.Api.Controllers
     public class ExamHallDto
     {
         public Guid? Id { get; set; }
-        public Guid SchoolId { get; set; }
+        public Guid? SchoolId { get; set; }
         public string RoomName { get; set; } = string.Empty;
         public int Capacity { get; set; } = 30;
         public string Tag { get; set; } = "İkili Oturum";
@@ -2358,7 +2383,7 @@ namespace OgretmenAjanda.Api.Controllers
     public class WrittenExamDto
     {
         public Guid? Id { get; set; }
-        public Guid SchoolId { get; set; }
+        public Guid? SchoolId { get; set; }
         public string Name { get; set; } = string.Empty;
         public DateTime ExamDate { get; set; } = DateTime.Today;
         public int LessonHour { get; set; } = 3;

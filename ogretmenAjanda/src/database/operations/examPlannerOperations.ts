@@ -1,5 +1,5 @@
 import { getDB } from '../db';
-import { apiGet, apiPost, apiPut, apiDelete, getActiveSchoolId } from '../../services/apiClient';
+import { apiGet, apiPost, apiPut, apiDelete, apiRequest, getActiveSchoolId } from '../../services/apiClient';
 
 export interface ExamHallItem {
   id: string;
@@ -92,20 +92,19 @@ export async function fetchExamRooms(schoolId?: string, tag?: string): Promise<E
 }
 
 export async function saveExamRoom(room: Partial<ExamHallItem> & { roomName: string; capacity: number }): Promise<boolean> {
-  const sId = room.schoolId || (await getActiveSchoolId());
+  const rawId = room.schoolId || (await getActiveSchoolId());
+  const sId = rawId && rawId !== 'undefined' && rawId !== 'null' ? rawId.trim() : undefined;
   try {
-    if (sId) {
-      const res = await apiPost<{ success: boolean; data: any }>('/ExamPlanner/rooms', {
-        id: room.id,
-        schoolId: sId,
-        roomName: room.roomName,
-        capacity: room.capacity,
-        tag: room.tag || 'İkili Oturum',
-        orderIndex: room.orderIndex || 0,
-        isActive: room.isActive ?? true,
-      });
-      if (res && res.success) return true;
-    }
+    const res = await apiRequest<{ success: boolean; data: any }>('ExamPlanner/rooms', 'POST', {
+      id: room.id,
+      schoolId: sId,
+      roomName: room.roomName,
+      capacity: room.capacity,
+      tag: room.tag || 'İkili Oturum',
+      orderIndex: room.orderIndex || 0,
+      isActive: room.isActive ?? true,
+    });
+    if (res && res.success) return true;
   } catch (err) {
     console.warn('[ExamPlanner] Sunucuya salon kaydedilemedi, yerel DB güncelleniyor:', err);
   }
@@ -205,15 +204,16 @@ export async function seedRoomsFromClasses(defaultTag = 'İkili Oturum', default
 // -------------------------------------------------------------
 
 export async function fetchWrittenExams(schoolId?: string): Promise<WrittenExamItem[]> {
+  const rawId = schoolId || (await getActiveSchoolId());
+  const sId = rawId && rawId !== 'undefined' && rawId !== 'null' ? rawId.trim() : '';
+  const qStr = sId ? `?schoolId=${encodeURIComponent(sId)}` : '';
+
   try {
-    const rawId = schoolId || (await getActiveSchoolId());
-    const sId = rawId && rawId !== 'undefined' && rawId !== 'null' ? rawId.trim() : '';
-    const qStr = sId ? `?schoolId=${encodeURIComponent(sId)}` : '';
     const res = await apiGet<{ success: boolean; data: any[] }>(`/ExamPlanner/exams${qStr}`);
-    if (res && res.success && Array.isArray(res.data)) {
-      return res.data.map((e: any) => ({
+    if (res && res.success && Array.isArray(res.data) && res.data.length > 0) {
+      const serverExams = res.data.map((e: any) => ({
         id: String(e.id),
-        schoolId: String(e.schoolId),
+        schoolId: String(e.schoolId || ''),
         name: e.name,
         examDate: e.examDateStr || e.examDate?.substring(0, 10),
         dayOfWeekStr: e.dayOfWeekStr,
@@ -226,18 +226,41 @@ export async function fetchWrittenExams(schoolId?: string): Promise<WrittenExamI
         studentCount: Number(e.studentCount) || 0,
         roomCount: Number(e.roomCount) || 0,
       }));
+
+      // Yerel SQLite ile senkronize et
+      try {
+        const db = await getDB();
+        for (const se of serverExams) {
+          await db.runAsync(
+            `INSERT OR REPLACE INTO written_exams (id, school_id, name, exam_date, lesson_hour, start_time, academic_year, term, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            se.id,
+            se.schoolId || null,
+            se.name,
+            se.examDate,
+            se.lessonHour,
+            se.startTime || '09:50',
+            se.academicYear || '2026-2027',
+            se.term || '1. Dönem',
+            se.isActive ? 1 : 0
+          );
+        }
+      } catch {}
+
+      return serverExams;
     }
   } catch (err) {
     console.warn('[ExamPlanner] Sunucudan sınavlar alınamadı, yerel DB kullanılıyor:', err);
   }
 
+  // Yerel SQLite Fallback
   const db = await getDB();
   const rows = await db.getAllAsync<any>(
     'SELECT * FROM written_exams WHERE is_active = 1 ORDER BY exam_date DESC, lesson_hour ASC'
   );
   return rows.map((r) => ({
     id: String(r.id),
-    schoolId: String(r.school_id),
+    schoolId: String(r.school_id || ''),
     name: r.name,
     examDate: r.exam_date,
     lessonHour: Number(r.lesson_hour) || 3,
@@ -252,33 +275,44 @@ export async function fetchWrittenExams(schoolId?: string): Promise<WrittenExamI
 }
 
 export async function saveWrittenExam(exam: Partial<WrittenExamItem> & { name: string; examDate: string; lessonHour: number }): Promise<any> {
-  const sId = exam.schoolId || (await getActiveSchoolId());
+  const rawId = exam.schoolId || (await getActiveSchoolId());
+  const sId = rawId && rawId !== 'undefined' && rawId !== 'null' ? rawId.trim() : undefined;
+
+  let serverSavedItem: any = null;
   try {
-    if (sId) {
-      const res = await apiPost<{ success: boolean; data: any }>('/ExamPlanner/exams', {
-        id: exam.id,
-        schoolId: sId,
-        name: exam.name,
-        examDate: exam.examDate,
-        lessonHour: exam.lessonHour,
-        startTime: exam.startTime || '09:50',
-        academicYear: exam.academicYear || '2026-2027',
-        term: exam.term || '1. Dönem',
-        isActive: exam.isActive ?? true,
-        isPublishedToStudents: exam.isPublishedToStudents ?? true,
-      });
-      if (res && res.success) return res.data;
+    const res = await apiRequest<{ success: boolean; data: any }>('ExamPlanner/exams', 'POST', {
+      id: exam.id,
+      schoolId: sId,
+      name: exam.name,
+      examDate: exam.examDate,
+      lessonHour: exam.lessonHour,
+      startTime: exam.startTime || '09:50',
+      academicYear: exam.academicYear || '2026-2027',
+      term: exam.term || '1. Dönem',
+      isActive: exam.isActive ?? true,
+      isPublishedToStudents: exam.isPublishedToStudents ?? true,
+    });
+
+    if (res && res.success) {
+      serverSavedItem = (res.data as any)?.data || res.data;
+    } else if (res && !res.success) {
+      throw new Error(res.error || 'Sınav sunucuya kaydedilemedi.');
     }
-  } catch (err) {
-    console.warn('[ExamPlanner] Sunucuya sınav kaydedilemedi, yerel DB kullanılıyor:', err);
+  } catch (err: any) {
+    if (err?.message && !err.message.includes('Sunucuya bağlanılamadı')) {
+      throw err;
+    }
+    console.warn('[ExamPlanner] Sunucuya erişilemedi, yerel DB kullanılıyor:', err);
   }
 
+  // Yerel SQLite'a kaydet (çift güvence)
   const db = await getDB();
-  const id = exam.id || `exam_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const id = serverSavedItem?.id ? String(serverSavedItem.id) : (exam.id || `exam_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
   await db.runAsync(
-    `INSERT OR REPLACE INTO written_exams (id, name, exam_date, lesson_hour, start_time, academic_year, term, is_active)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO written_exams (id, school_id, name, exam_date, lesson_hour, start_time, academic_year, term, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
+    sId || null,
     exam.name,
     exam.examDate,
     exam.lessonHour,
@@ -287,7 +321,8 @@ export async function saveWrittenExam(exam: Partial<WrittenExamItem> & { name: s
     exam.term || '1. Dönem',
     exam.isActive ?? true ? 1 : 0
   );
-  return { id, ...exam };
+
+  return serverSavedItem || { id, ...exam, schoolId: sId };
 }
 
 export async function deleteWrittenExam(examId: string): Promise<boolean> {

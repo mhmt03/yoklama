@@ -32,7 +32,7 @@ export function getCachedUnreadCount(): number {
 export async function fetchUnreadMessageCount(schoolId?: string): Promise<number> {
   try {
     const url = schoolId ? `messages/unread-count?schoolId=${schoolId}` : 'messages/unread-count';
-    const res = await apiRequest<{ count: number }>(url);
+    const res = await apiRequest<{ count: number }>(url, 'GET', undefined, false, true);
     if (res.success && res.data && typeof res.data.count === 'number') {
       setCachedUnreadCount(res.data.count);
       return res.data.count;

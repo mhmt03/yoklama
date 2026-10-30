@@ -7,7 +7,7 @@ import { Alert, Linking, Platform } from 'react-native';
 export const CURRENT_APP_VERSION = '1.0.10';
 export const CURRENT_VERSION_CODE = 11;
 
-export const UPDATE_SERVER_BASE_URL = 'http://ogretmenajanda.runasp.net';
+export const UPDATE_SERVER_BASE_URL = 'https://ogretmenajanda.runasp.net';
 export const UPDATE_JSON_URL = `${UPDATE_SERVER_BASE_URL}/version.json`;
 export const UPDATE_TXT_URL = `${UPDATE_SERVER_BASE_URL}/version.txt`;
 export const DEFAULT_APK_DOWNLOAD_URL = `${UPDATE_SERVER_BASE_URL}/api/apk`;
@@ -45,8 +45,8 @@ export function isNewerVersion(remoteVersion: string, currentVersion: string = C
  * Yeni versiyon varsa kullanıcıya uyarı gösterip APK indirme bağlantısına yönlendirir.
  */
 export async function checkForAppUpdate(silent: boolean = true): Promise<void> {
-  // Web tarayıcısında çalışan sürüm için APK güncelleme kontrolü zorunlu değildir
-  // Ancak admin panelinde veya kullanıcı testlerinde de çalışabilir
+  // Web tarayıcısında çalışan sürüm için APK güncelleme kontrolü yapılmaz (Mixed content ve gereksiz ağ trafiği önlenir)
+  if (Platform.OS === 'web') return;
   try {
     let remoteInfo: AppVersionInfo | null = null;
 
