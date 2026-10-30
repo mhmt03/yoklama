@@ -303,153 +303,178 @@
 
 ---
 
-## 📍 FAZ 10: Optik Okuma Modülü ve E-Yoklama Modülü Adaptasyonu & Entegrasyon Planı (Yalnızca Admin)
+## 📍 FAZ 10: Optik Okuma, Sınav Değerlendirme, Konu-Kazanım Analizi & Çoklu Rol Raporlama Modülü
 
-> **Hedef:** `yoklamaWeb` uygulamasında yer alan gelişmiş **Optik Okuma (Sınav Değerlendirme)** ve **E-Yoklama (Sınıf & Salon Devamsızlık Takibi)** modüllerinin `ogretmenAjanda` sistemine çok kurumlu (`SchoolId`), modern REST API ve React Native/Web SPA arayüzü ile eksiksiz uyarlanması.  
-> **Erişim Kuralı:** Yalnızca **Okul Admini (Müdür / İdare)**, **Kurum Admini** ve **Süper Admin** erişimine açık olacaktır. Öğretmen veya veli rollerine kapalı tutulacaktır.  
-> **Uygulama Zamanı:** Cumartesi Günü (Kota yenilenmesi sonrası).
+> **Hedef:** `yoklamaWeb` uygulamasındaki optik okuma ve sınav değerlendirme mantığının çok kurumlu (`SchoolId`), modern REST API, zengin grafiksel istatistikler, detaylı konu-kazanım analizli karneler ve esnek rol/görünürlük izinleriyle `ogretmenAjanda` sistemine eksiksiz uyarlanması.  
+> **Uygulama Zamanı:** Cumartesi Günü (Kota yenilenmesi sonrası).  
+> **Geliştirme Kuralı:** Kodlama yapılmayacak; mevcut plan bu dokümanda olgunlaştırılmıştır.
 
 ---
 
 ### 🛡️ 1. Veritabanı Güvenlik Yedeği (Ön Koşul - Tamamlandı)
-Herhangi bir model veya tablo değişikliği öncesinde canlı sunucudan (`site99031.siteasp.net` FTP) en güncel SQLite veritabanı indirilip yerel güvenli depolama dizinine arşivlendi:
+Canlı sunucudan (`site99031.siteasp.net` FTP) en güncel SQLite veritabanı indirilip yerel güvenli depolama dizinine arşivlendi:
 - **Zaman Damgalı Yedek:** `backups/live_ogretmenajanda_backup_20261029_203026.db` (1.04 MB)
 - **En Son Canlı Kopya:** `backups/live_ogretmenajanda_backup_latest.db`
 - **Geri Dönüş Güvencesi:** Cumartesi günkü geliştirme sürecinde olası bir veri uyuşmazlığı durumunda tek tıkla orijinal canlı durumuna geri dönülebilecektir.
 
 ---
 
-### 🏛️ 2. Veritabanı Modelleri & Adaptasyon Haritası
+### 🎯 2. Esnek Rol Yetkileri & Görünürlük Kontrol Mekanizması
 
-`yoklamaWeb` tekil pansiyon/okul mimarisinde çalıştığı için tüm tablolarda **`SchoolId: Guid`** izolasyonu bulunmamaktaydı. `ogretmenAjanda` çok okullu (multi-tenant) bir sistem olduğu için yeni eklenecek tüm tablolar `SchoolId` ile izole edilecektir.
+Her sınav tanımlanırken veya değerlendirildikten sonra idare tarafından bağımsız olarak yönetilebilen **3 Temel Görünürlük ve Yetki Anahtarı** bulunacaktır:
 
-#### A. Optik Okuma Modülü Modelleri (`server/OgretmenAjanda.Api/Models/`)
+1. **Öğrenci & Veli Sonuç Görünürlüğü (`IsPublishedToStudents` - Açık/Kapalı):**
+   - **Kapalı:** Sınav değerlendirilmiş olsa dahi öğrenci ve veli ekranında sınavla ilgili hiçbir bilgi görünmez.
+   - **Açık:** Öğrenci ve veli kendi ekranında sınav puanını, netlerini ve detaylı karnesini görebilir.
+2. **Sıralama / Derece Görünürlüğü (`ShowRankingToStudents` - Açık/Kapalı):**
+   - **Kapalı:** Öğrenci ve veli kendi doğru/yanlış/net sayılarını ve karnesini görür; ancak okul/şube sıralaması gizlenir (öğrenciler arasında gereksiz yarış/stres oluşması istenmediğinde).
+   - **Açık:** Öğrenci kendi ekranında okul derecesini, şube derecesini ve genel katılım sayısını (Örn: *Okul 4.sü / 120 Öğrenci*) görebilir.
+3. **Öğretmen Sonuç Erişimi (`IsVisibleToTeachers` - Açık/Kapalı & İzolasyon):**
+   - **Kapalı:** Sınav sonuçları sadece idare panelinde kalır.
+   - **Açık:** Öğretmenler kendi panellerinden sınav sonuçlarına ve karnelere erişebilir.
+   - **Öğretmen İzolasyon Kuralı:** Öğretmenler okulun tamamını değil, **yalnızca kendi derse girdikleri sınıfların ve kendi branş derslerine ait sınav sonuçlarını, soru başarılarını ve istatistiki analizlerini** görebilir.
+
+---
+
+### 📑 3. Konu & Kazanım Analizli Detaylı Öğrenci Karneleri
+
+- **Kazanım Tanımlama Desteği:** Sınav tanımlanırken her bir dersin sorularına ait konu ve kazanımlar sisteme girilebilir (Arayüzden hızlıca veya Excel/şablon yükleyerek).
+  - *Örn:* Fizik 1. Soru ➔ "Vektörler ve Bileşke", 2. Soru ➔ "Bağıl Hareket".
+- **Kazanım Bazlı Başarı Karnesi:**
+  - Öğrencinin optik sonuçları değerlendirildiğinde her konu ve kazanımdaki soru sayısı, doğru, yanlış ve başarı yüzdesi (`%80 Başarılı`, `%25 Geliştirilmeli`, `%0 Eksik Kazanım`) hesaplanır.
+  - **Öğrenci & Veli Ekranı:** Renkli kazanım göstergeleri, öğrencinin hangi konularda eksiği olduğunu gösteren rehberlik karnesi.
+  - **Öğretmen & İdare Ekranı:** Sınıf genelinde en çok fire verilen konuların ve tekrar edilmesi gereken kazanımların tespiti.
+
+---
+
+### 📊 4. Zengin Görsel İstatistikler ve Başarı Analitikleri
+
+Admin ve branş öğretmenlerinin ekranında görsel zenginliğe sahip (bar chart, pasta dilimi, net dağılım grafikleri) kapsamlı gösterge panelleri yer alacaktır:
+
+1. **Okul Başarı Durumu (Genel Analiz):**
+   - Okul genel net ortalaması, puan dağılım grafiği, sınava katılım oranı.
+   - Ders bazında okul ortalamaları (Türkçe: 28.4 Net, Matematik: 19.2 Net vb.).
+2. **Sınıf / Şube Başarı Durumu (Karşılaştırmalı Analiz):**
+   - Şubeler arası net ve puan karşılaştırma grafikleri (Örn: 10-A, 10-B, 10-C net kıyaslamaları).
+   - Şube içi derece dağılımları ve şube başarı yüzdeleri.
+3. **Ders Ders Başarı Analizi (Branş Odaklı):**
+   - Soru zorluk indeksleri: Hangi soru okul/sınıf genelinde kaç kişi tarafından doğru, yanlış veya boş bırakılmış?
+   - Çeldirici analizi (A şıkkı yerine neden yoğun olarak D şıkkı işaretlendi?).
+   - Öğretmenin kendi sınıfındaki başarı trendi.
+
+---
+
+### 🪄 5. Kullanıcı Dostu Optik Form Tanımlama & Geleceğe Yönelik .FMT / AI Altyapısı
+
+- **Sezgisel Form Tanımlama Arayüzü:**
+  - Karmaşık koordinat hesapları yerine görsel ve adım adım form sihirbazı.
+  - Sütun başlangıç ve uzunluklarını canlı örnek metin satırı üzerinde seçerek doğrulama.
+- **Akıllı .FMT (Optik Format) Dosyası & AI Desteği (Hazırlık):**
+  - Kullanıcı ileride elindeki hazır `.fmt` dosyasını sisteme yüklediğinde;
+  - Yapay zekâ (AI / Regex Parser motoru) `.fmt` dosyasını çözümleyerek öğrenci numarası, ad soyad, sınıf, kitapçık türü ve tüm derslerin soru sayıları ile sütun koordinatlarını otomatik çıkaracak.
+  - Sıfır elle koordinat girişi ile optik form şablonu saniyeler içinde hazır hale gelecektir.
+
+---
+
+### 🏛️ 6. Genişletilmiş Veritabanı Modelleri (`server/OgretmenAjanda.Api/Models/`)
+
+Yeni gereksinimler doğrultusunda tasarlanan EF Core tabloları:
+
 1. **`OptikForm` & `OptikFormDers` (Optik Şablon Tanımı):**
-   - `Id: Guid` (veya int)
-   - `SchoolId: Guid` *(Okula özel şablon havuzu)*
-   - `FormAdi: string` (Örn: "40 Soruluk Ortak Sınav Optiği", "Kazanım İzleme Formu")
-   - Sütun Koordinatları: `NumaraBaslangic`, `NumaraUzunluk`, `AdSoyadBaslangic`, `AdSoyadUzunluk`, `SinifBaslangic`, `SinifUzunluk`, `KitapcikTuruBaslangic`, `KitapcikTuruUzunluk`
-   - `ICollection<OptikFormDers>`: `DersAdi`, `BaslangicSutun`, `KarakterSayisi` (Soru Sayısı)
+   - `Id: Guid`, `SchoolId: Guid`, `FormAdi: string`
+   - `NumaraBaslangic`, `NumaraUzunluk`, `AdSoyadBaslangic`, `AdSoyadUzunluk`, `SinifBaslangic`, `SinifUzunluk`, `KitapcikTuruBaslangic`, `KitapcikTuruUzunluk`
+   - `FmtRawContent: string?` *(Gelecekte yüklenecek .fmt dosya içeriği)*
+   - `ICollection<OptikFormDers>`: `DersAdi`, `BaslangicSutun`, `KarakterSayisi` (Soru Sayısı), `SiraNo`
 
-2. **`OptikSinav` & `OptikSinavDers` (Sınav ve Cevap Anahtarları):**
-   - `Id: Guid`
-   - `SchoolId: Guid`
-   - `SinavAdi: string`
-   - `UygulamaTarihi: DateTime`
-   - `YanlisDogruyuGotururSayisi: double` (Örn: 4 yanlış 1 doğruyu götürür veya 0)
-   - `HedefSiniflar: string?` (Virgülle ayrılmış şubeler: "9-A,9-B,10-A")
-   - `KitapcikTurleri: string?` (Örn: "A,B,C,D")
-   - `OptikFormId: Guid?` (Kullanılan varsayılan optik form)
-   - `ICollection<OptikSinavDers>`:
-     - `DersAdi: string`
-     - `SoruSayisi: int`
-     - `CevapAnahtariA: string`
-     - `CevapAnahtariB: string?`
-     - `CevapAnahtariC: string?`
-     - `CevapAnahtariD: string?`
+2. **`OptikSinav` & `OptikSinavDers` (Sınav, Cevap Anahtarları & Görünürlük İzinleri):**
+   - `Id: Guid`, `SchoolId: Guid`, `SinavAdi: string`, `UygulamaTarihi: DateTime`
+   - `YanlisDogruyuGotururSayisi: double` (Örn: 4 yanlış 1 doğru, veya 0)
+   - `HedefSiniflar: string?`, `KitapcikTurleri: string?`, `OptikFormId: Guid?`
+   - 🛡️ **Yeni Görünürlük Alanları:**
+     - `IsPublishedToStudents: bool` *(Öğrenci/Veli sınav sonucunu görsün mü? Varsayılan: false)*
+     - `ShowRankingToStudents: bool` *(Öğrenci/Veli ekranında okul/şube sırası görünsün mü? Varsayılan: false)*
+     - `IsVisibleToTeachers: bool` *(Öğretmenler sınav sonuçlarını görebilsin mi? Varsayılan: true)*
+     - `HasKazanimAnalysis: bool` *(Sınavda konu/kazanım analizi aktif mi?)*
+   - `ICollection<OptikSinavDers>`: `DersAdi`, `SoruSayisi`, `CevapAnahtariA`, `CevapAnahtariB`, `CevapAnahtariC`, `CevapAnahtariD`
 
-3. **`OptikSinavSonuc` & `OptikSinavSonucDers` (Değerlendirme Sonuçları):**
-   - `Id: Guid`
-   - `SchoolId: Guid`
-   - `OptikSinavId: Guid`
-   - `StudentId: Guid?` *(Canlı `Students` tablosundaki gerçek öğrenci GUID'i)*
-   - `OgrenciNo: string`
-   - `AdSoyad: string`
-   - `Sinif: string` (Kademe + Şube)
-   - `KitapcikTuru: string`
-   - `ToplamDogru: int`, `ToplamYanlis: int`, `ToplamBos: int`, `ToplamNet: double`
-   - `Puan: double?`
-   - `OrijinalSatir: string?` *(Optik okuyucudan gelen ham TXT/DAT satırı)*
-   - `ICollection<OptikSinavSonucDers>`:
-     - `DersAdi: string`
-     - `DogruSayisi: int`, `YanlisSayisi: int`, `BosSayisi: int`, `Net: double`
-     - `OgrenciCevaplari: string`
+3. **`OptikSoruKazanim` (Konu ve Kazanım Eşleştirmeleri - Yeni):**
+   - `Id: Guid`, `SchoolId: Guid`, `OptikSinavId: Guid`
+   - `DersAdi: string`, `SoruNo: int`
+   - `KonuAdi: string` (Örn: "Trigonometri")
+   - `KazanimKodu: string?` (Örn: "11.1.2.1")
+   - `KazanimAciklamasi: string?` (Örn: "Trigonometrik fonksiyonların grafiklerini çizer.")
 
-#### B. E-Yoklama (Sınıf & Salon Devamsızlık) Modelleri
-1. **`ClassAttendanceDefinition` (Yoklama Grubu & Sınıf Tanımı):**
-   - `Id: Guid`
-   - `SchoolId: Guid`
-   - `Name: string` (Örn: "9. Sınıflar Günlük Ders Yoklaması", "Destekleme Yetiştirme Kursu")
-   - `BuildingOrRoom: string?`
-   - `ValidFrom: DateTime`, `ValidTo: DateTime`
-   - `TargetClasses: string?` (İlgili şubeler)
+4. **`OptikSinavSonuc` & `OptikSinavSonucDers` (Öğrenci Değerlendirme & Dereceler):**
+   - `Id: Guid`, `SchoolId: Guid`, `OptikSinavId: Guid`, `StudentId: Guid?`
+   - `OgrenciNo: string`, `AdSoyad: string`, `Sinif: string`, `KitapcikTuru: string`
+   - `ToplamDogru: int`, `ToplamYanlis: int`, `ToplamBos: int`, `ToplamNet: double`, `Puan: double?`
+   - 🏆 **Derece / Sıralama Alanları:**
+     - `OkulSirasi: int?`, `SinifSirasi: int?`, `ToplamKatilimci: int?`
+   - `ICollection<OptikSinavSonucDers>`: `DersAdi`, `DogruSayisi`, `YanlisSayisi`, `BosSayisi`, `Net: double`, `OgrenciCevaplari: string`
 
-2. **`DailyClassAttendance` & `DailyClassAttendanceStudent` (Günlük Saatlik Yoklama):**
-   - `Id: Guid`
-   - `SchoolId: Guid`
-   - `ClassAttendanceDefinitionId: Guid`
-   - `Tarih: DateTime`
-   - `OturumNo: int` (Ders Saati: 1..8)
-   - `SalonNotu: string?`, `GozetmenNotu: string?`
-   - `YoklamaYapanKullaniciAdi: string?`
-   - `KayitZamani: DateTime`
-   - `ICollection<DailyClassAttendanceStudent>`:
-     - `StudentId: Guid`
-     - `StudentNumber: string`, `FullName: string`, `Grade: string`, `Section: string`
-     - `Status: AttendanceStatus` (`Var = 1`, `Yok = 2`, `Izinli = 3`, `Raporlu = 4`, `Gec = 5`)
-     - `Not: string?`
+5. **`OptikSinavSonucKazanim` (Öğrenci Konu-Kazanım Başarı Tablosu - Yeni):**
+   - `Id: Guid`, `SchoolId: Guid`, `OptikSinavId: Guid`, `StudentId: Guid?`, `OgrenciNo: string`
+   - `DersAdi: string`, `KonuAdi: string`, `KazanimAciklamasi: string?`
+   - `ToplamSoru: int`, `DogruSayisi: int`, `YanlisSayisi: int`, `BosSayisi: int`
+   - `BasariYuzdesi: double` (Örn: 80.0)
+
+6. **`ClassAttendanceDefinition` & `DailyClassAttendance` (E-Yoklama Modülü):**
+   - Sınıf/salon bazlı günlük ve ders saati devamsızlık kayıt modelleri.
 
 ---
 
-### 🔌 3. Öğretmen Ajandası Mevcut Verileri ile Adaptasyon Kuralları
-- **Öğrenci Eşleştirme Motoru:**
-  - `yoklamaWeb`'de `OgrenciNo` üzerinden arama yapılmaktaydı.
-  - `ogretmenAjanda` sisteminde değerlendirme sırasında optik metindeki `OgrenciNo`, okulun aktif `Students` tablosundaki `s.SchoolId == schoolId && s.StudentNumber == ogrenciNo` sorgusu ile eşleştirilecek.
-  - Numarası okul veritabanında bulunamayan öğrenciler için sistem "Sistemde Kayıtsız Öğrenci" etiketiyle satırı koruyacak ve adminin tek tıkla şube/öğrenciyi sisteme bağlamasına imkân tanıyacaktır.
-- **Şube ve Sınıf Uyumluluğu:**
-  - `GradeSectionNormalizer` kullanılarak optik çıktılardaki "10A", "10-A", "10/A" formatları canonical `Grade = "10"`, `Section = "A"` değerlerine dönüştürülecektir.
-- **Yetki Sınırı (Admin-Only):**
-  - Tüm yeni Controller ve API uçlarına `[Authorize]` kuralı ve `IsAdminOrStaff` kontrolü konulacak; öğretmen rolü doğrudan 403 Forbidden alacaktır.
+### 🌐 7. Backend REST API Uç Noktaları (`OptikModulController.cs`)
+
+- `GET /api/Optik/forms?schoolId=...` -> Tanımlı form şablonları
+- `POST /api/Optik/forms` -> Yeni form oluşturma / düzenleme
+- `POST /api/Optik/forms/parse-fmt` -> *.fmt dosyasından AI / parser ile form koordinatlarını çıkarma (altyapı)*
+- `GET /api/Optik/exams?schoolId=...` -> Okul optik sınavları (rol bazlı filtreli)
+- `POST /api/Optik/exams` -> Sınav, cevap anahtarları ve görünürlük anahtarlarıyla kayıt
+- `PUT /api/Optik/exams/{id}/visibility` -> Öğrenci/Veli ve Öğretmen görünürlük ile sıralama anahtarlarını anlık açma/kapama
+- `POST /api/Optik/exams/{id}/kazanimlar` -> Soru bazlı konu ve kazanımları kaydetme
+- `POST /api/Optik/evaluate` -> TXT / DAT optik dosyasını işleme, net/puan/sıralama ve kazanım başarılarını hesaplama
+- `GET /api/Optik/exams/{id}/results` -> Sınav sonuçları (Admin tümünü, öğretmen sadece dersine girdiği şubeleri görür)
+- `GET /api/Optik/exams/{id}/statistics` -> Okul, şube ve ders bazlı görsel grafik veri seti
+- `GET /api/Optik/exams/{id}/student-report/{studentId}` -> Öğrencinin detaylı konusu/kazanımı olan karnesi
+- `GET /api/Optik/exams/{id}/export-excel` -> Çok sayfalı Excel çıktısı (Genel sıralama, şube listeleri, karne dökümü)
 
 ---
 
-### 🌐 4. Backend REST API Mimarisi (`server/OgretmenAjanda.Api`)
+### 📱 8. Kullanıcı Arayüzü (UI) Tasarım & Ekran Dağılımı
 
-#### `OptikModulController.cs` (REST API Endpoints)
-- `GET /api/Optik/forms?schoolId=...` -> Okula ait tanımlı optik form şablonları listesi
-- `POST /api/Optik/forms` -> Yeni optik form şablonu oluşturma
-- `PUT /api/Optik/forms/{id}` -> Form şablonu sütun koordinatlarını güncelleme
-- `DELETE /api/Optik/forms/{id}` -> Şablon silme
-- `GET /api/Optik/exams?schoolId=...` -> Okul optik sınavları listesi
-- `POST /api/Optik/exams` -> Yeni sınav tanımlama ve cevap anahtarları (A/B/C/D)
-- `PUT /api/Optik/exams/{id}` -> Sınav ve cevap anahtarlarını güncelleme
-- `DELETE /api/Optik/exams/{id}` -> Sınavı ve sonuçlarını silme
-- `POST /api/Optik/evaluate` -> TXT / DAT dosyasını alıp canlı ayrıştırma, cevap anahtarı ile karşılaştırma, net hesaplama ve sonuçları toplu kaydetme
-- `GET /api/Optik/exams/{id}/results` -> Sınav sonuçları (Net sıralı öğrenci ve şube başarı listesi)
-- `GET /api/Optik/exams/{id}/export-excel` -> EPPlus / ClosedXML ile hazırlanmış renkli sınav sonuç karnesi ve Excel çıktısı
-
-#### `ClassAttendanceController.cs` (REST API Endpoints)
-- `GET /api/ClassAttendance/definitions?schoolId=...` -> Yoklama grupları
-- `POST /api/ClassAttendance/definitions` -> Yeni yoklama grubu oluşturma
-- `GET /api/ClassAttendance/daily?definitionId=...&tarih=...&oturumNo=...` -> Belirtilen gün ve ders saatindeki yoklama listesi
-- `POST /api/ClassAttendance/daily/save` -> Toplu yoklama durumu (Var, Yok, İzinli, Raporlu, Geç) kaydetme
-- `GET /api/ClassAttendance/daily/export-excel` -> Günlük / haftalık devamsızlık icmal raporu
+1. **Okul Admin Paneli (`SchoolAdminScreen.tsx`):**
+   - **Optik Formlar Sekmesi:** Şablon listesi, yeni form sihirbazı (.fmt yükleme hazırlığı).
+   - **Optik Sınavlar & Okuma Sekmesi:** Sınav oluşturma, cevap anahtarı girme, TXT yükleyip anında değerlendirme.
+   - **Görünürlük Ayar Paneli:** Sınav kartı üzerinden tek dokunuşla "Öğrenci/Veliye Aç", "Sıralamayı Göster", "Öğretmenlere Aç" switch anahtarları.
+   - **Okul İstatistik & Grafik Ekranı:** Okul ve şube karşılaştırma çubukları, ders başarı pasta grafikleri.
+2. **Öğretmen Paneli (`HomeScreen.tsx` / `SideDrawer.tsx` / `Student360Modal.tsx`):**
+   - Eğer sınav öğretmene açılmışsa menüde veya ana ekranda **"🎯 Optik Sınav Sonuçlarım"** kartı.
+   - Öğretmenin yalnızca kendi girdiği şubelere ait net ortalamaları, konu/kazanım analizleri ve öğrenci karneleri.
+3. **Öğrenci & Veli Paneli (`StudentDashboardScreen.tsx`):**
+   - İdare izin verdiğinde sınav sonuç kartı: Puan, toplam net, ders bazlı netler.
+   - İdare sıralamaya izin verdiyse: Okul ve şube derecesi.
+   - **Detaylı Karne Sekmesi:** Hangi dersten hangi kazanımlarda başarılı olunduğu, eksik kalınan konuların renkli dökümü.
 
 ---
 
-### 📱 5. Kullanıcı Arayüzü (UI) Tasarım Planı (`SchoolAdminScreen.tsx`)
+### 🗓️ 9. Cumartesi Günü Uygulama Sıralaması (Güncellenmiş Checklist)
 
-Yalnızca `isSchoolAdmin` veya `isSuperAdmin` giriş yaptığında okul yönetim paneli altındaki sekmeler arasına 2 yeni modern kart grubu entegre edilecektir:
-
-1. **🎯 Optik Okuma ve Sınav Değerlendirme Modülü:**
-   - **Form Şablonları Kartı:** Sütun koordinatlarını ayarlama (No, Ad, Sınıf, Kitapçık ve Dersler).
-   - **Cevap Anahtarı Girişi:** A, B, C, D kitapçıkları için soru butonları veya hızlı metin yapıştırma.
-   - **TXT / DAT Dosya Yükleyici:** Dosya seçildiğinde ilk 5 satırın canlı karakter ızgarası üzerinde gösterilmesi; sütunların görsel olarak doğrulanması.
-   - **Sonuç Tablosu & Karne:** Genel derece, sınıf derecesi, ders bazlı doğru/yanlış/net dağılımı ve tek tıkla Excel karnesi indirme.
-
-2. **📋 E-Yoklama (Sınıf & Salon Devamsızlık Modülü):**
-   - **Tarih & Ders Saati Seçici:** 1. Ders.. 8. Ders oturum çubukları.
-   - **Hızlı Durum Değiştirici:** Tek tıkla "Tümünü Var Yap", yok olan öğrencileri hızlıca "Yok", "İzinli", "Raporlu" işaretleme.
-   - **Salon & Gözetmen Notu:** İlgili ders saatine özel idari not düşme alanı.
-   - **Günlük Devamsızlık Özeti:** Okul genelinde o gün gelmeyen öğrenci sayıları ve şube bazlı dağılım.
-
----
-
-### 🗓️ 6. Cumartesi Günü Uygulama Sıralaması (Checklist)
-1. [ ] `server/OgretmenAjanda.Api/Models/` altına Optik Modül (`OptikForm`, `OptikSinav`, `OptikSinavSonuc` vb.) ve E-Yoklama modellerinin eklenmesi.
-2. [ ] `AppDbContext.cs` içine DbSet tanımlarının ve foreign key ilişkilerinin eklenmesi.
-3. [ ] `OptikModulController.cs` ve `ClassAttendanceController.cs` API kontrolcülerinin `server/` projesinde derlenip test edilmesi.
-4. [ ] `src/screens/SchoolAdminScreen.tsx` içine admin rolüne özel Optik Okuma ve E-Yoklama arayüzlerinin entegre edilmesi.
-5. [ ] Canlı sunucuya (FTP) güvenli güncelleme (`app_offline.htm` ile) ve canlı testlerin yapılması.
-6. [ ] Git commit & push ile sürecin tamamlanması.
+1. [ ] **Veri Modelleri & EF Core Entegrasyonu:**
+   - `OptikForm`, `OptikSinav`, `OptikSoruKazanim`, `OptikSinavSonuc`, `OptikSinavSonucKazanim` modellerinin `server/OgretmenAjanda.Api/Models/` içine eklenmesi.
+   - `AppDbContext.cs` üzerinde DbSet ve ilişkilerin tanımlanması.
+2. [ ] **Backend Servis & API Denetleyicileri (`OptikModulController.cs`):**
+   - Değerlendirme motoru: Ham TXT okuma, net hesabı, okul/şube sıralaması çıkarma, konu-kazanım başarı oranlarını hesaplama.
+   - Görünürlük yetkilendirmesi (`IsPublishedToStudents`, `ShowRankingToStudents`, `IsVisibleToTeachers`).
+   - Öğretmen ders/şube izolasyon filtresi.
+3. [ ] **Okul İdare Paneli Arayüzü (`SchoolAdminScreen.tsx`):**
+   - Kullanıcı dostu form tanımlama sihirbazı.
+   - Sınav tanımlama, cevap anahtarı, TXT yükleme ve değerlendirme.
+   - Görünürlük ve sıralama switch kontrolleri.
+   - Okul, şube ve ders bazlı görsel istatistik & grafik bileşenleri.
+4. [ ] **Öğretmen Ekranı Entegrasyonu:**
+   - Öğretmenin sorumlu olduğu sınıfların sınav sonuçlarını ve kazanım eksiklerini gösteren görünüm.
+5. [ ] **Öğrenci & Veli Ekranı Entegrasyonu (`StudentDashboardScreen.tsx`):**
+   - İzin verilen sınavların sonuç kartı, sıralama (izinliyse) ve detaylı kazanım karnesi modalı.
+6. [ ] **Derleme, FTP Yayınlama & Test:**
+   - Backend ve Web build, FTP dağıtımı ve canlı testlerin tamamlanması.
 
