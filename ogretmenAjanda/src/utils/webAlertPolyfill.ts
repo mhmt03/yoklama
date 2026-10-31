@@ -26,3 +26,14 @@ if (Platform.OS === 'web' && typeof window !== 'undefined') {
     else cancelBtn?.onPress?.();
   };
 }
+
+export function showAlert(title: string, message?: string) {
+  Alert.alert(title, message);
+}
+
+export function showConfirm(title: string, message: string, onConfirm: () => void) {
+  Alert.alert(title, message, [
+    { text: 'Vazgeç', style: 'cancel' },
+    { text: 'Onayla', style: 'destructive', onPress: onConfirm },
+  ]);
+}

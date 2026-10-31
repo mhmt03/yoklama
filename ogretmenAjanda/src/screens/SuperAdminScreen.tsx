@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../theme/colors';
 import { apiRequest } from '../services/apiClient';
+import { BackupModuleView } from '../components/BackupModuleView';
 
 interface SchoolItem {
   id: string;
@@ -106,7 +107,7 @@ export function SuperAdminScreen({ navigation }: any) {
   const [institutions, setInstitutions] = useState<InstitutionItem[]>([]);
   const [schools, setSchools] = useState<SchoolItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'institutions' | 'logs'>('institutions');
+  const [activeTab, setActiveTab] = useState<'institutions' | 'logs' | 'backups'>('institutions');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -511,6 +512,14 @@ export function SuperAdminScreen({ navigation }: any) {
           >
             <Text style={[styles.tabText, activeTab === 'logs' && styles.tabTextActive]}>
               📜 Sistem Günlüğü ({auditLogs.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'backups' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('backups')}
+          >
+            <Text style={[styles.tabText, activeTab === 'backups' && styles.tabTextActive]}>
+              💾 Tam Sistem Yedeği
             </Text>
           </TouchableOpacity>
         </View>
@@ -1032,6 +1041,8 @@ export function SuperAdminScreen({ navigation }: any) {
               );
             })}
           </View>
+        ) : activeTab === 'backups' ? (
+          <BackupModuleView isSuperAdmin={true} />
         ) : (
           /* Denetim Günlüğü Listesi */
           <View style={styles.logsList}>

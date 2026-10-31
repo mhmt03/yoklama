@@ -523,6 +523,15 @@ namespace OgretmenAjanda.Api.Services
                 "LESSON_CREATED" => "📖 Yeni Ders Tanımlandı",
                 "LESSON_DELETED" => "🗑️ Ders Silindi",
                 "SCHOOL_SETTINGS_UPDATED" => "⚙️ Okul Ayarları Güncellendi",
+                "BACKUP_CREATED" => "💾 Veritabanı Yedeği Alındı",
+                "BACKUP_DOWNLOADED" => "📥 Yedek Dosyası İndirildi",
+                "BACKUP_UPLOADED" => "📤 Yedek Dosyası Yüklendi",
+                "BACKUP_RESTORED" => "♻️ Veritabanı Yedekten Geri Yüklendi",
+                "BACKUP_DELETED" => "🗑️ Yedek Dosyası Silindi",
+                "OPTIK_FORM_SAVED" => "📋 Optik Form Şablonu Kaydedildi",
+                "OPTIK_EXAM_SAVED" => "📝 Optik Sınav Tanımlandı / Güncellendi",
+                "OPTIK_EXAM_EVALUATED" => "🎯 Optik Sınav Değerlendirildi",
+                "OPTIK_VISIBILITY_UPDATED" => "👁️ Optik Sınav Görünürlük Ayarları Değiştirildi",
                 _ => actionType
             };
         }

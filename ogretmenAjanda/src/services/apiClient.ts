@@ -151,7 +151,9 @@ export async function apiRequest<T = any>(
     }
 
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timeoutId = controller ? setTimeout(() => controller.abort(), 7000) : null;
+    const isHeavyEndpoint = endpoint.includes('Backup') || endpoint.includes('Optik') || endpoint.includes('sync/');
+    const timeoutMs = isHeavyEndpoint ? 30000 : 8000;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
     let response: Response;
     try {

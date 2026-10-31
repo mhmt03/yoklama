@@ -473,7 +473,7 @@ export async function fetchTeacherProctorDuties(
     let name = teacherName;
     if (!name) {
       const session = await import('../../services/apiClient').then((m) => m.getActiveUserSession());
-      name = session?.teacherName || session?.fullName || session?.username || '';
+      name = (session as any)?.teacherName || session?.fullName || session?.username || '';
     }
     if (!name) return [];
 

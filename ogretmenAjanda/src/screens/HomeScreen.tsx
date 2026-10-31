@@ -77,6 +77,7 @@ import { getActiveTeacherName } from '../utils/roleService';
 import { getTeacherTaughtLessons } from '../services/yearlyPlanSyncService';
 import { subscribeUnreadCount, fetchUnreadMessageCount } from '../services/messageNotificationService';
 import { FloatingMessageBubble } from '../components/FloatingMessageBubble';
+import { OptikModuleView } from '../components/OptikModuleView';
 
 interface HeroNavTarget {
   day: number;
@@ -111,6 +112,8 @@ export const HomeScreen: React.FC = () => {
   // Yazılı Sınav Uyarısı & Gözetmenlik State
   const [currentExamAlert, setCurrentExamAlert] = useState<any | null>(null);
   const [teacherProctorDuties, setTeacherProctorDuties] = useState<TeacherProctorDutyItem[]>([]);
+  const [serverSchoolId, setServerSchoolId] = useState<string | undefined>(undefined);
+  const [optikModalVisible, setOptikModalVisible] = useState(false);
 
   const todayIndex = getDayOfWeekIndex();
   const [selectedDay, setSelectedDay] = useState<number>(todayIndex);
@@ -120,6 +123,9 @@ export const HomeScreen: React.FC = () => {
   const loadSchools = async () => {
     try {
       const session = await getActiveUserSession();
+      if (session?.schoolId) {
+        setServerSchoolId(session.schoolId);
+      }
       const affSchools = (session?.affiliatedSchools && session.affiliatedSchools.length > 0)
         ? session.affiliatedSchools
         : (session?.schoolName ? [{ id: session.schoolCode || 'OKL-10001', name: session.schoolName, code: session.schoolCode || 'OKL-10001', geminiApiKey: session.geminiApiKey, geminiModel: session.geminiModel }] : []);
@@ -1402,6 +1408,81 @@ export const HomeScreen: React.FC = () => {
             ))}
           </View>
         )}
+
+        {/* 🎯 OPTİK SINAV SONUÇLARIM & BRANŞ KAZANIM ANALİZİ KARTI */}
+        {serverSchoolId && (
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#EFF6FF',
+              borderRadius: 14,
+              padding: 14,
+              borderWidth: 1,
+              borderColor: '#BFDBFE',
+              marginBottom: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+            onPress={() => setOptikModalVisible(true)}
+            activeOpacity={0.85}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+              <View style={{ backgroundColor: '#2563EB', padding: 9, borderRadius: 10 }}>
+                <Ionicons name="analytics" size={20} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 14, fontWeight: '800', color: '#1E3A8A' }}>
+                  🎯 Optik Sınav Sonuçlarım & Kazanım Analizleri
+                </Text>
+                <Text style={{ fontSize: 12, color: '#1D4ED8', marginTop: 2 }}>
+                  Girdiğiniz şubelerin deneme sonuçlarını, soru zorluklarını ve eksik kazanım karnelerini inceleyin
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#2563EB" />
+          </TouchableOpacity>
+        )}
+
+        {/* OPTİK SINAV ANALİZ MODALI (ÖĞRETMEN GÖRÜNÜMÜ) */}
+        <Modal
+          visible={optikModalVisible}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => setOptikModalVisible(false)}
+        >
+          <View style={{ flex: 1, backgroundColor: '#F8FAFC', paddingTop: insets.top }}>
+            <View
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                backgroundColor: '#FFFFFF',
+                borderBottomWidth: 1,
+                borderBottomColor: '#E2E8F0',
+              }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
+                🎯 Optik Sınav Sonuçlarım & Branş Analizleri
+              </Text>
+              <TouchableOpacity
+                style={{
+                  backgroundColor: '#F1F5F9',
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 8,
+                }}
+                onPress={() => setOptikModalVisible(false)}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#334155' }}>✕ Kapat</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 14 }}>
+              <OptikModuleView schoolId={serverSchoolId} mode="teacher" />
+            </ScrollView>
+          </View>
+        </Modal>
 
         {/* 🚨 TÜM GÜN EKRANDA UYARI KARTI (Günün Kritik Ajanda / Hatırlatma Notları) */}
         {todayAlertItems.length > 0 && (

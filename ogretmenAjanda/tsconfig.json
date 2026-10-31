@@ -4,8 +4,17 @@
     "strict": true,
     "skipLibCheck": true
   },
+  "include": [
+    "src",
+    "App.tsx",
+    "index.ts"
+  ],
   "exclude": [
     "node_modules",
-    "node_modulesESKİ"
+    "node_modulesESKİ",
+    "android",
+    "server",
+    "backups",
+    "scratch"
   ]
 }

@@ -179,6 +179,215 @@ namespace OgretmenAjanda.Api.Data
             }
             catch { }
 
+            // FAZ 10: Optik Okuma ve Sınav Değerlendirme Tabloları
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikFormlar"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""FormAdi"" TEXT NOT NULL,
+                        ""NumaraBaslangic"" INTEGER NOT NULL DEFAULT 0,
+                        ""NumaraUzunluk"" INTEGER NOT NULL DEFAULT 5,
+                        ""AdSoyadBaslangic"" INTEGER NOT NULL DEFAULT 5,
+                        ""AdSoyadUzunluk"" INTEGER NOT NULL DEFAULT 20,
+                        ""SinifBaslangic"" INTEGER NOT NULL DEFAULT 25,
+                        ""SinifUzunluk"" INTEGER NOT NULL DEFAULT 4,
+                        ""KitapcikTuruBaslangic"" INTEGER,
+                        ""KitapcikTuruUzunluk"" INTEGER,
+                        ""FmtRawContent"" TEXT,
+                        ""SampleLine"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikFormDersleri"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""OptikFormId"" TEXT NOT NULL,
+                        ""DersAdi"" TEXT NOT NULL,
+                        ""BaslangicSutun"" INTEGER NOT NULL DEFAULT 0,
+                        ""KarakterSayisi"" INTEGER NOT NULL DEFAULT 20,
+                        ""SiraNo"" INTEGER NOT NULL DEFAULT 1
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikSinavlar"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""SinavAdi"" TEXT NOT NULL,
+                        ""UygulamaTarihi"" TEXT NOT NULL,
+                        ""YanlisDogruyuGotururSayisi"" REAL NOT NULL DEFAULT 4.0,
+                        ""HedefSiniflar"" TEXT,
+                        ""HedefOgrenciler"" TEXT,
+                        ""KitapcikTurleri"" TEXT,
+                        ""OptikFormId"" TEXT,
+                        ""TabanPuan"" REAL NOT NULL DEFAULT 100.0,
+                        ""ToplamPuan"" REAL NOT NULL DEFAULT 500.0,
+                        ""IsPublishedToStudents"" INTEGER NOT NULL DEFAULT 0,
+                        ""ShowRankingToStudents"" INTEGER NOT NULL DEFAULT 0,
+                        ""IsVisibleToTeachers"" INTEGER NOT NULL DEFAULT 1,
+                        ""HasKazanimAnalysis"" INTEGER NOT NULL DEFAULT 0,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikSinavDersleri"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""OptikSinavId"" TEXT NOT NULL,
+                        ""DersAdi"" TEXT NOT NULL,
+                        ""SoruSayisi"" INTEGER NOT NULL DEFAULT 20,
+                        ""Katsayi"" REAL NOT NULL DEFAULT 1.0,
+                        ""SiraNo"" INTEGER NOT NULL DEFAULT 1,
+                        ""CevapAnahtariA"" TEXT NOT NULL,
+                        ""CevapAnahtariB"" TEXT,
+                        ""CevapAnahtariC"" TEXT,
+                        ""CevapAnahtariD"" TEXT
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikSoruKazanimlari"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""OptikSinavId"" TEXT NOT NULL,
+                        ""DersAdi"" TEXT NOT NULL,
+                        ""SoruNo"" INTEGER NOT NULL,
+                        ""BSoruNo"" INTEGER,
+                        ""CSoruNo"" INTEGER,
+                        ""DSoruNo"" INTEGER,
+                        ""KonuAdi"" TEXT NOT NULL,
+                        ""KazanimKodu"" TEXT,
+                        ""KazanimAciklamasi"" TEXT
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikSinavSonuclari"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""OptikSinavId"" TEXT NOT NULL,
+                        ""StudentId"" TEXT,
+                        ""OgrenciNo"" TEXT NOT NULL,
+                        ""AdSoyad"" TEXT NOT NULL,
+                        ""Sinif"" TEXT NOT NULL,
+                        ""KitapcikTuru"" TEXT NOT NULL DEFAULT 'A',
+                        ""ToplamDogru"" INTEGER NOT NULL DEFAULT 0,
+                        ""ToplamYanlis"" INTEGER NOT NULL DEFAULT 0,
+                        ""ToplamBos"" INTEGER NOT NULL DEFAULT 0,
+                        ""ToplamNet"" REAL NOT NULL DEFAULT 0,
+                        ""Puan"" REAL NOT NULL DEFAULT 0,
+                        ""OkulSirasi"" INTEGER NOT NULL DEFAULT 0,
+                        ""SinifSirasi"" INTEGER NOT NULL DEFAULT 0,
+                        ""ToplamKatilimci"" INTEGER NOT NULL DEFAULT 0,
+                        ""SinifKatilimci"" INTEGER NOT NULL DEFAULT 0,
+                        ""OrijinalSatir"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikSinavSonucDersleri"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""OptikSinavSonucId"" TEXT NOT NULL,
+                        ""DersAdi"" TEXT NOT NULL,
+                        ""DogruSayisi"" INTEGER NOT NULL DEFAULT 0,
+                        ""YanlisSayisi"" INTEGER NOT NULL DEFAULT 0,
+                        ""BosSayisi"" INTEGER NOT NULL DEFAULT 0,
+                        ""Net"" REAL NOT NULL DEFAULT 0,
+                        ""OgrenciCevaplari"" TEXT NOT NULL,
+                        ""CevapAnahtari"" TEXT
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""OptikSinavSonucKazanimlari"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""OptikSinavId"" TEXT NOT NULL,
+                        ""OptikSinavSonucId"" TEXT NOT NULL,
+                        ""StudentId"" TEXT,
+                        ""OgrenciNo"" TEXT NOT NULL,
+                        ""Sinif"" TEXT NOT NULL,
+                        ""DersAdi"" TEXT NOT NULL,
+                        ""KonuAdi"" TEXT NOT NULL,
+                        ""KazanimKodu"" TEXT,
+                        ""KazanimAciklamasi"" TEXT,
+                        ""ToplamSoru"" INTEGER NOT NULL DEFAULT 0,
+                        ""DogruSayisi"" INTEGER NOT NULL DEFAULT 0,
+                        ""YanlisSayisi"" INTEGER NOT NULL DEFAULT 0,
+                        ""BosSayisi"" INTEGER NOT NULL DEFAULT 0,
+                        ""BasariYuzdesi"" REAL NOT NULL DEFAULT 0
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""ClassAttendanceDefinitions"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""ClassName"" TEXT NOT NULL,
+                        ""TotalLessonsPerDay"" INTEGER NOT NULL DEFAULT 8,
+                        ""IsActive"" INTEGER NOT NULL DEFAULT 1,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""DailyClassAttendances"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""ClassName"" TEXT NOT NULL,
+                        ""Date"" TEXT NOT NULL,
+                        ""LessonHour"" INTEGER NOT NULL DEFAULT 1,
+                        ""TeacherId"" TEXT,
+                        ""TeacherName"" TEXT,
+                        ""LessonName"" TEXT,
+                        ""AbsentStudentNumbersJson"" TEXT NOT NULL DEFAULT '[]',
+                        ""Notes"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+
             // 1. Süper Admin: mehmetsuper / 1234 (veya mehmet / 123456)
             var superAdmin = await context.Users.FirstOrDefaultAsync(u => u.Username.ToLower() == "mehmetsuper");
             if (superAdmin == null)

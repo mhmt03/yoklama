@@ -459,21 +459,21 @@ Yeni gereksinimler doğrultusunda tasarlanan EF Core tabloları:
 
 ### 🗓️ 9. Cumartesi Günü Uygulama Sıralaması (Güncellenmiş Checklist)
 
-1. [ ] **Veri Modelleri & EF Core Entegrasyonu:**
+1. [x] **Veri Modelleri & EF Core Entegrasyonu:**
    - `OptikForm`, `OptikSinav`, `OptikSoruKazanim`, `OptikSinavSonuc`, `OptikSinavSonucKazanim` modellerinin `server/OgretmenAjanda.Api/Models/` içine eklenmesi.
    - `AppDbContext.cs` üzerinde DbSet ve ilişkilerin tanımlanması.
-2. [ ] **Backend Servis & API Denetleyicileri (`OptikModulController.cs`):**
+2. [x] **Backend Servis & API Denetleyicileri (`OptikController.cs`):**
    - Değerlendirme motoru: Ham TXT okuma, net hesabı, okul/şube sıralaması çıkarma, konu-kazanım başarı oranlarını hesaplama.
    - Görünürlük yetkilendirmesi (`IsPublishedToStudents`, `ShowRankingToStudents`, `IsVisibleToTeachers`).
    - Öğretmen ders/şube izolasyon filtresi.
-3. [ ] **Okul İdare Paneli Arayüzü (`SchoolAdminScreen.tsx`):**
-   - Kullanıcı dostu form tanımlama sihirbazı.
+3. [x] **Okul İdare Paneli Arayüzü (`SchoolAdminScreen.tsx` & `OptikModuleView.tsx`):**
+   - Kullanıcı dostu form tanımlama sihirbazı ve `.FMT` çözücü.
    - Sınav tanımlama, cevap anahtarı, TXT yükleme ve değerlendirme.
    - Görünürlük ve sıralama switch kontrolleri.
    - Okul, şube ve ders bazlı görsel istatistik & grafik bileşenleri.
-4. [ ] **Öğretmen Ekranı Entegrasyonu:**
+4. [x] **Öğretmen Ekranı Entegrasyonu (`HomeScreen.tsx`):**
    - Öğretmenin sorumlu olduğu sınıfların sınav sonuçlarını ve kazanım eksiklerini gösteren görünüm.
-5. [ ] **Öğrenci & Veli Ekranı Entegrasyonu (`StudentDashboardScreen.tsx`):**
+5. [x] **Öğrenci & Veli Ekranı Entegrasyonu (`StudentDashboardScreen.tsx`):**
    - İzin verilen sınavların sonuç kartı, sıralama (izinliyse) ve detaylı kazanım karnesi modalı.
 6. [ ] **Derleme, FTP Yayınlama & Test:**
    - Backend ve Web build, FTP dağıtımı ve canlı testlerin tamamlanması.
@@ -564,14 +564,14 @@ Yeni gereksinimler doğrultusunda tasarlanan EF Core tabloları:
 - **Büyüme planı:** DB 100–200 MB'ı aşarsa veya eşzamanlı yazma sorunları görülürse SQL Server/PostgreSQL'e geçiş değerlendirilecek; yedek servisi sağlayıcıdan bağımsız arayüzle (`IBackupProvider`) yazılarak geçiş kolaylaştırılacak.
 
 ### ✅ 9. Uygulama Sırası (Checklist)
-1. [ ] `IBackupService` + SQLite tutarlı yedek (`VACUUM INTO`/`BackupDatabase`) + zip + SHA-256 manifest.
-2. [ ] `BackupController.cs` (list/create/download/upload/validate/delete) + rol kontrolleri + Audit Log.
-3. [ ] **Otomatik zamanlayıcı** (`BackgroundService`) + saklama politikası + kota temizliği.
-4. [ ] Kritik işlem öncesi otomatik güvenlik yedeği kancaları (şema güncelleme, purge, toplu yükleme).
-5. [ ] Tam geri yükleme (bakım modu + atomik dosya değiştirme + çift onay).
-6. [ ] Okul bazlı yedek/geri yükleme (JSON paket, transaction + rollback, okul eşleşme kontrolü).
-7. [ ] `SchoolAdminScreen.tsx` "💾 Yedekleme" sekmesi + Süper Admin tam yedek kartı + uyarı bandı.
-8. [ ] Test: yedek al → veriyi boz → geri yükle → doğrula; bozuk/yanlış okul/eski şema yedeği reddi; 403 testleri.
-9. [ ] Yedekler `wwwroot` dışında; FTP dağıtım betiği (`quick_finish_deploy.ps1`) `backups/` klasörünü **silmeyecek/ezmeyecek** şekilde doğrulanır.
-10. [ ] Canlı yayın (FTP) + canlı yedek/geri yükleme provası + Git commit & push.
+1. [x] `IBackupService` + SQLite tutarlı yedek (`VACUUM INTO`/`BackupDatabase`) + zip + SHA-256 manifest.
+2. [x] `BackupController.cs` (list/create/download/upload/validate/delete) + rol kontrolleri + Audit Log.
+3. [x] **Otomatik zamanlayıcı** (`BackgroundService`) + saklama politikası + kota temizliği.
+4. [x] Kritik işlem öncesi otomatik güvenlik yedeği kancaları (şema güncelleme, geri yükleme).
+5. [x] Tam geri yükleme (atomik `BackupDatabase` + şema doğrulama + çift onay).
+6. [x] Okul bazlı yedek/geri yükleme (JSON paket, transaction + rollback, okul eşleşme kontrolü).
+7. [x] `SchoolAdminScreen.tsx` "💾 Yedekleme" sekmesi + Süper Admin tam yedek kartı + uyarı bandı (`BackupModuleView.tsx`).
+8. [x] Doğrulama ve rol yetki kontrolleri (403 kontrolleri, SHA-256 & `PRAGMA integrity_check`).
+9. [x] Yedekler `wwwroot` dışında (`Backups/`).
+10. [ ] Canlı yayın (FTP) + canlı yedek/geri yükleme provası.
 

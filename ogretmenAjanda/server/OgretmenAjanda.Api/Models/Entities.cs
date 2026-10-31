@@ -586,6 +586,309 @@ namespace OgretmenAjanda.Api.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
+
+    // =========================================================================
+    // FAZ 10: OPTİK OKUMA, SINAV DEĞERLENDİRME & KONU-KAZANIM ANALİZİ MODELLERİ
+    // =========================================================================
+
+    public class OptikForm
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(150)]
+        public string FormAdi { get; set; } = string.Empty;
+
+        public int NumaraBaslangic { get; set; } = 0;
+        public int NumaraUzunluk { get; set; } = 5;
+
+        public int AdSoyadBaslangic { get; set; } = 5;
+        public int AdSoyadUzunluk { get; set; } = 20;
+
+        public int SinifBaslangic { get; set; } = 25;
+        public int SinifUzunluk { get; set; } = 4;
+
+        public int? KitapcikTuruBaslangic { get; set; } = 29;
+        public int? KitapcikTuruUzunluk { get; set; } = 1;
+
+        public string? FmtRawContent { get; set; }
+        public string? SampleLine { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public ICollection<OptikFormDers> Dersler { get; set; } = new List<OptikFormDers>();
+    }
+
+    public class OptikFormDers
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid OptikFormId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string DersAdi { get; set; } = string.Empty;
+
+        public int BaslangicSutun { get; set; }
+        public int KarakterSayisi { get; set; }
+        public int SiraNo { get; set; } = 1;
+    }
+
+    public class OptikSinav
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(200)]
+        public string SinavAdi { get; set; } = string.Empty;
+
+        public DateTime UygulamaTarihi { get; set; } = DateTime.Today;
+
+        public double YanlisDogruyuGotururSayisi { get; set; } = 4.0; // Örn: 4 yanlış 1 doğru, veya 0
+
+        [MaxLength(500)]
+        public string? HedefSiniflar { get; set; }
+
+        public string? HedefOgrenciler { get; set; }
+
+        [MaxLength(50)]
+        public string? KitapcikTurleri { get; set; } = "A,B";
+
+        public Guid? OptikFormId { get; set; }
+
+        public double TabanPuan { get; set; } = 100.0;
+        public double ToplamPuan { get; set; } = 500.0;
+
+        // Görünürlük ve Yetki Anahtarları
+        public bool IsPublishedToStudents { get; set; } = false; // Öğrenci ve Veli sınav sonucunu görsün mü?
+        public bool ShowRankingToStudents { get; set; } = false; // Öğrenci/Veli ekranında okul/şube sırası görünsün mü?
+        public bool IsVisibleToTeachers { get; set; } = true;    // Öğretmenler sınav sonuçlarını görebilsin mi?
+        public bool HasKazanimAnalysis { get; set; } = false;    // Konu ve kazanım analizi aktif mi?
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public ICollection<OptikSinavDers> Dersler { get; set; } = new List<OptikSinavDers>();
+    }
+
+    public class OptikSinavDers
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid OptikSinavId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string DersAdi { get; set; } = string.Empty;
+
+        public int SoruSayisi { get; set; } = 20;
+        public double Katsayi { get; set; } = 1.0;
+        public int SiraNo { get; set; } = 1;
+
+        [MaxLength(200)]
+        public string CevapAnahtariA { get; set; } = string.Empty;
+
+        [MaxLength(200)]
+        public string? CevapAnahtariB { get; set; }
+
+        [MaxLength(200)]
+        public string? CevapAnahtariC { get; set; }
+
+        [MaxLength(200)]
+        public string? CevapAnahtariD { get; set; }
+    }
+
+    public class OptikSoruKazanim
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required]
+        public Guid OptikSinavId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string DersAdi { get; set; } = string.Empty;
+
+        public int SoruNo { get; set; } // A Kitapçığındaki Soru No (1..N)
+        public int? BSoruNo { get; set; } // B Kitapçığı karşılığı (opsiyonel, boşsa SoruNo ile aynı)
+        public int? CSoruNo { get; set; }
+        public int? DSoruNo { get; set; }
+
+        [Required, MaxLength(200)]
+        public string KonuAdi { get; set; } = string.Empty;
+
+        [MaxLength(50)]
+        public string? KazanimKodu { get; set; }
+
+        [MaxLength(500)]
+        public string? KazanimAciklamasi { get; set; }
+    }
+
+    public class OptikSinavSonuc
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required]
+        public Guid OptikSinavId { get; set; }
+
+        public Guid? StudentId { get; set; }
+
+        [Required, MaxLength(30)]
+        public string OgrenciNo { get; set; } = string.Empty;
+
+        [Required, MaxLength(120)]
+        public string AdSoyad { get; set; } = string.Empty;
+
+        [MaxLength(30)]
+        public string Sinif { get; set; } = string.Empty;
+
+        [MaxLength(10)]
+        public string KitapcikTuru { get; set; } = "A";
+
+        public int ToplamDogru { get; set; }
+        public int ToplamYanlis { get; set; }
+        public int ToplamBos { get; set; }
+        public double ToplamNet { get; set; }
+        public double Puan { get; set; }
+
+        // Derece ve Sıralama Alanları
+        public int OkulSirasi { get; set; }
+        public int SinifSirasi { get; set; }
+        public int ToplamKatilimci { get; set; }
+        public int SinifKatilimci { get; set; }
+
+        public string? OrijinalSatir { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public ICollection<OptikSinavSonucDers> DersSonuclari { get; set; } = new List<OptikSinavSonucDers>();
+    }
+
+    public class OptikSinavSonucDers
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid OptikSinavSonucId { get; set; }
+
+        [Required, MaxLength(100)]
+        public string DersAdi { get; set; } = string.Empty;
+
+        public int DogruSayisi { get; set; }
+        public int YanlisSayisi { get; set; }
+        public int BosSayisi { get; set; }
+        public double Net { get; set; }
+
+        [MaxLength(200)]
+        public string OgrenciCevaplari { get; set; } = string.Empty;
+
+        [MaxLength(200)]
+        public string? CevapAnahtari { get; set; }
+    }
+
+    public class OptikSinavSonucKazanim
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required]
+        public Guid OptikSinavId { get; set; }
+
+        [Required]
+        public Guid OptikSinavSonucId { get; set; }
+
+        public Guid? StudentId { get; set; }
+
+        [Required, MaxLength(30)]
+        public string OgrenciNo { get; set; } = string.Empty;
+
+        [MaxLength(30)]
+        public string Sinif { get; set; } = string.Empty;
+
+        [Required, MaxLength(100)]
+        public string DersAdi { get; set; } = string.Empty;
+
+        [Required, MaxLength(200)]
+        public string KonuAdi { get; set; } = string.Empty;
+
+        [MaxLength(50)]
+        public string? KazanimKodu { get; set; }
+
+        [MaxLength(500)]
+        public string? KazanimAciklamasi { get; set; }
+
+        public int ToplamSoru { get; set; }
+        public int DogruSayisi { get; set; }
+        public int YanlisSayisi { get; set; }
+        public int BosSayisi { get; set; }
+        public double BasariYuzdesi { get; set; }
+    }
+
+    public class ClassAttendanceDefinition
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(50)]
+        public string ClassName { get; set; } = string.Empty;
+
+        public int TotalLessonsPerDay { get; set; } = 8;
+
+        public bool IsActive { get; set; } = true;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
+
+    public class DailyClassAttendance
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(50)]
+        public string ClassName { get; set; } = string.Empty;
+
+        public DateTime Date { get; set; } = DateTime.Today;
+
+        public int LessonHour { get; set; } = 1;
+
+        public Guid? TeacherId { get; set; }
+
+        [MaxLength(120)]
+        public string? TeacherName { get; set; }
+
+        [MaxLength(100)]
+        public string? LessonName { get; set; }
+
+        public string AbsentStudentNumbersJson { get; set; } = "[]";
+
+        public string? Notes { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    }
 }
 
 

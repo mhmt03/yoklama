@@ -121,8 +121,10 @@ import {
   isSameTeacher,
 } from '../utils/counselorService';
 import { printDutyAssignments, DutyPrintSlot } from '../utils/dutyPrintService';
+import { OptikModuleView } from '../components/OptikModuleView';
+import { BackupModuleView } from '../components/BackupModuleView';
 
-type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'duty_assignment' | 'logs' | 'messages' | 'reports' | 'ai_settings' | 'radar';
+type AdminTab = 'teachers' | 'classes' | 'lessons' | 'students' | 'schedule' | 'duty_assignment' | 'logs' | 'messages' | 'reports' | 'ai_settings' | 'radar' | 'optik' | 'backup';
 
 const HtmlSelect = 'select' as any;
 
@@ -6930,6 +6932,28 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               🛡️ Nöbetçi Atama
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'optik' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('optik')}
+          >
+            <Ionicons name="scan" size={15} color={activeTab === 'optik' ? '#4F46E5' : '#64748B'} />
+            <Text style={[styles.tabButtonText, activeTab === 'optik' && styles.tabButtonTextActive]}>
+              🎯 Optik Sınav & Analiz
+            </Text>
+          </TouchableOpacity>
+
+          {!isStaff && (
+            <TouchableOpacity
+              style={[styles.tabButton, activeTab === 'backup' && styles.tabButtonActive]}
+              onPress={() => setActiveTab('backup')}
+            >
+              <Ionicons name="cloud-download" size={15} color={activeTab === 'backup' ? '#4F46E5' : '#64748B'} />
+              <Text style={[styles.tabButtonText, activeTab === 'backup' && styles.tabButtonTextActive]}>
+                💾 Yedekleme
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {loading ? (
@@ -12174,6 +12198,20 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
                   })()}
                 </View>
               </View>
+            )}
+
+            {/* OPTİK OKUMA, SINAV DEĞERLENDİRME & KONU-KAZANIM ANALİZİ SEKMESİ */}
+            {activeTab === 'optik' && (
+              <OptikModuleView schoolId={selectedSchool?.id} mode="admin" />
+            )}
+
+            {/* VERİTABANI YEDEKLEME & GERİ YÜKLEME SEKMESİ */}
+            {activeTab === 'backup' && !isStaff && (
+              <BackupModuleView
+                schoolId={selectedSchool?.id}
+                schoolName={selectedSchool?.name}
+                isSuperAdmin={currentUserSession?.role === 'SUPERADMIN'}
+              />
             )}
           </>
         )}

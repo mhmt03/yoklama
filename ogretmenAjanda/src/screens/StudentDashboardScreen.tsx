@@ -24,13 +24,14 @@ import { fetchStudentPortalFeed } from '../services/syncService';
 import { markMessageAsRead, markAllMessagesAsRead, setCachedUnreadCount } from '../services/messageNotificationService';
 import { FloatingMessageBubble } from '../components/FloatingMessageBubble';
 import { fetchStudentExamSeatings } from '../database/operations/examPlannerOperations';
+import { OptikModuleView } from '../components/OptikModuleView';
 
 interface StudentDashboardScreenProps {
   onLogout: () => void;
   initialMode?: 'student' | 'parent';
 }
 
-type PortalTab = 'schedule' | 'exam_seatings' | 'teachers' | 'assignments' | 'quizzes' | 'evaluations' | 'messages';
+type PortalTab = 'schedule' | 'exam_seatings' | 'optik_results' | 'teachers' | 'assignments' | 'quizzes' | 'evaluations' | 'messages';
 
 const DAYS = [
   { day: 1, label: 'Pazartesi' },
@@ -576,6 +577,26 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
             </Text>
           </TouchableOpacity>
 
+          {/* 🎯 OPTİK DENEME SINAVI SONUÇLARI & KAZANIM KARNESİ SEKMESİ */}
+          <TouchableOpacity
+            style={[styles.portalTab, activeTab === 'optik_results' && styles.portalTabActive]}
+            onPress={() => setActiveTab('optik_results')}
+          >
+            <Ionicons
+              name={activeTab === 'optik_results' ? 'analytics' : 'analytics-outline'}
+              size={16}
+              color={activeTab === 'optik_results' ? '#2563EB' : '#64748B'}
+            />
+            <Text
+              style={[
+                styles.portalTabText,
+                activeTab === 'optik_results' && { color: '#2563EB', fontWeight: '800' },
+              ]}
+            >
+              🎯 Deneme & Optik Karnem
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={[styles.portalTab, activeTab === 'teachers' && styles.portalTabActive]}
             onPress={() => setActiveTab('teachers')}
@@ -883,6 +904,17 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
               ))
             )}
           </View>
+        )}
+
+        {/* ======================================================= */}
+        {/* TAB: OPTİK DENEME SINAVI SONUÇLARI & KAZANIM KARNESİ    */}
+        {/* ======================================================= */}
+        {activeTab === 'optik_results' && (
+          <OptikModuleView
+            schoolId={session?.schoolId || student?.schoolId}
+            mode="student"
+            studentNumber={student?.studentNumber || session?.username}
+          />
         )}
 
         {/* ===================================== */}

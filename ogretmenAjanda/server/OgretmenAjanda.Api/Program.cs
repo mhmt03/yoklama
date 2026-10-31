@@ -35,6 +35,8 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddSingleton<IAuditLogService, AuditLogService>();
 builder.Services.AddScoped<ISchoolPurgeService, SchoolPurgeService>();
+builder.Services.AddSingleton<IBackupService, BackupService>();
+builder.Services.AddHostedService<BackupSchedulerService>();
 
 // 3. JWT Kimlik Doğrulama
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "OgretmenAjandaUltraSecureJWTSecretKey2026!MehmetG!XYZ987";
@@ -80,6 +82,25 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    var backupService = scope.ServiceProvider.GetRequiredService<IBackupService>();
+    try
+    {
+        var dbFile = Path.Combine(Directory.GetCurrentDirectory(), "ogretmenajanda.db");
+        if (File.Exists(dbFile))
+        {
+            var todayPrefix = $"full_ogretmenajanda_{DateTime.UtcNow.AddHours(3):yyyyMMdd}";
+            var existingToday = Directory.GetFiles(backupService.BackupsDirectory, $"{todayPrefix}*_safety.zip");
+            if (existingToday.Length == 0)
+            {
+                await backupService.CreateFullBackupAsync(context, "safety", "Uygulama başlangıcı / şema güncellemesi öncesi otomatik güvenlik yedeği");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Startup Safety Backup] Uyarı: {ex.Message}");
+    }
+
     await DbInitializer.InitializeAsync(context);
 }
 

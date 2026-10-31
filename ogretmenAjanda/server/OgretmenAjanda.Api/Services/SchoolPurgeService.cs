@@ -81,6 +81,32 @@ namespace OgretmenAjanda.Api.Services
             var logs = await context.AuditLogs.Where(a => a.SchoolId == schoolId).ToListAsync();
             context.AuditLogs.RemoveRange(logs);
 
+            // Optik ve Yoklama tabloları temizliği
+            try
+            {
+                var optikForms = await context.OptikFormlar.Include(f => f.Dersler).Where(f => f.SchoolId == schoolId).ToListAsync();
+                context.OptikFormlar.RemoveRange(optikForms);
+
+                var optikExams = await context.OptikSinavlar.Include(e => e.Dersler).Where(e => e.SchoolId == schoolId).ToListAsync();
+                context.OptikSinavlar.RemoveRange(optikExams);
+
+                var optikKazanim = await context.OptikSoruKazanimlari.Where(k => k.SchoolId == schoolId).ToListAsync();
+                context.OptikSoruKazanimlari.RemoveRange(optikKazanim);
+
+                var optikSonuc = await context.OptikSinavSonuclari.Include(r => r.DersSonuclari).Where(r => r.SchoolId == schoolId).ToListAsync();
+                context.OptikSinavSonuclari.RemoveRange(optikSonuc);
+
+                var optikSonucKazanim = await context.OptikSinavSonucKazanimlari.Where(k => k.SchoolId == schoolId).ToListAsync();
+                context.OptikSinavSonucKazanimlari.RemoveRange(optikSonucKazanim);
+
+                var attDefs = await context.ClassAttendanceDefinitions.Where(a => a.SchoolId == schoolId).ToListAsync();
+                context.ClassAttendanceDefinitions.RemoveRange(attDefs);
+
+                var dailyAtt = await context.DailyClassAttendances.Where(a => a.SchoolId == schoolId).ToListAsync();
+                context.DailyClassAttendances.RemoveRange(dailyAtt);
+            }
+            catch { }
+
             // 2. ÖĞRETMEN VE PERSONEL TEMİZLİĞİ:
             // Bu okula bağlı olan tüm öğretmenler ve idari personeller
             var teachers = await context.Users
