@@ -52,6 +52,9 @@ obj/
 *.db-wal
 # Build outputs & APK
 publish/
+temp_dist/
+backups/
+server/OgretmenAjanda.Api/Backups/
 *.apk
 server/OgretmenAjanda.Api/publish/
 server/OgretmenAjanda.Api/wwwroot/*
