@@ -112,6 +112,59 @@ export async function extractStudentPhotosWithAi(
 
     const resultPhotos: AiExtractedStudentPhoto[] = [];
 
+    const getStdNum = (s: any): string => String(s?.studentNumber || s?.student_number || s?.number || '').trim();
+    const getStdFullName = (s: any): string =>
+      String(s?.fullName || s?.full_name || `${s?.first_name || s?.name || ''} ${s?.last_name || ''}`.trim() || '').trim();
+
+    function findStudentByNumberFirst(stdNo: string, stdName: string | undefined, students: Student[]): Student | undefined {
+      if (stdNo && stdNo.trim()) {
+        const cleanNo = stdNo.trim().replace(/^0+/, '');
+        if (cleanNo.length > 0) {
+          // 1. BİRİNCİ VE EN KESİN KRİTER: Öğrenci Numarası (Okul No)
+          const byNum = students.find((s) => {
+            const sNum = getStdNum(s);
+            const cleanS = sNum.replace(/^0+/, '');
+            return sNum === stdNo.trim() || (cleanS.length > 0 && cleanS === cleanNo);
+          });
+          if (byNum) return byNum;
+        }
+      }
+
+      // 2. İKİNCİL DESTEK: Sadece numara hiç bulunamadıysa ve isim en az 2 kelimelik tam ad-soyad ise
+      if (stdName && stdName.trim().length >= 4) {
+        const norm = (str: string) =>
+          str
+            .replace(/Ý/g, 'İ')
+            .replace(/Ð/g, 'Ğ')
+            .replace(/Þ/g, 'Ş')
+            .replace(/ý/g, 'ı')
+            .replace(/ð/g, 'ğ')
+            .replace(/þ/g, 'ş')
+            .toLocaleLowerCase('tr-TR')
+            .replace(/[^a-zçğıöşü0-9]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const targetNorm = norm(stdName);
+        const tToks = targetNorm.split(' ').filter(t => t.length >= 2);
+
+        // KATI GÜVENLİK: İsim eşleştirmesi için en az 2 kelime olmalı (tek harfler "I G L" asla eşleşemez)
+        if (tToks.length >= 2) {
+          const byName = students.find((s) => {
+            const sNameNorm = norm(getStdFullName(s));
+            if (sNameNorm === targetNorm) return true;
+            const sToks = sNameNorm.split(' ').filter(t => t.length >= 2);
+            if (sToks.length === tToks.length) {
+              return tToks.every((tt, idx) => tt === sToks[idx]);
+            }
+            return false;
+          });
+          if (byName) return byName;
+        }
+      }
+
+      return undefined;
+    }
+
     // ─── 1. DURUM: PDF BELGESİ ───
     if (isPdf) {
       console.log(LOG, '1. Adım: PDF belgesi taranıyor...');
@@ -128,59 +181,6 @@ export async function extractStudentPhotosWithAi(
       } catch (streamErr) {
         console.warn(LOG, 'PDF akış çıkarma atlandı/hata verdi:', streamErr);
       }
-
-const getStdNum = (s: any): string => String(s?.studentNumber || s?.student_number || s?.number || '').trim();
-const getStdFullName = (s: any): string =>
-  String(s?.fullName || s?.full_name || `${s?.first_name || s?.name || ''} ${s?.last_name || ''}`.trim() || '').trim();
-
-function findStudentByNumberFirst(stdNo: string, stdName: string | undefined, students: Student[]): Student | undefined {
-  if (stdNo && stdNo.trim()) {
-    const cleanNo = stdNo.trim().replace(/^0+/, '');
-    if (cleanNo.length > 0) {
-      // 1. BİRİNCİ VE EN KESİN KRİTER: Öğrenci Numarası (Okul No)
-      const byNum = students.find((s) => {
-        const sNum = getStdNum(s);
-        const cleanS = sNum.replace(/^0+/, '');
-        return sNum === stdNo.trim() || (cleanS.length > 0 && cleanS === cleanNo);
-      });
-      if (byNum) return byNum;
-    }
-  }
-
-  // 2. İKİNCİL DESTEK: Sadece numara hiç bulunamadıysa ve isim en az 2 kelimelik tam ad-soyad ise
-  if (stdName && stdName.trim().length >= 4) {
-    const norm = (str: string) =>
-      str
-        .replace(/Ý/g, 'İ')
-        .replace(/Ð/g, 'Ğ')
-        .replace(/Þ/g, 'Ş')
-        .replace(/ý/g, 'ı')
-        .replace(/ð/g, 'ğ')
-        .replace(/þ/g, 'ş')
-        .toLocaleLowerCase('tr-TR')
-        .replace(/[^a-zçğıöşü0-9]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    const targetNorm = norm(stdName);
-    const tToks = targetNorm.split(' ').filter(t => t.length >= 2);
-
-    // KATI GÜVENLİK: İsim eşleştirmesi için en az 2 kelime olmalı (tek harfler "I G L" asla eşleşemez)
-    if (tToks.length >= 2) {
-      const byName = students.find((s) => {
-        const sNameNorm = norm(getStdFullName(s));
-        if (sNameNorm === targetNorm) return true;
-        const sToks = sNameNorm.split(' ').filter(t => t.length >= 2);
-        if (sToks.length === tToks.length) {
-          return tToks.every((tt, idx) => tt === sToks[idx]);
-        }
-        return false;
-      });
-      if (byName) return byName;
-    }
-  }
-
-  return undefined;
-}
 
       // PDF akışından çıkan TÜM fotoğrafları topla (boş numara olsa dahi atlama, sıra kaymasını engeller)
       for (const sp of streamPhotos) {

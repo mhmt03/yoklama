@@ -334,7 +334,7 @@ export function MessagesScreen({ navigation }: any) {
             <Ionicons name="checkmark-done" size={16} color="#16A34A" />
             <Text style={styles.markAllReadHeaderBtnText}>Okundu Yap</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={loadMessages} style={styles.refreshButton}>
+          <TouchableOpacity onPress={() => loadMessages()} style={styles.refreshButton}>
             <Ionicons name="refresh" size={20} color={Colors.primary} />
           </TouchableOpacity>
         </View>

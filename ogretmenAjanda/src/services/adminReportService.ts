@@ -368,7 +368,7 @@ export async function exportSchedulesReport(params: {
   filterClass?: string;
   filterDay?: number;
 }): Promise<boolean> {
-  const { school, schedules, classes, filterTeacher, filterClass, filterDay } = params;
+  const { school, schedules, teachers = [], classes, filterTeacher, filterClass, filterDay } = params;
 
   let filtered = [...schedules];
   if (filterTeacher && filterTeacher !== 'all') {

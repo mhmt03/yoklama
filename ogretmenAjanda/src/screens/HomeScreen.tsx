@@ -69,7 +69,6 @@ import {
   toggleAgendaItemCompleted,
   getPendingAgendaCountToday,
 } from '../database/operations/agendaOperations';
-
 import { School, getSchools, getActiveSchool, setActiveSchool, createSchool, SCHOOL_COLORS, syncAffiliatedSchools, refreshAffiliatedSchoolsFromServer, getDefaultSchoolId, setDefaultSchoolId, activateDefaultSchoolOnStartup } from '../database/operations/schoolOperations';
 import { useSchoolTheme, getOpaqueTint } from '../context/SchoolThemeContext';
 import { getActiveUserSession } from '../services/apiClient';
@@ -78,229 +77,79 @@ import { getTeacherTaughtLessons } from '../services/yearlyPlanSyncService';
 import { subscribeUnreadCount, fetchUnreadMessageCount } from '../services/messageNotificationService';
 import { FloatingMessageBubble } from '../components/FloatingMessageBubble';
 import { OptikModuleView } from '../components/OptikModuleView';
-
-interface HeroNavTarget {
-  day: number;
-  lesson: ScheduleItem;
-  dayLessons: ScheduleItem[];
-  index: number;
-}
+import { styles, HomeCtx, HeroNavTarget } from './home/homeStyles';
+import { HomeModals } from './home/HomeModals';
+import { createHomeHandlers } from './home/homeHandlers';
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
+
   const { reloadSchoolTheme, bgTint } = useSchoolTheme();
+
   const { openDrawer } = useDrawer();
+
   const [refreshing, setRefreshing] = useState(false);
+
   const [currentTime, setCurrentTime] = useState(getCurrentTimeString());
+
   const [unreadMessageCount, setUnreadMessageCount] = useState<number>(0);
 
-  // --- SCHOOL MANAGEMENT STATE ---
   const [activeSchool, setActiveSchoolState] = useState<School | null>(null);
+
   const [defaultSchoolId, setDefaultSchoolIdState] = useState<number | null>(null);
+
   const [schoolsList, setSchoolsList] = useState<School[]>([]);
+
   const [isInstitutionalTeacher, setIsInstitutionalTeacher] = useState(false);
+
   const [schoolModalVisible, setSchoolModalVisible] = useState(false);
+
   const [newSchoolName, setNewSchoolName] = useState('');
+
   const [newSchoolColor, setNewSchoolColor] = useState(SCHOOL_COLORS[0].color);
+
   const [isAddingSchool, setIsAddingSchool] = useState(false);
 
-  // Edit / Delete School State
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
+
   const [editSchoolName, setEditSchoolName] = useState('');
+
   const [editSchoolColor, setEditSchoolColor] = useState(SCHOOL_COLORS[0].color);
 
-  // Yazılı Sınav Uyarısı & Gözetmenlik State
   const [currentExamAlert, setCurrentExamAlert] = useState<any | null>(null);
+
   const [teacherProctorDuties, setTeacherProctorDuties] = useState<TeacherProctorDutyItem[]>([]);
+
   const [serverSchoolId, setServerSchoolId] = useState<string | undefined>(undefined);
+
   const [optikModalVisible, setOptikModalVisible] = useState(false);
 
   const todayIndex = getDayOfWeekIndex();
+
   const [selectedDay, setSelectedDay] = useState<number>(todayIndex);
+
   const [displayedLessons, setDisplayedLessons] = useState<ScheduleItem[]>([]);
+
   const [showAllSchoolsSchedule, setShowAllSchoolsSchedule] = useState(false);
-
-  const loadSchools = async () => {
-    try {
-      const session = await getActiveUserSession();
-      if (session?.schoolId) {
-        setServerSchoolId(session.schoolId);
-      }
-      const affSchools = (session?.affiliatedSchools && session.affiliatedSchools.length > 0)
-        ? session.affiliatedSchools
-        : (session?.schoolName ? [{ id: session.schoolCode || 'OKL-10001', name: session.schoolName, code: session.schoolCode || 'OKL-10001', geminiApiKey: session.geminiApiKey, geminiModel: session.geminiModel }] : []);
-      const isInst = !!(session?.schoolCode || session?.schoolId || affSchools.length > 0);
-      setIsInstitutionalTeacher(isInst);
-
-      // 1. Önce yerel veritabanındaki mevcut okulları anında göster
-      const initialActive = await getActiveSchool();
-      if (initialActive) setActiveSchoolState(initialActive);
-      const initialList = await getSchools();
-      if (initialList.length > 0) setSchoolsList(initialList);
-
-      // 2. Kurumsal bağlantı varsa sunucudan en güncel okulları çekip senkronize et (İsmi değişen veya silinen okullar anında güncellenir)
-      if (isInst) {
-        await refreshAffiliatedSchoolsFromServer();
-      }
-
-      // 3. Güncellenmiş varsayılan okulu etkinleştir
-      const active = await activateDefaultSchoolOnStartup();
-      setActiveSchoolState(active);
-      const defId = await getDefaultSchoolId();
-      setDefaultSchoolIdState(defId);
-      const list = await getSchools();
-      setSchoolsList(list);
-      await reloadSchoolTheme();
-      const savedSetting = await getShowAllSchoolsSetting();
-      setShowAllSchoolsSchedule(savedSetting);
-    } catch (e) {
-      console.warn('Error loading schools:', e);
-    }
-  };
-
-  const handleSetDefaultSchool = async (schId: number) => {
-    try {
-      await setDefaultSchoolId(schId);
-      setDefaultSchoolIdState(schId);
-      const updated = await setActiveSchool(schId);
-      setActiveSchoolState(updated);
-      await reloadSchoolTheme();
-      await loadData();
-      Alert.alert('Varsayılan Okul Seçildi ⭐', 'Öğretmen ekranı açıldığında artık bu okul otomatik olarak seçilecektir.');
-    } catch (e: any) {
-      Alert.alert('Hata', 'Varsayılan okul ayarlanamadı.');
-    }
-  };
-
-  const handleExitApp = () => {
-    Alert.alert(
-      'Uygulamayı Kapat',
-      'Uygulamadan çıkmak istediğinize emin misiniz?',
-      [
-        { text: 'Vazgeç', style: 'cancel' },
-        {
-          text: 'Kapat',
-          style: 'destructive',
-          onPress: () => BackHandler.exitApp(),
-        },
-      ],
-      { cancelable: true }
-    );
-  };
-
-  const handleToggleShowAllSchools = async (val: boolean) => {
-    setShowAllSchoolsSchedule(val);
-    await setShowAllSchoolsSetting(val);
-    await loadDaySchedule(selectedDay, val);
-  };
-
-  const handleSelectSchool = async (schoolId: number) => {
-    try {
-      const updated = await setActiveSchool(schoolId);
-      setActiveSchoolState(updated);
-      await reloadSchoolTheme();
-      setSchoolModalVisible(false);
-
-      // Kurumsal okul ise verileri (program, şube/öğrenci, yıllık plan) bu okul için otomatik senkronize et
-      if (updated?.code) {
-        try {
-          const { syncScheduleFromSchool } = await import('../services/scheduleSyncService');
-          const { syncTeacherAssignedClassesAndStudents } = await import('../services/studentSyncService');
-          const { syncYearlyPlansFromSchool } = await import('../services/yearlyPlanSyncService');
-
-          await syncScheduleFromSchool(updated.code);
-          await syncTeacherAssignedClassesAndStudents(updated.code);
-          await syncYearlyPlansFromSchool({ providedSchoolCode: updated.code });
-        } catch (syncErr) {
-          console.warn('School switch auto-sync error:', syncErr);
-        }
-      }
-
-      await loadData();
-    } catch (e) {
-      Alert.alert('Hata', 'Okul değiştirilemedi.');
-    }
-  };
-
-  const handleCreateSchool = async () => {
-    if (!newSchoolName.trim()) {
-      Alert.alert('Uyarı', 'Lütfen okul adını giriniz.');
-      return;
-    }
-    try {
-      await createSchool(newSchoolName, newSchoolColor);
-      setNewSchoolName('');
-      setIsAddingSchool(false);
-      await loadSchools();
-      await loadData();
-    } catch (e) {
-      Alert.alert('Hata', 'Okul eklenirken bir hata oluştu.');
-    }
-  };
-
-  const handleStartEditSchool = (sch: School) => {
-    setEditingSchool(sch);
-    setEditSchoolName(sch.name);
-    setEditSchoolColor(sch.color || SCHOOL_COLORS[0].color);
-  };
-
-  const handleSaveEditSchool = async () => {
-    if (!editingSchool || !editSchoolName.trim()) {
-      Alert.alert('Uyarı', 'Lütfen okul adını giriniz.');
-      return;
-    }
-    try {
-      const { updateSchool } = await import('../database/operations/schoolOperations');
-      await updateSchool(editingSchool.id, editSchoolName, editSchoolColor);
-      setEditingSchool(null);
-      await loadSchools();
-      await loadData();
-    } catch (e) {
-      Alert.alert('Hata', 'Okul güncellenirken hata oluştu.');
-    }
-  };
-
-  const handleDeleteSchoolHandler = async (sch: School) => {
-    if (schoolsList.length <= 1) {
-      Alert.alert('Uyarı', 'Sistemde en az bir okul bulunmalıdır, son okul silinemez.');
-      return;
-    }
-    Alert.alert(
-      'Okulu Sil',
-      `"${sch.name}" okulunu silmek istediğinize emin misiniz? Okula ait tüm şubeler ve kayıtlar da silinecektir.`,
-      [
-        { text: 'Vazgeç', style: 'cancel' },
-        {
-          text: 'Sil',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { deleteSchool } = await import('../database/operations/schoolOperations');
-              await deleteSchool(sch.id);
-              await loadSchools();
-              await loadData();
-            } catch (e: any) {
-              Alert.alert('Hata', e?.message || 'Okul silinemedi.');
-            }
-          },
-        },
-      ]
-    );
-  };
 
   const [lessonInfo, setLessonInfo] = useState<ActiveLessonInfo>({
     currentLesson: null,
     nextLesson: null,
     todayLessons: [],
   });
+
   const [heroNavTarget, setHeroNavTarget] = useState<HeroNavTarget | null>(null);
+
   const [heroTopic, setHeroTopic] = useState<YearlyPlanItem | null>(null);
+
   const [heroTopicLoading, setHeroTopicLoading] = useState(false);
 
-  // Öğretmen Profil & Ders/Şube Bilgilendirme Durumu
   const [teacherDisplayName, setTeacherDisplayName] = useState<string>('');
+
   const [assignedLessonsList, setAssignedLessonsList] = useState<string[]>([]);
+
   const [assignedClassesList, setAssignedClassesList] = useState<string[]>([]);
+
   const [teacherInfoModalVisible, setTeacherInfoModalVisible] = useState(false);
 
   const [stats, setStats] = useState({
@@ -309,471 +158,67 @@ export const HomeScreen: React.FC = () => {
     pendingAssignments: 0,
   });
 
-  // --- AGENDA & REMINDERS STATE ---
   const [selectedDayAgendaItems, setSelectedDayAgendaItems] = useState<AgendaItem[]>([]);
+
   const [todayAlertItems, setTodayAlertItems] = useState<AgendaItem[]>([]);
+
   const [pendingAgendaCount, setPendingAgendaCount] = useState<number>(0);
 
-  const loadAgendaData = async (targetDate?: string) => {
-    try {
-      const dateToLoad = targetDate || getDateForDayOfWeek(selectedDay);
-      const items = await getAgendaItemsByDate(dateToLoad, activeSchool?.id);
-      setSelectedDayAgendaItems(items);
-      const alerts = await getTodayAlertItems(activeSchool?.id);
-      setTodayAlertItems(alerts);
-      const pendingCount = await getPendingAgendaCountToday(activeSchool?.id);
-      setPendingAgendaCount(pendingCount);
-    } catch (e) {
-      console.warn('Error loading agenda data in HomeScreen:', e);
-    }
-  };
-
-  // --- TOPIC (DEFTERE YAZILACAK METİN) MODAL STATE ---
   const [topicModalVisible, setTopicModalVisible] = useState(false);
+
   const [topicLoading, setTopicLoading] = useState(false);
+
   const [topicInfo, setTopicInfo] = useState<LessonTopicSurroundingInfo | null>(null);
+
   const [selectedTopicIndex, setSelectedTopicIndex] = useState<number>(0);
 
-  // --- YEARLY PLAN POPUP MODAL STATE ---
   const [yearlyPlanModalVisible, setYearlyPlanModalVisible] = useState(false);
+
   const [yearlyPlanLoading, setYearlyPlanLoading] = useState(false);
+
   const [yearlyPlanList, setYearlyPlanList] = useState<YearlyPlanItem[]>([]);
+
   const [yearlyPlanPdf, setYearlyPlanPdf] = useState<YearlyPlanDocument | null>(null);
+
   const [yearlyPlanMeta, setYearlyPlanMeta] = useState<{
     gradeLevel: number;
     className: string;
     courseName: string;
     courseId: number;
   } | null>(null);
+
   const [planSearchQuery, setPlanSearchQuery] = useState('');
+
   const [planDateStart, setPlanDateStart] = useState('');
+
   const [planDateEnd, setPlanDateEnd] = useState('');
+
   const [showPlanDatePicker, setShowPlanDatePicker] = useState<'start' | 'end' | null>(null);
+
   const [pdfViewerModalVisible, setPdfViewerModalVisible] = useState(false);
 
-  // Yearly plan scroll & highlight refs
   const planScrollRef = useRef<ScrollView>(null);
+
   const planItemOffsets = useRef<Record<number, number>>({});
+
   const [highlightedPlanId, setHighlightedPlanId] = useState<number | null>(null);
 
-  const loadDaySchedule = async (day: number, overrideShowAll?: boolean) => {
-    try {
-      const showAll = overrideShowAll !== undefined ? overrideShowAll : showAllSchoolsSchedule;
-      const items = await getScheduleByDay(day, showAll ? 'all' : undefined);
-      const valid = items.filter((item) => item.class_id || item.course_id);
-      if (showAll) {
-        setDisplayedLessons(mergeAndDetectConflicts(valid, activeSchool?.id));
-      } else {
-        setDisplayedLessons(valid);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const fetchAssignedLessonsForDay = async (day: number, overrideShowAll?: boolean): Promise<ScheduleItem[]> => {
-    try {
-      const showAll = overrideShowAll !== undefined ? overrideShowAll : showAllSchoolsSchedule;
-      const items = await getScheduleByDay(day, showAll ? 'all' : undefined);
-      const valid = items.filter((item) => item.class_id || item.course_id);
-      if (showAll) {
-        return mergeAndDetectConflicts(valid, activeSchool?.id);
-      }
-      return valid;
-    } catch (err) {
-      console.error('Error fetching lessons for day', day, err);
-      return [];
-    }
-  };
-
-  const findNextDayWithLessons = async (
-    startDay: number,
-    overrideShowAll?: boolean
-  ): Promise<{ day: number; lessons: ScheduleItem[] } | null> => {
-    for (let offset = 1; offset <= 7; offset++) {
-      const nextDay = ((startDay - 1 + offset) % 7) + 1;
-      const lessons = await fetchAssignedLessonsForDay(nextDay, overrideShowAll);
-      if (lessons.length > 0) {
-        return { day: nextDay, lessons };
-      }
-    }
-    return null;
-  };
-
-  const findPrevDayWithLessons = async (
-    startDay: number,
-    overrideShowAll?: boolean
-  ): Promise<{ day: number; lessons: ScheduleItem[] } | null> => {
-    for (let offset = 1; offset <= 7; offset++) {
-      let prevDay = startDay - offset;
-      while (prevDay <= 0) prevDay += 7;
-      const lessons = await fetchAssignedLessonsForDay(prevDay, overrideShowAll);
-      if (lessons.length > 0) {
-        return { day: prevDay, lessons };
-      }
-    }
-    return null;
-  };
-
-  const loadData = async (dayToLoad?: number) => {
-    try {
-      setCurrentTime(getCurrentTimeString());
-      const savedSetting = await getShowAllSchoolsSetting();
-      setShowAllSchoolsSchedule(savedSetting);
-      const targetDay = dayToLoad !== undefined ? dayToLoad : selectedDay;
-      const info = await getActiveAndTodayLessons(savedSetting ? 'all' : undefined);
-      setLessonInfo(info);
-      await loadDaySchedule(targetDay, savedSetting);
-
-      const classes = await getClasses();
-      const totalStudents = classes.reduce((sum, c) => sum + (c.student_count || 0), 0);
-      const assignments = await getAssignments();
-      const pendingCount = assignments.reduce((sum, a) => sum + (a.pending_count || 0), 0);
-
-      setStats({
-        classCount: classes.length,
-        studentCount: totalStudents,
-        pendingAssignments: pendingCount,
-      });
-
-      // Öğretmen adı ve sorumlu olduğu ders/şubeleri yükle
-      try {
-        const tName = await getActiveTeacherName();
-        const session = await getActiveUserSession();
-        if (tName) {
-          setTeacherDisplayName(tName);
-        } else if (session?.fullName) {
-          setTeacherDisplayName(session.fullName);
-        }
-
-        let lessons: string[] = [];
-        let classList: string[] = [];
-
-        if (session?.assignedLessons) {
-          lessons = Array.isArray(session.assignedLessons)
-            ? session.assignedLessons
-            : JSON.parse(session.assignedLessons);
-        }
-        if (session?.assignedClasses) {
-          classList = Array.isArray(session.assignedClasses)
-            ? session.assignedClasses
-            : JSON.parse(session.assignedClasses);
-        }
-
-        if (lessons.length === 0) {
-          try {
-            const taught = await getTeacherTaughtLessons();
-            lessons = taught.map((t) => t.lessonName);
-          } catch { }
-        }
-
-        if (classList.length === 0 && classes.length > 0) {
-          classList = classes.map((c) => c.name);
-        }
-
-        setAssignedLessonsList(lessons);
-        setAssignedClassesList(classList);
-
-        // Öğretmen sınav gözetmenlik görevlerini sunucudan yükle
-        try {
-          const duties = await fetchTeacherProctorDuties(activeSchool?.code || undefined, tName || session?.fullName || undefined);
-          setTeacherProctorDuties(duties || []);
-        } catch (examErr) {
-          console.warn('Error fetching proctor duties in HomeScreen:', examErr);
-        }
-      } catch (profErr) {
-        console.warn('Error loading teacher profile/assignments in HomeScreen:', profErr);
-      }
-
-      await loadAgendaData();
-    } catch (error) {
-      console.error('Error loading home data:', error);
-    }
-  };
-
-  useFocusEffect(
-    useCallback(() => {
-      const currentDay = getDayOfWeekIndex();
-      setSelectedDay(currentDay);
-      setHeroNavTarget(null);
-      loadSchools().then(() => {
-        loadData(currentDay);
-      });
-      fetchUnreadMessageCount();
-      const interval = setInterval(() => {
-        setCurrentTime(getCurrentTimeString());
-        getActiveAndTodayLessons(showAllSchoolsSchedule ? 'all' : undefined).then(async (info) => {
-          setLessonInfo(info);
-        });
-      }, 30000); // 30 sec tick
-      return () => clearInterval(interval);
-    }, [showAllSchoolsSchedule])
-  );
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    const currentDay = getDayOfWeekIndex();
-    setSelectedDay(currentDay);
-    setHeroNavTarget(null);
-    await loadData(currentDay);
-    await fetchUnreadMessageCount();
-    setRefreshing(false);
-  };
-
-  useEffect(() => {
-    const unsub = subscribeUnreadCount(setUnreadMessageCount);
-    fetchUnreadMessageCount();
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    loadDaySchedule(selectedDay);
-    const dateStr = getDateForDayOfWeek(selectedDay);
-    loadAgendaData(dateStr);
-  }, [selectedDay]);
-
-  const handlePrevDay = () => {
-    setSelectedDay((prev) => (prev <= 1 ? 7 : prev - 1));
-  };
-
-  const handleNextDay = () => {
-    setSelectedDay((prev) => (prev >= 7 ? 1 : prev + 1));
-  };
-
-  const handleJumpToToday = () => {
-    setSelectedDay(todayIndex);
-    setHeroNavTarget(null);
-  };
-
-  const handleJumpToCurrentDayAndLesson = async () => {
-    const currentDay = getDayOfWeekIndex();
-    setSelectedDay(currentDay);
-    setHeroNavTarget(null);
-    await loadDaySchedule(currentDay);
-    try {
-      const info = await getActiveAndTodayLessons(showAllSchoolsSchedule ? 'all' : undefined);
-      setLessonInfo(info);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleOpenTopicModal = async (item: ScheduleItem) => {
-    if (!item.class_id || !item.course_id) {
-      Alert.alert('Bilgi', 'Bu ders için şube veya ders bilgisi tanımlı değil.');
-      return;
-    }
-    setTopicLoading(true);
-    setTopicModalVisible(true);
-    try {
-      const res = await getSurroundingTopicsForLesson(
-        item.class_id,
-        item.course_id,
-        item.day_of_week,
-        item.slot_id
-      );
-      setTopicInfo(res);
-      setSelectedTopicIndex(res.currentIndex >= 0 ? res.currentIndex : 0);
-    } catch (e) {
-      console.error('Error loading surrounding topics:', e);
-      Alert.alert('Hata', 'Defter metni yüklenirken bir sorun oluştu.');
-    } finally {
-      setTopicLoading(false);
-    }
-  };
-
-  const handleCopyNotebookText = async (text: string) => {
-    if (!text) return;
-    await Clipboard.setStringAsync(text);
-    Alert.alert('Kopyalandı', 'Deftere yazılacak metin panoya kopyalandı.');
-  };
-
-  const handleOpenYearlyPlanModal = async (item: ScheduleItem) => {
-    const m = item.class_name?.match(/\d+/);
-    const gradeLevel = m ? parseInt(m[0], 10) : 0;
-    const meta = {
-      gradeLevel,
-      className: item.class_name || '',
-      courseName: item.course_name || 'Ders',
-      courseId: item.course_id || 0,
-    };
-    setYearlyPlanMeta(meta);
-    setPlanSearchQuery('');
-    setPlanDateStart('');
-    setPlanDateEnd('');
-    setYearlyPlanLoading(true);
-    setYearlyPlanModalVisible(true);
-    planItemOffsets.current = {};
-    setHighlightedPlanId(null);
-
-    try {
-      // 1. Şubeye özel değil sınıf düzeyine ait planı ara (class_id göndermeden)
-      let plans = await getYearlyPlans(item.course_id || undefined, gradeLevel || undefined);
-
-      // 2. Yedek: Eğer ders eşleşmediyse, o sınıf düzeyine yüklenmiş tüm planları dene
-      if (plans.length === 0 && gradeLevel) {
-        plans = await getYearlyPlans(undefined, gradeLevel);
-      }
-
-      // 3. Yedek: Eğer sınıf düzeyi çıkmadıysa ders id ile ara
-      if (plans.length === 0 && item.course_id) {
-        plans = await getYearlyPlans(item.course_id, undefined);
-      }
-
-      // PDF belgesini kontrol et
-      const doc = await getYearlyPlanDocument(item.course_id || undefined, gradeLevel || undefined);
-
-      setYearlyPlanList(plans);
-      setYearlyPlanPdf(doc);
-
-      // Başlangıç tarihi varsayılanı: Yıllık planın başladığı ilk hafta tarihi
-      const firstWeekStart = plans.find((p) => p.date_start)?.date_start;
-      if (firstWeekStart) {
-        setPlanDateStart(firstWeekStart);
-        // Bitiş tarihi varsayılanı: Tam 1 yıl sonrası
-        const sDate = new Date(firstWeekStart);
-        if (!isNaN(sDate.getTime())) {
-          sDate.setFullYear(sDate.getFullYear() + 1);
-          setPlanDateEnd(sDate.toISOString().split('T')[0]);
-        } else {
-          setPlanDateEnd('');
-        }
-      } else {
-        const todayStr = new Date().toISOString().split('T')[0];
-        setPlanDateStart(todayStr);
-        const nextYearDate = new Date();
-        nextYearDate.setFullYear(nextYearDate.getFullYear() + 1);
-        setPlanDateEnd(nextYearDate.toISOString().split('T')[0]);
-      }
-    } catch (e) {
-      console.error('Error loading yearly plan:', e);
-      Alert.alert('Hata', 'Yıllık plan yüklenirken bir sorun oluştu.');
-    } finally {
-      setYearlyPlanLoading(false);
-    }
-  };
-
-  const getClosestPlanItem = (plans: YearlyPlanItem[]): YearlyPlanItem | null => {
-    if (!plans || plans.length === 0) return null;
-    const todayStr = getTodayDateString();
-    const todayTime = new Date(todayStr).getTime();
-
-    // 1. Doğrudan bu haftaya denk gelen kazanım
-    const exactMatch = plans.find(
-      (p) => Boolean(p.date_start && p.date_end && p.date_start <= todayStr && p.date_end >= todayStr)
-    );
-    if (exactMatch) return exactMatch;
-
-    // 2. Bugünün tarihine gün farkı olarak en yakın kazanım
-    let closestPlan: YearlyPlanItem | null = null;
-    let minDiff = Infinity;
-
-    for (const p of plans) {
-      if (p.date_start && p.date_end) {
-        const startTime = new Date(p.date_start).getTime();
-        const endTime = new Date(p.date_end).getTime();
-        let diff = 0;
-        if (todayTime < startTime) {
-          diff = startTime - todayTime;
-        } else if (todayTime > endTime) {
-          diff = todayTime - endTime;
-        } else {
-          diff = 0;
-        }
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestPlan = p;
-        }
-      } else if (p.date_start) {
-        const diff = Math.abs(todayTime - new Date(p.date_start).getTime());
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestPlan = p;
-        }
-      } else if (p.date_end) {
-        const diff = Math.abs(todayTime - new Date(p.date_end).getTime());
-        if (diff < minDiff) {
-          minDiff = diff;
-          closestPlan = p;
-        }
-      }
-    }
-
-    return closestPlan || plans[0] || null;
-  };
-
-  const handleScrollToTodayPlan = () => {
-    if (!yearlyPlanList || yearlyPlanList.length === 0) return;
-
-    // Filtreleme yapmadan, tüm listede rahatça yukarı-aşağı kaydırılabilmesi için arama/tarih filtresini sıfırlar
-    let needFilterReset = false;
-    if (planSearchQuery) {
-      setPlanSearchQuery('');
-      needFilterReset = true;
-    }
-    const todayStr = getTodayDateString();
-    if (planDateStart && planDateEnd) {
-      if (planDateStart > todayStr || planDateEnd < todayStr) {
-        const firstWeekStart = yearlyPlanList.find((p) => p.date_start)?.date_start;
-        if (firstWeekStart) {
-          setPlanDateStart(firstWeekStart);
-          try {
-            const sDate = new Date(firstWeekStart);
-            sDate.setFullYear(sDate.getFullYear() + 1);
-            setPlanDateEnd(sDate.toISOString().split('T')[0]);
-          } catch {
-            setPlanDateEnd('');
-          }
-        } else {
-          setPlanDateStart('');
-          setPlanDateEnd('');
-        }
-        needFilterReset = true;
-      }
-    }
-
-    const targetPlan = getClosestPlanItem(yearlyPlanList);
-    if (!targetPlan) return;
-
-    setHighlightedPlanId(targetPlan.id);
-    setTimeout(() => {
-      setHighlightedPlanId(null);
-    }, 3000);
-
-    const performScroll = () => {
-      const y = planItemOffsets.current[targetPlan.id];
-      if (y !== undefined && planScrollRef.current) {
-        planScrollRef.current.scrollTo({
-          y: Math.max(0, y - 10),
-          animated: true,
-        });
-      }
-    };
-
-    if (needFilterReset) {
-      setTimeout(performScroll, 120);
-    } else {
-      performScroll();
-      setTimeout(performScroll, 120);
-    }
-  };
-
-  // --- HERO CARD (ACTIVE/NAVIGATED LESSON) COMPUTED & STATE ---
   const todayLessons = lessonInfo.todayLessons || [];
+
   const currentActiveIndex = lessonInfo.currentLesson
-    ? todayLessons.findIndex((item) => item.slot_id === lessonInfo.currentLesson?.slot_id)
+    ? todayLessons.findIndex((item: any) => item.slot_id === lessonInfo.currentLesson?.slot_id)
     : -1;
 
-  // Gezinme hedefi varsa o ders gösterilir.
-  // Gezinme hedefi yoksa SADECE o an devam eden aktif ders gösterilir.
-  // Eğer o an ders yoksa effectiveHeroLesson = null olur ve 'Şu An Boş Ders' kartı gösterilir!
   const effectiveHeroLesson: ScheduleItem | null = heroNavTarget
     ? heroNavTarget.lesson
     : (lessonInfo.currentLesson || null);
 
   const heroDay = heroNavTarget ? heroNavTarget.day : todayIndex;
+
   const isHeroToday = heroDay === todayIndex;
-  const heroDayObj = DAYS_OF_WEEK.find((d) => d.id === heroDay);
+
+  const heroDayObj = DAYS_OF_WEEK.find((d: any) => d.id === heroDay);
+
   const heroDayName = heroDayObj ? heroDayObj.name : '';
 
   const isCurrentLesson = Boolean(
@@ -803,6 +248,247 @@ export const HomeScreen: React.FC = () => {
     ? heroNavTarget.dayLessons.length
     : todayLessons.length;
 
+  const currentTopicItem = topicInfo?.allTopics[selectedTopicIndex] || null;
+
+  const prevTopics = topicInfo
+    ? [
+      selectedTopicIndex - 2 >= 0
+        ? { offset: -2, item: topicInfo.allTopics[selectedTopicIndex - 2] }
+        : null,
+      selectedTopicIndex - 1 >= 0
+        ? { offset: -1, item: topicInfo.allTopics[selectedTopicIndex - 1] }
+        : null,
+    ].filter(Boolean) as { offset: number; item: YearlyPlanItem }[]
+    : [];
+
+  const nextTopics = topicInfo
+    ? [
+      selectedTopicIndex + 1 < topicInfo.allTopics.length
+        ? { offset: 1, item: topicInfo.allTopics[selectedTopicIndex + 1] }
+        : null,
+      selectedTopicIndex + 2 < topicInfo.allTopics.length
+        ? { offset: 2, item: topicInfo.allTopics[selectedTopicIndex + 2] }
+        : null,
+    ].filter(Boolean) as { offset: number; item: YearlyPlanItem }[]
+    : [];
+
+  const filteredPlanList = yearlyPlanList.filter((p: any) => {
+    if (planSearchQuery.trim()) {
+      const q = planSearchQuery.toLowerCase();
+      const matchText =
+        p.subject_topic.toLowerCase().includes(q) ||
+        (p.learning_outcomes && p.learning_outcomes.toLowerCase().includes(q)) ||
+        `hafta ${p.week_number}`.includes(q) ||
+        `${p.week_number}. hafta`.includes(q) ||
+        (p.date_start && p.date_start.includes(q)) ||
+        (p.date_end && p.date_end.includes(q));
+      if (!matchText) return false;
+    }
+    if (planDateStart.trim() && p.date_end && p.date_end < planDateStart.trim()) return false;
+    if (planDateEnd.trim() && p.date_start && p.date_start > planDateEnd.trim()) return false;
+    return true;
+  });
+
+  const isViewingToday = selectedDay === todayIndex;
+
+  const selectedDayObj = DAYS_OF_WEEK.find((d: any) => d.id === selectedDay);
+
+  const selectedDateString = useMemo(() => {
+    return getDateForDayOfWeek(selectedDay);
+  }, [selectedDay]);
+
+  const todayName = DAYS_OF_WEEK.find((d: any) => d.id === todayIndex)?.name || 'Bugün';
+
+  const insets = useSafeAreaInsets();
+
+  const topInset = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 20
+  );
+
+  const schoolBgTint = bgTint || (activeSchool?.color ? getOpaqueTint(activeSchool.color) : Colors.background);
+
+  const ctx: HomeCtx = {
+    navigation,
+    reloadSchoolTheme,
+    bgTint,
+    openDrawer,
+    refreshing,
+    setRefreshing,
+    currentTime,
+    setCurrentTime,
+    unreadMessageCount,
+    setUnreadMessageCount,
+    activeSchool,
+    setActiveSchoolState,
+    defaultSchoolId,
+    setDefaultSchoolIdState,
+    schoolsList,
+    setSchoolsList,
+    isInstitutionalTeacher,
+    setIsInstitutionalTeacher,
+    schoolModalVisible,
+    setSchoolModalVisible,
+    newSchoolName,
+    setNewSchoolName,
+    newSchoolColor,
+    setNewSchoolColor,
+    isAddingSchool,
+    setIsAddingSchool,
+    editingSchool,
+    setEditingSchool,
+    editSchoolName,
+    setEditSchoolName,
+    editSchoolColor,
+    setEditSchoolColor,
+    currentExamAlert,
+    setCurrentExamAlert,
+    teacherProctorDuties,
+    setTeacherProctorDuties,
+    serverSchoolId,
+    setServerSchoolId,
+    optikModalVisible,
+    setOptikModalVisible,
+    todayIndex,
+    selectedDay,
+    setSelectedDay,
+    displayedLessons,
+    setDisplayedLessons,
+    showAllSchoolsSchedule,
+    setShowAllSchoolsSchedule,
+    lessonInfo,
+    setLessonInfo,
+    heroNavTarget,
+    setHeroNavTarget,
+    heroTopic,
+    setHeroTopic,
+    heroTopicLoading,
+    setHeroTopicLoading,
+    teacherDisplayName,
+    setTeacherDisplayName,
+    assignedLessonsList,
+    setAssignedLessonsList,
+    assignedClassesList,
+    setAssignedClassesList,
+    teacherInfoModalVisible,
+    setTeacherInfoModalVisible,
+    stats,
+    setStats,
+    selectedDayAgendaItems,
+    setSelectedDayAgendaItems,
+    todayAlertItems,
+    setTodayAlertItems,
+    pendingAgendaCount,
+    setPendingAgendaCount,
+    topicModalVisible,
+    setTopicModalVisible,
+    topicLoading,
+    setTopicLoading,
+    topicInfo,
+    setTopicInfo,
+    selectedTopicIndex,
+    setSelectedTopicIndex,
+    yearlyPlanModalVisible,
+    setYearlyPlanModalVisible,
+    yearlyPlanLoading,
+    setYearlyPlanLoading,
+    yearlyPlanList,
+    setYearlyPlanList,
+    yearlyPlanPdf,
+    setYearlyPlanPdf,
+    yearlyPlanMeta,
+    setYearlyPlanMeta,
+    planSearchQuery,
+    setPlanSearchQuery,
+    planDateStart,
+    setPlanDateStart,
+    planDateEnd,
+    setPlanDateEnd,
+    showPlanDatePicker,
+    setShowPlanDatePicker,
+    pdfViewerModalVisible,
+    setPdfViewerModalVisible,
+    planScrollRef,
+    planItemOffsets,
+    highlightedPlanId,
+    setHighlightedPlanId,
+    todayLessons,
+    currentActiveIndex,
+    effectiveHeroLesson,
+    heroDay,
+    isHeroToday,
+    heroDayObj,
+    heroDayName,
+    isCurrentLesson,
+    isNextLesson,
+    heroDisplayIndex,
+    heroDisplayTotal,
+    currentTopicItem,
+    prevTopics,
+    nextTopics,
+    filteredPlanList,
+    isViewingToday,
+    selectedDayObj,
+    selectedDateString,
+    todayName,
+    insets,
+    topInset,
+    schoolBgTint
+  };
+
+  Object.assign(ctx, createHomeHandlers(ctx));
+
+  const {
+    loadSchools,
+    loadData,
+    loadDaySchedule,
+    loadAgendaData,
+    onRefresh,
+    handleExitApp,
+    handleSelectSchool,
+    handleJumpToCurrentDayAndLesson,
+    handlePrevHeroLesson,
+    handleNextHeroLesson,
+    handleCopyNotebookText,
+    handleOpenTopicModal,
+    handleOpenYearlyPlanModal,
+    handlePrevDay,
+    handleJumpToToday,
+    handleNextDay,
+    handleToggleShowAllSchools
+  } = ctx;
+
+  useFocusEffect(
+    useCallback(() => {
+      const currentDay = getDayOfWeekIndex();
+      setSelectedDay(currentDay);
+      setHeroNavTarget(null);
+      loadSchools().then(() => {
+        loadData(currentDay);
+      });
+      fetchUnreadMessageCount();
+      const interval = setInterval(() => {
+        setCurrentTime(getCurrentTimeString());
+        getActiveAndTodayLessons(showAllSchoolsSchedule ? 'all' : undefined).then(async (info: any) => {
+          setLessonInfo(info);
+        });
+      }, 30000); // 30 sec tick
+      return () => clearInterval(interval);
+    }, [showAllSchoolsSchedule])
+  );
+
+  useEffect(() => {
+    const unsub = subscribeUnreadCount(setUnreadMessageCount);
+    fetchUnreadMessageCount();
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    loadDaySchedule(selectedDay);
+    const dateStr = getDateForDayOfWeek(selectedDay);
+    loadAgendaData(dateStr);
+  }, [selectedDay]);
+
   useEffect(() => {
     let isMounted = true;
     if (!effectiveHeroLesson) {
@@ -820,13 +506,13 @@ export const HomeScreen: React.FC = () => {
       effectiveHeroLesson.class_name,
       effectiveHeroLesson.course_name
     )
-      .then((topic) => {
+      .then((topic: any) => {
         if (isMounted) {
           setHeroTopic(topic);
           setHeroTopicLoading(false);
         }
       })
-      .catch((err) => {
+      .catch((err: any) => {
         console.error('Error loading hero topic:', err);
         if (isMounted) {
           setHeroTopic(null);
@@ -865,258 +551,6 @@ export const HomeScreen: React.FC = () => {
     effectiveHeroLesson?.class_name,
     effectiveHeroLesson?.course_name,
   ]);
-
-  const handleNextHeroLesson = async () => {
-    const currentDay = getDayOfWeekIndex();
-    const cTime = getCurrentTimeString();
-    const todayAssigned = lessonInfo.todayLessons || [];
-
-    // Durum 1: Halihazırda gezinilen bir dersteysek
-    if (heroNavTarget) {
-      const { day, dayLessons, index } = heroNavTarget;
-      if (index < dayLessons.length - 1) {
-        // Aynı gün içinde bir sonraki ders
-        const nextIndex = index + 1;
-        setHeroNavTarget({
-          day,
-          dayLessons,
-          index: nextIndex,
-          lesson: dayLessons[nextIndex],
-        });
-        return;
-      }
-      // Bu günün son dersindeyiz -> en yakın sonraki günün ilk dersine git
-      const nextResult = await findNextDayWithLessons(day);
-      if (nextResult && nextResult.lessons.length > 0) {
-        setSelectedDay(nextResult.day);
-        setHeroNavTarget({
-          day: nextResult.day,
-          dayLessons: nextResult.lessons,
-          index: 0,
-          lesson: nextResult.lessons[0],
-        });
-      }
-      return;
-    }
-
-    // Durum 2: "Şu An" modundayız ve şu anda devam eden bir aktif ders var
-    if (lessonInfo.currentLesson) {
-      const curIdx = todayAssigned.findIndex((item) => item.slot_id === lessonInfo.currentLesson?.slot_id);
-      if (curIdx !== -1 && curIdx < todayAssigned.length - 1) {
-        // Bugün içindeki bir sonraki ders
-        const nextIndex = curIdx + 1;
-        setHeroNavTarget({
-          day: currentDay,
-          dayLessons: todayAssigned,
-          index: nextIndex,
-          lesson: todayAssigned[nextIndex],
-        });
-        return;
-      }
-      // Bugünün son dersindeydik -> sonraki günün ilk dersine git
-      const nextResult = await findNextDayWithLessons(currentDay);
-      if (nextResult && nextResult.lessons.length > 0) {
-        setSelectedDay(nextResult.day);
-        setHeroNavTarget({
-          day: nextResult.day,
-          dayLessons: nextResult.lessons,
-          index: 0,
-          lesson: nextResult.lessons[0],
-        });
-      }
-      return;
-    }
-
-    // Durum 3: "Şu An Boş Ders" formundayız (şu an ders yok)
-    // En yakın sıradaki derse git
-    if (lessonInfo.nextLesson) {
-      const nextIdx = todayAssigned.findIndex((item) => item.slot_id === lessonInfo.nextLesson?.slot_id);
-      if (nextIdx !== -1) {
-        setHeroNavTarget({
-          day: currentDay,
-          dayLessons: todayAssigned,
-          index: nextIdx,
-          lesson: todayAssigned[nextIdx],
-        });
-        return;
-      }
-    }
-
-    // Ya da bugün saati cTime'dan büyük olan herhangi bir ders
-    const upcomingIdx = todayAssigned.findIndex((item) => Boolean(item.start_time && item.start_time > cTime));
-    if (upcomingIdx !== -1) {
-      setHeroNavTarget({
-        day: currentDay,
-        dayLessons: todayAssigned,
-        index: upcomingIdx,
-        lesson: todayAssigned[upcomingIdx],
-      });
-      return;
-    }
-
-    // Bugün başka ders kalmadıysa -> sonraki günlerin ilk dersine git
-    const nextResult = await findNextDayWithLessons(currentDay);
-    if (nextResult && nextResult.lessons.length > 0) {
-      setSelectedDay(nextResult.day);
-      setHeroNavTarget({
-        day: nextResult.day,
-        dayLessons: nextResult.lessons,
-        index: 0,
-        lesson: nextResult.lessons[0],
-      });
-    }
-  };
-
-  const handlePrevHeroLesson = async () => {
-    const currentDay = getDayOfWeekIndex();
-    const cTime = getCurrentTimeString();
-    const todayAssigned = lessonInfo.todayLessons || [];
-
-    // Durum 1: Halihazırda gezinilen bir dersteysek
-    if (heroNavTarget) {
-      const { day, dayLessons, index } = heroNavTarget;
-      if (index > 0) {
-        // Aynı gün içinde bir önceki ders
-        const prevIndex = index - 1;
-        setHeroNavTarget({
-          day,
-          dayLessons,
-          index: prevIndex,
-          lesson: dayLessons[prevIndex],
-        });
-        return;
-      }
-      // Bu günün ilk dersindeyiz -> en yakın önceki günün son dersine git
-      const prevResult = await findPrevDayWithLessons(day);
-      if (prevResult && prevResult.lessons.length > 0) {
-        const lastIdx = prevResult.lessons.length - 1;
-        setSelectedDay(prevResult.day);
-        setHeroNavTarget({
-          day: prevResult.day,
-          dayLessons: prevResult.lessons,
-          index: lastIdx,
-          lesson: prevResult.lessons[lastIdx],
-        });
-      }
-      return;
-    }
-
-    // Durum 2: "Şu An" modundayız ve şu anda devam eden bir aktif ders var
-    if (lessonInfo.currentLesson) {
-      const curIdx = todayAssigned.findIndex((item) => item.slot_id === lessonInfo.currentLesson?.slot_id);
-      if (curIdx > 0) {
-        // Bugün içindeki bir önceki ders
-        const prevIndex = curIdx - 1;
-        setHeroNavTarget({
-          day: currentDay,
-          dayLessons: todayAssigned,
-          index: prevIndex,
-          lesson: todayAssigned[prevIndex],
-        });
-        return;
-      }
-      // Bugünün ilk dersindeydik -> önceki günün son dersine git
-      const prevResult = await findPrevDayWithLessons(currentDay);
-      if (prevResult && prevResult.lessons.length > 0) {
-        const lastIdx = prevResult.lessons.length - 1;
-        setSelectedDay(prevResult.day);
-        setHeroNavTarget({
-          day: prevResult.day,
-          dayLessons: prevResult.lessons,
-          index: lastIdx,
-          lesson: prevResult.lessons[lastIdx],
-        });
-      }
-      return;
-    }
-
-    // Durum 3: "Şu An Boş Ders" formundayız (şu an ders yok)
-    // Bugün daha önce bitmiş ders varsa en son biten derse git
-    let lastPastIdx = -1;
-    for (let i = todayAssigned.length - 1; i >= 0; i--) {
-      if (todayAssigned[i].end_time && todayAssigned[i].end_time! <= cTime) {
-        lastPastIdx = i;
-        break;
-      }
-    }
-
-    if (lastPastIdx !== -1) {
-      setHeroNavTarget({
-        day: currentDay,
-        dayLessons: todayAssigned,
-        index: lastPastIdx,
-        lesson: todayAssigned[lastPastIdx],
-      });
-      return;
-    }
-
-    // Bugün geçmiş ders yoksa (örneğin sabah erken veya bugün ders yok) -> önceki günlerin son dersine git
-    const prevResult = await findPrevDayWithLessons(currentDay);
-    if (prevResult && prevResult.lessons.length > 0) {
-      const lastIdx = prevResult.lessons.length - 1;
-      setSelectedDay(prevResult.day);
-      setHeroNavTarget({
-        day: prevResult.day,
-        dayLessons: prevResult.lessons,
-        index: lastIdx,
-        lesson: prevResult.lessons[lastIdx],
-      });
-    }
-  };
-
-  const currentTopicItem = topicInfo?.allTopics[selectedTopicIndex] || null;
-  const prevTopics = topicInfo
-    ? [
-      selectedTopicIndex - 2 >= 0
-        ? { offset: -2, item: topicInfo.allTopics[selectedTopicIndex - 2] }
-        : null,
-      selectedTopicIndex - 1 >= 0
-        ? { offset: -1, item: topicInfo.allTopics[selectedTopicIndex - 1] }
-        : null,
-    ].filter(Boolean) as { offset: number; item: YearlyPlanItem }[]
-    : [];
-  const nextTopics = topicInfo
-    ? [
-      selectedTopicIndex + 1 < topicInfo.allTopics.length
-        ? { offset: 1, item: topicInfo.allTopics[selectedTopicIndex + 1] }
-        : null,
-      selectedTopicIndex + 2 < topicInfo.allTopics.length
-        ? { offset: 2, item: topicInfo.allTopics[selectedTopicIndex + 2] }
-        : null,
-    ].filter(Boolean) as { offset: number; item: YearlyPlanItem }[]
-    : [];
-
-  const filteredPlanList = yearlyPlanList.filter((p) => {
-    if (planSearchQuery.trim()) {
-      const q = planSearchQuery.toLowerCase();
-      const matchText =
-        p.subject_topic.toLowerCase().includes(q) ||
-        (p.learning_outcomes && p.learning_outcomes.toLowerCase().includes(q)) ||
-        `hafta ${p.week_number}`.includes(q) ||
-        `${p.week_number}. hafta`.includes(q) ||
-        (p.date_start && p.date_start.includes(q)) ||
-        (p.date_end && p.date_end.includes(q));
-      if (!matchText) return false;
-    }
-    if (planDateStart.trim() && p.date_end && p.date_end < planDateStart.trim()) return false;
-    if (planDateEnd.trim() && p.date_start && p.date_start > planDateEnd.trim()) return false;
-    return true;
-  });
-
-  const isViewingToday = selectedDay === todayIndex;
-  const selectedDayObj = DAYS_OF_WEEK.find((d) => d.id === selectedDay);
-  const selectedDateString = useMemo(() => {
-    return getDateForDayOfWeek(selectedDay);
-  }, [selectedDay]);
-  const todayName = DAYS_OF_WEEK.find((d) => d.id === todayIndex)?.name || 'Bugün';
-
-  const insets = useSafeAreaInsets();
-  const topInset = Math.max(
-    insets.top,
-    Platform.OS === 'android' ? (StatusBar.currentHeight || 28) : 20
-  );
-
-  const schoolBgTint = bgTint || (activeSchool?.color ? getOpaqueTint(activeSchool.color) : Colors.background);
 
   return (
     <View style={{ flex: 1, backgroundColor: schoolBgTint }}>
@@ -1273,7 +707,7 @@ export const HomeScreen: React.FC = () => {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.schoolSwitcherScroll}
             >
-              {schoolsList.map((sch) => {
+              {schoolsList.map((sch: any) => {
                 const isSelected = activeSchool?.id === sch.id;
                 const schColor = sch.color || Colors.primary;
                 return (
@@ -1351,7 +785,7 @@ export const HomeScreen: React.FC = () => {
               <Text style={styles.proctorDutyCountText}>{teacherProctorDuties.length} Görev</Text>
             </View>
 
-            {teacherProctorDuties.map((duty, idx) => (
+            {teacherProctorDuties.map((duty: any, idx: any) => (
               <View
                 key={`${duty.examId}-${duty.roomName}-${idx}`}
                 style={[
@@ -1487,7 +921,7 @@ export const HomeScreen: React.FC = () => {
         {/* 🚨 TÜM GÜN EKRANDA UYARI KARTI (Günün Kritik Ajanda / Hatırlatma Notları) */}
         {todayAlertItems.length > 0 && (
           <View style={styles.alertBannerContainer}>
-            {todayAlertItems.map((alertItem) => (
+            {todayAlertItems.map((alertItem: any) => (
               <TouchableOpacity
                 key={alertItem.id}
                 style={[
@@ -2032,7 +1466,7 @@ export const HomeScreen: React.FC = () => {
             </TouchableOpacity>
           </Card>
         ) : (
-          displayedLessons.map((item, index) => {
+          displayedLessons.map((item: any, index: any) => {
             const isCurrent =
               isViewingToday &&
               lessonInfo.currentLesson &&
@@ -2248,14 +1682,14 @@ export const HomeScreen: React.FC = () => {
                   {selectedDayAgendaItems.length > 0 && (
                     <View style={[styles.agendaCountBadge, { backgroundColor: `${activeSchool?.color || Colors.primary}18` }]}>
                       <Text style={[styles.agendaCountBadgeText, { color: activeSchool?.color || Colors.primary }]}>
-                        {selectedDayAgendaItems.filter((i) => i.is_completed === 1).length}/{selectedDayAgendaItems.length}
+                        {selectedDayAgendaItems.filter((i: any) => i.is_completed === 1).length}/{selectedDayAgendaItems.length}
                       </Text>
                     </View>
                   )}
                 </View>
                 <Text style={styles.todayAgendaSubtitle}>
                   {selectedDayAgendaItems.length > 0
-                    ? `${selectedDayAgendaItems.filter((i) => i.is_completed === 0).length} bekleyen iş / randevu`
+                    ? `${selectedDayAgendaItems.filter((i: any) => i.is_completed === 0).length} bekleyen iş / randevu`
                     : isViewingToday
                       ? 'Günün planları, görevleri ve hatırlatıcıları'
                       : `${selectedDayObj?.name} için kayıtlı randevu veya görev bulunmuyor`}
@@ -2309,7 +1743,7 @@ export const HomeScreen: React.FC = () => {
             </TouchableOpacity>
           ) : (
             <View style={styles.agendaItemsList}>
-              {selectedDayAgendaItems.map((item) => {
+              {selectedDayAgendaItems.map((item: any) => {
                 const isCompleted = item.is_completed === 1;
                 return (
                   <View
@@ -2570,970 +2004,7 @@ export const HomeScreen: React.FC = () => {
       </ScrollView>
 
       {/* 1. DEFTERE YAZILACAK METİN (KONU) POP-UP MODAL */}
-      <Modal
-        visible={topicModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setTopicModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContainer}>
-            {/* Modal Başlığı */}
-            <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.modalClassTag}>
-                    {topicInfo?.className || '-'}
-                  </Text>
-                  <Text style={styles.modalCourseTag}>
-                    {topicInfo?.courseName || '-'}
-                  </Text>
-                </View>
-                <Text style={styles.modalTitle}>Deftere Yazılacak Metin</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setTopicModalVisible(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                style={styles.modalCloseBtn}
-              >
-                <Ionicons name="close" size={22} color={Colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {topicLoading ? (
-              <View style={styles.modalLoadingWrap}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={styles.modalLoadingText}>Konu ve plan yükleniyor...</Text>
-              </View>
-            ) : !topicInfo || !topicInfo.found || topicInfo.allTopics.length === 0 ? (
-              <View style={styles.modalEmptyWrap}>
-                <Ionicons name="book-outline" size={44} color={Colors.textMuted} />
-                <Text style={styles.modalEmptyTitle}>Yıllık Plan Bulunamadı</Text>
-                <Text style={styles.modalEmptyDesc}>
-                  Bu ders ve sınıf düzeyi için sisteme henüz yıllık plan yüklenmemiş.
-                </Text>
-                <TouchableOpacity
-                  style={styles.modalEmptyBtn}
-                  onPress={() => {
-                    setTopicModalVisible(false);
-                    navigation.navigate('YearlyPlan');
-                  }}
-                >
-                  <Ionicons name="add-circle-outline" size={18} color="#FFFFFF" />
-                  <Text style={styles.modalEmptyBtnText}>Yıllık Plan Yükle / Düzenle</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <ScrollView
-                style={styles.modalScroll}
-                contentContainerStyle={{ paddingBottom: 24 }}
-                showsVerticalScrollIndicator={false}
-              >
-                {/* Gezinme Şeridi */}
-                <View style={styles.topicStepperRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.stepArrowBtn,
-                      selectedTopicIndex <= 0 && styles.stepArrowBtnDisabled,
-                    ]}
-                    disabled={selectedTopicIndex <= 0}
-                    onPress={() => setSelectedTopicIndex((prev) => Math.max(0, prev - 1))}
-                  >
-                    <Ionicons
-                      name="chevron-back"
-                      size={18}
-                      color={selectedTopicIndex <= 0 ? Colors.textMuted : Colors.primary}
-                    />
-                    <Text
-                      style={[
-                        styles.stepArrowText,
-                        selectedTopicIndex <= 0 && { color: Colors.textMuted },
-                      ]}
-                    >
-                      Önceki
-                    </Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.stepCounterText}>
-                    Ders Sırası: {selectedTopicIndex + 1} / {topicInfo.allTopics.length}
-                  </Text>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.stepArrowBtn,
-                      selectedTopicIndex >= topicInfo.allTopics.length - 1 &&
-                      styles.stepArrowBtnDisabled,
-                    ]}
-                    disabled={selectedTopicIndex >= topicInfo.allTopics.length - 1}
-                    onPress={() =>
-                      setSelectedTopicIndex((prev) =>
-                        Math.min(topicInfo.allTopics.length - 1, prev + 1)
-                      )
-                    }
-                  >
-                    <Text
-                      style={[
-                        styles.stepArrowText,
-                        selectedTopicIndex >= topicInfo.allTopics.length - 1 && {
-                          color: Colors.textMuted,
-                        },
-                      ]}
-                    >
-                      Sonraki
-                    </Text>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={18}
-                      color={
-                        selectedTopicIndex >= topicInfo.allTopics.length - 1
-                          ? Colors.textMuted
-                          : Colors.primary
-                      }
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                {/* 1. SON İKİ DERS (ÖNCEKİ 2 DERSİN METNİ) */}
-                <Text style={styles.topicSectionHeader}>Son İki Dersin Metni</Text>
-                {prevTopics.length === 0 ? (
-                  <View style={styles.noAdjacentBox}>
-                    <Text style={styles.noAdjacentText}>
-                      Önceki ders kaydı bulunmuyor (Dönem başlangıcı).
-                    </Text>
-                  </View>
-                ) : (
-                  prevTopics.map(({ offset, item }) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.adjacentCard}
-                      onPress={() => {
-                        const targetIdx = topicInfo.allTopics.findIndex((t) => t.id === item.id);
-                        if (targetIdx >= 0) setSelectedTopicIndex(targetIdx);
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <View style={styles.adjacentHeaderRow}>
-                        <View style={styles.offsetBadgeGray}>
-                          <Ionicons name="time-outline" size={12} color={Colors.textSecondary} />
-                          <Text style={styles.offsetBadgeTextGray}>
-                            {offset === -2 ? '2 Ders Önce' : '1 Ders Önce'}
-                          </Text>
-                        </View>
-                        <Text style={styles.adjacentMetaText}>
-                          {item.week_number}. Hafta {item.lesson_hours ? `(${item.lesson_hours} Saat)` : ''}
-                        </Text>
-                      </View>
-                      <Text style={styles.adjacentTopicText} numberOfLines={3} selectable={true}>
-                        {item.subject_topic}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-
-                {/* 2. O DERS: DEFTERE YAZILACAK METİN (Vurgulu & Büyütülmüş & Kopyalanabilir) */}
-                {currentTopicItem && (
-                  <View style={styles.currentTopicHeroCard}>
-                    <View style={styles.heroBadgeRow}>
-                      <View style={styles.mainBadge}>
-                        <Ionicons name="star" size={14} color="#FFFFFF" />
-                        <Text style={styles.mainBadgeText}>BU DERSTE DEFTERE YAZILACAK</Text>
-                      </View>
-                      <Text style={styles.heroWeekText}>
-                        {currentTopicItem.week_number}. Hafta
-                      </Text>
-                    </View>
-
-                    {currentTopicItem.date_start && currentTopicItem.date_end && (
-                      <Text style={styles.heroDateText}>
-                        Tarih: {formatDateToTR(currentTopicItem.date_start)} - {formatDateToTR(currentTopicItem.date_end)}
-                      </Text>
-                    )}
-
-                    <View style={styles.heroTopicBox}>
-                      <Text style={styles.heroTopicText} selectable={true}>
-                        {currentTopicItem.subject_topic}
-                      </Text>
-                    </View>
-
-                    {currentTopicItem.learning_outcomes ? (
-                      <View style={styles.outcomesContainer}>
-                        <Text style={styles.outcomesLabel}>Kazanımlar / Açıklama:</Text>
-                        <Text style={styles.outcomesBody} selectable={true}>
-                          {currentTopicItem.learning_outcomes}
-                        </Text>
-                      </View>
-                    ) : null}
-
-                    {/* Defter Metnini Kopyala Butonu */}
-                    <TouchableOpacity
-                      style={styles.heroCopyBtn}
-                      onPress={() => handleCopyNotebookText(currentTopicItem.subject_topic)}
-                      activeOpacity={0.8}
-                    >
-                      <Ionicons name="copy" size={18} color="#FFFFFF" />
-                      <Text style={styles.heroCopyBtnText}>Defter Metnini Kopyala</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* 3. GELECEK İKİ DERS (SONRAKİ 2 DERSİN METNİ) */}
-                <Text style={styles.topicSectionHeader}>Gelecek İki Dersin Metni</Text>
-                {nextTopics.length === 0 ? (
-                  <View style={styles.noAdjacentBox}>
-                    <Text style={styles.noAdjacentText}>
-                      Sonraki ders kaydı bulunmuyor (Dönem sonu).
-                    </Text>
-                  </View>
-                ) : (
-                  nextTopics.map(({ offset, item }) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={styles.adjacentCard}
-                      onPress={() => {
-                        const targetIdx = topicInfo.allTopics.findIndex((t) => t.id === item.id);
-                        if (targetIdx >= 0) setSelectedTopicIndex(targetIdx);
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <View style={styles.adjacentHeaderRow}>
-                        <View style={styles.offsetBadgeBlue}>
-                          <Ionicons name="arrow-forward-circle-outline" size={12} color="#0284C7" />
-                          <Text style={styles.offsetBadgeTextBlue}>
-                            {offset === 1 ? '1 Ders Sonra' : '2 Ders Sonra'}
-                          </Text>
-                        </View>
-                        <Text style={styles.adjacentMetaText}>
-                          {item.week_number}. Hafta {item.lesson_hours ? `(${item.lesson_hours} Saat)` : ''}
-                        </Text>
-                      </View>
-                      <Text style={styles.adjacentTopicText} numberOfLines={3} selectable={true}>
-                        {item.subject_topic}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                )}
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* 2. O SINIF DÜZEYİNE AİT YILLIK PLAN POP-UP MODAL */}
-      <Modal
-        visible={yearlyPlanModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setYearlyPlanModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalContainer, styles.yearlyPlanModalContainer]}>
-            {/* Modal Başlığı */}
-            <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.modalClassTag}>
-                    {yearlyPlanMeta?.gradeLevel ? `${yearlyPlanMeta.gradeLevel}. Sınıf` : 'Sınıf'}
-                  </Text>
-                  <Text style={styles.modalCourseTag}>
-                    {yearlyPlanMeta?.courseName || '-'}
-                  </Text>
-                </View>
-                <Text style={styles.modalTitle}>
-                  {yearlyPlanMeta?.className ? `${yearlyPlanMeta.className} Yıllık Müfredat Planı` : 'Yıllık Plan'}
-                </Text>
-              </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <TouchableOpacity
-                  onPress={handleScrollToTodayPlan}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  style={styles.headerTodayIconBtn}
-                  accessibilityLabel="Bugünün Kazanımına Git"
-                >
-                  <Ionicons name="locate-outline" size={17} color={Colors.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setYearlyPlanModalVisible(false)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  style={styles.modalCloseBtn}
-                >
-                  <Ionicons name="close" size={22} color={Colors.textSecondary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Üst İşlem Butonları */}
-            <View style={styles.yearlyPlanActionsRow}>
-              {yearlyPlanPdf && (
-                <>
-                  <TouchableOpacity
-                    style={styles.pdfOpenBtn}
-                    onPress={() => setPdfViewerModalVisible(true)}
-                  >
-                    <Ionicons name="document-text" size={14} color="#FFFFFF" />
-                    <Text style={styles.pdfOpenBtnText}>PDF Gör</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.pdfOpenBtn, { backgroundColor: Colors.secondary }]}
-                    onPress={() =>
-                      viewYearlyPlanPdf(
-                        yearlyPlanPdf.file_uri,
-                        `${yearlyPlanMeta?.gradeLevel}. Sınıf ${yearlyPlanMeta?.courseName} Yıllık Planı`
-                      )
-                    }
-                  >
-                    <Ionicons name="share-outline" size={14} color="#FFFFFF" />
-                    <Text style={styles.pdfOpenBtnText}>PDF Paylaş/Aç</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-              <TouchableOpacity
-                style={styles.planManageBtn}
-                onPress={() => {
-                  setYearlyPlanModalVisible(false);
-                  navigation.navigate('YearlyPlan');
-                }}
-              >
-                <Ionicons name="create-outline" size={14} color={Colors.primary} />
-                <Text style={styles.planManageBtnText}>Planı Yönet</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Arama ve Tarih Filtreleme Çubuğu */}
-            <View style={styles.searchBarWrap}>
-              <Ionicons name="search" size={16} color={Colors.textMuted} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Konu, hafta veya kazanım ara..."
-                placeholderTextColor={Colors.textMuted}
-                value={planSearchQuery}
-                onChangeText={setPlanSearchQuery}
-              />
-              {planSearchQuery ? (
-                <TouchableOpacity onPress={() => setPlanSearchQuery('')}>
-                  <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
-            {/* Tarih Aralığı Filtresi (Picker) */}
-            <View style={styles.dateFilterContainer}>
-              <TouchableOpacity
-                style={styles.dateFilterInputBox}
-                onPress={() => setShowPlanDatePicker('start')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="calendar-outline" size={14} color={Colors.primary} />
-                <Text style={styles.dateFilterText}>
-                  {planDateStart ? formatDateToTR(planDateStart) : 'Başlangıç Tarihi'}
-                </Text>
-              </TouchableOpacity>
-              <Text style={{ fontSize: 12, color: Colors.textMuted }}>-</Text>
-              <TouchableOpacity
-                style={styles.dateFilterInputBox}
-                onPress={() => setShowPlanDatePicker('end')}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="calendar-outline" size={14} color={Colors.primary} />
-                <Text style={styles.dateFilterText}>
-                  {planDateEnd ? formatDateToTR(planDateEnd) : 'Bitiş Tarihi'}
-                </Text>
-              </TouchableOpacity>
-              {(planDateStart || planDateEnd) && (
-                <TouchableOpacity onPress={() => { setPlanDateStart(''); setPlanDateEnd(''); }}>
-                  <Ionicons name="close-circle" size={16} color={Colors.textMuted} />
-                </TouchableOpacity>
-              )}
-              {/* Mini Icon: Bugünün / Bu Haftanın Kazanımına Git */}
-              <TouchableOpacity
-                style={styles.todayJumpIconBtn}
-                onPress={handleScrollToTodayPlan}
-                activeOpacity={0.7}
-                accessibilityLabel="Bugünün Kazanımına Git"
-              >
-                <Ionicons name="navigate-circle" size={16} color="#FFFFFF" />
-                <Text style={styles.todayJumpIconBtnText}>Bugün</Text>
-              </TouchableOpacity>
-            </View>
-
-            {showPlanDatePicker && (
-              <DateTimePicker
-                value={
-                  showPlanDatePicker === 'start'
-                    ? (planDateStart && !isNaN(new Date(planDateStart).getTime()) ? new Date(planDateStart) : new Date())
-                    : (planDateEnd && !isNaN(new Date(planDateEnd).getTime()) ? new Date(planDateEnd) : new Date())
-                }
-                mode="date"
-                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                onChange={(event, selectedDate) => {
-                  const mode = showPlanDatePicker;
-                  setShowPlanDatePicker(null);
-                  if (selectedDate) {
-                    const isoStr = selectedDate.toISOString().split('T')[0];
-                    if (mode === 'start') {
-                      setPlanDateStart(isoStr);
-                      // Başlangıç değişirse varsayılan bitişi de 1 yıl sonrasına ayarla
-                      const endDateObj = new Date(selectedDate);
-                      endDateObj.setFullYear(endDateObj.getFullYear() + 1);
-                      setPlanDateEnd(endDateObj.toISOString().split('T')[0]);
-                    } else {
-                      setPlanDateEnd(isoStr);
-                    }
-                  }
-                }}
-              />
-            )}
-
-            {yearlyPlanLoading ? (
-              <View style={styles.modalLoadingWrap}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-                <Text style={styles.modalLoadingText}>Yıllık plan listeleniyor...</Text>
-              </View>
-            ) : filteredPlanList.length === 0 ? (
-              <View style={styles.modalEmptyWrap}>
-                <Ionicons name="calendar-outline" size={44} color={Colors.textMuted} />
-                <Text style={styles.modalEmptyTitle}>Kayıt Bulunamadı</Text>
-                <Text style={styles.modalEmptyDesc}>
-                  {planSearchQuery || planDateStart || planDateEnd
-                    ? 'Filtrelerinize uygun plan satırı bulunamadı.'
-                    : 'Bu sınıf düzeyi için henüz yıllık plan yüklenmemiş.'}
-                </Text>
-                {!planSearchQuery && !planDateStart && !planDateEnd && (
-                  <TouchableOpacity
-                    style={styles.modalEmptyBtn}
-                    onPress={() => {
-                      setYearlyPlanModalVisible(false);
-                      navigation.navigate('YearlyPlan');
-                    }}
-                  >
-                    <Ionicons name="cloud-upload-outline" size={18} color="#FFFFFF" />
-                    <Text style={styles.modalEmptyBtnText}>Plan Yükle (Excel / PDF)</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            ) : (
-              <ScrollView
-                ref={planScrollRef}
-                style={styles.modalScroll}
-                contentContainerStyle={{ paddingBottom: 30 }}
-                showsVerticalScrollIndicator={true}
-              >
-                {filteredPlanList.map((plan) => {
-                  const todayStr = getTodayDateString();
-                  const isThisWeek =
-                    Boolean(plan.date_start && plan.date_end && plan.date_start <= todayStr && plan.date_end >= todayStr);
-                  const isHighlighted = highlightedPlanId === plan.id;
-
-                  return (
-                    <View
-                      key={plan.id}
-                      onLayout={(event) => {
-                        const y = event.nativeEvent.layout.y;
-                        planItemOffsets.current[plan.id] = y;
-                      }}
-                      style={[
-                        styles.planItemCard,
-                        isThisWeek && styles.planItemCardActive,
-                        isHighlighted && styles.planItemCardHighlighted,
-                      ]}
-                    >
-                      {/* Hafta Numarası, Tarih Aralığı ve Bu Hafta rozeti aynı satırda */}
-                      <View style={styles.planItemHeaderRow}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
-                          <View
-                            style={[
-                              styles.weekBadge,
-                              isThisWeek && { backgroundColor: Colors.primary },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.weekBadgeText,
-                                isThisWeek && { color: '#FFFFFF' },
-                              ]}
-                            >
-                              {plan.week_number}. Hafta
-                            </Text>
-                          </View>
-
-                          {plan.date_start && plan.date_end && (
-                            <Text style={styles.planDateInlineText}>
-                              📅 {formatDateToTR(plan.date_start)} - {formatDateToTR(plan.date_end)}
-                            </Text>
-                          )}
-
-                          {isThisWeek && (
-                            <Badge label="Bu Hafta" status="yapildi" size="sm" />
-                          )}
-                          {!isThisWeek && isHighlighted && (
-                            <Badge label="Bugüne En Yakın" status="bekliyor" size="sm" />
-                          )}
-                        </View>
-
-                        <Text style={styles.planHoursText}>
-                          {plan.lesson_hours ? `${plan.lesson_hours} Sa` : ''}
-                        </Text>
-                      </View>
-
-                      <Text style={styles.planSubjectText} selectable={true}>
-                        {plan.subject_topic}
-                      </Text>
-
-                      {plan.learning_outcomes ? (
-                        <View style={styles.planOutcomesWrap}>
-                          <Text style={styles.planOutcomesLabel}>Kazanım:</Text>
-                          <Text style={styles.planOutcomesBody} selectable={true}>
-                            {plan.learning_outcomes}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })}
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* 3. PDF GÖRÜNTÜLEME MODALI */}
-      <PdfViewerModal
-        visible={pdfViewerModalVisible}
-        onClose={() => setPdfViewerModalVisible(false)}
-        fileUri={yearlyPlanPdf?.file_uri || null}
-        fileName={yearlyPlanPdf?.file_name}
-        title={`${yearlyPlanMeta?.gradeLevel || ''}. Sınıf ${yearlyPlanMeta?.courseName || ''} Yıllık Planı`}
-        onShareOrExternal={() => {
-          if (yearlyPlanPdf) {
-            viewYearlyPlanPdf(
-              yearlyPlanPdf.file_uri,
-              `${yearlyPlanMeta?.gradeLevel}. Sınıf ${yearlyPlanMeta?.courseName} Yıllık Planı`
-            );
-          }
-        }}
-      />
-
-      {/* 4. OKUL DEĞİŞTİRME & EKLEME POP-UP MODALI */}
-      <Modal
-        visible={schoolModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setSchoolModalVisible(false)}
-      >
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.modalContainer, { maxHeight: '80%' }]}>
-            <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modalClassTag}>OKUL SEÇİMİ VE YÖNETİMİ</Text>
-                <Text style={styles.modalTitle}>Aktif Okulu Değiştir</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => {
-                  setSchoolModalVisible(false);
-                  setIsAddingSchool(false);
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                style={styles.modalCloseBtn}
-              >
-                <Ionicons name="close" size={22} color={Colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView contentContainerStyle={{ paddingVertical: 10, gap: 12 }}>
-              <Text style={{ fontSize: 13, color: Colors.textSecondary, lineHeight: 18 }}>
-                {isInstitutionalTeacher
-                  ? 'Yöneticinizin hesabına bağlı kurum okulları listelenmiştir. Dersine girdiğiniz aktif okulu seçebilirsiniz.'
-                  : 'Çalıştığınız okulu seçin veya yeni okul ekleyin. Seçtiğiniz okulun renk teması uygulamaya otomatik uygulanacaktır.'}
-              </Text>
-
-              {/* Okul Listesi */}
-              {schoolsList.map((sch) => {
-                const isActive = sch.id === activeSchool?.id;
-                const isEditing = editingSchool?.id === sch.id;
-
-                if (isEditing) {
-                  return (
-                    <View key={sch.id} style={{ backgroundColor: '#F8FAFC', padding: 14, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, gap: 12 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.textPrimary }}>
-                        Okul Düzenle
-                      </Text>
-
-                      <View>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginBottom: 4 }}>
-                          Okul Adı
-                        </Text>
-                        <TextInput
-                          style={{
-                            backgroundColor: '#FFFFFF',
-                            borderWidth: 1,
-                            borderColor: Colors.border,
-                            borderRadius: 10,
-                            paddingHorizontal: 12,
-                            paddingVertical: 8,
-                            fontSize: 14,
-                            color: Colors.textPrimary,
-                          }}
-                          value={editSchoolName}
-                          onChangeText={setEditSchoolName}
-                        />
-                      </View>
-
-                      <View>
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginBottom: 8 }}>
-                          Renk Teması
-                        </Text>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                          {SCHOOL_COLORS.map((c) => (
-                            <TouchableOpacity
-                              key={c.color}
-                              style={{
-                                width: 32,
-                                height: 32,
-                                borderRadius: 16,
-                                backgroundColor: c.color,
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                borderWidth: editSchoolColor === c.color ? 3 : 0,
-                                borderColor: '#0F172A',
-                              }}
-                              onPress={() => setEditSchoolColor(c.color)}
-                            >
-                              {editSchoolColor === c.color && (
-                                <Ionicons name="checkmark" size={18} color="#FFFFFF" />
-                              )}
-                            </TouchableOpacity>
-                          ))}
-                        </View>
-                      </View>
-
-                      <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-                        <TouchableOpacity
-                          style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: Colors.cardSubtle, alignItems: 'center' }}
-                          onPress={() => setEditingSchool(null)}
-                        >
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.textSecondary }}>Vazgeç</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={{ flex: 1, paddingVertical: 8, borderRadius: 8, backgroundColor: editSchoolColor, alignItems: 'center' }}
-                          onPress={handleSaveEditSchool}
-                        >
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Kaydet</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                }
-
-                return (
-                  <View
-                    key={sch.id}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      padding: 12,
-                      borderRadius: 14,
-                      backgroundColor: isActive ? '#F0FDF4' : Colors.cardSubtle,
-                      borderWidth: 2,
-                      borderColor: isActive ? sch.color : 'transparent',
-                      gap: 10,
-                    }}
-                  >
-                    <TouchableOpacity
-                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
-                      onPress={() => handleSelectSchool(sch.id)}
-                      activeOpacity={0.8}
-                    >
-                      <View
-                        style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 18,
-                          backgroundColor: sch.color,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Ionicons name="school" size={18} color="#FFFFFF" />
-                      </View>
-
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <Text style={{ fontSize: 15, fontWeight: '700', color: Colors.textPrimary }} numberOfLines={1}>
-                            {sch.name}
-                          </Text>
-                          {isActive && (
-                            <View style={{ backgroundColor: sch.color, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#FFFFFF' }}>Aktif</Text>
-                            </View>
-                          )}
-                          {sch.id === defaultSchoolId && (
-                            <View style={{ backgroundColor: '#FEF08A', flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
-                              <Ionicons name="star" size={10} color="#CA8A04" />
-                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#854D0E' }}>Varsayılan</Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-
-                    {/* Action buttons (Varsayılan Yap, Edit & Delete) */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <TouchableOpacity
-                        style={{
-                          padding: 6,
-                          borderRadius: 8,
-                          backgroundColor: sch.id === defaultSchoolId ? '#FEF08A' : '#F1F5F9',
-                        }}
-                        onPress={() => handleSetDefaultSchool(sch.id)}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        accessibilityLabel="Varsayılan Okul Yap"
-                      >
-                        <Ionicons
-                          name={sch.id === defaultSchoolId ? 'star' : 'star-outline'}
-                          size={16}
-                          color={sch.id === defaultSchoolId ? '#CA8A04' : Colors.textMuted}
-                        />
-                      </TouchableOpacity>
-
-                      {!isInstitutionalTeacher && (
-                        <>
-                          <TouchableOpacity
-                            style={{ padding: 6, borderRadius: 8, backgroundColor: '#E2E8F0' }}
-                            onPress={() => handleStartEditSchool(sch)}
-                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          >
-                            <Ionicons name="pencil" size={15} color={Colors.textSecondary} />
-                          </TouchableOpacity>
-                          {schoolsList.length > 1 && (
-                            <TouchableOpacity
-                              style={{ padding: 6, borderRadius: 8, backgroundColor: '#FEE2E2' }}
-                              onPress={() => handleDeleteSchoolHandler(sch)}
-                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                            >
-                              <Ionicons name="trash-outline" size={15} color="#DC2626" />
-                            </TouchableOpacity>
-                          )}
-                        </>
-                      )}
-                    </View>
-                  </View>
-                );
-              })}
-
-              {/* Yeni Okul Ekle Formu veya Kurumsal Bilgi Kartı */}
-              {isInstitutionalTeacher ? (
-                <View style={{ backgroundColor: '#F0FDF4', padding: 14, borderRadius: 14, borderWidth: 1, borderColor: '#BBF7D0', marginTop: 10 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Ionicons name="shield-checkmark" size={18} color="#16A34A" />
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#166534' }}>Kurumsal Okul Seçimi</Text>
-                  </View>
-                  <Text style={{ fontSize: 12, color: '#15803D', marginTop: 4, lineHeight: 17 }}>
-                    Bağlı olduğunuz okul yöneticisinin tanımladığı okullar arasında yukarıdan geçiş yapabilirsiniz. Yeni okul tanımlama ve düzenleme işlemleri okul yöneticisi yetkisindedir.
-                  </Text>
-                </View>
-              ) : isAddingSchool ? (
-                <View style={{ backgroundColor: '#F8FAFC', padding: 14, borderRadius: 14, borderWidth: 1, borderColor: Colors.border, gap: 12, marginTop: 8 }}>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: Colors.textPrimary }}>
-                    Yeni Okul Tanımla
-                  </Text>
-
-                  <View>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginBottom: 4 }}>
-                      Okul / Kurum Adı
-                    </Text>
-                    <TextInput
-                      style={{
-                        backgroundColor: '#FFFFFF',
-                        borderWidth: 1,
-                        borderColor: Colors.border,
-                        borderRadius: 10,
-                        paddingHorizontal: 12,
-                        paddingVertical: 8,
-                        fontSize: 14,
-                        color: Colors.textPrimary,
-                      }}
-                      placeholder="Örn: Atatürk Anadolu Lisesi"
-                      placeholderTextColor={Colors.textMuted}
-                      value={newSchoolName}
-                      onChangeText={setNewSchoolName}
-                    />
-                  </View>
-
-                  <View>
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: Colors.textSecondary, marginBottom: 8 }}>
-                      Okulun Renk Temasını Seçin
-                    </Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                      {SCHOOL_COLORS.map((c) => (
-                        <TouchableOpacity
-                          key={c.color}
-                          style={{
-                            width: 36,
-                            height: 36,
-                            borderRadius: 18,
-                            backgroundColor: c.color,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            borderWidth: newSchoolColor === c.color ? 3 : 0,
-                            borderColor: '#0F172A',
-                          }}
-                          onPress={() => setNewSchoolColor(c.color)}
-                        >
-                          {newSchoolColor === c.color && (
-                            <Ionicons name="checkmark" size={20} color="#FFFFFF" />
-                          )}
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-                    <TouchableOpacity
-                      style={{
-                        flex: 1,
-                        paddingVertical: 10,
-                        borderRadius: 10,
-                        backgroundColor: Colors.cardSubtle,
-                        alignItems: 'center',
-                      }}
-                      onPress={() => setIsAddingSchool(false)}
-                    >
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.textSecondary }}>
-                        Vazgeç
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={{
-                        flex: 1,
-                        paddingVertical: 10,
-                        borderRadius: 10,
-                        backgroundColor: newSchoolColor,
-                        alignItems: 'center',
-                      }}
-                      onPress={handleCreateSchool}
-                    >
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>
-                        Okulu Kaydet & Geç
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    padding: 12,
-                    borderRadius: 12,
-                    backgroundColor: activeSchool?.color || Colors.primary,
-                    gap: 8,
-                    marginTop: 6,
-                  }}
-                  onPress={() => setIsAddingSchool(true)}
-                >
-                  <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF' }}>
-                    Yeni Okul Ekle
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 📋 ÖĞRETMEN DERS VE ŞUBE BİLGİLENDİRME MODALI */}
-      <Modal
-        visible={teacherInfoModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setTeacherInfoModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxWidth: 440, borderRadius: 16, padding: 20, backgroundColor: "#f8d8f8ff" }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="person" size={20} color={activeSchool?.color || Colors.primary} />
-                </View>
-                <View>
-                  <Text style={{ fontSize: 15, fontWeight: '800', color: Colors.textPrimary }}>
-                    {teacherDisplayName || 'Öğretmen Bilgisi'}
-                  </Text>
-                  <Text style={{ fontSize: 11, color: Colors.textMuted }}>Kayıtlı Ders & Şube Bilgilendirmesi</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={() => setTeacherInfoModalVisible(false)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="close-circle" size={24} color={Colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Girdiğiniz Dersler */}
-            <View style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <Ionicons name="book" size={16} color="#4F46E5" />
-                <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.textPrimary }}>Girdiğiniz Dersler</Text>
-                <Text style={{ fontSize: 11, color: Colors.textMuted }}>({assignedLessonsList.length})</Text>
-              </View>
-              {assignedLessonsList.length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {assignedLessonsList.map((ls, idx) => (
-                    <View key={idx} style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#C7D2FE' }}>
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: '#3730A3' }}>{ls}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={{ fontSize: 12, color: Colors.textMuted, fontStyle: 'italic' }}>
-                  Sistemde adınıza tanımlı ders henüz listelenmedi (çarşaf/program yüklenince otomatik doldurulur).
-                </Text>
-              )}
-            </View>
-
-            {/* Girdiğiniz Şubeler */}
-            <View style={{ marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <Ionicons name="school" size={16} color="#059669" />
-                <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.textPrimary }}>Girdiğiniz Şubeler</Text>
-                <Text style={{ fontSize: 11, color: Colors.textMuted }}>({assignedClassesList.length})</Text>
-              </View>
-              {assignedClassesList.length > 0 ? (
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {assignedClassesList.map((cl, idx) => (
-                    <View key={idx} style={{ backgroundColor: '#ECFDF5', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#A7F3D0' }}>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#065F46' }}>{cl}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={{ fontSize: 12, color: Colors.textMuted, fontStyle: 'italic' }}>
-                  Tanımlı şube bulunamadı.
-                </Text>
-              )}
-            </View>
-
-            <View style={{ backgroundColor: '#F8FAFC', padding: 10, borderRadius: 10, borderLeftWidth: 3, borderLeftColor: activeSchool?.color || Colors.primary, marginBottom: 16 }}>
-              <Text style={{ fontSize: 11, color: Colors.textSecondary, lineHeight: 16 }}>
-                💡 Bilgi: Yıllık plan ve haftalık program çekerken yalnızca yukarıda listelenen ders ve sınıflarınızın verileri sistemden güvenle aktarılır.
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={{ backgroundColor: activeSchool?.color || Colors.primary, paddingVertical: 10, borderRadius: 10, alignItems: 'center' }}
-              onPress={() => setTeacherInfoModalVisible(false)}
-            >
-              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Tamam</Text>
-            </TouchableOpacity>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
-              <Ionicons name="information-circle-outline" size={12} color="#64748B" />
-              <Text style={{ fontSize: 10.5, color: '#64748B' }}>
-                Öğretmen Ajanda v{CURRENT_APP_VERSION} • Geliştirici: gundoner@yahoo.com
-              </Text>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <HomeModals ctx={ctx} />
 
       {/* 💬 Okunmamış Mesajlar Yüzen Bildirim Baloncuğu */}
       <FloatingMessageBubble
@@ -3544,1820 +2015,3 @@ export const HomeScreen: React.FC = () => {
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  contentContainer: {
-    padding: 12,
-    paddingBottom: 40,
-  },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  schoolSwitcherBar: {
-    marginBottom: 10,
-    marginTop: 2,
-  },
-  schoolSwitcherScroll: {
-    gap: 8,
-    paddingHorizontal: 2,
-    paddingVertical: 2,
-  },
-  schoolSwitchTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#E2E8F0',
-    ...Shadows.small,
-  },
-  schoolSwitchTabActive: {
-    borderWidth: 1.5,
-  },
-  schoolSwitchTabText: {
-    fontSize: 12.5,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-    maxWidth: 180,
-  },
-  schoolSwitchTabTextActive: {
-    fontWeight: '800',
-  },
-  activeSchoolBadge: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 2,
-  },
-  hamburgerBtn: {
-    padding: 6,
-    borderRadius: 10,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    marginRight: 8,
-  },
-  topBarLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-    marginRight: 8,
-  },
-  topBarLogo: {
-    width: 46,
-    height: 46,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#E0E7FF',
-    ...Shadows.small,
-  },
-  dateText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  greetingTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-    letterSpacing: -0.5,
-  },
-  clockBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.card,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    gap: 4,
-    ...Shadows.small,
-  },
-  clockText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  settingsHeaderBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Shadows.small,
-  },
-  exitHeaderBtn: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#FECACA',
-  },
-  heroCardContainer: {
-    marginTop: 0,
-    marginBottom: 1,
-  },
-  activeCard: {
-    backgroundColor: '#FFFFFF',
-    borderColor: Colors.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 0,
-  },
-  activeBadgeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-    gap: 4,
-  },
-  activeStatusWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
-    flex: 1,
-  },
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#DCFCE7',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-  },
-  pulsingDot: {
-    width: 6.5,
-    height: 6.5,
-    borderRadius: 3.5,
-    backgroundColor: Colors.success,
-  },
-  liveText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-    color: Colors.successDark,
-    letterSpacing: 0.3,
-  },
-  nextIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-  },
-  nextText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-    color: Colors.primaryDark,
-    letterSpacing: 0.3,
-  },
-  otherIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-  },
-  otherText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  heroRightControlsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  heroCurrentJumpBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#EFF6FF',
-    borderWidth: 1,
-    borderColor: 'rgba(37, 99, 235, 0.25)',
-    paddingHorizontal: 5,
-    paddingVertical: 2.5,
-    borderRadius: 6,
-  },
-  heroCurrentJumpBtnActive: {
-    backgroundColor: '#DCFCE7',
-    borderColor: '#86EFAC',
-  },
-  heroCurrentJumpBtnText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-    color: Colors.primary,
-  },
-  heroNavContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F1F5F9',
-    borderRadius: 6,
-    paddingHorizontal: 2,
-    paddingVertical: 1,
-    gap: 1,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  heroNavArrowBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  heroNavArrowDisabled: {
-    backgroundColor: 'transparent',
-    opacity: 0.35,
-  },
-  heroNavCounter: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-    minWidth: 24,
-    textAlign: 'center',
-    paddingHorizontal: 2,
-  },
-  heroCompactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 5,
-    gap: 4,
-  },
-  heroClassBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-  },
-  heroClassBadgeText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: Colors.primaryDark,
-  },
-  heroCourseNameText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  heroDotSeparator: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    fontWeight: '600',
-  },
-  heroSlotBadge: {
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 5,
-  },
-  heroSlotBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  heroClassroomText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  expandedTopicCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderLeftWidth: 3.5,
-    borderLeftColor: Colors.primary,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    marginBottom: 6,
-  },
-  expandedTopicHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  topicHeaderTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  topicBookIconBg: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  expandedTopicLabel: {
-    fontSize: 10.5,
-    fontWeight: '800',
-    color: Colors.primaryDark,
-    letterSpacing: 0.3,
-    textTransform: 'uppercase',
-  },
-  topicHeaderBadges: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  topicWeekBadge: {
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  topicWeekBadgeText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: Colors.primaryDark,
-  },
-  topicCopyIconBtn: {
-    width: 22,
-    height: 22,
-    borderRadius: 5,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  expandedTopicText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textPrimary,
-    lineHeight: 18.5,
-  },
-  expandedOutcomeText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 3,
-    lineHeight: 15,
-  },
-  topicLoadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-  },
-  topicLoadingText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-  },
-  topicEmptyContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 4,
-  },
-  topicEmptyText: {
-    flex: 1,
-    fontSize: 11,
-    color: Colors.textSecondary,
-    fontStyle: 'italic',
-  },
-  cardActionsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 0,
-    marginBottom: 0,
-  },
-  cardActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primaryLight,
-    paddingVertical: 6,
-    borderRadius: 6,
-    gap: 4,
-  },
-  cardActionText: {
-    fontSize: 11.5,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  idleCard: {
-    backgroundColor: Colors.card,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 0,
-  },
-  idleIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.secondaryLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 5,
-  },
-  idleIndicatorText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-    color: Colors.secondary,
-    letterSpacing: 0.3,
-  },
-  idleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 6,
-  },
-  idleIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.secondaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  idleTextWrap: {
-    flex: 1,
-  },
-  idleTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  idleSub: {
-    fontSize: 11.5,
-    color: Colors.textSecondary,
-    marginTop: 2,
-    lineHeight: 16,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
-  },
-  statBox: {
-    flex: 1,
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
-    ...Shadows.small,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-  },
-  statLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  sectionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  sectionHeader: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginTop: 16,
-    marginBottom: 10,
-  },
-  seeAllText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
-  scheduleHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 0,
-    marginBottom: 4,
-  },
-  dayNavigator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flex: 1,
-  },
-  navArrowBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 7,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Shadows.small,
-  },
-  dayTitleContainer: {
-    justifyContent: 'center',
-  },
-  dayMainTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  daySubTitle: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
-  todayPill: {
-    backgroundColor: '#DEF7EC',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#31C48D',
-  },
-  todayPillText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#03543F',
-  },
-  returnTodayBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  returnTodayBtnText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: Colors.primaryDark,
-  },
-  quickGrid: {
-    marginBottom: 10,
-    gap: 10,
-
-  },
-  quickRow: {
-    flexDirection: 'row',
-    gap: 10,
-
-  },
-  quickBtn: {
-    flex: 1,
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    ...Shadows.small,
-  },
-  quickIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  quickTextWrap: {
-    flex: 1,
-  },
-  quickTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  quickSub: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  emptyTodayCard: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  emptyTodayText: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: 8,
-  },
-  addScheduleLink: {
-    marginTop: 10,
-  },
-  addScheduleLinkText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  allProgramsSwitchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.card,
-    paddingHorizontal: 28,
-    paddingVertical: 1,
-    borderRadius: 8,
-    marginBottom: 3,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    ...Shadows.small,
-    height: 35,
-
-  },
-  allProgramsSwitchLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  allProgramsSwitchLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-
-  },
-  schoolsCountBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 6,
-    marginLeft: 2,
-  },
-  schoolsCountBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  cardMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginBottom: 2,
-  },
-  schoolPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 5,
-    borderWidth: 1,
-  },
-  schoolPillDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-  },
-  schoolPillText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  conflictWarningBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#FEF3C7',
-    borderColor: '#F59E0B',
-    borderWidth: 1,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 5,
-  },
-  conflictWarningText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: '#B45309',
-  },
-  timelineCard: {
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    marginBottom: 4,
-  },
-  timelineActive: {
-    borderColor: Colors.primary,
-    backgroundColor: '#F8FAFC',
-  },
-  timelineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  timeColumn: {
-    width: 76,
-  },
-  slotName: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  timeRange: {
-    fontSize: 10,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
-  lessonDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: Colors.border,
-    marginHorizontal: 6,
-  },
-  lessonContent: {
-    flex: 1,
-  },
-  lessonHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  lessonClass: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  lessonCourse: {
-    fontSize: 11.5,
-    color: Colors.primary,
-    fontWeight: '600',
-    marginTop: 0,
-  },
-  classroomSmall: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    marginTop: 1,
-  },
-  timeColumnTouch: {
-    width: 74,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  defterPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 5,
-    paddingVertical: 1.5,
-    borderRadius: 5,
-    marginTop: 2,
-    gap: 2,
-  },
-  defterPillText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: Colors.primaryDark,
-  },
-  classNameTouch: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingVertical: 1,
-  },
-  planCardBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingLeft: 6,
-    borderLeftWidth: 1,
-    borderLeftColor: Colors.border,
-    marginLeft: 4,
-  },
-  planBtnIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 1,
-  },
-  planCardBtnText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    justifyContent: 'flex-start',
-    paddingTop: Platform.OS === 'android' ? 36 : 52,
-    paddingHorizontal: 14,
-  },
-  modalContainer: {
-    backgroundColor: Colors.card,
-    borderRadius: 20,
-    maxHeight: '88%',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 20,
-    ...Shadows.large,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-    marginBottom: 12,
-  },
-  modalClassTag: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  modalCourseTag: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primaryDark,
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.textPrimary,
-    marginTop: 4,
-  },
-  modalCloseBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalLoadingWrap: {
-    paddingVertical: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalLoadingText: {
-    marginTop: 10,
-    fontSize: 13,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
-  modalEmptyWrap: {
-    paddingVertical: 36,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  modalEmptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    marginTop: 12,
-  },
-  modalEmptyDesc: {
-    fontSize: 13,
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 6,
-    lineHeight: 18,
-  },
-  modalEmptyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-    marginTop: 16,
-    gap: 6,
-  },
-  modalEmptyBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  modalScroll: {
-    marginTop: 4,
-  },
-  topicStepperRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 14,
-  },
-  stepArrowBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  stepArrowBtnDisabled: {
-    opacity: 0.4,
-  },
-  stepArrowText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  stepCounterText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  topicSectionHeader: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: Colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  noAdjacentBox: {
-    padding: 10,
-    backgroundColor: Colors.background,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  noAdjacentText: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    fontStyle: 'italic',
-  },
-  adjacentCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 10,
-    marginBottom: 8,
-  },
-  adjacentHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  offsetBadgeGray: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#E2E8F0',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  offsetBadgeTextGray: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  offsetBadgeBlue: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#E0F2FE',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  offsetBadgeTextBlue: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#0284C7',
-  },
-  adjacentMetaText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.textMuted,
-  },
-  adjacentTopicText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: Colors.textPrimary,
-    lineHeight: 18,
-  },
-  currentTopicHeroCard: {
-    backgroundColor: '#F0FDF4',
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: '#22C55E',
-    padding: 14,
-    marginVertical: 12,
-    ...Shadows.medium,
-  },
-  heroBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  mainBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#16A34A',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  mainBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
-  },
-  heroWeekText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#15803D',
-  },
-  heroDateText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#166534',
-    marginBottom: 10,
-  },
-  heroTopicBox: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#DCFCE7',
-    marginBottom: 10,
-  },
-  heroTopicText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    lineHeight: 22,
-  },
-  outcomesContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#22C55E',
-  },
-  outcomesLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#166534',
-    marginBottom: 2,
-  },
-  outcomesBody: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    lineHeight: 17,
-  },
-  heroCopyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#16A34A',
-    paddingVertical: 11,
-    borderRadius: 10,
-    gap: 8,
-    ...Shadows.small,
-  },
-  heroCopyBtnText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  yearlyPlanModalContainer: {
-    maxHeight: '96%',
-    height: '96%',
-    paddingTop: Platform.OS === 'ios' ? 44 : 16,
-    paddingBottom: 16,
-  },
-  yearlyPlanActionsRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 10,
-  },
-  pdfOpenBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#EF4444',
-    paddingVertical: 7,
-    paddingHorizontal: 6,
-    borderRadius: 8,
-    gap: 4,
-  },
-  pdfOpenBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  planManageBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primaryLight,
-    paddingVertical: 7,
-    paddingHorizontal: 6,
-    borderRadius: 8,
-    gap: 4,
-  },
-  planManageBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.primaryDark,
-  },
-  searchBarWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 36,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    gap: 6,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 12,
-    color: Colors.textPrimary,
-    paddingVertical: 0,
-  },
-  dateFilterContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 10,
-  },
-  dateFilterInputBox: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.background,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    height: 34,
-    gap: 4,
-  },
-  dateFilterInput: {
-    flex: 1,
-    fontSize: 11,
-    color: Colors.textPrimary,
-    paddingVertical: 0,
-  },
-  dateFilterText: {
-    flex: 1,
-    fontSize: 11,
-    color: Colors.textPrimary,
-    fontWeight: '500',
-  },
-  headerTodayIconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  todayJumpIconBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.primary,
-    height: 34,
-    paddingHorizontal: 9,
-    borderRadius: 8,
-    gap: 4,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  todayJumpIconBtnText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  planItemCardHighlighted: {
-    borderColor: Colors.primary,
-    borderWidth: 2,
-    backgroundColor: '#EEF2FF',
-  },
-  planItemCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    marginBottom: 8,
-    ...Shadows.small,
-  },
-  planItemCardActive: {
-    borderColor: Colors.primary,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1.5,
-  },
-  planItemHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  weekBadge: {
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  weekBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.primaryDark,
-  },
-  planDateInlineText: {
-    fontSize: 10.5,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  planHoursText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  planDateText: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  planSubjectText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  planOutcomesWrap: {
-    backgroundColor: Colors.background,
-    borderRadius: 6,
-    padding: 8,
-    marginTop: 4,
-    borderLeftWidth: 2,
-    borderLeftColor: Colors.primary,
-  },
-  planOutcomesLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: Colors.textSecondary,
-    marginBottom: 2,
-  },
-  planOutcomesBody: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    lineHeight: 16,
-  },
-  headerAgendaBadge: {
-    position: 'absolute',
-    top: -3,
-    right: -3,
-    backgroundColor: Colors.danger,
-    borderRadius: 8,
-    minWidth: 15,
-    height: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-  },
-  headerAgendaBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  headerMessageBadge: {
-    position: 'absolute',
-    top: -3,
-    right: -3,
-    backgroundColor: '#EF4444',
-    borderRadius: 8,
-    minWidth: 15,
-    height: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-    borderWidth: 1.5,
-    borderColor: '#FFFFFF',
-  },
-  headerMessageBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  unreadNotificationBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: '#C7D2FE',
-    padding: 12,
-    marginBottom: 10,
-    borderLeftWidth: 5,
-    borderLeftColor: '#4F46E5',
-    ...Shadows.small,
-  },
-  unreadNotificationIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#4F46E5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  unreadNotificationTitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#1E1B4B',
-  },
-  unreadNotificationLiveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#EF4444',
-  },
-  unreadNotificationSub: {
-    fontSize: 11.5,
-    color: '#4338CA',
-    marginTop: 2,
-  },
-  unreadNotificationActionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-    gap: 3,
-    marginLeft: 6,
-  },
-  unreadNotificationActionText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#4F46E5',
-  },
-  alertBannerContainer: {
-    marginBottom: 10,
-    gap: 8,
-  },
-  alertBannerCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFBEB',
-    borderWidth: 1.5,
-    borderColor: '#FDE68A',
-    borderRadius: 14,
-    padding: 12,
-    borderLeftWidth: 5,
-    borderLeftColor: '#F59E0B',
-    ...Shadows.small,
-  },
-  alertBannerCardUrgent: {
-    backgroundColor: '#FEF2F2',
-    borderColor: '#FECACA',
-    borderLeftColor: '#EF4444',
-  },
-  alertBannerLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingRight: 8,
-  },
-  alertIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: '#FEF3C7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  alertHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  alertBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#B45309',
-    letterSpacing: 0.3,
-  },
-  alertTimePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: '#FDE68A',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  alertTimeText: {
-    fontSize: 9.5,
-    fontWeight: '700',
-    color: '#78350F',
-  },
-  alertTitleText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    lineHeight: 18,
-  },
-  alertDescText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
-  alertQuickCheckBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  alertQuickCheckText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#047857',
-  },
-  todayAgendaSection: {
-    marginTop: 10,
-    marginBottom: 12,
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    ...Shadows.small,
-  },
-  todayAgendaHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.borderLight,
-    marginBottom: 8,
-  },
-  agendaSectionIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  todayAgendaTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  agendaCountBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 10,
-  },
-  agendaCountBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  todayAgendaSubtitle: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
-  agendaQuickAddBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  agendaQuickAddText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  agendaViewAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-  },
-  agendaViewAllText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-  },
-  agendaEmptyBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-  },
-  agendaEmptyIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: Colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  agendaEmptyTitle: {
-    fontSize: 12.5,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-  },
-  agendaEmptyText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    marginTop: 1,
-  },
-  agendaItemsList: {
-    gap: 6,
-  },
-  agendaItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  agendaItemRowAlert: {
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.danger,
-    backgroundColor: '#FFFDFD',
-  },
-  agendaItemRowCompleted: {
-    opacity: 0.6,
-    backgroundColor: '#F1F5F9',
-  },
-  agendaCheckbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  agendaCheckboxPending: {
-    borderColor: Colors.divider,
-    backgroundColor: '#FFFFFF',
-  },
-  agendaCheckboxDone: {
-    borderColor: Colors.success,
-    backgroundColor: Colors.success,
-  },
-  agendaItemTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textPrimary,
-    flex: 1,
-  },
-  agendaItemTitleDone: {
-    textDecorationLine: 'line-through',
-    color: Colors.textMuted,
-  },
-  agendaMiniAlertPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    backgroundColor: Colors.dangerLight,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 4,
-  },
-  agendaMiniAlertText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: Colors.danger,
-  },
-  agendaTimeMini: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  agendaTimeMiniText: {
-    fontSize: 10.5,
-    color: Colors.textSecondary,
-    fontWeight: '500',
-  },
-  agendaCategoryMiniText: {
-    fontSize: 10.5,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
-  agendaDateBadge: {
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  agendaDateBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  proctorDutyContainer: {
-    marginBottom: 12,
-    gap: 8,
-  },
-  proctorDutyHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    marginBottom: 2,
-  },
-  proctorDutyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#EEF2FF',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#C7D2FE',
-  },
-  proctorDutyBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#4338CA',
-    letterSpacing: 0.5,
-  },
-  proctorDutyCountText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6366F1',
-  },
-  proctorDutyCard: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#C7D2FE',
-    borderLeftWidth: 5,
-    borderLeftColor: '#6366F1',
-    borderRadius: 14,
-    padding: 12,
-    ...Shadows.small,
-  },
-  proctorDutyCardToday: {
-    backgroundColor: '#FDF4FF',
-    borderColor: '#E9D5FF',
-    borderLeftColor: '#9333EA',
-  },
-  proctorDutyCardLeft: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  proctorIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: '#EEF2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  proctorRowTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 4,
-  },
-  proctorExamTitle: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1F2937',
-  },
-  proctorTodayBadge: {
-    backgroundColor: '#9333EA',
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  proctorTodayBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  proctorMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
-  },
-  proctorMetaChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#F3F4F6',
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  proctorMetaChipText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#4B5563',
-  },
-  proctorHallHighlight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  proctorHallText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#065F46',
-  },
-  proctorStudentCountPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#D1FAE5',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  proctorStudentCountText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#047857',
-  },
-});

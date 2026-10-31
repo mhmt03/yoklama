@@ -271,10 +271,11 @@ export async function syncYearlyPlansFromSchool(options?: {
     const isTeacher = activeRole === 'teacher' || sessionRole === 'teacher';
 
     let plansToProcess = allServerPlans;
+    let taughtLessons: TeacherTaughtLesson[] = [];
 
     if (isTeacher) {
       // Öğretmenin bu okulda girdiği dersleri ve kademeleri bul
-      const taughtLessons = await getTeacherTaughtLessons(code, schoolId);
+      taughtLessons = await getTeacherTaughtLessons(code, schoolId);
 
       if (taughtLessons.length === 0) {
         return {

@@ -66,7 +66,7 @@ function MainTabs() {
       detachInactiveScreens={true}
       screenOptions={{
         headerShown: false,
-        unmountOnBlur: Platform.OS === 'web',
+        ...({ unmountOnBlur: Platform.OS === 'web' } as any),
         sceneStyle: { backgroundColor: bgTint || Colors.background },
         tabBarActiveTintColor: themeColor,
         tabBarInactiveTintColor: Colors.textMuted,
