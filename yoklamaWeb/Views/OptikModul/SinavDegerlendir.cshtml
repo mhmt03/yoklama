@@ -37,18 +37,133 @@
                         </select>
                     </div>
                     <div class="col-md-2">
-                        <button type="submit" class="btn btn-primary w-100" id="btnDegerlendir" disabled>
+                        <button type="submit" class="btn btn-primary w-100 fw-semibold" id="btnDegerlendir" disabled>
                             <i class="bi bi-play-fill me-1"></i> Değerlendir
                         </button>
                     </div>
+
+                    <!-- Sınıf Eşleştirme ve Numara Filtresi Seçenekleri -->
+                    <div class="col-12 mt-3">
+                        <div class="p-3 bg-light rounded border">
+                            <div class="d-flex align-items-start mb-3">
+                                <div class="form-check form-switch mb-0 me-3 pt-1">
+                                    <input class="form-check-input fs-5" type="checkbox" id="sinifFiltresiUygula" name="sinifFiltresiUygula" role="switch">
+                                </div>
+                                <div>
+                                    <label class="form-check-label fw-bold mb-0 text-dark cursor-pointer" for="sinifFiltresiUygula">
+                                        <i class="bi bi-funnel me-1 text-primary"></i> Sadece Sınavın Hedef Sınıflarını Değerlendir (Numaraya Göre DB Sınıf Kısıtlaması)
+                                    </label>
+                                    <div class="small text-muted">
+                                        Öğrencinin optikte kodladığı sınıfa değil, <strong>öğrenci numarasına bakılarak veritabanındaki gerçek sınıfına</strong> göre eşleştirilir. Böylece tüm okulun olduğu karışık bir TXT yüklense bile sadece bu sınava ait sınıfların öğrencileri tabloya alınır.
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-items-start border-top pt-3">
+                                <div class="form-check form-switch mb-0 me-3 pt-1">
+                                    <input class="form-check-input fs-5" type="checkbox" id="numarasizlariDahilEt" name="numarasizlariDahilEt" role="switch" checked>
+                                </div>
+                                <div>
+                                    <label class="form-check-label fw-bold mb-0 text-dark cursor-pointer" for="numarasizlariDahilEt">
+                                        <i class="bi bi-person-x me-1 text-warning"></i> Numarasız veya Sistemde Bulunamayan Öğrencileri de Tabloya Ekle
+                                    </label>
+                                    <div class="small text-muted">
+                                        Numara kodlamayan veya numarası veritabanında bulunamayan satırların sınıfı bilinemediği için otomatik elenmek yerine tabloya <strong>Kayıtsız</strong> olarak aktarılır. Böylece öğrenciyi inceleyebilir, doğru öğrenciyle eşleştirebilir veya yanındaki silme butonuyla kaldırabilirsiniz.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Dinamik Eşleştirme Alanı -->
+                <!-- Dinamik Eşleştirme ve Koordinat Alanı -->
                 <div id="eslesmeContainer" class="mt-4 p-3 bg-light border rounded" style="display: none;">
-                    <h6 class="fw-bold text-primary mb-3"><i class="bi bi-link-45deg me-2"></i>Ders Eşleştirmeleri</h6>
-                    <p class="small text-muted mb-3">Lütfen sınavdaki derslerin, seçtiğiniz optik formda hangi bölüme denk geldiğini seçiniz.</p>
-                    <div class="row g-3" id="eslesmeRow">
-                        <!-- Dinamik Selectbox'lar buraya gelecek -->
+                    
+                    <!-- 1. Öğrenci Bilgi Sütunları (Dinamik Düzenlenebilir) -->
+                    <div class="card border mb-3 shadow-none">
+                        <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                            <span class="fw-bold text-dark small">
+                                <i class="bi bi-person-badge text-primary me-1"></i> 1. Öğrenci Bilgi Sütunları (No, Ad Soyad, Sınıf, Kitapçık)
+                            </span>
+                            <button type="button" class="btn btn-sm btn-link text-decoration-none py-0 text-secondary" data-bs-toggle="collapse" data-bs-target="#genelParametrelerCollapse">
+                                <i class="bi bi-chevron-down me-1"></i> Göster / Gizle
+                            </button>
+                        </div>
+                        <div class="collapse show" id="genelParametrelerCollapse">
+                            <div class="card-body p-3">
+                                <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i>TXT dosyasındaki sütun başlangıçları <strong>0'dan başlar</strong>. Dosyanızdaki sütunlara göre anlık değiştirebilirsiniz.</p>
+                                <div class="row g-2">
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold text-secondary mb-1">Öğrenci No (Sütun / Krk)</label>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text">Sütun</span>
+                                            <input type="number" class="form-control" id="dynNoBaslangic" min="0">
+                                            <span class="input-group-text">Krk</span>
+                                            <input type="number" class="form-control" id="dynNoUzunluk" min="1">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold text-secondary mb-1">Ad Soyad (Sütun / Krk)</label>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text">Sütun</span>
+                                            <input type="number" class="form-control" id="dynAdBaslangic" min="0">
+                                            <span class="input-group-text">Krk</span>
+                                            <input type="number" class="form-control" id="dynAdUzunluk" min="1">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold text-secondary mb-1">Sınıf (Sütun / Krk)</label>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text">Sütun</span>
+                                            <input type="number" class="form-control" id="dynSinifBaslangic" min="0">
+                                            <span class="input-group-text">Krk</span>
+                                            <input type="number" class="form-control" id="dynSinifUzunluk" min="1">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small fw-bold text-secondary mb-1">Kitapçık Türü (Sütun / Krk)</label>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text">Sütun</span>
+                                            <input type="number" class="form-control" id="dynKitapcikBaslangic" min="0">
+                                            <span class="input-group-text">Krk</span>
+                                            <input type="number" class="form-control" id="dynKitapcikUzunluk" min="1">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. Ders Eşleştirmeleri ve Sütun Parametreleri -->
+                    <div class="card border shadow-none">
+                        <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                            <span class="fw-bold text-primary small">
+                                <i class="bi bi-link-45deg me-1"></i> 2. Ders Eşleştirmeleri ve Sütun Parametreleri
+                            </span>
+                            <span class="badge bg-light text-muted border small">Her dersin başlangıç sütunu ve soru sayısı</span>
+                        </div>
+                        <div class="card-body p-3">
+                            <p class="small text-muted mb-3">Sınavdaki her dersin optik formdaki karşılığını seçin. Yanındaki sütun ve soru sayısı kutularını formunuza göre doğrudan güncelleyebilirsiniz.</p>
+                            <div class="row g-3" id="eslesmeRow">
+                                <!-- Dinamik Selectbox'lar buraya gelecek -->
+                            </div>
+
+                            <!-- Ortak Şablona Kaydetme Aksiyon Alanı -->
+                            <div class="mt-4 p-3 bg-light rounded border d-flex flex-wrap justify-content-between align-items-center gap-2">
+                                <div class="form-check mb-0">
+                                    <input class="form-check-input" type="checkbox" id="chkOptikFormuGuncelle">
+                                    <label class="form-check-label small fw-semibold text-muted cursor-pointer" for="chkOptikFormuGuncelle">
+                                        <i class="bi bi-arrow-repeat me-1"></i> "Değerlendir"e basıldığında da şablona otomatik kaydet
+                                    </label>
+                                    <div class="small text-muted" style="font-size: 0.8rem;">
+                                        (Öğrenci genel bilgileri + tüm derslerin sütun/soru sayıları dahil)
+                                    </div>
+                                </div>
+                                <button type="button" class="btn btn-success fw-bold px-3 py-2 shadow-sm" onclick="kaydetFormParametreleriManuel()">
+                                    <i class="bi bi-save2 me-1"></i> Tüm Parametreleri Şablona Kaydet (Öğrenci + Ders Sütunları)
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </form>
@@ -64,10 +179,6 @@
             </button>
         </div>
         <div class="card-body">
-            <div class="alert alert-warning" id="notFoundsAlert" style="display:none;">
-                <i class="bi bi-exclamation-triangle-fill me-2"></i><strong>Dikkat!</strong> Bazı öğrenciler veritabanında bulunamadı. Bu satırlar kaydedilmeyecektir. Tablodan "Durum" sütununu kontrol edin.
-            </div>
-
             <div id="notFoundsAlert" class="alert alert-danger" style="display:none;">
                 <i class="bi bi-exclamation-triangle-fill me-2"></i> Sistemde kayıtlı olmayan (veya numarası hatalı kodlanmış) öğrenciler bulundu! Lütfen aşağıdaki tablodan kırmızı <strong>Kayıtsız</strong> etiketli satırlara tıklayarak doğru öğrenciyle eşleştirin.
             </div>
@@ -95,12 +206,12 @@
     </div>
 </div>
 
-<!-- Düzeltme Modalı -->
+<!-- Gelişmiş Satır Düzeltme Modalı -->
 <div class="modal fade" id="duzeltmeModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header bg-light">
-                <h5 class="modal-title text-danger"><i class="bi bi-pencil-square me-2"></i>Satır Düzeltme</h5>
+                <h5 class="modal-title text-danger"><i class="bi bi-pencil-square me-2"></i>Satır Düzeltme & Öğrenci Eşleştirme</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -108,14 +219,8 @@
                 
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label fw-bold">Okunan Öğrenci No (Hatalı Olabilir)</label>
+                        <label class="form-label fw-bold">Okunan Öğrenci No (Optikten Çıkan)</label>
                         <input type="text" id="editOgrenciNo" class="form-control text-danger fw-bold" readonly>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label fw-bold text-success">Sistemden Doğru Öğrenciyi Seçin</label>
-                        <select id="editOgrenciSecim" class="form-select">
-                            <option value="">-- Öğrenci Seçin --</option>
-                        </select>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label fw-bold">Kitapçık Türü</label>
@@ -127,10 +232,46 @@
                             <option value="D">D Kitapçığı</option>
                         </select>
                     </div>
+
+                    <!-- Öğrenci Arama & Filtreleme Bölümü -->
+                    <div class="col-12">
+                        <div class="p-3 bg-light rounded border">
+                            <label class="form-label fw-bold text-success d-flex justify-content-between align-items-center mb-2">
+                                <span><i class="bi bi-person-check-fill me-1"></i> Sistemden Doğru Öğrenciyi Seçin</span>
+                                <span class="badge bg-secondary font-monospace" id="filtreSonucSayisi">0 Öğrenci</span>
+                            </label>
+                            
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-7">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text bg-white"><i class="bi bi-search text-muted"></i></span>
+                                        <input type="text" id="ogrAramaInput" class="form-control" placeholder="Ad, numara veya şube ara (Örn: Ceren, 1551)..." oninput="filtreleOgrenciSecim()">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('ogrAramaInput').value=''; filtreleOgrenciSecim();" title="Temizle">
+                                            <i class="bi bi-x"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="col-md-5">
+                                    <select id="ogrSinifFiltreSelect" class="form-select form-select-sm" onchange="filtreleOgrenciSecim()">
+                                        <option value="">Tüm Şubeler / Sınıflar</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <select id="editOgrenciSecim" class="form-select font-monospace" size="6" onchange="onOgrenciSelected(this.value)">
+                                <option value="">-- Listeden Öğrenci Seçin --</option>
+                            </select>
+
+                            <div class="mt-2 small d-flex justify-content-between align-items-center">
+                                <span>Seçili Öğrenci: <strong id="secilenOgrenciEtiketi" class="text-muted">Henüz seçilmedi</strong></span>
+                                <span class="text-muted"><i class="bi bi-cursor-fill me-1"></i>Öğrenciye çift tıklayarak hızlıca uygulayabilirsiniz.</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <hr>
-                <h6 class="fw-bold mb-3">Öğrenci Kodlamaları</h6>
+                <h6 class="fw-bold mb-3"><i class="bi bi-ui-checks me-1"></i>Öğrenci Cevap Kodlamaları</h6>
                 <div id="editDerslerContainer" class="row g-3">
                     <!-- Dinamik Ders İnputları -->
                 </div>
@@ -157,22 +298,31 @@
         let sinavDersleriRef = null;
         let tumOgrenciler = [];
         let duzeltmeModalObj = null;
+        let currentFormDersleri = [];
 
         document.addEventListener('DOMContentLoaded', async () => {
             duzeltmeModalObj = new bootstrap.Modal(document.getElementById('duzeltmeModal'));
             
-            // Öğrencileri listesi (Düzeltme modalı için)
+            // Öğrenci listesini yükle
             try {
                 const res = await fetch('@Url.Action("GetOgrencilerListesi", "OptikModul")', { credentials: 'same-origin' });
                 tumOgrenciler = await res.json();
                 
-                let ogrSelect = document.getElementById('editOgrenciSecim');
-                tumOgrenciler.forEach(o => {
-                    ogrSelect.options.add(new Option(`${o.ogrenciNo} - ${o.adSoyad} (${o.sinif})`, o.ogrenciNo));
-                });
+                // Şube filtre seçeneklerini doldur
+                const sinifSelect = document.getElementById('ogrSinifFiltreSelect');
+                const siniflar = [...new Set(tumOgrenciler.map(o => o.sinif).filter(Boolean))].sort();
+                sinifSelect.innerHTML = '<option value="">Tüm Şubeler / Sınıflar</option>';
+                siniflar.forEach(s => sinifSelect.options.add(new Option(s + ' Şubesi', s)));
+
+                filtreleOgrenciSecim();
             } catch (err) {
                 console.error("Öğrenci listesi yüklenemedi", err);
             }
+
+            // Çift tıklamayla düzeltmeyi kaydet
+            document.getElementById('editOgrenciSecim').addEventListener('dblclick', function() {
+                if (this.value) kaydetDuzeltme();
+            });
         });
 
         async function checkEslesme() {
@@ -194,21 +344,64 @@
                 if (!response.ok) throw new Error("Hata oluştu");
                 
                 const data = await response.json();
+                currentFormDersleri = data.formDersleri || [];
+
+                // Form koordinatlarını dinamik alanlara doldur
+                if (data.formDetay) {
+                    document.getElementById('dynNoBaslangic').value = data.formDetay.numaraBaslangic;
+                    document.getElementById('dynNoUzunluk').value = data.formDetay.numaraUzunluk;
+                    document.getElementById('dynAdBaslangic').value = data.formDetay.adSoyadBaslangic;
+                    document.getElementById('dynAdUzunluk').value = data.formDetay.adSoyadUzunluk;
+                    document.getElementById('dynSinifBaslangic').value = data.formDetay.sinifBaslangic;
+                    document.getElementById('dynSinifUzunluk').value = data.formDetay.sinifUzunluk;
+                    document.getElementById('dynKitapcikBaslangic').value = data.formDetay.kitapcikTuruBaslangic ?? 0;
+                    document.getElementById('dynKitapcikUzunluk').value = data.formDetay.kitapcikTuruUzunluk ?? 1;
+                }
                 
                 let html = '';
                 data.sinavDersleri.forEach(sinavDers => {
+                    const sDersAdi = sinavDers.dersAdi || sinavDers;
+                    const sSoruSayisi = sinavDers.soruSayisi || 0;
+
+                    // İsme göre eşleşen form dersi
+                    const matchedFd = currentFormDersleri.find(fd => fd.dersAdi.toLowerCase() === sDersAdi.toLowerCase());
+                    const defSutun = matchedFd ? matchedFd.baslangicSutun : 0;
+                    const defKrk = matchedFd ? matchedFd.karakterSayisi : sSoruSayisi;
+
                     html += `
-                        <div class="col-md-4">
-                            <label class="form-label small fw-bold text-dark">Sınavdaki Ders: ${sinavDers}</label>
-                            <select class="form-select eslesme-select" data-sinav-ders="${sinavDers}" required>
-                                <option value="">-- Formdaki Karşılığını Seçin --</option>
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 shadow-sm border">
+                                <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+                                    <span class="fw-bold text-dark small"><i class="bi bi-book text-primary me-1"></i>${sDersAdi}</span>
+                                    <span class="badge bg-primary rounded-pill small">${sSoruSayisi} Soru</span>
+                                </div>
+                                <div class="card-body p-2">
+                                    <label class="form-label small text-muted mb-1">Formdaki Karşılığı:</label>
+                                    <select class="form-select form-select-sm eslesme-select mb-2" data-sinav-ders="${sDersAdi}" onchange="onFormDersSecildi('${sDersAdi}', this.value)" required>
+                                        <option value="">-- Form Dersi Seçin --</option>
+                                        ${currentFormDersleri.map(fd => {
+                                            const selected = (fd.dersAdi.toLowerCase() === sDersAdi.toLowerCase()) ? "selected" : "";
+                                            return `<option value="${fd.dersAdi}" ${selected}>${fd.dersAdi} (${fd.karakterSayisi} Soru)</option>`;
+                                        }).join('')}
+                                    </select>
+                                    <div class="row g-1">
+                                        <div class="col-6">
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text py-0 text-muted" style="font-size:0.75rem;">Sütun</span>
+                                                <input type="number" class="form-control form-control-sm dyn-ders-sutun" data-sinav-ders="${sDersAdi}" min="0" value="${defSutun}">
+                                            </div>
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text py-0 text-muted" style="font-size:0.75rem;">Soru</span>
+                                                <input type="number" class="form-control form-control-sm dyn-ders-karakter" data-sinav-ders="${sDersAdi}" min="1" value="${defKrk}">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     `;
-                    data.formDersleri.forEach(formDers => {
-                        // Eğer isimleri birebir aynıysa otomatik seçili getir
-                        const selected = (sinavDers.toLowerCase() === formDers.toLowerCase()) ? "selected" : "";
-                        html += `<option value="${formDers}" ${selected}>${formDers}</option>`;
-                    });
-                    html += `</select></div>`;
                 });
 
                 eslesmeRow.innerHTML = html;
@@ -223,12 +416,83 @@
             }
         }
 
+        function onFormDersSecildi(sinavDersAdi, formDersAdi) {
+            const fd = currentFormDersleri.find(d => d.dersAdi === formDersAdi);
+            if (fd) {
+                const sutunInp = document.querySelector(`.dyn-ders-sutun[data-sinav-ders="${sinavDersAdi}"]`);
+                const krkInp = document.querySelector(`.dyn-ders-karakter[data-sinav-ders="${sinavDersAdi}"]`);
+                if (sutunInp) sutunInp.value = fd.baslangicSutun;
+                if (krkInp) krkInp.value = fd.karakterSayisi;
+            }
+        }
+
+        async function kaydetFormParametreleriManuel() {
+            var formId = document.getElementById('formId').value;
+            if (!formId) {
+                alert("Lütfen önce bir optik form seçin.");
+                return;
+            }
+
+            var dinamikForm = {
+                formId: parseInt(formId),
+                numaraBaslangic: parseInt(document.getElementById('dynNoBaslangic').value) || 0,
+                numaraUzunluk: parseInt(document.getElementById('dynNoUzunluk').value) || 1,
+                adSoyadBaslangic: parseInt(document.getElementById('dynAdBaslangic').value) || 0,
+                adSoyadUzunluk: parseInt(document.getElementById('dynAdUzunluk').value) || 1,
+                sinifBaslangic: parseInt(document.getElementById('dynSinifBaslangic').value) || 0,
+                sinifUzunluk: parseInt(document.getElementById('dynSinifUzunluk').value) || 1,
+                kitapcikTuruBaslangic: parseInt(document.getElementById('dynKitapcikBaslangic').value) || null,
+                kitapcikTuruUzunluk: parseInt(document.getElementById('dynKitapcikUzunluk').value) || null,
+                dersler: []
+            };
+
+            document.querySelectorAll('.eslesme-select').forEach(sel => {
+                const sDers = sel.getAttribute('data-sinav-ders');
+                const fDers = sel.value;
+                const sutunInp = document.querySelector(`.dyn-ders-sutun[data-sinav-ders="${sDers}"]`);
+                const krkInp = document.querySelector(`.dyn-ders-karakter[data-sinav-ders="${sDers}"]`);
+                if (fDers) {
+                    dinamikForm.dersler.push({
+                        dersAdi: fDers,
+                        baslangicSutun: sutunInp ? (parseInt(sutunInp.value) || 0) : 0,
+                        karakterSayisi: krkInp ? (parseInt(krkInp.value) || 1) : 1
+                    });
+                }
+            });
+
+            document.getElementById('loadingOverlay').style.display = 'flex';
+
+            try {
+                const response = await fetch('@Url.Action("KaydetDinamikFormParametreleri", "OptikModul")', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(dinamikForm)
+                });
+                const result = await response.json();
+                document.getElementById('loadingOverlay').style.display = 'none';
+
+                if (result.success) {
+                    alert(result.message);
+                } else {
+                    alert("Hata: " + result.message);
+                }
+            } catch (err) {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                console.error(err);
+                alert("Sunucuya bağlanırken hata oluştu.");
+            }
+        }
+
         document.getElementById('degerlendirmeForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             var sinavId = document.getElementById('sinavId').value;
             var formId = document.getElementById('formId').value;
             var fileInput = document.getElementById('txtFile');
+            var sinifFiltresiUygula = document.getElementById('sinifFiltresiUygula').checked;
+            var numarasizlariDahilEt = document.getElementById('numarasizlariDahilEt').checked;
+            var optikFormuGuncelle = document.getElementById('chkOptikFormuGuncelle').checked;
             
             // Eşleştirmeleri JSON'a çevir
             var eslesmeler = {};
@@ -236,11 +500,42 @@
                 eslesmeler[sel.getAttribute('data-sinav-ders')] = sel.value;
             });
 
+            // Dinamik form parametreleri
+            var dinamikForm = {
+                numaraBaslangic: parseInt(document.getElementById('dynNoBaslangic').value) || 0,
+                numaraUzunluk: parseInt(document.getElementById('dynNoUzunluk').value) || 1,
+                adSoyadBaslangic: parseInt(document.getElementById('dynAdBaslangic').value) || 0,
+                adSoyadUzunluk: parseInt(document.getElementById('dynAdUzunluk').value) || 1,
+                sinifBaslangic: parseInt(document.getElementById('dynSinifBaslangic').value) || 0,
+                sinifUzunluk: parseInt(document.getElementById('dynSinifUzunluk').value) || 1,
+                kitapcikTuruBaslangic: parseInt(document.getElementById('dynKitapcikBaslangic').value) || null,
+                kitapcikTuruUzunluk: parseInt(document.getElementById('dynKitapcikUzunluk').value) || null,
+                dersler: []
+            };
+
+            document.querySelectorAll('.eslesme-select').forEach(sel => {
+                const sDers = sel.getAttribute('data-sinav-ders');
+                const fDers = sel.value;
+                const sutunInp = document.querySelector(`.dyn-ders-sutun[data-sinav-ders="${sDers}"]`);
+                const krkInp = document.querySelector(`.dyn-ders-karakter[data-sinav-ders="${sDers}"]`);
+                if (fDers) {
+                    dinamikForm.dersler.push({
+                        dersAdi: fDers,
+                        baslangicSutun: sutunInp ? (parseInt(sutunInp.value) || 0) : 0,
+                        karakterSayisi: krkInp ? (parseInt(krkInp.value) || 1) : 1
+                    });
+                }
+            });
+
             var formData = new FormData();
             formData.append('sinavId', sinavId);
             formData.append('formId', formId);
             formData.append('txtFile', fileInput.files[0]);
             formData.append('dersEslesmeleriJson', JSON.stringify(eslesmeler));
+            formData.append('sinifFiltresiUygula', sinifFiltresiUygula);
+            formData.append('numarasizlariDahilEt', numarasizlariDahilEt);
+            formData.append('dinamikFormJson', JSON.stringify(dinamikForm));
+            formData.append('optikFormuGuncelle', optikFormuGuncelle);
 
             document.getElementById('loadingOverlay').style.display = 'flex';
 
@@ -259,6 +554,10 @@
                     sinavDersleriRef = result.sinavDersleri;
                     tabloyuDoldur(result.data, result.sinavDersleri);
                     document.getElementById('sonuclarCard').style.display = 'block';
+
+                    if (optikFormuGuncelle) {
+                        alert("Değerlendirme tamamlandı ve güncel koordinatlar optik form şablonuna kalıcı olarak kaydedildi!");
+                    }
                 } else {
                     alert("Hata: " + result.message);
                 }
@@ -302,12 +601,21 @@
                 
                 let durumBadge = row.durum === "Bulundu" ? 
                     '<span class="badge bg-success">Bulundu</span>' : 
-                    '<span class="badge bg-danger">Kayıtsız</span>';
+                    '<span class="badge bg-danger">Kayıtsız (Düzeltmek İçin Tıklayın)</span>';
 
                 let tr = `<tr style="cursor:pointer;" onclick="satirSec(${rowIndex})" title="Düzeltmek için tıklayın">
                     <td class="fw-bold">${row.ogrenciNo}</td>
                     <td>${row.sinif}</td>
-                    <td>${row.adSoyad}</td>
+                    <td>
+                        <div class="d-flex align-items-center justify-content-between">
+                            <span class="fw-semibold">${row.adSoyad}</span>
+                            <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 ms-2" 
+                                    onclick="event.stopPropagation(); hizliSatirSil(${rowIndex});" 
+                                    title="Bu satırı değerlendirme tablosundan kaldır">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </td>
                     <td>${durumBadge}</td>
                     <td class="text-success">${row.toplamDogru}</td>
                     <td class="text-danger">${row.toplamYanlis}</td>
@@ -345,19 +653,68 @@
             });
         }
 
+        // Satır Düzeltme & Öğrenci Filtreleme Fonksiyonları
+        function filtreleOgrenciSecim(seciliNo) {
+            const q = (document.getElementById('ogrAramaInput').value || '').toLowerCase().trim();
+            const sinif = document.getElementById('ogrSinifFiltreSelect').value;
+            const select = document.getElementById('editOgrenciSecim');
+            select.innerHTML = '<option value="">-- Listeden Öğrenci Seçin --</option>';
+
+            const filtered = tumOgrenciler.filter(o => {
+                const matchesQuery = !q || o.adSoyad.toLowerCase().includes(q) || o.ogrenciNo.includes(q) || o.sinif.toLowerCase().includes(q);
+                const matchesSinif = !sinif || o.sinif === sinif;
+                return matchesQuery && matchesSinif;
+            });
+
+            filtered.forEach(o => {
+                const opt = new Option(`${o.ogrenciNo} - ${o.adSoyad} (${o.sinif})`, o.ogrenciNo);
+                if (seciliNo && o.ogrenciNo === seciliNo) opt.selected = true;
+                select.options.add(opt);
+            });
+
+            document.getElementById('filtreSonucSayisi').innerText = `${filtered.length} / ${tumOgrenciler.length} Öğrenci`;
+            updateSecilenOgrenciEtiket();
+        }
+
+        function onOgrenciSelected(val) {
+            updateSecilenOgrenciEtiket();
+        }
+
+        function updateSecilenOgrenciEtiket() {
+            const select = document.getElementById('editOgrenciSecim');
+            const etiket = document.getElementById('secilenOgrenciEtiketi');
+            if (select.selectedIndex > 0) {
+                etiket.innerText = select.options[select.selectedIndex].text;
+                etiket.className = "text-success fw-bold";
+            } else {
+                etiket.innerText = "Henüz seçilmedi";
+                etiket.className = "text-muted";
+            }
+        }
+
         function satirSec(index) {
             let row = islenmisSonuclar[index];
             if (!row) return;
 
             document.getElementById('editRowIndex').value = index;
             document.getElementById('editOgrenciNo').value = row.ogrenciNo;
-            document.getElementById('editOgrenciSecim').value = (row.durum === "Bulundu") ? row.ogrenciNo : "";
             document.getElementById('editKitapcik').value = row.kitapcikTuru || "A";
+
+            // Arama kutusuna akıllı ön doldurma
+            if (row.durum !== "Bulundu" && row.adSoyad && row.adSoyad.length > 2) {
+                document.getElementById('ogrAramaInput').value = row.adSoyad.split(' ')[0]; // Öğrencinin ilk adı
+            } else if (row.durum === "Bulundu") {
+                document.getElementById('ogrAramaInput').value = row.adSoyad || "";
+            } else {
+                document.getElementById('ogrAramaInput').value = row.ogrenciNo || "";
+            }
+            document.getElementById('ogrSinifFiltreSelect').value = "";
+            
+            filtreleOgrenciSecim(row.ogrenciNo);
 
             let container = document.getElementById('editDerslerContainer');
             let html = '';
             
-            // Eğer islenmisSonuclar içinde dersSonuclari var
             if (row.dersSonuclari && Array.isArray(row.dersSonuclari)) {
                 row.dersSonuclari.forEach(d => {
                     html += `
@@ -378,6 +735,15 @@
                 islenmisSonuclar.splice(index, 1);
                 tabloyuDoldur(islenmisSonuclar, sinavDersleriRef);
                 duzeltmeModalObj.hide();
+            }
+        }
+
+        function hizliSatirSil(index) {
+            let row = islenmisSonuclar[index];
+            let isim = row ? (row.adSoyad || row.ogrenciNo || "bu öğrenciyi") : "bu satırı";
+            if (confirm(`"${isim}" satırını değerlendirme tablosundan kaldırmak istediğinize emin misiniz?`)) {
+                islenmisSonuclar.splice(index, 1);
+                tabloyuDoldur(islenmisSonuclar, sinavDersleriRef);
             }
         }
 

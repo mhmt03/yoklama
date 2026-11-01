@@ -160,7 +160,7 @@ export function createHomeHandlers(ctx: HomeCtx) {
       const savedSetting = await getShowAllSchoolsSetting();
       setShowAllSchoolsSchedule(savedSetting);
     } catch (e) {
-      console.warn('Error loading schools:', e);
+      // console.warn('Error loading schools:', e);
     }
   };
 
@@ -218,7 +218,7 @@ export function createHomeHandlers(ctx: HomeCtx) {
           await syncTeacherAssignedClassesAndStudents(updated.code);
           await syncYearlyPlansFromSchool({ providedSchoolCode: updated.code });
         } catch (syncErr) {
-          console.warn('School switch auto-sync error:', syncErr);
+          // console.warn('School switch auto-sync error:', syncErr);
         }
       }
 
@@ -304,7 +304,7 @@ export function createHomeHandlers(ctx: HomeCtx) {
       const pendingCount = await getPendingAgendaCountToday(activeSchool?.id);
       setPendingAgendaCount(pendingCount);
     } catch (e) {
-      console.warn('Error loading agenda data in HomeScreen:', e);
+      // console.warn('Error loading agenda data in HomeScreen:', e);
     }
   };
 
@@ -431,10 +431,10 @@ export function createHomeHandlers(ctx: HomeCtx) {
           const duties = await fetchTeacherProctorDuties(activeSchool?.code || undefined, tName || session?.fullName || undefined);
           setTeacherProctorDuties(duties || []);
         } catch (examErr) {
-          console.warn('Error fetching proctor duties in HomeScreen:', examErr);
+          // console.warn('Error fetching proctor duties in HomeScreen:', examErr);
         }
       } catch (profErr) {
-        console.warn('Error loading teacher profile/assignments in HomeScreen:', profErr);
+        // console.warn('Error loading teacher profile/assignments in HomeScreen:', profErr);
       }
 
       await loadAgendaData();

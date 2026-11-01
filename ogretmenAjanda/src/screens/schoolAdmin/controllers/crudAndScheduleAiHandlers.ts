@@ -737,7 +737,7 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
           }
         }
       } catch (err) {
-        console.warn('[Admin Öğrenci Detay] Sunucu akışı alınamadı:', err);
+        // console.warn('[Admin Öğrenci Detay] Sunucu akışı alınamadı:', err);
       }
 
       // 2. Mobil / Yerel SQLite veritabanından veri çekme (varsa)
@@ -788,11 +788,11 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
             setStudentLocalQuizzes(quizzes || []);
           }
         } catch (sqliteErr) {
-          console.warn('[Admin Öğrenci Detay] SQLite verisi sorgulanamadı:', sqliteErr);
+          // console.warn('[Admin Öğrenci Detay] SQLite verisi sorgulanamadı:', sqliteErr);
         }
       }
     } catch (globalErr) {
-      console.warn('[Admin Öğrenci Detay] Genel hata:', globalErr);
+      // console.warn('[Admin Öğrenci Detay] Genel hata:', globalErr);
     } finally {
       setLoadingStudentDetail(false);
     }
@@ -1199,7 +1199,7 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
             setPdfEndPage('1');
           }
         } catch (cntErr) {
-          console.warn('PDF sayfa sayısı okunamadı (Tüm belge modu seçildi):', cntErr);
+          // console.warn('PDF sayfa sayısı okunamadı (Tüm belge modu seçildi):', cntErr);
           setPdfTotalPages(0);
           setPdfPageRangeMode('all');
           setPdfStartPage('1');
@@ -1284,7 +1284,7 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
         apiKey = DEFAULT_GEMINI_API_KEY;
       }
       if (!apiKey) {
-        console.warn('[Çarşaf UI] ❌ Gemini API anahtarı bulunamadı (okul ayarları, yerel ayarlar ve varsayılan anahtar boş). Analiz durduruldu.');
+        // console.warn('[Çarşaf UI] ❌ Gemini API anahtarı bulunamadı (okul ayarları, yerel ayarlar ve varsayılan anahtar boş). Analiz durduruldu.');
         setAiParsing(false);
         setAiModalVisible(false);
         Alert.alert(
@@ -1301,22 +1301,22 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
       const existingClassNames = classes.map((c: any) => `${c.grade}-${c.section.toUpperCase()}`).filter(Boolean);
       const existingLessonNames = lessons.map((l: any) => l.name).filter(Boolean);
 
-      console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
-      console.log('║ 🚀 [ÇARŞAF PROGRAM] ANALİZ VE YÜKLEME İŞLEMİ BAŞLATILDI           ║');
-      console.log('╚═══════════════════════════════════════════════════════════════════╝');
-      console.log('[Çarşaf UI] Seçili Okul:', selectedSchool.name, '(ID:', selectedSchool.id, ')');
-      console.log('[Çarşaf UI] Dosya Adı:', pendingScheduleFile.name);
-      console.log('[Çarşaf UI] Dosya MIME:', pendingScheduleFile.mimeType || 'otomatik');
-      console.log('[Çarşaf UI] Dosya URI:', pendingScheduleFile.uri);
-      console.log('[Çarşaf UI] Kullanılacak AI Modeli:', model);
-      console.log('[Çarşaf UI] API Anahtarı Durumu:', apiKey ? `Mevcut (${apiKey.slice(0, 6)}...${apiKey.slice(-4)})` : '❌ BULUNAMADI!');
-      console.log('[Çarşaf UI] Seçilen Analiz Kriterleri:', {
-        öğretmenKadrosu: optExtractTeachers,
-        şubeler: optExtractClasses,
-        açıkDersler: optExtractLessons,
-        haftalıkProgramHücreleri: optExtractScheduleItems,
-        sayfaAralığı: pageRange ? `${pageRange.start}-${pageRange.end}` : 'Tüm Belge',
-      });
+      // console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
+      // console.log('║ 🚀 [ÇARŞAF PROGRAM] ANALİZ VE YÜKLEME İŞLEMİ BAŞLATILDI           ║');
+      // console.log('╚═══════════════════════════════════════════════════════════════════╝');
+      // console.log('[Çarşaf UI] Seçili Okul:', selectedSchool.name, '(ID:', selectedSchool.id, ')');
+      // console.log('[Çarşaf UI] Dosya Adı:', pendingScheduleFile.name);
+      // console.log('[Çarşaf UI] Dosya MIME:', pendingScheduleFile.mimeType || 'otomatik');
+      // console.log('[Çarşaf UI] Dosya URI:', pendingScheduleFile.uri);
+      // console.log('[Çarşaf UI] Kullanılacak AI Modeli:', model);
+      // console.log('[Çarşaf UI] API Anahtarı Durumu:', apiKey ? `Mevcut (${apiKey.slice(0, 6)}...${apiKey.slice(-4)})` : '❌ BULUNAMADI!');
+      // console.log('[Çarşaf UI] Seçilen Analiz Kriterleri:', {
+//         öğretmenKadrosu: optExtractTeachers,
+//         şubeler: optExtractClasses,
+//         açıkDersler: optExtractLessons,
+//         haftalıkProgramHücreleri: optExtractScheduleItems,
+//         sayfaAralığı: pageRange ? `${pageRange.start}-${pageRange.end}` : 'Tüm Belge',
+//       });
 
       const parsed = await parseMasterScheduleWithAi(
         pendingScheduleFile.uri,
@@ -1325,11 +1325,11 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
         model,
         selectedSchool.id,
         (msg: any) => {
-          console.log(`[Çarşaf UI Aşaması]: ${msg}`);
+          // console.log(`[Çarşaf UI Aşaması]: ${msg}`);
           if (!aiCancelledRef.current) setAiStageText(msg);
         },
         (m: any) => {
-          console.log(`[Çarşaf UI Aktif Model Değişti]: ${m}`);
+          // console.log(`[Çarşaf UI Aktif Model Değişti]: ${m}`);
           if (!aiCancelledRef.current) setAiActiveModel(m);
         },
         {
@@ -1347,17 +1347,17 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
       );
 
       if (aiCancelledRef.current) {
-        console.warn('[Çarşaf UI] Kullanıcı analizi iptal etti.');
+        // console.warn('[Çarşaf UI] Kullanıcı analizi iptal etti.');
         return;
       }
 
-      console.log('[Çarşaf UI] Analiz Başarılı! Çıkarılan Veri Özeti:', {
-        öğretmenler: (parsed?.teachers || []).length,
-        şubeler: (parsed?.classes || []).length,
-        dersler: (parsed?.lessons || []).length,
-        programSatırları: (parsed?.scheduleItems || []).length,
-        zilSaatleri: (parsed?.bellSchedule || []).length,
-      });
+      // console.log('[Çarşaf UI] Analiz Başarılı! Çıkarılan Veri Özeti:', {
+//         öğretmenler: (parsed?.teachers || []).length,
+//         şubeler: (parsed?.classes || []).length,
+//         dersler: (parsed?.lessons || []).length,
+//         programSatırları: (parsed?.scheduleItems || []).length,
+//         zilSaatleri: (parsed?.bellSchedule || []).length,
+//       });
 
       setParsedSchedule(parsed);
       if (selectedSchool) {
@@ -1462,21 +1462,21 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
         teacherVerifications: parsedSchedule.teacherVerifications || [],
       };
 
-      console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
-      console.log('║ 💾 [ÇARŞAF KAYIT] VERİTABANINA YAZMA ADIMI BAŞLATILDI             ║');
-      console.log('╚═══════════════════════════════════════════════════════════════════╝');
-      console.log('[Çarşaf Kayıt UI] Hedef Okul:', selectedSchool.name, '(ID:', selectedSchool.id, ')');
-      console.log('[Çarşaf Kayıt UI] Kayıt Modu (Mevcut Programı Sıfırla):', scheduleSaveMode === 'overwrite');
-      console.log('[Çarşaf Kayıt UI] Gönderilecek Veri Özeti:', {
-        öğretmenler: filteredSchedule.teachers.length,
-        şubeler: filteredSchedule.classes.length,
-        dersler: filteredSchedule.lessons.length,
-        programHücreleri: filteredSchedule.scheduleItems.length,
-        öğretmenleriKaydet: saveTeachersChecked,
-        şubeleriKaydet: saveClassesChecked,
-        dersleriKaydet: saveLessonsChecked,
-        programıKaydet: saveScheduleChecked,
-      });
+      // console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
+      // console.log('║ 💾 [ÇARŞAF KAYIT] VERİTABANINA YAZMA ADIMI BAŞLATILDI             ║');
+      // console.log('╚═══════════════════════════════════════════════════════════════════╝');
+      // console.log('[Çarşaf Kayıt UI] Hedef Okul:', selectedSchool.name, '(ID:', selectedSchool.id, ')');
+      // console.log('[Çarşaf Kayıt UI] Kayıt Modu (Mevcut Programı Sıfırla):', scheduleSaveMode === 'overwrite');
+      // console.log('[Çarşaf Kayıt UI] Gönderilecek Veri Özeti:', {
+//         öğretmenler: filteredSchedule.teachers.length,
+//         şubeler: filteredSchedule.classes.length,
+//         dersler: filteredSchedule.lessons.length,
+//         programHücreleri: filteredSchedule.scheduleItems.length,
+//         öğretmenleriKaydet: saveTeachersChecked,
+//         şubeleriKaydet: saveClassesChecked,
+//         dersleriKaydet: saveLessonsChecked,
+//         programıKaydet: saveScheduleChecked,
+//       });
 
       const result = await saveMasterScheduleToServer(selectedSchool.id, filteredSchedule, {
         overwriteAll: scheduleSaveMode === 'overwrite',
@@ -1486,10 +1486,10 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
         syncSchedules: saveScheduleChecked,
       });
 
-      console.log('[Çarşaf Kayıt UI Sonucu]:', result);
+      // console.log('[Çarşaf Kayıt UI Sonucu]:', result);
 
       if (result.success) {
-        console.log('[Çarşaf Kayıt UI] Başarılı! Ekran yenileniyor...');
+        // console.log('[Çarşaf Kayıt UI] Başarılı! Ekran yenileniyor...');
         Alert.alert('Başarılı 🎉', result.message);
         setAiModalVisible(false);
         setParsedSchedule(null);
@@ -1690,7 +1690,7 @@ export function createCrudAndScheduleAiHandlers(ctx: SchoolAdminCtx) {
 
   const handleLogout = async () => {
     const doLogout = async () => {
-      console.log('[SchoolAdmin] Oturum kapatılıyor...');
+      // console.log('[SchoolAdmin] Oturum kapatılıyor...');
       await logoutUserRole();
       if (onRoleChange) {
         await onRoleChange(null);

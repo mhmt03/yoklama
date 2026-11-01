@@ -6,6 +6,7 @@ import { Student } from '../types';
 import { apiRequest } from './apiClient';
 import { readUriAsBase64, detectMimeType, parseJsonLenient } from './aiScheduleParser';
 import { extractPhotosFromPdf } from '../utils/pdfPhotoExtractor';
+import { extractPhotosFromDocx } from '../utils/docxPhotoExtractor';
 import { getGeminiApiKey, getGeminiModel, DEFAULT_GEMINI_API_KEY, DEFAULT_GEMINI_MODEL } from '../utils/geminiScheduleService';
 
 export interface AiExtractedStudentPhoto {
@@ -14,7 +15,7 @@ export interface AiExtractedStudentPhoto {
   photoBase64: string;
   fileName: string;
   matchedStudent?: Student;
-  source: 'pdf-stream' | 'ai-vision-crop' | 'ai-matched';
+  source: 'pdf-stream' | 'ai-vision-crop' | 'ai-matched' | 'docx-table';
   tempUri?: string;
   pageNumber?: number;
 }
@@ -47,7 +48,7 @@ async function cropImageByBoundingBox(
     const cropHeight = Math.min(imageHeight - originY, Math.round(((ymax - ymin) / 1000) * imageHeight));
 
     if (cropWidth < 20 || cropHeight < 20) {
-      console.warn(LOG, 'Kırpma alanı çok küçük, atlandı:', { cropWidth, cropHeight });
+      // console.warn(LOG, 'Kırpma alanı çok küçük, atlandı:', { cropWidth, cropHeight });
       return null;
     }
 
@@ -62,7 +63,7 @@ async function cropImageByBoundingBox(
 
     return { uri: manipResult.uri, base64: manipResult.base64 || '' };
   } catch (err) {
-    console.warn(LOG, 'Kırpma hatası:', err);
+    // console.warn(LOG, 'Kırpma hatası:', err);
     return null;
   }
 }
@@ -76,7 +77,7 @@ function getImageDimensions(uri: string): Promise<{ width: number; height: numbe
       uri,
       (width, height) => resolve({ width, height }),
       (err) => {
-        console.warn(LOG, 'Image.getSize başarısız, varsayılan 1200x1600 kullanılıyor:', err);
+        // console.warn(LOG, 'Image.getSize başarısız, varsayılan 1200x1600 kullanılıyor:', err);
         resolve({ width: 1200, height: 1600 });
       }
     );
@@ -98,8 +99,8 @@ export async function extractStudentPhotosWithAi(
   onProgress?: (stageText: string) => void,
   autoSave: boolean = true
 ): Promise<AiPhotoExtractResult> {
-  console.log(`\n══════════════════ ${LOG} BAŞLADI ══════════════════`);
-  console.log(LOG, 'Dosya:', fileName, '| MIME:', mimeType, '| Okul ID:', schoolId, '| Sistemdeki Öğrenci Sayısı:', students.length);
+  // console.log(`\n══════════════════ ${LOG} BAŞLADI ══════════════════`);
+  // console.log(LOG, 'Dosya:', fileName, '| MIME:', mimeType, '| Okul ID:', schoolId, '| Sistemdeki Öğrenci Sayısı:', students.length);
 
   try {
     onProgress?.('Belge hazırlanıyor ve yapay zeka yapılandırılıyor...');
@@ -165,9 +166,46 @@ export async function extractStudentPhotosWithAi(
       return undefined;
     }
 
+    // ─── 0. DURUM: WORD (.docx) BELGESİ ───
+    const isDocx =
+      fileName.toLowerCase().endsWith('.docx') ||
+      fileName.toLowerCase().endsWith('.doc') ||
+      mimeType.includes('word');
+
+    if (isDocx) {
+      onProgress?.('Word (.docx) belgesi tablosu ve fotoğrafları taranıyor...');
+      const docxRes = await extractPhotosFromDocx(students, fileUri);
+      if (docxRes.success && docxRes.extractedPhotos.length > 0) {
+        for (const p of docxRes.extractedPhotos) {
+          try {
+            const b64 = p.tempUri.startsWith('data:')
+              ? p.tempUri
+              : `data:image/jpeg;base64,${await readUriAsBase64(p.tempUri)}`;
+            resultPhotos.push({
+              studentNumber: p.detectedNumber || (p.matchedStudent ? getStdNum(p.matchedStudent) : ''),
+              studentName: p.detectedName || (p.matchedStudent ? getStdFullName(p.matchedStudent) : ''),
+              photoBase64: b64,
+              fileName: `${p.detectedNumber || 'ogrenci_' + (resultPhotos.length + 1)}.jpg`,
+              matchedStudent: p.matchedStudent || undefined,
+              source: 'docx-table',
+              tempUri: p.tempUri,
+              pageNumber: p.pageNumber,
+            });
+          } catch {}
+        }
+      }
+      return {
+        success: resultPhotos.length > 0,
+        totalFound: resultPhotos.length,
+        uploadedCount: 0,
+        photos: resultPhotos,
+        error: resultPhotos.length === 0 ? (docxRes.error || 'Word belgesinde vesikalık fotoğraf tespit edilemedi.') : undefined,
+      };
+    }
+
     // ─── 1. DURUM: PDF BELGESİ ───
     if (isPdf) {
-      console.log(LOG, '1. Adım: PDF belgesi taranıyor...');
+      // console.log(LOG, '1. Adım: PDF belgesi taranıyor...');
       onProgress?.('PDF içerisindeki fotoğraf ve metin akışları inceleniyor...');
 
       // Önce PDF akışından fotoğrafları algıla (kullanıcıya tekrar dosya seçtirmez, mevcut dosya kullanılır)
@@ -176,10 +214,10 @@ export async function extractStudentPhotosWithAi(
         const streamRes = await extractPhotosFromPdf(students, fileUri);
         if (streamRes.success && streamRes.extractedPhotos?.length) {
           streamPhotos = streamRes.extractedPhotos;
-          console.log(LOG, `PDF akışından ${streamPhotos.length} fotoğraf ham olarak çıkarıldı.`);
+          // console.log(LOG, `PDF akışından ${streamPhotos.length} fotoğraf ham olarak çıkarıldı.`);
         }
       } catch (streamErr) {
-        console.warn(LOG, 'PDF akış çıkarma atlandı/hata verdi:', streamErr);
+        // console.warn(LOG, 'PDF akış çıkarma atlandı/hata verdi:', streamErr);
       }
 
       // PDF akışından çıkan TÜM fotoğrafları topla (boş numara olsa dahi atlama, sıra kaymasını engeller)
@@ -205,11 +243,11 @@ export async function extractStudentPhotosWithAi(
 
       // Eğer akıştan eşleşme çıkmadıysa veya eksik kaldıysa: Gemini Vision ile PDF analizi yap
       if (resultPhotos.length === 0) {
-        console.log(LOG, 'PDF akışında doğrudan numara eşleşmesi bulunamadı. Gemini Vision ile görsel analiz yapılıyor...');
+        // console.log(LOG, 'PDF akışında doğrudan numara eşleşmesi bulunamadı. Gemini Vision ile görsel analiz yapılıyor...');
         onProgress?.('Gemini Vision ile PDF sayfası ve vesikalık fotoğraflar taranıyor (Numara Öncelikli)...');
 
         const base64Pdf = await readUriAsBase64(fileUri);
-        console.log(LOG, 'PDF base64 boyutu:', base64Pdf.length);
+        // console.log(LOG, 'PDF base64 boyutu:', base64Pdf.length);
 
         const registeredHints = students
           .map((s) => ({ no: getStdNum(s), name: getStdFullName(s) }))
@@ -265,9 +303,9 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
         try {
           rawText = visionRes.response.text().trim();
         } catch (textErr: any) {
-          console.warn(LOG, 'visionRes.response.text() hatası:', textErr);
+          // console.warn(LOG, 'visionRes.response.text() hatası:', textErr);
         }
-        console.log(LOG, 'Gemini Vision PDF yanıtı:', rawText.slice(0, 300));
+        // console.log(LOG, 'Gemini Vision PDF yanıtı:', rawText.slice(0, 300));
         let detectedItems: any[] = [];
         try {
           const parsed = parseJsonLenient(rawText);
@@ -275,7 +313,7 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
             ? parsed.data 
             : (parsed.data?.students || parsed.data?.items || (parsed.data ? [parsed.data] : []));
         } catch (jsonErr: any) {
-          console.warn(LOG, 'parseJsonLenient hatası, regex fallback deneniyor:', jsonErr);
+          // console.warn(LOG, 'parseJsonLenient hatası, regex fallback deneniyor:', jsonErr);
           const itemRegex = /\{[\s\S]*?"studentNumber"\s*:\s*"?[^",}]+"?[\s\S]*?\}/g;
           let match;
           while ((match = itemRegex.exec(rawText)) !== null) {
@@ -287,7 +325,7 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
         }
 
         if (Array.isArray(detectedItems) && detectedItems.length > 0) {
-          console.log(LOG, `Gemini Vision PDF'den ${detectedItems.length} öğrenci tespit etti.`);
+          // console.log(LOG, `Gemini Vision PDF'den ${detectedItems.length} öğrenci tespit etti.`);
           // Akıştan çıkan fotoğraflarla tespit edilen numaraları sırayla eşle
           for (let i = 0; i < detectedItems.length; i++) {
             const item = detectedItems[i];
@@ -314,12 +352,12 @@ Yalnızca aşağıdaki JSON şemasına uyarak saf JSON dizisi döndür:
       }
     } else {
       // ─── 2. DURUM: GÖRSEL BELGE (JPG / PNG - Taranmış Liste veya Albüm) ───
-      console.log(LOG, 'Görsel taranıyor (Gemini Vision Kırpma Motoru)...');
+      // console.log(LOG, 'Görsel taranıyor (Gemini Vision Kırpma Motoru)...');
       onProgress?.('Görsel üzerindeki öğrenci yüzleri ve numaraları taranıyor...');
 
       const base64Img = await readUriAsBase64(fileUri);
       const dims = await getImageDimensions(fileUri);
-      console.log(LOG, 'Görsel boyutları:', dims.width, 'x', dims.height, '| Base64 uzunluğu:', base64Img.length);
+      // console.log(LOG, 'Görsel boyutları:', dims.width, 'x', dims.height, '| Base64 uzunluğu:', base64Img.length);
 
       const registeredHintsImg = students
         .map((s) => ({ no: getStdNum(s), name: getStdFullName(s) }))
@@ -373,9 +411,9 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
       try {
         rawText = visionRes.response.text().trim();
       } catch (textErr: any) {
-        console.warn(LOG, 'visionRes.response.text() hatası:', textErr);
+        // console.warn(LOG, 'visionRes.response.text() hatası:', textErr);
       }
-      console.log(LOG, 'Gemini Vision Yanıtı (ilk 300 karakter):', rawText.slice(0, 300));
+      // console.log(LOG, 'Gemini Vision Yanıtı (ilk 300 karakter):', rawText.slice(0, 300));
       let detectedBoxes: any[] = [];
       try {
         const parsed = parseJsonLenient(rawText);
@@ -383,7 +421,7 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
           ? parsed.data
           : (parsed.data?.students || parsed.data?.items || (parsed.data ? [parsed.data] : []));
       } catch (jsonErr: any) {
-        console.warn(LOG, 'parseJsonLenient hatası, regex fallback deneniyor:', jsonErr);
+        // console.warn(LOG, 'parseJsonLenient hatası, regex fallback deneniyor:', jsonErr);
         const itemRegex = /\{[\s\S]*?"studentNumber"\s*:\s*"?[^",}]+"?[\s\S]*?\}/g;
         let match;
         while ((match = itemRegex.exec(rawText)) !== null) {
@@ -395,7 +433,7 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
       }
 
       if (Array.isArray(detectedBoxes) && detectedBoxes.length > 0) {
-        console.log(LOG, `${detectedBoxes.length} öğrenci tespit edildi. Kırpma işlemi başlatılıyor...`);
+        // console.log(LOG, `${detectedBoxes.length} öğrenci tespit edildi. Kırpma işlemi başlatılıyor...`);
         onProgress?.(`${detectedBoxes.length} öğrenci fotoğrafı görselden kırpılıyor...`);
 
         for (const item of detectedBoxes) {
@@ -421,7 +459,7 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
     }
 
     if (resultPhotos.length === 0) {
-      console.warn(LOG, 'Hiçbir fotoğraf veya numara eşleşmesi bulunamadı.');
+      // console.warn(LOG, 'Hiçbir fotoğraf veya numara eşleşmesi bulunamadı.');
       return {
         success: false,
         totalFound: 0,
@@ -432,7 +470,7 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
     }
 
     if (!autoSave) {
-      console.log(LOG, `${resultPhotos.length} fotoğraf önizleme ve kullanıcı onayına hazır.`);
+      // console.log(LOG, `${resultPhotos.length} fotoğraf önizleme ve kullanıcı onayına hazır.`);
       return {
         success: true,
         totalFound: resultPhotos.length,
@@ -441,7 +479,7 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
       };
     }
 
-    console.log(LOG, `${resultPhotos.length} öğrenci fotoğrafı hazırlandı. Sunucuya yükleniyor...`);
+    // console.log(LOG, `${resultPhotos.length} öğrenci fotoğrafı hazırlandı. Sunucuya yükleniyor...`);
     onProgress?.(`${resultPhotos.length} fotoğraf sunucuya aktarılıyor...`);
 
     const payloadPhotos = resultPhotos.map((p) => ({
@@ -462,7 +500,7 @@ Yalnızca yukarıdaki JSON dizisini döndür, başka hiçbir metin ekleme.
 
     if (uploadRes.success) {
       const updated = uploadRes.data?.updatedCount || payloadPhotos.length;
-      console.log(LOG, `Başarıyla tamamlandı! ${updated} öğrenci fotoğrafı yüklendi.`);
+      // console.log(LOG, `Başarıyla tamamlandı! ${updated} öğrenci fotoğrafı yüklendi.`);
       return {
         success: true,
         totalFound: resultPhotos.length,

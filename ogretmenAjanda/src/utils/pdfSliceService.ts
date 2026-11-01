@@ -188,12 +188,12 @@ export async function countPdfPages(base64Pdf: string): Promise<number> {
       const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
       const count = doc.getPageCount();
       if (count > 0) {
-        console.log(`[PDF Sayfa Sayacı] pdf-lib ile kesin sayfa sayısı tespit edildi: ${count}`);
+        // console.log(`[PDF Sayfa Sayacı] pdf-lib ile kesin sayfa sayısı tespit edildi: ${count}`);
         return count;
       }
     }
   } catch (libErr) {
-    console.warn('[PDF Sayfa Sayacı] pdf-lib okuma uyarısı, regex analizi deneniyor:', libErr);
+    // console.warn('[PDF Sayfa Sayacı] pdf-lib okuma uyarısı, regex analizi deneniyor:', libErr);
   }
 
   // 2. Fallback: Saf JS ile ikili regex araması (Tüm hiyerarşideki en yüksek /Count değerini alır)
@@ -201,11 +201,11 @@ export async function countPdfPages(base64Pdf: string): Promise<number> {
     const latin1 = safeBase64ToLatin1(clean);
     const count = extractPdfPageCountFromText(latin1);
     if (count > 0) {
-      console.log(`[PDF Sayfa Sayacı] Regex taramasıyla tespit edilen sayfa sayısı: ${count}`);
+      // console.log(`[PDF Sayfa Sayacı] Regex taramasıyla tespit edilen sayfa sayısı: ${count}`);
       return count;
     }
   } catch (fastErr) {
-    console.warn('[PDF Sayfa Sayacı] Hızlı sayfa sayımı uyarısı:', fastErr);
+    // console.warn('[PDF Sayfa Sayacı] Hızlı sayfa sayımı uyarısı:', fastErr);
   }
 
   return 0;

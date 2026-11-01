@@ -2112,7 +2112,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   useEffect(() => {
     const elapsed = tabPressTimestampRef.current > 0 ? (Date.now() - tabPressTimestampRef.current) : 0;
     const h = InteractionManager.runAfterInteractions(() => {
-      console.log(`[PERF] sekme='${activeTab}' (tıklama->çizim: ${elapsed}ms) | öğretmen=${teachers.length} öğrenci=${students.length} program=${allSchoolSchedules.length}`);
+      // console.log(`[PERF] sekme='${activeTab}' (tıklama->çizim: ${elapsed}ms) | öğretmen=${teachers.length} öğrenci=${students.length} program=${allSchoolSchedules.length}`);
     });
     return () => h.cancel();
   }, [activeTab]);
@@ -2120,7 +2120,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   useEffect(() => {
     const elapsed = tabPressTimestampRef.current > 0 ? (Date.now() - tabPressTimestampRef.current) : 0;
     const h = InteractionManager.runAfterInteractions(() => {
-      console.log(`[PERF] radarAltSekme='${radarSubTab}' boşÖğretmenler=${freeTeachersList.length} gün=${radarDay} saat=${radarHour} (tıklama->çizim: ${elapsed}ms)`);
+      // console.log(`[PERF] radarAltSekme='${radarSubTab}' boşÖğretmenler=${freeTeachersList.length} gün=${radarDay} saat=${radarHour} (tıklama->çizim: ${elapsed}ms)`);
     });
     return () => h.cancel();
   }, [radarSubTab, radarDay, radarHour]);
@@ -2208,8 +2208,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           </View>
         </View>
 
-        {/* 🏫 BİRLEŞTİRİLMİŞ OKUL VE ÖĞRETMEN BAĞLANTI KODU KARTI */}
-        <View style={styles.combinedSchoolCard}>
+        {/* 🏫 BİRLEŞTİRİLMİŞ OKUL VE ÖĞRETMEN BAĞLANTI KODU KARTI & SEKME ÇUBUĞU (Optik Modülünde Gizlenir) */}
+        {activeTab !== 'optik' && (
+          <>
+            <View style={styles.combinedSchoolCard}>
           <View style={styles.schoolSelectorHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
               <Ionicons name="business" size={13} color="#4F46E5" />
@@ -2396,7 +2398,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           )}
         </View>
 
-        {/* Sekme Seçim Çubuğu (Tabs) */}
+        {/* Sekme Seçim Çubuğu (Yalnızca Günlük Çekirdek Sekmeler) */}
         <View style={styles.tabsContainer}>
           <TouchableOpacity
             style={[styles.tabButton, activeTab === 'teachers' && styles.tabButtonActive]}
@@ -2439,36 +2441,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'schedule' && styles.tabButtonActive]}
-            onPress={() => {
-              setActiveTab('schedule');
-              if (allSchoolSchedules.length === 0) {
-                loadAllSchedules();
-              }
-              if (!scheduleStats) {
-                loadScheduleStats();
-              }
-            }}
-          >
-            <Ionicons name="sparkles" size={15} color={activeTab === 'schedule' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'schedule' && styles.tabButtonTextActive]}>
-              📅 Program & Doğruluk Denetimi
-            </Text>
-            {!!scheduleStats?.conflictsCount && scheduleStats.conflictsCount > 0 && (
-              <View style={{ backgroundColor: '#EF4444', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10, marginLeft: 4 }}>
-                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>
-                  {scheduleStats.conflictsCount}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
             style={[styles.tabButton, activeTab === 'radar' && styles.tabButtonActive]}
             onPress={() => {
               tabPressTimestampRef.current = Date.now();
               setActiveTab('radar');
-              // Yerel hafızada zaten veri varsa 0ms gecikmeyle anında göster, sunucu bekleme yapma
               if (allSchoolSchedules.length === 0) {
                 loadAllSchedules();
               }
@@ -2500,29 +2476,66 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               🛡️ Nöbetçi Atama
             </Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'optik' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('optik')}
-          >
-            <Ionicons name="scan" size={15} color={activeTab === 'optik' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'optik' && styles.tabButtonTextActive]}>
-              🎯 Optik Sınav & Analiz
-            </Text>
-          </TouchableOpacity>
-
-          {!isStaff && (
-            <TouchableOpacity
-              style={[styles.tabButton, activeTab === 'backup' && styles.tabButtonActive]}
-              onPress={() => setActiveTab('backup')}
-            >
-              <Ionicons name="cloud-download" size={15} color={activeTab === 'backup' ? '#4F46E5' : '#64748B'} />
-              <Text style={[styles.tabButtonText, activeTab === 'backup' && styles.tabButtonTextActive]}>
-                💾 Yedekleme
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
+      </>
+    )}
+
+    {/* Hamburger Menüden Açılan Modül Aktifse Gösterilen Bilgi Şeridi */}
+        {['schedule', 'optik', 'backup', 'logs', 'messages', 'reports', 'ai_settings'].includes(activeTab) && (
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#EEF2FF',
+              borderWidth: 1,
+              borderColor: '#C7D2FE',
+              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              marginBottom: 12,
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Ionicons name="apps" size={16} color="#4F46E5" />
+              <Text style={{ fontSize: 13, fontWeight: '800', color: '#3730A3' }}>
+                {activeTab === 'schedule' && '📅 Program & Doğruluk Denetimi Modülü'}
+                {activeTab === 'optik' && '🎯 Optik Sınav Okuma, Değerlendirme & Konu Analizi'}
+                {activeTab === 'backup' && '💾 Veritabanı Yedekleme & Geri Yükleme'}
+                {activeTab === 'logs' && '🛡️ Denetim Logları & Güvenlik Kayıtları'}
+                {activeTab === 'messages' && '💬 Okul İçi Mesajlar & Duyurular'}
+                {activeTab === 'reports' && '📊 Raporlar & İstatistik Merkezi'}
+                {activeTab === 'ai_settings' && '🤖 AI & API Ayarları'}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => setMenuDrawerVisible(true)}
+                style={{
+                  backgroundColor: '#FFFFFF',
+                  borderWidth: 1,
+                  borderColor: '#A5B4FC',
+                  borderRadius: 8,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                }}
+              >
+                <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#4F46E5' }}>☰ Diğer Modüller</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setActiveTab('teachers')}
+                style={{
+                  backgroundColor: '#4F46E5',
+                  borderRadius: 8,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                }}
+              >
+                <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#FFFFFF' }}>← Ana Sekmelere Dön</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {loading ? (
           <ActivityIndicator size="large" color={Colors.primary} style={{ marginTop: 32 }} />
@@ -2563,11 +2576,14 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
             {/* OPTİK OKUMA, SINAV DEĞERLENDİRME & KONU-KAZANIM ANALİZİ SEKMESİ */}
             {activeTab === 'optik' && (
-              <OptikModuleView schoolId={selectedSchool?.id} mode="admin" />
+              <OptikModuleView
+                schoolId={selectedSchool?.id || schools[0]?.id || currentUserSession?.affiliatedSchools?.[0]?.id}
+                mode="admin"
+              />
             )}
 
             {/* VERİTABANI YEDEKLEME & GERİ YÜKLEME SEKMESİ */}
-            {activeTab === 'backup' && !isStaff && (
+            {activeTab === 'backup' && (
               <BackupModuleView
                 schoolId={selectedSchool?.id}
                 schoolName={selectedSchool?.name}

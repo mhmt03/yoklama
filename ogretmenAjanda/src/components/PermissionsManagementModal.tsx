@@ -61,7 +61,7 @@ export const PermissionsManagementModal: React.FC<Props> = ({
   // Toplu İşlem (Batch) Durumu
   const [selectedTeacherIds, setSelectedTeacherIds] = useState<string[]>([]);
   const [batchModalVisible, setBatchModalVisible] = useState<boolean>(false);
-  const [batchPerms, setBatchPerms] = useState<{ [key: string]: boolean }>({
+  const [batchPerms, setBatchPerms] = useState<{ [key: string]: any }>({
     canViewAllClasses: true,
     canUseAiAssistant: true,
     canMessageStudents: true,
@@ -585,6 +585,33 @@ export const PermissionsManagementModal: React.FC<Props> = ({
                               {teacher.permissions?.canExportReports !== false ? '✓ Rapor Alabilir' : 'Rapor Kapalı'}
                             </Text>
                           </View>
+
+                          <View
+                            style={[
+                              styles.permPill,
+                              teacher.permissions?.examResultsScope && teacher.permissions?.examResultsScope !== 'KENDI_SUBELERI'
+                                ? { backgroundColor: '#EDE9FE', borderColor: '#DDD6FE' }
+                                : { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.permPillText,
+                                teacher.permissions?.examResultsScope && teacher.permissions?.examResultsScope !== 'KENDI_SUBELERI'
+                                  ? { color: '#6D28D9' }
+                                  : { color: '#15803D' },
+                              ]}
+                            >
+                              🎯 Sınav: {
+                                teacher.permissions?.examResultsScope === 'TUM_OKUL' ? 'Tüm Okul' :
+                                teacher.permissions?.examResultsScope === 'GRADE_9' ? '9. Sınıflar' :
+                                teacher.permissions?.examResultsScope === 'GRADE_10' ? '10. Sınıflar' :
+                                teacher.permissions?.examResultsScope === 'GRADE_11' ? '11. Sınıflar' :
+                                teacher.permissions?.examResultsScope === 'GRADE_12' ? '12. Sınıflar' :
+                                teacher.permissions?.examResultsScope === 'GRADE_11_12' ? '11 ve 12\'ler' : 'Kendi Şubeleri'
+                              }
+                            </Text>
+                          </View>
                         </View>
 
                         {/* Butonlar */}
@@ -751,6 +778,59 @@ export const PermissionsManagementModal: React.FC<Props> = ({
                       thumbColor={editingPerms.canEditStudents ? '#4F46E5' : '#F1F5F9'}
                     />
                   </View>
+
+                  {/* 🎯 Sınav Sonuçları Kapsamı */}
+                  <View style={{ marginTop: 14, padding: 12, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      <Ionicons name="stats-chart" size={16} color="#4F46E5" />
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: '#1E293B' }}>
+                        🎯 Sınav Sonuçları & Analiz Yetki Kapsamı
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 10 }}>
+                      Öğretmenin optik sınav sonuçlarında ve karnelerde görebileceği şube kapsamı:
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {[
+                        { key: 'KENDI_SUBELERI', label: '👨‍🏫 Kendi Şubeleri' },
+                        { key: 'TUM_OKUL', label: '🏛️ Tüm Okul' },
+                        { key: 'GRADE_9', label: '9️⃣ 9. Sınıflar' },
+                        { key: 'GRADE_10', label: '🔟 10. Sınıflar' },
+                        { key: 'GRADE_11', label: '1️⃣1️⃣ 11. Sınıflar' },
+                        { key: 'GRADE_12', label: '1️⃣2️⃣ 12. Sınıflar' },
+                        { key: 'GRADE_11_12', label: '🎓 11 ve 12. Sınıflar' },
+                      ].map((item) => {
+                        const currentScope = editingPerms.examResultsScope || 'KENDI_SUBELERI';
+                        const isSelected = currentScope === item.key;
+                        return (
+                          <TouchableOpacity
+                            key={item.key}
+                            style={[
+                              {
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: isSelected ? '#4F46E5' : '#CBD5E1',
+                                backgroundColor: isSelected ? '#EEF2FF' : '#FFFFFF',
+                              },
+                            ]}
+                            onPress={() => setEditingPerms({ ...editingPerms, examResultsScope: item.key })}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: isSelected ? '800' : '600',
+                                color: isSelected ? '#4F46E5' : '#475569',
+                              }}
+                            >
+                              {item.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 </ScrollView>
 
                 <TouchableOpacity
@@ -862,6 +942,53 @@ export const PermissionsManagementModal: React.FC<Props> = ({
                       value={batchPerms.canEditStudents}
                       onValueChange={(v) => setBatchPerms({ ...batchPerms, canEditStudents: v })}
                     />
+                  </View>
+
+                  {/* Toplu Sınav Sonuçları Kapsamı */}
+                  <View style={{ marginTop: 12, padding: 12, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E293B', marginBottom: 4 }}>
+                      🎯 Sınav Sonuçları Kapsamı (Toplu)
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {[
+                        { key: 'KENDI_SUBELERI', label: '👨‍🏫 Kendi Şubeleri' },
+                        { key: 'TUM_OKUL', label: '🏛️ Tüm Okul' },
+                        { key: 'GRADE_9', label: '9️⃣ 9. Sınıflar' },
+                        { key: 'GRADE_10', label: '🔟 10. Sınıflar' },
+                        { key: 'GRADE_11', label: '1️⃣1️⃣ 11. Sınıflar' },
+                        { key: 'GRADE_12', label: '1️⃣2️⃣ 12. Sınıflar' },
+                        { key: 'GRADE_11_12', label: '🎓 11 ve 12. Sınıflar' },
+                      ].map((item) => {
+                        const currentScope = batchPerms.examResultsScope || 'KENDI_SUBELERI';
+                        const isSelected = currentScope === item.key;
+                        return (
+                          <TouchableOpacity
+                            key={item.key}
+                            style={[
+                              {
+                                paddingHorizontal: 10,
+                                paddingVertical: 6,
+                                borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: isSelected ? '#7C3AED' : '#CBD5E1',
+                                backgroundColor: isSelected ? '#F5F3FF' : '#FFFFFF',
+                              },
+                            ]}
+                            onPress={() => setBatchPerms({ ...batchPerms, examResultsScope: item.key })}
+                          >
+                            <Text
+                              style={{
+                                fontSize: 11,
+                                fontWeight: isSelected ? '800' : '600',
+                                color: isSelected ? '#7C3AED' : '#475569',
+                              }}
+                            >
+                              {item.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                   </View>
                 </ScrollView>
 

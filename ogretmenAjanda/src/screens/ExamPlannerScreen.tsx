@@ -290,7 +290,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
         setSelectedExamId(loadedExams[0].id);
       }
     } catch (err) {
-      console.warn('Veriler yüklenirken hata:', err);
+      // console.warn('Veriler yüklenirken hata:', err);
     } finally {
       setLoading(false);
     }
@@ -335,7 +335,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
         setSelectedRoomIdsForDistribute(rooms.map((r) => r.id));
       }
     } catch (err) {
-      console.warn('Şubeler alınırken hata:', err);
+      // console.warn('Şubeler alınırken hata:', err);
     } finally {
       setLoading(false);
     }
@@ -691,7 +691,7 @@ export const ExamPlannerScreen: React.FC<{ navigation: any }> = ({ navigation })
         const list = await fetchAvailableProctors(selectedExamId, roomName);
         setAvailableProctors(list);
       } catch (err) {
-        console.warn('Gözetmen listesi alınamadı:', err);
+        // console.warn('Gözetmen listesi alınamadı:', err);
       } finally {
         setLoadingProctors(false);
       }

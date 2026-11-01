@@ -62,7 +62,7 @@ export const getGeminiApiKey = async (): Promise<string> => {
     const key = (row?.value || '').trim();
     if (key) return key;
   } catch (e) {
-    console.warn('Gemini API anahtarı veritabanından okunamadı:', e);
+    // console.warn('Gemini API anahtarı veritabanından okunamadı:', e);
   }
   return DEFAULT_GEMINI_API_KEY.trim();
 };
@@ -177,7 +177,7 @@ export const recordGeminiApiUsage = async (
       model
     );
   } catch (err) {
-    console.warn('API kullanım istatistiği kaydedilemedi:', err);
+    // console.warn('API kullanım istatistiği kaydedilemedi:', err);
   }
 };
 
@@ -280,7 +280,7 @@ export const getGeminiUsageStats = async (schoolId?: string): Promise<GeminiUsag
       scope: 'DEVICE',
     };
   } catch (err) {
-    console.warn('Gemini kullanım verisi okunamadı:', err);
+    // console.warn('Gemini kullanım verisi okunamadı:', err);
     return {
       date: today,
       requestsToday: 0,
@@ -357,7 +357,7 @@ export const getGeminiModel = async (): Promise<string> => {
     const model = (row?.value || '').trim();
     if (model) return model;
   } catch (e) {
-    console.warn('Gemini model veritabanından okunamadı:', e);
+    // console.warn('Gemini model veritabanından okunamadı:', e);
   }
   return DEFAULT_GEMINI_MODEL;
 };
@@ -409,7 +409,7 @@ export const fetchAvailableGeminiModels = async (
 
     return valid;
   } catch (err) {
-    console.warn('Modeller listelenemedi:', err);
+    // console.warn('Modeller listelenemedi:', err);
     return [];
   }
 };
@@ -788,7 +788,7 @@ export const analyzeSchedulePhotoWithGemini = async (
       };
     } catch (err: any) {
       lastError = err;
-      console.warn(`${model} denemesi başarısız:`, err?.message || err);
+      // console.warn(`${model} denemesi başarısız:`, err?.message || err);
     }
   }
 
@@ -955,7 +955,7 @@ JSON Şeması:
       return result;
     } catch (err: any) {
       lastError = err;
-      console.warn(`${model} yıllık plan denemesi başarısız:`, err?.message || err);
+      // console.warn(`${model} yıllık plan denemesi başarısız:`, err?.message || err);
     }
   }
 
@@ -1104,7 +1104,7 @@ GÖREVLERİN:
         };
       }
     } catch (e) {
-      console.warn(`detectStudentExcelSchemaWithGemini ${model} hatası:`, e);
+      // console.warn(`detectStudentExcelSchemaWithGemini ${model} hatası:`, e);
     }
   }
 

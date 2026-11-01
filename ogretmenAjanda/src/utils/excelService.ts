@@ -617,7 +617,7 @@ export const pickAndParseAllSchoolStudentsWithAi = async (
         aiUsed = true;
       }
     } catch (aiErr) {
-      console.warn('Gemini Excel şema analizi yapılamadı, yerel algoritmaya geçiliyor:', aiErr);
+      // console.warn('Gemini Excel şema analizi yapılamadı, yerel algoritmaya geçiliyor:', aiErr);
     }
   }
 
@@ -1166,7 +1166,7 @@ const parseExcelDateValue = (val: any): string => {
           return `${y}-${m}-${d}`;
         }
       } catch (e) {
-        console.warn('SSF.parse_date_code error:', e);
+        // console.warn('SSF.parse_date_code error:', e);
       }
     }
   }
@@ -1485,7 +1485,7 @@ export const getWorkbookSheetNames = async (
     const workbook = await readWorkbookFromAsset(asset);
     return workbook.SheetNames || [];
   } catch (err) {
-    console.warn('getWorkbookSheetNames hatası:', err);
+    // console.warn('getWorkbookSheetNames hatası:', err);
     return [];
   }
 };

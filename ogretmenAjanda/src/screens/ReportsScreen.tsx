@@ -114,7 +114,7 @@ export const ReportsScreen: React.FC = () => {
       const teacherInSchool = userRole === 'teacher' && !!activeSchoolObj;
       setIsSchoolTeacher(teacherInSchool);
     } catch (e) {
-      console.warn('Error loading reporting data:', e);
+      // console.warn('Error loading reporting data:', e);
     }
   };
 

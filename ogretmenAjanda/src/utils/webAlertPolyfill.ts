@@ -1,6 +1,20 @@
 import { Alert, Platform, AlertButton } from 'react-native';
 
 /**
+ * Terminal ve tarayıcı konsolundaki gereksiz bilgi/uyarı loglarını gizler.
+ * Sorun giderme sırasında detaylı logları tekrar görmek için true yapabilirsiniz.
+ */
+export const VERBOSE_CONSOLE_LOGS = false;
+
+if (!VERBOSE_CONSOLE_LOGS) {
+  const noop = () => {};
+  console.log = noop;
+  console.info = noop;
+  console.debug = noop;
+  console.warn = noop;
+}
+
+/**
  * react-native-web içinde Alert.alert bir no-op'tur (hiçbir şey göstermez).
  * Bu polyfill web platformunda Alert.alert çağrılarını tarayıcının
  * window.alert / window.confirm diyaloglarına yönlendirir.

@@ -98,7 +98,7 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
         }
       }
     } catch (e) {
-      console.warn('Oturum denetimi hatası:', e);
+      // console.warn('Oturum denetimi hatası:', e);
     } finally {
       setLoading(false);
     }
@@ -115,7 +115,7 @@ export function StudentDashboardScreen({ onLogout, initialMode = 'student' }: St
         setExamSeatings(seatings);
       }
     } catch (e: any) {
-      console.warn('Portal verisi çekilemedi:', e?.message || e);
+      // console.warn('Portal verisi çekilemedi:', e?.message || e);
     } finally {
       setRefreshing(false);
     }

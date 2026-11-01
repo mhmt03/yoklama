@@ -37,7 +37,7 @@ export const closeDatabase = async (): Promise<void> => {
     try {
       await dbInstance.closeAsync();
     } catch (e) {
-      console.warn('Error closing database:', e);
+      // console.warn('Error closing database:', e);
     }
     setInstance(null);
     dbOpenPromise = null;
@@ -52,7 +52,7 @@ const openFresh = async (): Promise<SQLite.SQLiteDatabase> => {
     // WAL: okuma ve yazma işlemlerinin birbirini kilitlemesini azaltır
     await db.execAsync('PRAGMA journal_mode = WAL;');
   } catch (e) {
-    console.warn('WAL mode could not be enabled:', e);
+    // console.warn('WAL mode could not be enabled:', e);
   }
   setInstance(db);
   return db;
@@ -88,7 +88,7 @@ const ensureHealthyDB = async (): Promise<SQLite.SQLiteDatabase> => {
     await db.getFirstAsync('SELECT 1');
     return db;
   } catch (e) {
-    console.warn('Stale DB connection detected, reopening...', e);
+    // console.warn('Stale DB connection detected, reopening...', e);
     setInstance(null);
     return await openFresh();
   }
@@ -681,7 +681,7 @@ export const initDatabase = async (): Promise<void> => {
     } catch (err: any) {
       const msg = String(err?.message || err);
       const isLocked = msg.includes('database is locked');
-      console.warn(`initDatabase attempt ${attempt} failed${isLocked ? ' (locked)' : ''}`, msg);
+      // console.warn(`initDatabase attempt ${attempt} failed${isLocked ? ' (locked)' : ''}`, msg);
       if (attempt === MAX_ATTEMPTS) throw err;
       if (isLocked) {
         // Aynı bağlantıyla, kilidin kalkmasını bekleyerek tekrar dene

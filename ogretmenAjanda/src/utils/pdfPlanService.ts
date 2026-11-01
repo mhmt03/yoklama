@@ -61,7 +61,7 @@ export const pickAndSaveYearlyPlanPdf = async (
         to: targetUri,
       });
     } catch (copyErr) {
-      console.warn('copyAsync failed, trying fetch/blob fallback:', copyErr);
+      // console.warn('copyAsync failed, trying fetch/blob fallback:', copyErr);
       const res = await fetch(sourceUri);
       const blob = await res.blob();
       const base64 = await new Promise<string>((resolve, reject) => {

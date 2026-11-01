@@ -91,7 +91,7 @@ export async function resolveAndDownloadStudentPhoto(photoPath?: string | null, 
     }
     return fullUrl;
   } catch (err) {
-    console.warn('[Öğrenci Senkronizasyon] Fotoğraf çözme/indirme uyarısı:', err);
+    // console.warn('[Öğrenci Senkronizasyon] Fotoğraf çözme/indirme uyarısı:', err);
     return photoPath;
   }
 }
@@ -363,7 +363,7 @@ export async function syncTeacherAssignedClassesAndStudents(
       const { syncScheduleFromSchool } = await import('./scheduleSyncService');
       await syncScheduleFromSchool(code);
     } catch (schedSyncErr) {
-      console.warn('Otomatik ders programı kontrolü uyarısı:', schedSyncErr);
+      // console.warn('Otomatik ders programı kontrolü uyarısı:', schedSyncErr);
     }
 
     // 4. Şube kaynakları: YALNIZCA sunucudaki güncel çarşaf program ve profil atamaları esas alınır.
@@ -382,7 +382,7 @@ export async function syncTeacherAssignedClassesAndStudents(
           }
         }
       } catch (schedErr) {
-        console.warn('Sunucu programından şube tarama hatası:', schedErr);
+        // console.warn('Sunucu programından şube tarama hatası:', schedErr);
       }
     }
 
@@ -467,7 +467,7 @@ export async function syncTeacherAssignedClassesAndStudents(
           classId
         );
       } catch (taErr) {
-        console.warn('teacher_assignments kaydı uyarısı:', taErr);
+        // console.warn('teacher_assignments kaydı uyarısı:', taErr);
       }
 
       // Bu sınıfın öğrencilerini sunucudan çek
@@ -477,7 +477,7 @@ export async function syncTeacherAssignedClassesAndStudents(
           totalStudentsSynced += studentSync.totalServer;
         }
       } catch (stErr) {
-        console.warn(`${className} öğrencileri çekilirken hata:`, stErr);
+        // console.warn(`${className} öğrencileri çekilirken hata:`, stErr);
       }
 
       syncedList.push(className);
@@ -503,7 +503,7 @@ export async function syncTeacherAssignedClassesAndStudents(
         }
       }
     } catch (cleanErr) {
-      console.warn('Kullanılmayan şubeler temizlenirken hata:', cleanErr);
+      // console.warn('Kullanılmayan şubeler temizlenirken hata:', cleanErr);
     }
 
     return {

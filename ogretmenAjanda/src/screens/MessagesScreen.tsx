@@ -123,7 +123,7 @@ export function MessagesScreen({ navigation }: any) {
         }
       }
     } catch (e) {
-      console.warn('Veriler yüklenirken hata:', e);
+      // console.warn('Veriler yüklenirken hata:', e);
     }
   };
 
@@ -169,7 +169,7 @@ export function MessagesScreen({ navigation }: any) {
         await loadLocalAndSchoolData();
       }
     } catch (e: any) {
-      console.warn('Mesajlar yüklenemedi:', e);
+      // console.warn('Mesajlar yüklenemedi:', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -187,7 +187,7 @@ export function MessagesScreen({ navigation }: any) {
       Alert.alert('Tamamlandı', 'Tüm mesajlar okundu olarak işaretlendi.');
       loadMessages();
     } catch (e: any) {
-      console.warn('Okundu işaretleme hatası:', e);
+      // console.warn('Okundu işaretleme hatası:', e);
     }
   };
 

@@ -116,7 +116,7 @@ export const ClassesScreen: React.FC = () => {
         const all = await getAllStudentsWithClass();
         setAllStudentsCache(all);
       } catch (e) {
-        console.warn('Student load error:', e);
+        // console.warn('Student load error:', e);
       } finally {
         setSearchLoading(false);
       }

@@ -148,7 +148,7 @@ export const exportDatabaseBackup = async (
     try {
       await db.execAsync('PRAGMA wal_checkpoint(TRUNCATE);');
     } catch (walErr) {
-      console.warn('Backup öncesi WAL checkpoint uyarısı:', walErr);
+      // console.warn('Backup öncesi WAL checkpoint uyarısı:', walErr);
     }
 
     let dbContentBase64 = '';
@@ -162,7 +162,7 @@ export const exportDatabaseBackup = async (
         dbContentBase64 = uint8ArrayToBase64(bytes);
       }
     } catch (serializeErr) {
-      console.warn('serializeAsync başarısız, fiziksel dosya okuma deneniyor:', serializeErr);
+      // console.warn('serializeAsync başarısız, fiziksel dosya okuma deneniyor:', serializeErr);
     }
 
     // 2. Yedek yöntem: SQLite dosyasını doğrudan oku
@@ -206,7 +206,7 @@ export const exportDatabaseBackup = async (
           };
         }
       } catch (safErr) {
-        console.warn('SAF hatası, paylaşım yöntemine dönülüyor:', safErr);
+        // console.warn('SAF hatası, paylaşım yöntemine dönülüyor:', safErr);
       }
     }
 
@@ -290,7 +290,7 @@ export const restoreDatabaseBackup = async (): Promise<{
         safetyBackupCreated = true;
       }
     } catch (e) {
-      console.warn('Güvenlik yedeği serialize ile alınamadı, devam ediliyor:', e);
+      // console.warn('Güvenlik yedeği serialize ile alınamadı, devam ediliyor:', e);
     }
 
     // 3. Mevcut veritabanı bağlantısını tamamen kapat
@@ -327,7 +327,7 @@ export const restoreDatabaseBackup = async (): Promise<{
         await FileSystem.deleteAsync(shmPath, { idempotent: true });
       }
     } catch (cleanErr) {
-      console.warn('WAL/SHM temizleme uyarısı:', cleanErr);
+      // console.warn('WAL/SHM temizleme uyarısı:', cleanErr);
     }
 
     // 5. Seçilen yedek dosyasını hedef veritabanının üzerine kopyala

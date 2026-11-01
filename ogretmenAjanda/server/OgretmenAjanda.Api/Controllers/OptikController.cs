@@ -227,6 +227,9 @@ namespace OgretmenAjanda.Api.Controllers
             public int NumaraUzunluk { get; set; }
             public int AdSoyadBaslangic { get; set; }
             public int AdSoyadUzunluk { get; set; }
+            public bool AdSoyadAyriMi { get; set; }
+            public int? SoyadBaslangic { get; set; }
+            public int? SoyadUzunluk { get; set; }
             public int SinifBaslangic { get; set; }
             public int SinifUzunluk { get; set; }
             public int? KitapcikTuruBaslangic { get; set; }
@@ -239,6 +242,7 @@ namespace OgretmenAjanda.Api.Controllers
         public class SaveOptikFormDersDto
         {
             public string DersAdi { get; set; } = string.Empty;
+            public string? DersGrubu { get; set; }
             public int BaslangicSutun { get; set; }
             public int KarakterSayisi { get; set; }
             public int SiraNo { get; set; }
@@ -258,62 +262,80 @@ namespace OgretmenAjanda.Api.Controllers
             if (string.IsNullOrWhiteSpace(dto.FormAdi))
                 return BadRequest(new { message = "Form adı boş olamaz." });
 
-            OptikForm? form = null;
-            if (dto.Id.HasValue && dto.Id.Value != Guid.Empty)
+            try
             {
-                form = await _context.OptikFormlar.Include(f => f.Dersler).FirstOrDefaultAsync(f => f.Id == dto.Id.Value && f.SchoolId == schoolId);
-            }
-
-            if (form == null)
-            {
-                form = new OptikForm
+                OptikForm? form = null;
+                if (dto.Id.HasValue && dto.Id.Value != Guid.Empty)
                 {
-                    Id = Guid.NewGuid(),
-                    SchoolId = schoolId,
-                    CreatedAt = DateTime.UtcNow
-                };
-                await _context.OptikFormlar.AddAsync(form);
-            }
-            else
-            {
-                _context.OptikFormDersleri.RemoveRange(form.Dersler);
-                form.Dersler.Clear();
-            }
+                    form = await _context.OptikFormlar.FirstOrDefaultAsync(f => f.Id == dto.Id.Value && f.SchoolId == schoolId);
+                }
 
-            form.FormAdi = dto.FormAdi.Trim();
-            form.NumaraBaslangic = Math.Max(0, dto.NumaraBaslangic);
-            form.NumaraUzunluk = Math.Max(1, dto.NumaraUzunluk);
-            form.AdSoyadBaslangic = Math.Max(0, dto.AdSoyadBaslangic);
-            form.AdSoyadUzunluk = Math.Max(1, dto.AdSoyadUzunluk);
-            form.SinifBaslangic = Math.Max(0, dto.SinifBaslangic);
-            form.SinifUzunluk = Math.Max(0, dto.SinifUzunluk);
-            form.KitapcikTuruBaslangic = dto.KitapcikTuruBaslangic;
-            form.KitapcikTuruUzunluk = dto.KitapcikTuruUzunluk;
-            form.FmtRawContent = dto.FmtRawContent;
-            form.SampleLine = dto.SampleLine;
-
-            int sira = 1;
-            foreach (var d in dto.Dersler.Where(x => !string.IsNullOrWhiteSpace(x.DersAdi)))
-            {
-                form.Dersler.Add(new OptikFormDers
+                if (form == null)
                 {
-                    Id = Guid.NewGuid(),
-                    OptikFormId = form.Id,
-                    DersAdi = d.DersAdi.Trim(),
-                    BaslangicSutun = Math.Max(0, d.BaslangicSutun),
-                    KarakterSayisi = Math.Max(1, d.KarakterSayisi),
-                    SiraNo = d.SiraNo > 0 ? d.SiraNo : sira++
-                });
+                    form = new OptikForm
+                    {
+                        Id = Guid.NewGuid(),
+                        SchoolId = schoolId,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    await _context.OptikFormlar.AddAsync(form);
+                }
+                else
+                {
+                    var existingDersler = await _context.OptikFormDersleri.Where(d => d.OptikFormId == form.Id).ToListAsync();
+                    if (existingDersler.Count > 0)
+                    {
+                        _context.OptikFormDersleri.RemoveRange(existingDersler);
+                    }
+                }
+
+                form.FormAdi = dto.FormAdi.Trim();
+                form.NumaraBaslangic = Math.Max(0, dto.NumaraBaslangic);
+                form.NumaraUzunluk = Math.Max(1, dto.NumaraUzunluk);
+                form.AdSoyadBaslangic = Math.Max(0, dto.AdSoyadBaslangic);
+                form.AdSoyadUzunluk = Math.Max(1, dto.AdSoyadUzunluk);
+                form.AdSoyadAyriMi = dto.AdSoyadAyriMi;
+                form.SoyadBaslangic = dto.SoyadBaslangic;
+                form.SoyadUzunluk = dto.SoyadUzunluk;
+                form.SinifBaslangic = Math.Max(0, dto.SinifBaslangic);
+                form.SinifUzunluk = Math.Max(0, dto.SinifUzunluk);
+                form.KitapcikTuruBaslangic = dto.KitapcikTuruBaslangic;
+                form.KitapcikTuruUzunluk = dto.KitapcikTuruUzunluk;
+                form.FmtRawContent = dto.FmtRawContent;
+                form.SampleLine = dto.SampleLine;
+
+                int sira = 1;
+                var newDersler = new List<OptikFormDers>();
+                foreach (var d in dto.Dersler.Where(x => !string.IsNullOrWhiteSpace(x.DersAdi)))
+                {
+                    newDersler.Add(new OptikFormDers
+                    {
+                        Id = Guid.NewGuid(),
+                        OptikFormId = form.Id,
+                        DersAdi = d.DersAdi.Trim(),
+                        DersGrubu = string.IsNullOrWhiteSpace(d.DersGrubu) ? null : d.DersGrubu.Trim(),
+                        BaslangicSutun = Math.Max(0, d.BaslangicSutun),
+                        KarakterSayisi = Math.Max(1, d.KarakterSayisi),
+                        SiraNo = d.SiraNo > 0 ? d.SiraNo : sira++
+                    });
+                }
+
+                await _context.OptikFormDersleri.AddRangeAsync(newDersler);
+                form.Dersler = newDersler;
+
+                await _auditLog.LogAsync(
+                    _context, schoolId, caller.userId, caller.userName, caller.fullName, caller.role,
+                    "OPTIK_FORM_SAVED", "OptikForm", form.Id.ToString(),
+                    $"Optik form şablonu kaydedildi: {form.FormAdi} ({newDersler.Count} ders)"
+                );
+                await _context.SaveChangesAsync();
+
+                return Ok(new { success = true, message = "Optik form şablonu başarıyla kaydedildi.", form });
             }
-
-            await _auditLog.LogAsync(
-                _context, schoolId, caller.userId, caller.userName, caller.fullName, caller.role,
-                "OPTIK_FORM_SAVED", "OptikForm", form.Id.ToString(),
-                $"Optik form şablonu kaydedildi: {form.FormAdi} ({form.Dersler.Count} ders)"
-            );
-            await _context.SaveChangesAsync();
-
-            return Ok(new { success = true, message = "Optik form şablonu başarıyla kaydedildi.", form });
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Optik form şablonu kaydedilirken bir hata oluştu: " + ex.Message, detail = ex.ToString() });
+            }
         }
 
         [HttpDelete("forms/{id}")]
@@ -589,6 +611,7 @@ namespace OgretmenAjanda.Api.Controllers
         public class SaveOptikSinavDersDto
         {
             public string DersAdi { get; set; } = string.Empty;
+            public string? DersGrubu { get; set; }
             public int SoruSayisi { get; set; } = 20;
             public double Katsayi { get; set; } = 1.0;
             public int SiraNo { get; set; } = 1;
@@ -612,67 +635,82 @@ namespace OgretmenAjanda.Api.Controllers
             if (string.IsNullOrWhiteSpace(dto.SinavAdi))
                 return BadRequest(new { message = "Sınav adı boş olamaz." });
 
-            OptikSinav? sinav = null;
-            if (dto.Id.HasValue && dto.Id.Value != Guid.Empty)
+            try
             {
-                sinav = await _context.OptikSinavlar.Include(e => e.Dersler).FirstOrDefaultAsync(e => e.Id == dto.Id.Value && e.SchoolId == schoolId);
-            }
-
-            if (sinav == null)
-            {
-                sinav = new OptikSinav
+                OptikSinav? sinav = null;
+                if (dto.Id.HasValue && dto.Id.Value != Guid.Empty)
                 {
-                    Id = Guid.NewGuid(),
-                    SchoolId = schoolId,
-                    CreatedAt = DateTime.UtcNow
-                };
-                await _context.OptikSinavlar.AddAsync(sinav);
-            }
-            else
-            {
-                _context.OptikSinavDersleri.RemoveRange(sinav.Dersler);
-                sinav.Dersler.Clear();
-            }
+                    sinav = await _context.OptikSinavlar.FirstOrDefaultAsync(e => e.Id == dto.Id.Value && e.SchoolId == schoolId);
+                }
 
-            sinav.SinavAdi = dto.SinavAdi.Trim();
-            sinav.UygulamaTarihi = dto.UygulamaTarihi ?? DateTime.Today;
-            sinav.YanlisDogruyuGotururSayisi = dto.YanlisDogruyuGotururSayisi >= 0 ? dto.YanlisDogruyuGotururSayisi : 4.0;
-            sinav.HedefSiniflar = dto.HedefSiniflar;
-            sinav.KitapcikTurleri = dto.KitapcikTurleri ?? "A,B";
-            sinav.OptikFormId = dto.OptikFormId;
-            sinav.TabanPuan = dto.TabanPuan;
-            sinav.ToplamPuan = dto.ToplamPuan > dto.TabanPuan ? dto.ToplamPuan : 500.0;
-            sinav.IsPublishedToStudents = dto.IsPublishedToStudents;
-            sinav.ShowRankingToStudents = dto.ShowRankingToStudents;
-            sinav.IsVisibleToTeachers = dto.IsVisibleToTeachers;
-            sinav.HasKazanimAnalysis = dto.HasKazanimAnalysis;
-
-            int sira = 1;
-            foreach (var d in dto.Dersler.Where(x => !string.IsNullOrWhiteSpace(x.DersAdi)))
-            {
-                sinav.Dersler.Add(new OptikSinavDers
+                if (sinav == null)
                 {
-                    Id = Guid.NewGuid(),
-                    OptikSinavId = sinav.Id,
-                    DersAdi = d.DersAdi.Trim(),
-                    SoruSayisi = Math.Max(1, d.SoruSayisi),
-                    Katsayi = d.Katsayi > 0 ? d.Katsayi : 1.0,
-                    SiraNo = d.SiraNo > 0 ? d.SiraNo : sira++,
-                    CevapAnahtariA = (d.CevapAnahtariA ?? string.Empty).Trim().ToUpperInvariant(),
-                    CevapAnahtariB = string.IsNullOrWhiteSpace(d.CevapAnahtariB) ? null : d.CevapAnahtariB.Trim().ToUpperInvariant(),
-                    CevapAnahtariC = string.IsNullOrWhiteSpace(d.CevapAnahtariC) ? null : d.CevapAnahtariC.Trim().ToUpperInvariant(),
-                    CevapAnahtariD = string.IsNullOrWhiteSpace(d.CevapAnahtariD) ? null : d.CevapAnahtariD.Trim().ToUpperInvariant()
-                });
+                    sinav = new OptikSinav
+                    {
+                        Id = Guid.NewGuid(),
+                        SchoolId = schoolId,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    await _context.OptikSinavlar.AddAsync(sinav);
+                }
+                else
+                {
+                    var existingDersler = await _context.OptikSinavDersleri.Where(d => d.OptikSinavId == sinav.Id).ToListAsync();
+                    if (existingDersler.Count > 0)
+                    {
+                        _context.OptikSinavDersleri.RemoveRange(existingDersler);
+                    }
+                }
+
+                sinav.SinavAdi = dto.SinavAdi.Trim();
+                sinav.UygulamaTarihi = dto.UygulamaTarihi ?? DateTime.Today;
+                sinav.YanlisDogruyuGotururSayisi = dto.YanlisDogruyuGotururSayisi >= 0 ? dto.YanlisDogruyuGotururSayisi : 4.0;
+                sinav.HedefSiniflar = dto.HedefSiniflar;
+                sinav.KitapcikTurleri = dto.KitapcikTurleri ?? "A,B";
+                sinav.OptikFormId = dto.OptikFormId;
+                sinav.TabanPuan = dto.TabanPuan;
+                sinav.ToplamPuan = dto.ToplamPuan > dto.TabanPuan ? dto.ToplamPuan : 500.0;
+                sinav.IsPublishedToStudents = dto.IsPublishedToStudents;
+                sinav.ShowRankingToStudents = dto.ShowRankingToStudents;
+                sinav.IsVisibleToTeachers = dto.IsVisibleToTeachers;
+                sinav.HasKazanimAnalysis = dto.HasKazanimAnalysis;
+
+                int sira = 1;
+                var newExamDersler = new List<OptikSinavDers>();
+                foreach (var d in dto.Dersler.Where(x => !string.IsNullOrWhiteSpace(x.DersAdi)))
+                {
+                    newExamDersler.Add(new OptikSinavDers
+                    {
+                        Id = Guid.NewGuid(),
+                        OptikSinavId = sinav.Id,
+                        DersAdi = d.DersAdi.Trim(),
+                        DersGrubu = string.IsNullOrWhiteSpace(d.DersGrubu) ? null : d.DersGrubu.Trim(),
+                        SoruSayisi = Math.Max(1, d.SoruSayisi),
+                        Katsayi = d.Katsayi > 0 ? d.Katsayi : 1.0,
+                        SiraNo = d.SiraNo > 0 ? d.SiraNo : sira++,
+                        CevapAnahtariA = (d.CevapAnahtariA ?? string.Empty).Trim().ToUpperInvariant(),
+                        CevapAnahtariB = string.IsNullOrWhiteSpace(d.CevapAnahtariB) ? null : d.CevapAnahtariB.Trim().ToUpperInvariant(),
+                        CevapAnahtariC = string.IsNullOrWhiteSpace(d.CevapAnahtariC) ? null : d.CevapAnahtariC.Trim().ToUpperInvariant(),
+                        CevapAnahtariD = string.IsNullOrWhiteSpace(d.CevapAnahtariD) ? null : d.CevapAnahtariD.Trim().ToUpperInvariant()
+                    });
+                }
+
+                await _context.OptikSinavDersleri.AddRangeAsync(newExamDersler);
+                sinav.Dersler = newExamDersler;
+
+                await _auditLog.LogAsync(
+                    _context, schoolId, caller.userId, caller.userName, caller.fullName, caller.role,
+                    "OPTIK_EXAM_SAVED", "OptikSinav", sinav.Id.ToString(),
+                    $"Optik sınav kaydedildi: {sinav.SinavAdi} ({newExamDersler.Count} ders)"
+                );
+                await _context.SaveChangesAsync();
+
+                return Ok(new { success = true, message = "Optik sınav başarıyla kaydedildi.", exam = sinav });
             }
-
-            await _auditLog.LogAsync(
-                _context, schoolId, caller.userId, caller.userName, caller.fullName, caller.role,
-                "OPTIK_EXAM_SAVED", "OptikSinav", sinav.Id.ToString(),
-                $"Optik sınav kaydedildi: {sinav.SinavAdi} ({sinav.Dersler.Count} ders)"
-            );
-            await _context.SaveChangesAsync();
-
-            return Ok(new { success = true, message = "Optik sınav başarıyla kaydedildi.", exam = sinav });
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Optik sınav kaydedilirken bir hata oluştu: " + ex.Message, detail = ex.ToString() });
+            }
         }
 
         public class UpdateVisibilityDto
@@ -1724,6 +1762,21 @@ namespace OgretmenAjanda.Api.Controllers
         // 7. DETAYLI ÖĞRENCİ KARNESİ (/api/Optik/exams/{id}/student-report/{studentKey})
         // =====================================================================
 
+        private static string? DetectLessonGroup(string? lessonName)
+        {
+            if (string.IsNullOrWhiteSpace(lessonName)) return null;
+            var l = lessonName.ToLowerInvariant();
+            if (l.Contains("fizik") || l.Contains("kimya") || l.Contains("biyoloji") || l.Contains("fen"))
+                return "Fen Bilimleri";
+            if (l.Contains("tarih") || l.Contains("coğrafya") || l.Contains("cografya") || l.Contains("felsefe") || l.Contains("din") || l.Contains("sosyal"))
+                return "Sosyal Bilimler";
+            if (l.Contains("türkçe") || l.Contains("turkce") || l.Contains("edebiyat"))
+                return "Türkçe / Edebiyat";
+            if (l.Contains("matematik") || l.Contains("geometri"))
+                return "Matematik";
+            return null;
+        }
+
         [HttpGet("exams/{id}/student-report/{studentKey}")]
         public async Task<IActionResult> GetStudentReport(Guid id, string studentKey)
         {
@@ -1921,6 +1974,283 @@ namespace OgretmenAjanda.Api.Controllers
                 kazanimAnalizi = filteredKazanimlar
             });
         }
+        public class BulkStudentReportsRequest
+        {
+            public List<Guid>? ResultIds { get; set; }
+            public string? Sinif { get; set; }
+        }
+
+        [HttpPost("exams/{id}/bulk-reports")]
+        public async Task<IActionResult> GetBulkStudentReports(Guid id, [FromBody] BulkStudentReportsRequest? req)
+        {
+            var caller = GetCaller();
+            if (caller.role == UserRoles.Student || caller.role == UserRoles.Parent)
+                return StatusCode(403, new { message = "Toplu karne raporu yalnızca okul yönetimi ve öğretmenler tarafından alınabilir." });
+
+            var sinav = await _context.OptikSinavlar.AsNoTracking()
+                .Include(e => e.Dersler)
+                .FirstOrDefaultAsync(e => e.Id == id);
+
+            if (sinav == null)
+                return NotFound(new { message = "Sınav bulunamadı." });
+
+            if (caller.role == UserRoles.Teacher && !sinav.IsVisibleToTeachers)
+                return StatusCode(403, new { message = "Bu sınavın karneleri öğretmen erişimine kapalıdır." });
+
+            var allResults = await _context.OptikSinavSonuclari.AsNoTracking()
+                .Include(r => r.DersSonuclari)
+                .Where(r => r.OptikSinavId == id)
+                .OrderBy(r => r.OkulSirasi)
+                .ToListAsync();
+
+            HashSet<string>? teacherLessons = null;
+            if (caller.role == UserRoles.Teacher)
+            {
+                var scope = await GetTeacherScopeAsync(caller.userId, sinav.SchoolId);
+                teacherLessons = scope.allowedLessons;
+            }
+
+            List<OptikSinavSonuc> targetResults;
+            if (req?.ResultIds != null && req.ResultIds.Count > 0)
+            {
+                var byId = allResults.ToDictionary(r => r.Id, r => r);
+                targetResults = new List<OptikSinavSonuc>();
+                foreach (var rid in req.ResultIds)
+                {
+                    if (byId.TryGetValue(rid, out var found))
+                        targetResults.Add(found);
+                }
+            }
+            else
+            {
+                targetResults = allResults.ToList();
+                if (!string.IsNullOrWhiteSpace(req?.Sinif) && req!.Sinif != "ALL")
+                {
+                    var normSinif = NormalizeClassKey(req.Sinif);
+                    targetResults = targetResults.Where(r => NormalizeClassKey(r.Sinif) == normSinif).ToList();
+                }
+            }
+
+            if (caller.role == UserRoles.Teacher)
+            {
+                var scope = await GetTeacherScopeAsync(caller.userId, sinav.SchoolId);
+                if (scope.allowedClasses.Count > 0)
+                {
+                    targetResults = targetResults.Where(r => scope.allowedClasses.Contains(NormalizeClassKey(r.Sinif))).ToList();
+                }
+            }
+
+            var kazanimDefs = await _context.OptikSoruKazanimlari.AsNoTracking()
+                .Where(k => k.OptikSinavId == id)
+                .ToListAsync();
+
+            var targetResultIds = targetResults.Select(r => r.Id).ToHashSet();
+            var allKazanimResults = await _context.OptikSinavSonucKazanimlari.AsNoTracking()
+                .Where(k => k.OptikSinavId == id && targetResultIds.Contains(k.OptikSinavSonucId))
+                .ToListAsync();
+
+            var kazanimByResultId = allKazanimResults
+                .GroupBy(k => k.OptikSinavSonucId)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            var orderedDersler = sinav.Dersler
+                .OrderBy(d => d.SiraNo)
+                .Where(d => teacherLessons == null || DoesLessonMatchTeacher(d.DersAdi, teacherLessons))
+                .ToList();
+
+            var studentNos = targetResults.Select(r => r.OgrenciNo).Where(n => !string.IsNullOrEmpty(n)).Distinct().ToList();
+            var pastResultsAll = await _context.OptikSinavSonuclari.AsNoTracking()
+                .Include(r => r.DersSonuclari)
+                .Where(r => r.SchoolId == sinav.SchoolId && studentNos.Contains(r.OgrenciNo))
+                .OrderByDescending(r => r.CreatedAt)
+                .ToListAsync();
+
+            var pastExamIds = pastResultsAll.Select(r => r.OptikSinavId).Distinct().ToList();
+            var pastExamsMap = await _context.OptikSinavlar.AsNoTracking()
+                .Where(e => pastExamIds.Contains(e.Id))
+                .ToDictionaryAsync(e => e.Id, e => e);
+
+            var pastExamsByStudent = pastResultsAll
+                .GroupBy(r => r.OgrenciNo)
+                .ToDictionary(g => g.Key, g => g.Take(6).ToList());
+
+            var reports = targetResults.Select(targetResult =>
+            {
+                var classPeers = allResults.Where(r => NormalizeClassKey(r.Sinif) == NormalizeClassKey(targetResult.Sinif)).ToList();
+
+                var lessonBreakdowns = orderedDersler.Select(d =>
+                {
+                    var stuDers = targetResult.DersSonuclari.FirstOrDefault(x => NormalizeLessonKey(x.DersAdi) == NormalizeLessonKey(d.DersAdi));
+                    var schoolLessonList = allResults.SelectMany(r => r.DersSonuclari).Where(x => NormalizeLessonKey(x.DersAdi) == NormalizeLessonKey(d.DersAdi)).ToList();
+                    var classLessonList = classPeers.SelectMany(r => r.DersSonuclari).Where(x => NormalizeLessonKey(x.DersAdi) == NormalizeLessonKey(d.DersAdi)).ToList();
+
+                    double schoolAvgNet = schoolLessonList.Count > 0 ? Math.Round(schoolLessonList.Average(x => x.Net), 2) : 0;
+                    double classAvgNet = classLessonList.Count > 0 ? Math.Round(classLessonList.Average(x => x.Net), 2) : 0;
+
+                    string ogrCevap = stuDers?.OgrenciCevaplari ?? "";
+                    string anahtar = stuDers?.CevapAnahtari ?? d.CevapAnahtariA ?? "";
+
+                    var lessonKazanimList = kazanimDefs
+                        .Where(k => NormalizeLessonKey(k.DersAdi) == NormalizeLessonKey(d.DersAdi))
+                        .ToList();
+
+                    var soruAnalizi = new List<object>();
+                    for (int q = 1; q <= d.SoruSayisi; q++)
+                    {
+                        int idx = q - 1;
+                        char cvp = idx < ogrCevap.Length ? ogrCevap[idx] : ' ';
+                        char keyChar = idx < anahtar.Length ? anahtar[idx] : ' ';
+
+                        string durum = "BOS";
+                        if (keyChar == 'X') durum = "IPTAL";
+                        else if (keyChar == 'H' || cvp == keyChar) durum = "DOGRU";
+                        else if (cvp == ' ' || cvp == '*' || cvp == '-') durum = "BOS";
+                        else durum = "YANLIS";
+
+                        var kDef = lessonKazanimList.FirstOrDefault(k =>
+                            (targetResult.KitapcikTuru == "B" && k.BSoruNo == q) ||
+                            (targetResult.KitapcikTuru == "C" && k.CSoruNo == q) ||
+                            (targetResult.KitapcikTuru == "D" && k.DSoruNo == q) ||
+                            k.SoruNo == q);
+
+                        soruAnalizi.Add(new
+                        {
+                            soruNo = q,
+                            dogruCevap = keyChar.ToString(),
+                            ogrenciCevabi = cvp == ' ' ? "-" : cvp.ToString(),
+                            durum = durum,
+                            konuAdi = kDef?.KonuAdi,
+                            kazanimKodu = kDef?.KazanimKodu,
+                            kazanimAciklamasi = kDef?.KazanimAciklamasi
+                        });
+                    }
+
+                    int dogru = stuDers?.DogruSayisi ?? 0;
+                    int yanlis = stuDers?.YanlisSayisi ?? 0;
+                    int bos = stuDers?.BosSayisi ?? d.SoruSayisi;
+                    double net = stuDers != null ? Math.Round(stuDers.Net, 2) : 0;
+                    double basariPct = d.SoruSayisi > 0 ? Math.Round((dogru * 100.0) / d.SoruSayisi, 1) : 0;
+
+                    return new
+                    {
+                        dersAdi = d.DersAdi,
+                        dersGrubu = d.DersGrubu ?? DetectLessonGroup(d.DersAdi),
+                        soruSayisi = d.SoruSayisi,
+                        dogruSayisi = dogru,
+                        yanlisSayisi = yanlis,
+                        bosSayisi = bos,
+                        net = net,
+                        sinifOrtalamaNet = classAvgNet,
+                        okulOrtalamaNet = schoolAvgNet,
+                        basariYuzdesi = basariPct,
+                        sorular = soruAnalizi
+                    };
+                }).ToList();
+
+                kazanimByResultId.TryGetValue(targetResult.Id, out var stuKazList);
+                var filteredKazanimlar = (stuKazList ?? new List<OptikSinavSonucKazanim>())
+                    .Where(k => teacherLessons == null || DoesLessonMatchTeacher(k.DersAdi, teacherLessons))
+                    .Select(k => new
+                    {
+                        k.DersAdi,
+                        k.KonuAdi,
+                        k.KazanimKodu,
+                        k.KazanimAciklamasi,
+                        k.ToplamSoru,
+                        k.DogruSayisi,
+                        k.YanlisSayisi,
+                        k.BosSayisi,
+                        basariYuzdesi = Math.Round(k.BasariYuzdesi, 1),
+                        durum = k.BasariYuzdesi >= 75 ? "Başarılı" : (k.BasariYuzdesi >= 50 ? "Geliştirilmeli" : "Eksik Kazanım")
+                    })
+                    .OrderBy(k => k.DersAdi)
+                    .ThenBy(k => k.basariYuzdesi)
+                    .ToList();
+
+                pastExamsByStudent.TryGetValue(targetResult.OgrenciNo, out var pList);
+                var recentExams = (pList ?? new List<OptikSinavSonuc>())
+                    .Where(pr => pastExamsMap.ContainsKey(pr.OptikSinavId))
+                    .Select(pr =>
+                    {
+                        pastExamsMap.TryGetValue(pr.OptikSinavId, out var ex);
+                        return new
+                        {
+                            sinavId = pr.OptikSinavId,
+                            sinavAdi = ex?.SinavAdi ?? "Deneme Sınavı",
+                            uygulamaTarihi = ex?.UygulamaTarihi,
+                            sinavTuru = ex?.SinavTuru ?? "SERBEST",
+                            toplamNet = Math.Round(pr.ToplamNet, 2),
+                            puan = Math.Round(pr.Puan, 2),
+                            okulSirasi = (int?)pr.OkulSirasi,
+                            toplamKatilimci = (int?)pr.ToplamKatilimci,
+                            dersler = pr.DersSonuclari.Select(ds => new
+                            {
+                                dersAdi = ds.DersAdi,
+                                net = Math.Round(ds.Net, 2)
+                            }).ToList()
+                        };
+                    }).ToList();
+
+                return new
+                {
+                    student = new
+                    {
+                        targetResult.Id,
+                        targetResult.StudentId,
+                        targetResult.OgrenciNo,
+                        targetResult.AdSoyad,
+                        targetResult.Sinif,
+                        targetResult.KitapcikTuru,
+                        targetResult.ToplamDogru,
+                        targetResult.ToplamYanlis,
+                        targetResult.ToplamBos,
+                        toplamNet = Math.Round(targetResult.ToplamNet, 2),
+                        puan = Math.Round(targetResult.Puan, 2),
+                        sinifOrtalamaNet = classPeers.Count > 0 ? Math.Round(classPeers.Average(x => x.ToplamNet), 2) : 0,
+                        okulOrtalamaNet = allResults.Count > 0 ? Math.Round(allResults.Average(x => x.ToplamNet), 2) : 0,
+                        okulSirasi = (int?)targetResult.OkulSirasi,
+                        toplamKatilimci = (int?)targetResult.ToplamKatilimci,
+                        sinifSirasi = (int?)targetResult.SinifSirasi,
+                        sinifKatilimci = (int?)targetResult.SinifKatilimci
+                    },
+                    lessons = lessonBreakdowns,
+                    grupOzetleri = lessonBreakdowns
+                        .Where(lb => !string.IsNullOrWhiteSpace((string?)((dynamic)lb).dersGrubu))
+                        .GroupBy(lb => (string)((dynamic)lb).dersGrubu)
+                        .Select(g => new
+                        {
+                            grupAdi = g.Key,
+                            soruSayisi = g.Sum(x => (int)((dynamic)x).soruSayisi),
+                            dogruSayisi = g.Sum(x => (int)((dynamic)x).dogruSayisi),
+                            yanlisSayisi = g.Sum(x => (int)((dynamic)x).yanlisSayisi),
+                            bosSayisi = g.Sum(x => (int)((dynamic)x).bosSayisi),
+                            net = Math.Round(g.Sum(x => (double)((dynamic)x).net), 2),
+                            basariYuzdesi = g.Sum(x => (int)((dynamic)x).soruSayisi) > 0
+                                ? Math.Round((g.Sum(x => (int)((dynamic)x).dogruSayisi) * 100.0) / g.Sum(x => (int)((dynamic)x).soruSayisi), 1)
+                                : 0
+                        }).ToList(),
+                    kazanimAnalizi = filteredKazanimlar,
+                    recentExams = recentExams
+                };
+            }).ToList();
+
+            return Ok(new
+            {
+                exam = new
+                {
+                    sinav.Id,
+                    sinav.SinavAdi,
+                    sinavTuru = string.IsNullOrWhiteSpace(sinav.SinavTuru) ? "SERBEST" : sinav.SinavTuru,
+                    sinav.UygulamaTarihi,
+                    sinav.YanlisDogruyuGotururSayisi,
+                    sinav.ShowRankingToStudents,
+                    sinav.HasKazanimAnalysis
+                },
+                count = reports.Count,
+                reports
+            });
+        }
     }
 }
+
 

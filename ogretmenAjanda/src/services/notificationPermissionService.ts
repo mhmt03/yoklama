@@ -35,7 +35,7 @@ export async function requestNotificationPermission(): Promise<boolean> {
         await AsyncStorage.setItem(NOTIFICATION_PERMISSION_ASKED_KEY, 'true');
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       } catch (err) {
-        console.warn('Bildirim izni alınırken hata:', err);
+        // console.warn('Bildirim izni alınırken hata:', err);
         return false;
       }
     }

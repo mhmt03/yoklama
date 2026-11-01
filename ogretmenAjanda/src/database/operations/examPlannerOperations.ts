@@ -67,7 +67,7 @@ export async function fetchExamRooms(schoolId?: string, tag?: string): Promise<E
       }));
     }
   } catch (err) {
-    console.warn('[ExamPlanner] Sunucudan salonlar alınamadı, yerel DB kullanılıyor:', err);
+    // console.warn('[ExamPlanner] Sunucudan salonlar alınamadı, yerel DB kullanılıyor:', err);
   }
 
   // Yerel SQLite fallback
@@ -106,7 +106,7 @@ export async function saveExamRoom(room: Partial<ExamHallItem> & { roomName: str
     });
     if (res && res.success) return true;
   } catch (err) {
-    console.warn('[ExamPlanner] Sunucuya salon kaydedilemedi, yerel DB güncelleniyor:', err);
+    // console.warn('[ExamPlanner] Sunucuya salon kaydedilemedi, yerel DB güncelleniyor:', err);
   }
 
   // Yerel SQLite
@@ -130,7 +130,7 @@ export async function deleteExamRoom(roomId: string): Promise<boolean> {
     const res = await apiDelete<{ success: boolean }>(`/ExamPlanner/rooms/${roomId}`);
     if (res && res.success) return true;
   } catch (err) {
-    console.warn('[ExamPlanner] Sunucudan salon silinemedi, yerel DB deneniyor:', err);
+    // console.warn('[ExamPlanner] Sunucudan salon silinemedi, yerel DB deneniyor:', err);
   }
 
   const db = await getDB();
@@ -148,7 +148,7 @@ export async function seedRoomsFromClasses(defaultTag = 'İkili Oturum', default
     );
     if (res && res.success) return true;
   } catch (err) {
-    console.warn('[ExamPlanner] Sunucuda seed yapılamadı, yerel deneniyor:', err);
+    // console.warn('[ExamPlanner] Sunucuda seed yapılamadı, yerel deneniyor:', err);
   }
 
   const db = await getDB();
@@ -250,7 +250,7 @@ export async function fetchWrittenExams(schoolId?: string): Promise<WrittenExamI
       return serverExams;
     }
   } catch (err) {
-    console.warn('[ExamPlanner] Sunucudan sınavlar alınamadı, yerel DB kullanılıyor:', err);
+    // console.warn('[ExamPlanner] Sunucudan sınavlar alınamadı, yerel DB kullanılıyor:', err);
   }
 
   // Yerel SQLite Fallback
@@ -302,7 +302,7 @@ export async function saveWrittenExam(exam: Partial<WrittenExamItem> & { name: s
     if (err?.message && !err.message.includes('Sunucuya bağlanılamadı')) {
       throw err;
     }
-    console.warn('[ExamPlanner] Sunucuya erişilemedi, yerel DB kullanılıyor:', err);
+    // console.warn('[ExamPlanner] Sunucuya erişilemedi, yerel DB kullanılıyor:', err);
   }
 
   // Yerel SQLite'a kaydet (çift güvence)
@@ -330,7 +330,7 @@ export async function deleteWrittenExam(examId: string): Promise<boolean> {
     const res = await apiDelete<{ success: boolean }>(`/ExamPlanner/exams/${examId}`);
     if (res && res.success) return true;
   } catch (err) {
-    console.warn('[ExamPlanner] Sunucudan sınav silinemedi, yerel DB deneniyor:', err);
+    // console.warn('[ExamPlanner] Sunucudan sınav silinemedi, yerel DB deneniyor:', err);
   }
 
   const db = await getDB();
@@ -347,7 +347,7 @@ export async function toggleExamPublish(examId: string, isPublished: boolean): P
     );
     if (res && res.success) return true;
   } catch (err) {
-    console.warn('[ExamPlanner] toggleExamPublish hatası:', err);
+    // console.warn('[ExamPlanner] toggleExamPublish hatası:', err);
   }
   return false;
 }
@@ -359,7 +359,7 @@ export async function fetchExamDetails(examId: string): Promise<any> {
       return res;
     }
   } catch (err) {
-    console.warn('[ExamPlanner] Sunucudan sınav detayları alınamadı:', err);
+    // console.warn('[ExamPlanner] Sunucudan sınav detayları alınamadı:', err);
   }
   return null;
 }
@@ -399,7 +399,7 @@ export async function updateProctorTeacher(examId: string, roomName: string, pro
     });
     return !!(res && res.success);
   } catch (err) {
-    console.warn('[ExamPlanner] Gözetmen güncellenemedi:', err);
+    // console.warn('[ExamPlanner] Gözetmen güncellenemedi:', err);
     return false;
   }
 }
@@ -417,7 +417,7 @@ export async function fetchStudentExamSeatings(schoolId: string, studentNumber: 
       return res.data;
     }
   } catch (err) {
-    console.warn('[ExamPlanner] Öğrenci oturma planı sorgulanamadı:', err);
+    // console.warn('[ExamPlanner] Öğrenci oturma planı sorgulanamadı:', err);
   }
   return [];
 }
@@ -484,7 +484,7 @@ export async function fetchTeacherProctorDuties(
       return res.data;
     }
   } catch (err) {
-    console.warn('[ExamPlanner] Gözetmenlik görevleri alınamadı:', err);
+    // console.warn('[ExamPlanner] Gözetmenlik görevleri alınamadı:', err);
   }
   return [];
 }
@@ -508,7 +508,7 @@ export async function fetchExamBranches(schoolId?: string): Promise<BranchDistri
       return res.data;
     }
   } catch (err) {
-    console.warn('[ExamPlanner] fetchExamBranches API hatası:', err);
+    // console.warn('[ExamPlanner] fetchExamBranches API hatası:', err);
   }
 
   // Yerel SQLite fallback (offline)
@@ -593,7 +593,7 @@ export async function fetchAvailableProctors(examId: string, roomName?: string):
       return res.data;
     }
   } catch (err) {
-    console.warn('[ExamPlanner] fetchAvailableProctors API hatası:', err);
+    // console.warn('[ExamPlanner] fetchAvailableProctors API hatası:', err);
   }
   return [];
 }

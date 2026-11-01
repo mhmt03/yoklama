@@ -83,7 +83,7 @@ export const TeacherSchoolModal: React.FC<TeacherSchoolModalProps> = ({
           setActiveTab('join');
         }
       } catch (e) {
-        console.warn('Veriler yüklenemedi:', e);
+        // console.warn('Veriler yüklenemedi:', e);
       }
     } else {
       setActiveTab('join');

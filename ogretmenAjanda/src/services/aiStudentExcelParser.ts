@@ -615,7 +615,7 @@ export async function parseStudentsFromExcelWithAi(
         aiReason = aiRes.reason;
         modelUsed = aiRes.modelUsed;
       } catch (aiErr: any) {
-        console.warn('AI analizi başarısız oldu, kural tabanlı eşleştiriciye geçiliyor:', aiErr?.message);
+        // console.warn('AI analizi başarısız oldu, kural tabanlı eşleştiriciye geçiliyor:', aiErr?.message);
         const fallback = heuristicColumnMatch(headerRow, rawRows.slice(bestHeaderRowIdx + 1, bestHeaderRowIdx + 6));
         mapping = fallback.mapping;
         mapping.startRowIndex = bestHeaderRowIdx + 1;

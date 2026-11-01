@@ -48,7 +48,7 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
 
 async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | string): Promise<Uint8Array> {
   const uri = typeof assetOrUri === 'string' ? assetOrUri : assetOrUri.uri;
-  console.log('[PDF Fotoğraf] PDF Baytları okunuyor:', uri);
+  // console.log('[PDF Fotoğraf] PDF Baytları okunuyor:', uri);
 
   // 1. Data URI kontrolü (Web ve önceden kodlanmış içerikler için)
   if (uri.startsWith('data:')) {
@@ -61,22 +61,22 @@ async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | str
     try {
       const b64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
       if (b64 && b64.length > 0) {
-        console.log(`[PDF Fotoğraf] FileSystem ile ${b64.length} karakter base64 okundu.`);
+        // console.log(`[PDF Fotoğraf] FileSystem ile ${b64.length} karakter base64 okundu.`);
         return base64ToUint8Array(b64);
       }
     } catch (e) {
-      console.warn('[PDF Fotoğraf] readAsStringAsync doğrudan okunamadı, copyAsync deneniyor:', e);
+      // console.warn('[PDF Fotoğraf] readAsStringAsync doğrudan okunamadı, copyAsync deneniyor:', e);
       try {
         const tempPath = `${FileSystem.cacheDirectory}pdf_safe_${Date.now()}.pdf`;
         await FileSystem.copyAsync({ from: uri, to: tempPath });
         const b64 = await FileSystem.readAsStringAsync(tempPath, { encoding: 'base64' });
         await FileSystem.deleteAsync(tempPath, { idempotent: true });
         if (b64 && b64.length > 0) {
-          console.log(`[PDF Fotoğraf] FileSystem (safe copy) ile ${b64.length} karakter base64 okundu.`);
+          // console.log(`[PDF Fotoğraf] FileSystem (safe copy) ile ${b64.length} karakter base64 okundu.`);
           return base64ToUint8Array(b64);
         }
       } catch (copyErr) {
-        console.warn('[PDF Fotoğraf] copyAsync fallback başarısız:', copyErr);
+        // console.warn('[PDF Fotoğraf] copyAsync fallback başarısız:', copyErr);
       }
     }
   }
@@ -88,7 +88,7 @@ async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | str
       try {
         const ab = await res.arrayBuffer();
         if (ab && ab.byteLength > 0) {
-          console.log(`[PDF Fotoğraf] Fetch ArrayBuffer ile ${ab.byteLength} bayt okundu.`);
+          // console.log(`[PDF Fotoğraf] Fetch ArrayBuffer ile ${ab.byteLength} bayt okundu.`);
           return new Uint8Array(ab);
         }
       } catch {}
@@ -99,12 +99,12 @@ async function readPdfBytes(assetOrUri: DocumentPicker.DocumentPickerAsset | str
       reader.onloadend = () => {
         try {
           if (reader.result instanceof ArrayBuffer) {
-            console.log(`[PDF Fotoğraf] FileReader ArrayBuffer ile ${reader.result.byteLength} bayt okundu.`);
+            // console.log(`[PDF Fotoğraf] FileReader ArrayBuffer ile ${reader.result.byteLength} bayt okundu.`);
             return resolve(new Uint8Array(reader.result));
           }
           const str = reader.result as string;
           const clean = str.includes(',') ? str.split(',')[1] : str;
-          console.log(`[PDF Fotoğraf] FileReader dataURL ile ${clean.length} karakter base64 okundu.`);
+          // console.log(`[PDF Fotoğraf] FileReader dataURL ile ${clean.length} karakter base64 okundu.`);
           resolve(base64ToUint8Array(clean));
         } catch (e) { reject(e); }
       };
@@ -827,17 +827,17 @@ export const extractPhotosFromPdf = async (
   students: Student[],
   assetOrUri?: DocumentPicker.DocumentPickerAsset | string
 ): Promise<PdfPhotoExtractResult> => {
-  console.log('\n══════════════════ [PDF Fotoğraf Çıkarıcı] BAŞLADI ══════════════════');
-  console.log('[PDF Fotoğraf] Eşleştirilecek Öğrenci Sayısı:', students.length);
+  // console.log('\n══════════════════ [PDF Fotoğraf Çıkarıcı] BAŞLADI ══════════════════');
+  // console.log('[PDF Fotoğraf] Eşleştirilecek Öğrenci Sayısı:', students.length);
 
   try {
     let targetAsset: DocumentPicker.DocumentPickerAsset | string | undefined = assetOrUri;
 
     if (!targetAsset) {
-      console.log('[PDF Fotoğraf] Belge seçici açılıyor...');
+      // console.log('[PDF Fotoğraf] Belge seçici açılıyor...');
       const pick = await DocumentPicker.getDocumentAsync({ type: ['application/pdf'], copyToCacheDirectory: true });
       if (pick.canceled || !pick.assets?.length) {
-        console.log('[PDF Fotoğraf] Kullanıcı belge seçimini iptal etti.');
+        // console.log('[PDF Fotoğraf] Kullanıcı belge seçimini iptal etti.');
         return { success: false, totalImages: 0, extractedPhotos: [], error: 'Dosya seçilmedi.' };
       }
       targetAsset = pick.assets[0];
@@ -849,7 +849,7 @@ export const extractPhotosFromPdf = async (
       return { success: false, totalImages: 0, extractedPhotos: [], error: 'PDF dosyası okunamadı.' };
     }
 
-    console.log(`[PDF Fotoğraf] PDF baytları hafızaya alındı (${(buf.length / 1024).toFixed(1)} KB). Resim nesneleri taranıyor...`);
+    // console.log(`[PDF Fotoğraf] PDF baytları hafızaya alındı (${(buf.length / 1024).toFixed(1)} KB). Resim nesneleri taranıyor...`);
 
     // Latin-1 string for text scanning (binary-safe & chunked to avoid browser memory spikes)
     let text = '';
@@ -873,10 +873,10 @@ export const extractPhotosFromPdf = async (
       );
     }
 
-    console.log(`[PDF Fotoğraf] Toplam Resim Objesi: ${allImgs.length} adet | Vesikalık Kriterine Uyan: ${photoObjs.length} adet`);
+    // console.log(`[PDF Fotoğraf] Toplam Resim Objesi: ${allImgs.length} adet | Vesikalık Kriterine Uyan: ${photoObjs.length} adet`);
 
     if (!photoObjs.length) {
-      console.warn('[PDF Fotoğraf] PDF içinde vesikalık boyutuna uygun fotoğraf nesnesi bulunamadı.');
+      // console.warn('[PDF Fotoğraf] PDF içinde vesikalık boyutuna uygun fotoğraf nesnesi bulunamadı.');
       return {
         success: false,
         totalImages: allImgs.length,
@@ -894,7 +894,7 @@ export const extractPhotosFromPdf = async (
           await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
         }
       } catch (dirErr) {
-        console.warn('[PDF Fotoğraf] Cache dir oluşturulamadı:', dirErr);
+        // console.warn('[PDF Fotoğraf] Cache dir oluşturulamadı:', dirErr);
       }
     }
 
@@ -1092,7 +1092,7 @@ export const extractPhotosFromPdf = async (
         });
       }
 
-      console.log(`[PDF Fotoğraf] Sayfa ${pageNumber}: ${photoPlacements.length} resim yerleşimi bulundu.`);
+      // console.log(`[PDF Fotoğraf] Sayfa ${pageNumber}: ${photoPlacements.length} resim yerleşimi bulundu.`);
 
       if (photoPlacements.length === 0) continue;
 
@@ -1293,7 +1293,7 @@ export const extractPhotosFromPdf = async (
       }
     }
 
-    console.log(`[PDF Fotoğraf] Sayfalardan toplam ${orderedPairs.length} adet resim-metin eşleşme adayı çıkarıldı.`);
+    // console.log(`[PDF Fotoğraf] Sayfalardan toplam ${orderedPairs.length} adet resim-metin eşleşme adayı çıkarıldı.`);
 
     // ── Convert matched image objects to files and resolve students ─────────
     const extractedPhotos: PdfExtractedStudentPhoto[] = [];
@@ -1408,7 +1408,7 @@ export const extractPhotosFromPdf = async (
             const cId = getStudentId(candidate);
             if (!usedStudentIds.has(cId as any)) {
               matched = candidate;
-              console.log(`[PDF Fotoğraf] İsimden tam eşleşme sağlandı: "${info.name}" -> ${getStudentFullName(candidate)} (${getStudentNum(candidate)})`);
+              // console.log(`[PDF Fotoğraf] İsimden tam eşleşme sağlandı: "${info.name}" -> ${getStudentFullName(candidate)} (${getStudentNum(candidate)})`);
             }
           }
         }
@@ -1416,11 +1416,11 @@ export const extractPhotosFromPdf = async (
         if (matched) usedStudentIds.add(getStudentId(matched) as any);
 
         const matchedDisplay = matched ? getStudentFullName(matched) : '';
-        console.log(
-          `[PDF Fotoğraf] Foto #${i + 1} (Sayfa ${pageNumber}): No=${detNum || 'YOK'} | İsim="${info.name}" -> ${
-            matched ? `✅ EŞLEŞTİ (${matchedDisplay} - No: ${getStudentNum(matched)})` : '⚠️ EŞLEŞMEDİ (Manuel Atama)'
-          }`
-        );
+        // console.log(
+//           `[PDF Fotoğraf] Foto #${i + 1} (Sayfa ${pageNumber}): No=${detNum || 'YOK'} | İsim="${info.name}" -> ${
+//             matched ? `✅ EŞLEŞTİ (${matchedDisplay} - No: ${getStudentNum(matched)})` : '⚠️ EŞLEŞMEDİ (Manuel Atama)'
+//           }`
+//         );
 
         extractedPhotos.push({
           id: `pdf-${i}-${Date.now()}`,
@@ -1433,18 +1433,18 @@ export const extractPhotosFromPdf = async (
           pageNumber,
         });
       } catch (e) {
-        console.warn(`[PDF Fotoğraf] Fotoğraf ${i} dönüştürme hatası:`, e);
+        // console.warn(`[PDF Fotoğraf] Fotoğraf ${i} dönüştürme hatası:`, e);
       }
     }
 
     const matchedCount = extractedPhotos.filter(p => p.matchedStudent !== null).length;
     const unmatchedCount = extractedPhotos.length - matchedCount;
 
-    console.log(`\n══════════════════ [PDF Fotoğraf Çıkarıcı] ÖZET ══════════════════`);
-    console.log(`[PDF Fotoğraf] Toplam Çıkarılan Fotoğraf: ${extractedPhotos.length}`);
-    console.log(`[PDF Fotoğraf] Otomatik Eşleşen: ${matchedCount} adet`);
-    console.log(`[PDF Fotoğraf] Eşleşmeyen (Manuel Bekleyen): ${unmatchedCount} adet`);
-    console.log(`═══════════════════════════════════════════════════════════════════\n`);
+    // console.log(`\n══════════════════ [PDF Fotoğraf Çıkarıcı] ÖZET ══════════════════`);
+    // console.log(`[PDF Fotoğraf] Toplam Çıkarılan Fotoğraf: ${extractedPhotos.length}`);
+    // console.log(`[PDF Fotoğraf] Otomatik Eşleşen: ${matchedCount} adet`);
+    // console.log(`[PDF Fotoğraf] Eşleşmeyen (Manuel Bekleyen): ${unmatchedCount} adet`);
+    // console.log(`═══════════════════════════════════════════════════════════════════\n`);
 
     if (!extractedPhotos.length) {
       return {

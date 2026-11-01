@@ -765,7 +765,7 @@ export const setShowAllSchoolsSetting = async (val: boolean): Promise<void> => {
       val ? '1' : '0'
     );
   } catch (e) {
-    console.warn('Error saving show_all_schools_schedule setting:', e);
+    // console.warn('Error saving show_all_schools_schedule setting:', e);
   }
 };
 

@@ -77,6 +77,7 @@ import {
   GeminiUsageStats,
 } from '../../../utils/geminiScheduleService';
 import { extractPhotosFromPdf, PdfExtractedStudentPhoto } from '../../../utils/pdfPhotoExtractor';
+import { extractPhotosFromDocx } from '../../../utils/docxPhotoExtractor';
 import * as XLSX from 'xlsx';
 import {
   SchoolSnapshotData,
@@ -204,7 +205,7 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
       const draft = await loadParsedScheduleDraft(schoolId);
       setCachedScheduleDraft(draft);
     } catch (e) {
-      console.warn('[Çarşaf Havuz] Yükleme hatası:', e);
+      // console.warn('[Çarşaf Havuz] Yükleme hatası:', e);
     }
   };
 
@@ -643,7 +644,7 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
             }
           }
         } catch (tErr: any) {
-          console.warn(`[Zincir Çözüm] "${currentTeacher}" okuma hatası:`, tErr);
+          // console.warn(`[Zincir Çözüm] "${currentTeacher}" okuma hatası:`, tErr);
         }
       }
 
@@ -733,7 +734,7 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
         Alert.alert('Ders Bulunamadı', `Belgede "${teacherToScan}" için ders saati tespit edilemedi.`);
       }
     } catch (err: any) {
-      console.warn('Tek öğretmen okuma hatası:', err);
+      // console.warn('Tek öğretmen okuma hatası:', err);
       Alert.alert('Okuma Hatası', err.message || 'Öğretmen belgeden taranamadı.');
     } finally {
       setReScanningTeacher(false);
@@ -1373,6 +1374,80 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
     }
   };
 
+  const handlePickWordAndExtractPhotos = async () => {
+    if (!selectedSchool) {
+      Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçiniz.');
+      return;
+    }
+    try {
+      setBulkPhotoModalVisible(true);
+      setUploadingBulkPhotos(true);
+
+      let currentStudents = students;
+      if (!currentStudents || currentStudents.length === 0) {
+        setBulkPhotoProgress('Okul öğrenci listesi yükleniyor...');
+        try {
+          const sRes = await apiRequest<any[]>(`sync/students?schoolId=${selectedSchool.id}`);
+          if (sRes.success && sRes.data) {
+            currentStudents = sRes.data;
+            setStudents(sRes.data);
+          }
+        } catch (loadErr) {}
+      }
+
+      setBulkPhotoProgress('Word (.docx) belgesi seçiliyor ve fotoğraflar ayıklanıyor...');
+      const pick = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/msword',
+          'application/octet-stream',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
+      if (pick.canceled || !pick.assets?.length) {
+        setBulkPhotoModalVisible(false);
+        setUploadingBulkPhotos(false);
+        setBulkPhotoProgress('');
+        return;
+      }
+      const asset = pick.assets[0];
+      setCachedPdfAsset(asset);
+
+      const res = await extractPhotosFromDocx(currentStudents, asset);
+      setBulkPhotoModalVisible(false);
+      setUploadingBulkPhotos(false);
+      setBulkPhotoProgress('');
+
+      if (!res.success) {
+        if (res.error && res.error !== 'Dosya seçilmedi.') {
+          Alert.alert('Word Fotoğraf Hatası', res.error);
+        }
+        return;
+      }
+
+      const extracted = res.extractedPhotos || [];
+      if (extracted.length === 0) {
+        Alert.alert('Fotoğraf Bulunamadı', 'Seçilen Word belgesinde vesikalık fotoğraf veya tablo hücresi tespit edilemedi.');
+        return;
+      }
+
+      setCachedPdfPhotos(extracted);
+      setInitialReviewPhotos(extracted);
+      setPhotoHistoryStack([]);
+      setReviewPhotos(extracted);
+      setReviewPageFilter('all');
+      setReviewMatchFilter('all');
+      setReviewSearchQuery('');
+      setPhotoReviewModalVisible(true);
+    } catch (e: any) {
+      setUploadingBulkPhotos(false);
+      setBulkPhotoModalVisible(false);
+      setBulkPhotoProgress('');
+      Alert.alert('Hata', e.message || 'Word fotoğrafları çıkarılırken bir hata oluştu.');
+    }
+  };
+
   const handlePickPdfAndExtractPhotos = async () => {
     if (!selectedSchool) {
       Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçiniz.');
@@ -1392,12 +1467,20 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
             setStudents(sRes.data);
           }
         } catch (loadErr) {
-          console.warn('[PDF Fotoğraf] Öğrenciler çekilemedi:', loadErr);
+          // console.warn('[PDF Fotoğraf] Öğrenciler çekilemedi:', loadErr);
         }
       }
 
       setBulkPhotoProgress('e-Okul PDF belgesi seçiliyor ve taranıyor...');
-      const pick = await DocumentPicker.getDocumentAsync({ type: ['application/pdf'], copyToCacheDirectory: true });
+      const pick = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/pdf',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/msword',
+          '*/*',
+        ],
+        copyToCacheDirectory: true,
+      });
       if (pick.canceled || !pick.assets?.length) {
         setBulkPhotoModalVisible(false);
         setUploadingBulkPhotos(false);
@@ -1407,7 +1490,14 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
       const asset = pick.assets[0];
       setCachedPdfAsset(asset);
 
-      const res = await extractPhotosFromPdf(currentStudents, asset);
+      const isWord =
+        asset.name?.toLowerCase().endsWith('.docx') ||
+        asset.name?.toLowerCase().endsWith('.doc') ||
+        asset.mimeType?.includes('word');
+
+      const res = isWord
+        ? await extractPhotosFromDocx(currentStudents, asset)
+        : await extractPhotosFromPdf(currentStudents, asset);
       setBulkPhotoModalVisible(false);
       setUploadingBulkPhotos(false);
       setBulkPhotoProgress('');
@@ -1476,8 +1566,43 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
             setStudents(sRes.data);
           }
         } catch (loadErr) {
-          console.warn('[AI Fotoğraf] Öğrenciler çekilemedi:', loadErr);
+          // console.warn('[AI Fotoğraf] Öğrenciler çekilemedi:', loadErr);
         }
+      }
+
+            const isWord =
+        file.name?.toLowerCase().endsWith('.docx') ||
+        file.name?.toLowerCase().endsWith('.doc') ||
+        file.mimeType?.includes('word');
+
+      if (isWord) {
+        setBulkPhotoProgress('Word (.docx) tablosu ve öğrenci bilgileri taranıyor...');
+        const res = await extractPhotosFromDocx(currentStudents, file);
+        setUploadingBulkPhotos(false);
+        setBulkPhotoModalVisible(false);
+        setBulkPhotoProgress('');
+
+        if (!res.success) {
+          Alert.alert('Word Fotoğraf Hatası', res.error || 'Fotoğraf analizi tamamlanamadı.');
+          return;
+        }
+
+        const extracted = res.extractedPhotos || [];
+        if (extracted.length === 0) {
+          Alert.alert('Fotoğraf Bulunamadı', 'Word belgesinde vesikalık fotoğraf tespit edilemedi.');
+          return;
+        }
+
+        setCachedPdfAsset(file);
+        setCachedPdfPhotos(extracted);
+        setInitialReviewPhotos(extracted);
+        setPhotoHistoryStack([]);
+        setReviewPhotos(extracted);
+        setReviewPageFilter('all');
+        setReviewMatchFilter('all');
+        setReviewSearchQuery('');
+        setPhotoReviewModalVisible(true);
+        return;
       }
 
       setBulkPhotoProgress('Yapay Zeka (Gemini Vision) ile öğrenci fotoğrafları taranıyor...');
@@ -1574,7 +1699,7 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
           setStudents(sRes.data);
         }
       } catch (err) {
-        console.warn('[Öğrenci Seçici] Öğrenciler yüklenemedi:', err);
+        // console.warn('[Öğrenci Seçici] Öğrenciler yüklenemedi:', err);
       }
     }
   };
@@ -1705,6 +1830,7 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
     handleExportTeacherCredentials,
     handleExportStudentCredentials,
     handleExportParentCredentials,
+    handlePickWordAndExtractPhotos,
     handlePickPdfAndExtractPhotos,
     handlePickAndExtractPhotosWithAi,
     handleRemovePhotoMatch,

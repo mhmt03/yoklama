@@ -602,16 +602,20 @@ namespace OgretmenAjanda.Api.Models
         [Required, MaxLength(150)]
         public string FormAdi { get; set; } = string.Empty;
 
-        public int NumaraBaslangic { get; set; } = 0;
+        public int NumaraBaslangic { get; set; } = 1;
         public int NumaraUzunluk { get; set; } = 5;
 
-        public int AdSoyadBaslangic { get; set; } = 5;
+        public int AdSoyadBaslangic { get; set; } = 6;
         public int AdSoyadUzunluk { get; set; } = 20;
 
-        public int SinifBaslangic { get; set; } = 25;
+        public bool AdSoyadAyriMi { get; set; } = false; // true ise AdSoyadBaslangic/Uzunluk = Ad, SoyadBaslangic/Uzunluk = Soyad
+        public int? SoyadBaslangic { get; set; } = 16;
+        public int? SoyadUzunluk { get; set; } = 10;
+
+        public int SinifBaslangic { get; set; } = 26;
         public int SinifUzunluk { get; set; } = 4;
 
-        public int? KitapcikTuruBaslangic { get; set; } = 29;
+        public int? KitapcikTuruBaslangic { get; set; } = 30;
         public int? KitapcikTuruUzunluk { get; set; } = 1;
 
         public string? FmtRawContent { get; set; }
@@ -633,6 +637,9 @@ namespace OgretmenAjanda.Api.Models
         [Required, MaxLength(100)]
         public string DersAdi { get; set; } = string.Empty;
 
+        [MaxLength(100)]
+        public string? DersGrubu { get; set; } // Örn: Fen Bilimleri, Sosyal Bilimler
+
         public int BaslangicSutun { get; set; }
         public int KarakterSayisi { get; set; }
         public int SiraNo { get; set; } = 1;
@@ -648,6 +655,13 @@ namespace OgretmenAjanda.Api.Models
 
         [Required, MaxLength(200)]
         public string SinavAdi { get; set; } = string.Empty;
+
+        [MaxLength(30)]
+        public string SinavTuru { get; set; } = "SERBEST"; // SERBEST, TYT, AYT, LGS
+
+        public Guid? BagliTytSinavId { get; set; } // AYT sınavı ise puan hesabı için bağlı olduğu TYT sınavı ID'si
+
+        public double VarsayilanTytPuani { get; set; } = 150.0; // Öğrenci bağlı TYT sınavına girmemişse kullanılacak varsayılan TYT taban puanı (örn: 100 veya 150)
 
         public DateTime UygulamaTarihi { get; set; } = DateTime.Today;
 
@@ -687,6 +701,9 @@ namespace OgretmenAjanda.Api.Models
 
         [Required, MaxLength(100)]
         public string DersAdi { get; set; } = string.Empty;
+
+        [MaxLength(100)]
+        public string? DersGrubu { get; set; } // Örn: Fen Bilimleri, Sosyal Bilimler
 
         public int SoruSayisi { get; set; } = 20;
         public double Katsayi { get; set; } = 1.0;
@@ -788,6 +805,9 @@ namespace OgretmenAjanda.Api.Models
 
         [Required, MaxLength(100)]
         public string DersAdi { get; set; } = string.Empty;
+
+        [MaxLength(100)]
+        public string? DersGrubu { get; set; } // Örn: Fen Bilimleri, Sosyal Bilimler
 
         public int DogruSayisi { get; set; }
         public int YanlisSayisi { get; set; }

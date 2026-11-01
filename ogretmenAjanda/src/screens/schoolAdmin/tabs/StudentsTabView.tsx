@@ -24,8 +24,10 @@ export function StudentsTabView({ ctx }: { ctx: SchoolAdminCtx }) {
     filteredStudents,
     students,
     handleDeleteAllStudents,
+    handleClearAllStudentPhotos,
     handleDownloadStudentTemplate,
     handlePickAndUploadBulkPhotos,
+    handlePickWordAndExtractPhotos,
     handlePickPdfAndExtractPhotos,
     handlePickAndExtractPhotosWithAi,
     handlePickAndParseExcel,
@@ -91,6 +93,14 @@ export function StudentsTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                     >
                       <Ionicons name="images-outline" size={13} color="#fff" />
                       <Text style={styles.primaryAddBtnText}>Toplu Foto</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.primaryAddBtn, { backgroundColor: '#2563EB' }]}
+                      onPress={handlePickWordAndExtractPhotos}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="document-text-outline" size={13} color="#fff" />
+                      <Text style={styles.primaryAddBtnText}>Word'den Foto (.docx)</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity

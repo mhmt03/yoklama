@@ -44,7 +44,7 @@ export const getActiveUserRole = async (): Promise<UserRole | null> => {
     }
     return null;
   } catch (err) {
-    console.warn('Aktif rol okunamadı:', err);
+    // console.warn('Aktif rol okunamadı:', err);
     return null;
   }
 };
@@ -72,7 +72,7 @@ export const setActiveTeacherName = async (name: string): Promise<void> => {
       name.trim()
     );
   } catch (err) {
-    console.warn('Öğretmen adı kaydedilemedi:', err);
+    // console.warn('Öğretmen adı kaydedilemedi:', err);
   }
 };
 
@@ -89,7 +89,7 @@ export const setActiveUserRole = async (role: UserRole | null): Promise<void> =>
       await AsyncStorage.removeItem(ROLE_STORAGE_KEY);
     }
   } catch (e) {
-    console.warn('AsyncStorage rol kayıt hatası:', e);
+    // console.warn('AsyncStorage rol kayıt hatası:', e);
   }
 
   // 2. SQLite
@@ -107,7 +107,7 @@ export const setActiveUserRole = async (role: UserRole | null): Promise<void> =>
       await db.runAsync("DELETE FROM app_settings WHERE key IN ('active_user_role', 'active_teacher_name')");
     }
   } catch (err) {
-    console.warn('Aktif rol kaydedilemedi:', err);
+    // console.warn('Aktif rol kaydedilemedi:', err);
   }
 };
 
@@ -125,7 +125,7 @@ export const getStudentSessionProfile = async (): Promise<StudentProfileData | n
     }
     return null;
   } catch (err) {
-    console.warn('Öğrenci profil oturumu okunamadı:', err);
+    // console.warn('Öğrenci profil oturumu okunamadı:', err);
     return null;
   }
 };
@@ -145,7 +145,7 @@ export const setStudentSessionProfile = async (profile: StudentProfileData | nul
       await db.runAsync("DELETE FROM app_settings WHERE key = 'student_session_profile'");
     }
   } catch (err) {
-    console.warn('Öğrenci profil oturumu kaydedilemedi:', err);
+    // console.warn('Öğrenci profil oturumu kaydedilemedi:', err);
   }
 };
 
@@ -153,11 +153,11 @@ export const setStudentSessionProfile = async (profile: StudentProfileData | nul
  * Rolü, token'ları ve kullanıcı oturumunu tamamen sıfırlar (Çıkış yapma ve rol değiştirme için).
  */
 export const logoutUserRole = async (): Promise<void> => {
-  console.log('[RoleService] Çıkış yapılıyor: Oturum ve roller tamamen sıfırlanıyor...');
+  // console.log('[RoleService] Çıkış yapılıyor: Oturum ve roller tamamen sıfırlanıyor...');
   try {
     await clearAuthSession();
   } catch (e) {
-    console.warn('clearAuthSession hatası:', e);
+    // console.warn('clearAuthSession hatası:', e);
   }
 
   try {
@@ -168,6 +168,6 @@ export const logoutUserRole = async (): Promise<void> => {
     const db = await getDB();
     await db.runAsync("DELETE FROM app_settings WHERE key IN ('active_user_role', 'student_session_profile', 'active_teacher_name')");
   } catch (err) {
-    console.warn('Çıkış işlemi SQLite hatası:', err);
+    // console.warn('Çıkış işlemi SQLite hatası:', err);
   }
 };

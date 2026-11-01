@@ -53,7 +53,7 @@ export const getSchools = async (): Promise<School[]> => {
       }
     }
   } catch (err) {
-    console.warn('Error filtering schools by session:', err);
+    // console.warn('Error filtering schools by session:', err);
   }
 
   return allSchools;
@@ -144,7 +144,7 @@ export const getDefaultSchoolId = async (): Promise<number | null> => {
     }
     return null;
   } catch (e) {
-    console.warn('Error reading default school id:', e);
+    // console.warn('Error reading default school id:', e);
     return null;
   }
 };
@@ -415,7 +415,7 @@ export const refreshAffiliatedSchoolsFromServer = async (): Promise<School[]> =>
       await syncAffiliatedSchools(freshSchools, targetCode);
     }
   } catch (err) {
-    console.warn('refreshAffiliatedSchoolsFromServer hatası:', err);
+    // console.warn('refreshAffiliatedSchoolsFromServer hatası:', err);
   }
 
   return await getSchools();

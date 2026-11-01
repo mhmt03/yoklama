@@ -4,8 +4,8 @@ import { Alert, Linking, Platform } from 'react-native';
  * Uygulamanın dahili versiyon bilgisi.
  * Yeni her APK derlemesinde bu değerler bir artırılır.
  */
-export const CURRENT_APP_VERSION = '1.0.10';
-export const CURRENT_VERSION_CODE = 11;
+export const CURRENT_APP_VERSION = '2.0.0';
+export const CURRENT_VERSION_CODE = 12;
 
 export const UPDATE_SERVER_BASE_URL = 'https://ogretmenajanda.runasp.net';
 export const UPDATE_JSON_URL = `${UPDATE_SERVER_BASE_URL}/version.json`;

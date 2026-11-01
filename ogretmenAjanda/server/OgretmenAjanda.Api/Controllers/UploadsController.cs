@@ -258,6 +258,94 @@ namespace OgretmenAjanda.Api.Controllers
                 failedCount
             });
         }
+
+        [HttpPost("clear-student-photos")]
+        public async Task<IActionResult> ClearStudentPhotos([FromQuery] Guid? schoolId, [FromBody] ClearStudentPhotosRequest? request)
+        {
+            if (IsTeacher)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Bu işlem yalnızca okul idaresi tarafından yapılabilir." });
+            }
+
+            var effectiveSchoolId = request?.SchoolId != null && request.SchoolId != Guid.Empty
+                ? request.SchoolId.Value
+                : (schoolId ?? Guid.Empty);
+
+            if (effectiveSchoolId == Guid.Empty)
+            {
+                return BadRequest(new { message = "Okul ID belirtilmedi." });
+            }
+
+            var query = _context.Students.Where(s => s.SchoolId == effectiveSchoolId && s.PhotoPath != null && s.PhotoPath != "");
+            if (!string.IsNullOrWhiteSpace(request?.ClassName))
+            {
+                var cls = request.ClassName.Trim();
+                query = query.Where(s => (s.Grade + "-" + s.Section) == cls || (s.Grade + "/" + s.Section) == cls || s.Grade == cls);
+            }
+
+            var studentsWithPhotos = await query.ToListAsync();
+            var webRoot = _env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+
+            int clearedCount = 0;
+            foreach (var st in studentsWithPhotos)
+            {
+                if (!string.IsNullOrEmpty(st.PhotoPath))
+                {
+                    try
+                    {
+                        var cleanRel = st.PhotoPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+                        var fullPath = Path.Combine(webRoot, cleanRel);
+                        if (System.IO.File.Exists(fullPath))
+                        {
+                            System.IO.File.Delete(fullPath);
+                        }
+                    }
+                    catch { }
+                }
+                st.PhotoPath = null;
+                st.UpdatedAt = DateTime.UtcNow;
+                clearedCount++;
+            }
+
+            await _context.SaveChangesAsync();
+
+            if (clearedCount > 0)
+            {
+                try
+                {
+                    var user = await _context.Users.FindAsync(CurrentUserId);
+                    var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+                    await _auditLogService.LogAsync(
+                        _context,
+                        effectiveSchoolId,
+                        CurrentUserId,
+                        user?.Username,
+                        user?.FullName,
+                        CurrentUserRole,
+                        "PHOTOS_CLEARED",
+                        "Student",
+                        null,
+                        $"{clearedCount} adet öğrencinin vesikalık fotoğrafı temizlendi.",
+                        $"{{\"clearedCount\": {clearedCount}, \"className\": \"{request?.ClassName}\"}}",
+                        clientIp
+                    );
+                    await _context.SaveChangesAsync();
+                }
+                catch { }
+            }
+
+            return Ok(new
+            {
+                message = $"{clearedCount} öğrencinin fotoğrafı başarıyla temizlendi.",
+                clearedCount
+            });
+        }
+    }
+
+    public class ClearStudentPhotosRequest
+    {
+        public Guid? SchoolId { get; set; }
+        public string? ClassName { get; set; }
     }
 
     public class Base64PhotoUploadRequest

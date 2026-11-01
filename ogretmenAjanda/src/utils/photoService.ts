@@ -16,7 +16,7 @@ const getPhotosDirectory = async (): Promise<string> => {
       await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
     }
   } catch (e) {
-    console.warn('getPhotosDirectory error:', e);
+    // console.warn('getPhotosDirectory error:', e);
   }
   return dir;
 };

@@ -88,7 +88,7 @@ export async function readUriAsBase64(fileUri: string): Promise<string> {
     });
     if (b64 && b64.length > 0) return b64;
   } catch (fetchErr) {
-    console.warn('fetch blob base64 okuma başarısız, fallback deneniyor:', fetchErr);
+    // console.warn('fetch blob base64 okuma başarısız, fallback deneniyor:', fetchErr);
   }
 
   // 2. Yalnızca Native ortamlarda FileSystem.readAsStringAsync doğrudan okuma
@@ -99,7 +99,7 @@ export async function readUriAsBase64(fileUri: string): Promise<string> {
       });
       if (b64 && b64.length > 0) return b64;
     } catch (fsErr) {
-      console.warn('readAsStringAsync başarısız, copyAsync deneniyor:', fsErr);
+      // console.warn('readAsStringAsync başarısız, copyAsync deneniyor:', fsErr);
     }
 
     // 3. Geçici dosya kopyalama ile okuma (Scoped storage aşımı)
@@ -113,7 +113,7 @@ export async function readUriAsBase64(fileUri: string): Promise<string> {
       await FileSystem.deleteAsync(tempPath, { idempotent: true });
       if (b64 && b64.length > 0) return b64;
     } catch (copyErr) {
-      console.warn('copyAsync fallback başarısız:', copyErr);
+      // console.warn('copyAsync fallback başarısız:', copyErr);
     }
   }
 
@@ -271,7 +271,7 @@ export function extractPdfBookmarksFromBase64(base64Data: string): string[] {
     }
     return teachers;
   } catch (err) {
-    console.warn('PDF bookmark çıkarma hatası (atlandı):', err);
+    // console.warn('PDF bookmark çıkarma hatası (atlandı):', err);
     return [];
   }
 }
@@ -449,9 +449,9 @@ export async function parseMasterScheduleWithAi(
       onProgress?.(`📄 PDF'in ${options.pageRange.start}. - ${options.pageRange.end}. arası sayfaları kesiliyor...`);
       const sliceRes = await slicePdfPages(base64Data, options.pageRange.start, options.pageRange.end);
       base64Data = sliceRes.slicedBase64;
-      console.log(`[Çarşaf AI] PDF Sayfa Aralığı Kesildi: ${options.pageRange.start}-${options.pageRange.end} (${sliceRes.pageCount}/${sliceRes.totalOriginalPages} sayfa, ${Math.round(base64Data.length / 1024)} KB)`);
+      // console.log(`[Çarşaf AI] PDF Sayfa Aralığı Kesildi: ${options.pageRange.start}-${options.pageRange.end} (${sliceRes.pageCount}/${sliceRes.totalOriginalPages} sayfa, ${Math.round(base64Data.length / 1024)} KB)`);
     } catch (sliceErr) {
-      console.warn('[Çarşaf AI] PDF sayfa kesme hatası, orijinal belgeyle devam ediliyor:', sliceErr);
+      // console.warn('[Çarşaf AI] PDF sayfa kesme hatası, orijinal belgeyle devam ediliyor:', sliceErr);
     }
   }
 
@@ -662,9 +662,9 @@ ${jsonSchema}
     const { fetchAvailableGeminiModels } = await import('../utils/geminiScheduleService');
     liveModels = await fetchAvailableGeminiModels(cleanApiKey);
   } catch (e) {
-    console.warn(LOG, 'Canlı model listesi alınamadı:', e);
+    // console.warn(LOG, 'Canlı model listesi alınamadı:', e);
   }
-  console.log(LOG, 'Canlı modeller:', liveModels.join(', ') || '(alınamadı)');
+  // console.log(LOG, 'Canlı modeller:', liveModels.join(', ') || '(alınamadı)');
 
   // Bilinen 404/kullanımdan kalkan modeller
   const deprecatedModels = [
@@ -698,21 +698,21 @@ ${jsonSchema}
   }
   const modelsToTry = Array.from(new Set(candidateList.filter(Boolean))).slice(0, 4);
   
-  console.log('╔═══════════════════════════════════════════════════════════════════╗');
-  console.log('║ 🚀 [ÇARŞAF AI] ÇARŞAF DERS PROGRAMI ANALİZİ BAŞLATILDI            ║');
-  console.log('╚═══════════════════════════════════════════════════════════════════╝');
-  console.log('[Çarşaf AI] Belge URI:', fileUri);
-  console.log('[Çarşaf AI] MIME Türü:', resolvedMime);
-  console.log('[Çarşaf AI] Base64 Boyutu:', `${Math.round(base64Data.length / 1024)} KB`);
-  console.log('[Çarşaf AI] Tercih Edilen Model:', preferredModel);
-  console.log('[Çarşaf AI] Sırayla Denenecek Modeller:', modelsToTry.join(' → '));
-  console.log('[Çarşaf AI] Analiz Seçenekleri:', {
-    öğretmenler: optTeachers,
-    şubeler: optClasses,
-    dersler: optLessons,
-    zilSaatleri: optBellSchedule,
-    haftalıkHücreler: optScheduleItems,
-  });
+  // console.log('╔═══════════════════════════════════════════════════════════════════╗');
+  // console.log('║ 🚀 [ÇARŞAF AI] ÇARŞAF DERS PROGRAMI ANALİZİ BAŞLATILDI            ║');
+  // console.log('╚═══════════════════════════════════════════════════════════════════╝');
+  // console.log('[Çarşaf AI] Belge URI:', fileUri);
+  // console.log('[Çarşaf AI] MIME Türü:', resolvedMime);
+  // console.log('[Çarşaf AI] Base64 Boyutu:', `${Math.round(base64Data.length / 1024)} KB`);
+  // console.log('[Çarşaf AI] Tercih Edilen Model:', preferredModel);
+  // console.log('[Çarşaf AI] Sırayla Denenecek Modeller:', modelsToTry.join(' → '));
+  // console.log('[Çarşaf AI] Analiz Seçenekleri:', {
+//     öğretmenler: optTeachers,
+//     şubeler: optClasses,
+//     dersler: optLessons,
+//     zilSaatleri: optBellSchedule,
+//     haftalıkHücreler: optScheduleItems,
+//   });
 
   let lastError: any = null;
   let primaryError: any = null;
@@ -720,11 +720,11 @@ ${jsonSchema}
 
   for (const currentModel of modelsToTry) {
     if (options?.isCancelled?.()) {
-      console.warn('[Çarşaf AI] Kullanıcı işlemi iptal etti.');
+      // console.warn('[Çarşaf AI] Kullanıcı işlemi iptal etti.');
       throw new Error('Analiz kullanıcı tarafından iptal edildi.');
     }
     try {
-      console.log(`\n[Çarşaf AI Model Deneniyor] >> ${currentModel} başlatılıyor...`);
+      // console.log(`\n[Çarşaf AI Model Deneniyor] >> ${currentModel} başlatılıyor...`);
       onModelChange?.(currentModel);
       onProgress?.(
         optScheduleItems
@@ -765,25 +765,25 @@ ${jsonSchema}
 
       let result: any;
       try {
-        console.log(`[Çarşaf AI İstek] ${currentModel} modeline gönderildi (Zaman aşımı: ${timeoutMs / 1000}s, MaxTokens: ${genConfig.maxOutputTokens})...`);
+        // console.log(`[Çarşaf AI İstek] ${currentModel} modeline gönderildi (Zaman aşımı: ${timeoutMs / 1000}s, MaxTokens: ${genConfig.maxOutputTokens})...`);
         result = await Promise.race([model.generateContent([prompt, imagePart]), timeoutPromise]);
       } catch (genErr: any) {
         if (options?.isCancelled?.()) throw genErr;
         const genMsg = String(genErr?.message || '');
         if (genConfig.thinkingConfig && (genMsg.includes('thinkingConfig') || genMsg.includes('invalid argument') || genErr.status === 400)) {
-          console.log(`[Çarşaf AI] ${currentModel} thinkingConfig parametresini desteklemedi, parametresiz yeniden deneniyor...`);
+          // console.log(`[Çarşaf AI] ${currentModel} thinkingConfig parametresini desteklemedi, parametresiz yeniden deneniyor...`);
           delete genConfig.thinkingConfig;
           model = genAI.getGenerativeModel({ model: currentModel, generationConfig: genConfig });
           result = await Promise.race([model.generateContent([prompt, imagePart]), timeoutPromise]);
         } else if (genMsg.includes('503') || genMsg.includes('overloaded') || genMsg.includes('429')) {
-          console.log(`[Çarşaf AI 503/429] ${currentModel} aşırı yoğunluk verdi, 2 sn sonra tekrar deneniyor...`);
+          // console.log(`[Çarşaf AI 503/429] ${currentModel} aşırı yoğunluk verdi, 2 sn sonra tekrar deneniyor...`);
           onProgress?.(`⚠️ Google sunucuları anlık yoğun (${currentModel}), tekrar deneniyor...`);
           await new Promise((resolve) => setTimeout(resolve, 2000));
           if (options?.isCancelled?.()) throw new Error('Analiz kullanıcı tarafından iptal edildi.');
           try {
             result = await Promise.race([model.generateContent([prompt, imagePart]), timeoutPromise]);
           } catch (retryErr: any) {
-            console.log(`[Çarşaf AI 503/429] ${currentModel} tekrar yoğunluk verdi, sıradaki yedek modele geçiliyor...`);
+            // console.log(`[Çarşaf AI 503/429] ${currentModel} tekrar yoğunluk verdi, sıradaki yedek modele geçiliyor...`);
             throw retryErr;
           }
         } else {
@@ -801,11 +801,11 @@ ${jsonSchema}
       );
       const textResponse = result.response.text().trim();
       const durationSec = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(`[Çarşaf AI Başarılı Yanıt] ${currentModel} yanıt verdi!`);
-      console.log(`  ⏱️ Geçen Süre: ${durationSec} sn`);
-      console.log(`  📄 Yanıt Karakter Sayısı: ${textResponse.length}`);
-      console.log(`  🏁 FinishReason: ${result.response.candidates?.[0]?.finishReason}`);
-      console.log(`  🔍 Yanıtın İlk 300 Karakteri:\n${textResponse.slice(0, 300)}\n...`);
+      // console.log(`[Çarşaf AI Başarılı Yanıt] ${currentModel} yanıt verdi!`);
+      // console.log(`  ⏱️ Geçen Süre: ${durationSec} sn`);
+      // console.log(`  📄 Yanıt Karakter Sayısı: ${textResponse.length}`);
+      // console.log(`  🏁 FinishReason: ${result.response.candidates?.[0]?.finishReason}`);
+      // console.log(`  🔍 Yanıtın İlk 300 Karakteri:\n${textResponse.slice(0, 300)}\n...`);
 
       onProgress?.(
         optScheduleItems
@@ -907,7 +907,7 @@ ${jsonSchema}
                       if (targetIdx < 8) {
                         if (!periods[targetIdx] || String(periods[targetIdx]).trim() === '') {
                           periods[targetIdx] = tokenToCopy;
-                          console.log(`[Çarşaf Blok Tamamlama] ⚡ ${teacherName} | ${dCfg.name} ${lastIdx + 1}. saatteki ${tokenToCopy} dersi, alttaki çizelgedeki ${expDayHours} saate göre ${targetIdx + 1}. saate blok tamamlandı.`);
+                          // console.log(`[Çarşaf Blok Tamamlama] ⚡ ${teacherName} | ${dCfg.name} ${lastIdx + 1}. saatteki ${tokenToCopy} dersi, alttaki çizelgedeki ${expDayHours} saate göre ${targetIdx + 1}. saate blok tamamlandı.`);
                         }
                       }
                     }
@@ -962,7 +962,7 @@ ${jsonSchema}
 
               // Eğer bu gün alt çizelgede 0 saat ise ama grid'e ders yazılmışsa (örneğin Salı günü boşken Çarşamba dersleri yazılmışsa):
               if (expHours === 0 && filledLessons.length > 0) {
-                console.log(`[Çarşaf Sağlama] ⚠️ ${teacherName} | ${dCfg.name} günü alt çizelgede 0 SAAT (KOMPLE BOŞ) ancak ızgarada ${filledLessons.length} ders bulundu. Otomatik düzeltiliyor...`);
+                // console.log(`[Çarşaf Sağlama] ⚠️ ${teacherName} | ${dCfg.name} günü alt çizelgede 0 SAAT (KOMPLE BOŞ) ancak ızgarada ${filledLessons.length} ders bulundu. Otomatik düzeltiliyor...`);
 
                 // Bu derslerin asıl ait olduğu eksik günü (genellikle sonraki gün, örn: Çarşamba) bul:
                 const deficientDay = dayConfigs.find(other => {
@@ -985,7 +985,7 @@ ${jsonSchema}
                     grid[defKey] = ['', '', '', '', '', '', '', ''];
                   }
 
-                  console.log(`[Çarşaf Düzeltme] 🔄 ${teacherName} | Boş gün ${dCfg.name} üzerindeki ${filledLessons.length} ders, eksik olan ${deficientDay.name} gününe aktarılıyor.`);
+                  // console.log(`[Çarşaf Düzeltme] 🔄 ${teacherName} | Boş gün ${dCfg.name} üzerindeki ${filledLessons.length} ders, eksik olan ${deficientDay.name} gününe aktarılıyor.`);
 
                   // Boş olan deficientDay hücrelerine aktar
                   for (let h = 0; h < periods.length && h < 8; h++) {
@@ -1106,11 +1106,11 @@ ${jsonSchema}
         }
       }
 
-      console.log(`[Çarşaf AI JSON Parse Başarılı] (Onarıldı mı: ${repaired ? 'EVET' : 'HAYIR'})`);
-      console.log(`  👨‍🏫 Öğretmen Sayısı: ${parsedData.teachers.length}`);
-      console.log(`  🏫 Şube Sayısı: ${parsedData.classes.length}`);
-      console.log(`  📚 Ders Sayısı: ${parsedData.lessons.length}`);
-      console.log(`  📅 Program Satırı Sayısı: ${parsedData.scheduleItems.length}`);
+      // console.log(`[Çarşaf AI JSON Parse Başarılı] (Onarıldı mı: ${repaired ? 'EVET' : 'HAYIR'})`);
+      // console.log(`  👨‍🏫 Öğretmen Sayısı: ${parsedData.teachers.length}`);
+      // console.log(`  🏫 Şube Sayısı: ${parsedData.classes.length}`);
+      // console.log(`  📚 Ders Sayısı: ${parsedData.lessons.length}`);
+      // console.log(`  📅 Program Satırı Sayısı: ${parsedData.scheduleItems.length}`);
 
       // Eğer kullanıcı program hücrelerini istemediyse kesinlikle boşalt (hızlı mod garantisi)
       if (!optScheduleItems) {
@@ -1199,10 +1199,10 @@ ${jsonSchema}
         const estimatedTokens = result.response?.usageMetadata?.totalTokenCount || Math.max(4500, Math.round((textResponse.length + 3000) / 3));
         await recordGeminiApiUsage(currentModel, result.response?.usageMetadata, schoolId, estimatedTokens);
       } catch (usageErr) {
-        console.warn(LOG, 'Kullanım kotası bildirilemedi:', usageErr);
+        // console.warn(LOG, 'Kullanım kotası bildirilemedi:', usageErr);
       }
 
-      console.log('══════════════════ [ÇARŞAF AI ANALİZİ TAMAMLANDI] ══════════════════\n');
+      // console.log('══════════════════ [ÇARŞAF AI ANALİZİ TAMAMLANDI] ══════════════════\n');
       onProgress?.('Ayrıştırma başarıyla tamamlandı!');
 
       const finalResult: ParsedScheduleResult = {
@@ -1291,15 +1291,15 @@ export async function saveMasterScheduleToServer(
     classroom: item.classroom,
   }));
 
-  console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
-  console.log('║ 💾 [ÇARŞAF KAYIT] DERS PROGRAMI SUNUCUYA AKTARILIYOR              ║');
-  console.log('╚═══════════════════════════════════════════════════════════════════╝');
-  console.log('[Çarşaf Kayıt] Hedef Okul ID:', schoolId);
-  console.log('[Çarşaf Kayıt] Mod (Mevcutları Sil & Sıfırdan Yaz):', opts.overwriteAll);
-  console.log('[Çarşaf Kayıt] Gönderilen Öğretmen Sayısı:', teachersList.length);
-  console.log('[Çarşaf Kayıt] Gönderilen Şube Sayısı:', classesList.length);
-  console.log('[Çarşaf Kayıt] Gönderilen Ders Sayısı:', lessonsList.length);
-  console.log('[Çarşaf Kayıt] Gönderilen Ders Program Saati:', syncItems.length);
+  // console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
+  // console.log('║ 💾 [ÇARŞAF KAYIT] DERS PROGRAMI SUNUCUYA AKTARILIYOR              ║');
+  // console.log('╚═══════════════════════════════════════════════════════════════════╝');
+  // console.log('[Çarşaf Kayıt] Hedef Okul ID:', schoolId);
+  // console.log('[Çarşaf Kayıt] Mod (Mevcutları Sil & Sıfırdan Yaz):', opts.overwriteAll);
+  // console.log('[Çarşaf Kayıt] Gönderilen Öğretmen Sayısı:', teachersList.length);
+  // console.log('[Çarşaf Kayıt] Gönderilen Şube Sayısı:', classesList.length);
+  // console.log('[Çarşaf Kayıt] Gönderilen Ders Sayısı:', lessonsList.length);
+  // console.log('[Çarşaf Kayıt] Gönderilen Ders Program Saati:', syncItems.length);
 
   const res = await apiRequest<any>('sync/schedules/batch', 'POST', {
     schoolId,
@@ -1315,10 +1315,10 @@ export async function saveMasterScheduleToServer(
     schedules: syncItems,
   });
 
-  console.log('[Çarşaf Kayıt Sunucu Yanıtı]:', res);
+  // console.log('[Çarşaf Kayıt Sunucu Yanıtı]:', res);
 
   if (res.success) {
-    console.log('[Çarşaf Kayıt BAŞARILI 🎉]:', res.data?.message);
+    // console.log('[Çarşaf Kayıt BAŞARILI 🎉]:', res.data?.message);
     try {
       const { fetchAndCacheSchoolSnapshot } = await import('./schoolSnapshotService');
       await fetchAndCacheSchoolSnapshot(schoolId);
@@ -1353,9 +1353,9 @@ export async function saveParsedScheduleToCache(data: ParsedScheduleResult): Pro
       await FileSystem.makeDirectoryAsync(SCHEDULE_CACHE_DIR, { intermediates: true });
     }
     await FileSystem.writeAsStringAsync(SCHEDULE_CACHE_FILE, JSON.stringify(data, null, 2));
-    console.log('[Çarşaf AI Cache] Ayrıştırılan veriler telefondaki yerel dosyaya kaydedildi:', SCHEDULE_CACHE_FILE);
+    // console.log('[Çarşaf AI Cache] Ayrıştırılan veriler telefondaki yerel dosyaya kaydedildi:', SCHEDULE_CACHE_FILE);
   } catch (err) {
-    console.warn('[Çarşaf AI Cache Hata]:', err);
+    // console.warn('[Çarşaf AI Cache Hata]:', err);
   }
 }
 
@@ -1371,7 +1371,7 @@ export async function getCachedParsedSchedule(): Promise<ParsedScheduleResult | 
       return JSON.parse(content);
     }
   } catch (err) {
-    console.warn('[Çarşaf AI Cache Okuma Hata]:', err);
+    // console.warn('[Çarşaf AI Cache Okuma Hata]:', err);
   }
   return null;
 }
@@ -1447,9 +1447,9 @@ export async function saveScheduleBatchesToStorage(
   try {
     const key = `${BATCH_STORAGE_KEY_PREFIX}${schoolId}`;
     await AsyncStorage.setItem(key, JSON.stringify(batches));
-    console.log(`[Çarşaf Havuz] ${batches.length} parça yerel depolamaya saklandı.`);
+    // console.log(`[Çarşaf Havuz] ${batches.length} parça yerel depolamaya saklandı.`);
   } catch (e) {
-    console.warn('[Çarşaf Havuz Kayıt Hata]:', e);
+    // console.warn('[Çarşaf Havuz Kayıt Hata]:', e);
   }
 }
 
@@ -1469,7 +1469,7 @@ export async function loadScheduleBatchesFromStorage(
       }
     }
   } catch (e) {
-    console.warn('[Çarşaf Havuz Yükleme Hata]:', e);
+    // console.warn('[Çarşaf Havuz Yükleme Hata]:', e);
   }
   return [];
 }
@@ -1481,9 +1481,9 @@ export async function clearScheduleBatchesFromStorage(schoolId: string): Promise
   try {
     const key = `${BATCH_STORAGE_KEY_PREFIX}${schoolId}`;
     await AsyncStorage.removeItem(key);
-    console.log('[Çarşaf Havuz] Depolama temizlendi.');
+    // console.log('[Çarşaf Havuz] Depolama temizlendi.');
   } catch (e) {
-    console.warn('[Çarşaf Havuz Temizleme Hata]:', e);
+    // console.warn('[Çarşaf Havuz Temizleme Hata]:', e);
   }
 }
 
@@ -1506,9 +1506,9 @@ export async function saveCachedScheduleFile(schoolId: string, docInfo: CachedSc
   try {
     const key = `${CACHED_FILE_KEY_PREFIX}${schoolId}`;
     await AsyncStorage.setItem(key, JSON.stringify(docInfo));
-    console.log(`[Çarşaf Önbellek] Belge saklandı: ${docInfo.name}`);
+    // console.log(`[Çarşaf Önbellek] Belge saklandı: ${docInfo.name}`);
   } catch (e) {
-    console.warn('[Çarşaf Belge Saklama Hata]:', e);
+    // console.warn('[Çarşaf Belge Saklama Hata]:', e);
   }
 }
 
@@ -1523,7 +1523,7 @@ export async function loadCachedScheduleFile(schoolId: string): Promise<CachedSc
       return JSON.parse(raw);
     }
   } catch (e) {
-    console.warn('[Çarşaf Belge Yükleme Hata]:', e);
+    // console.warn('[Çarşaf Belge Yükleme Hata]:', e);
   }
   return null;
 }
@@ -1536,7 +1536,7 @@ export async function clearCachedScheduleFile(schoolId: string): Promise<void> {
     const key = `${CACHED_FILE_KEY_PREFIX}${schoolId}`;
     await AsyncStorage.removeItem(key);
   } catch (e) {
-    console.warn('[Çarşaf Belge Temizleme Hata]:', e);
+    // console.warn('[Çarşaf Belge Temizleme Hata]:', e);
   }
 }
 
@@ -1547,9 +1547,9 @@ export async function saveParsedScheduleDraft(schoolId: string, draft: ParsedSch
   try {
     const key = `${DRAFT_SCHEDULE_KEY_PREFIX}${schoolId}`;
     await AsyncStorage.setItem(key, JSON.stringify(draft));
-    console.log('[Çarşaf Taslak] Ayrıştırılan son program taslak olarak saklandı.');
+    // console.log('[Çarşaf Taslak] Ayrıştırılan son program taslak olarak saklandı.');
   } catch (e) {
-    console.warn('[Çarşaf Taslak Saklama Hata]:', e);
+    // console.warn('[Çarşaf Taslak Saklama Hata]:', e);
   }
 }
 
@@ -1564,7 +1564,7 @@ export async function loadParsedScheduleDraft(schoolId: string): Promise<ParsedS
       return JSON.parse(raw);
     }
   } catch (e) {
-    console.warn('[Çarşaf Taslak Yükleme Hata]:', e);
+    // console.warn('[Çarşaf Taslak Yükleme Hata]:', e);
   }
   return null;
 }
@@ -1576,8 +1576,8 @@ export async function clearParsedScheduleDraft(schoolId: string): Promise<void> 
   try {
     const key = `${DRAFT_SCHEDULE_KEY_PREFIX}${schoolId}`;
     await AsyncStorage.removeItem(key);
-    console.log('[Çarşaf Taslak] Taslak temizlendi.');
+    // console.log('[Çarşaf Taslak] Taslak temizlendi.');
   } catch (e) {
-    console.warn('[Çarşaf Taslak Temizleme Hata]:', e);
+    // console.warn('[Çarşaf Taslak Temizleme Hata]:', e);
   }
 }

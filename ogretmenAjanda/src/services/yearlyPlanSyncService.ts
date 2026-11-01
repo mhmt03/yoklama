@@ -175,7 +175,7 @@ export async function getTeacherTaughtLessons(
       }
     }
   } catch (err) {
-    console.warn('getTeacherTaughtLessons hatası:', err);
+    // console.warn('getTeacherTaughtLessons hatası:', err);
   }
 
   const list: TeacherTaughtLesson[] = [];
@@ -450,7 +450,7 @@ export async function syncYearlyPlansFromSchool(options?: {
           );
         }
       } catch (cleanErr) {
-        console.warn('Eski yetkisiz planları temizleme uyarısı:', cleanErr);
+        // console.warn('Eski yetkisiz planları temizleme uyarısı:', cleanErr);
       }
     }
 

@@ -107,7 +107,7 @@ export function ClassCockpitScreen({ route, navigation }: any) {
         setCurrentWeekSubject(planRow.subject);
       }
     } catch (e: any) {
-      console.warn('Ders kokpiti yüklenemedi:', e);
+      // console.warn('Ders kokpiti yüklenemedi:', e);
     } finally {
       setLoading(false);
     }

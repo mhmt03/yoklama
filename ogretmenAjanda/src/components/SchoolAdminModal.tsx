@@ -113,7 +113,7 @@ export const SchoolAdminModal: React.FC<SchoolAdminModalProps> = ({
         setSelectedCourseId(crsList[0].id);
       }
     } catch (e) {
-      console.warn('Admin verileri yüklenemedi:', e);
+      // console.warn('Admin verileri yüklenemedi:', e);
     } finally {
       setLoadingAssignments(false);
     }

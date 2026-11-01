@@ -210,6 +210,7 @@ namespace OgretmenAjanda.Api.Data
                         ""Id"" TEXT NOT NULL PRIMARY KEY,
                         ""OptikFormId"" TEXT NOT NULL,
                         ""DersAdi"" TEXT NOT NULL,
+                        ""DersGrubu"" TEXT,
                         ""BaslangicSutun"" INTEGER NOT NULL DEFAULT 0,
                         ""KarakterSayisi"" INTEGER NOT NULL DEFAULT 20,
                         ""SiraNo"" INTEGER NOT NULL DEFAULT 1
@@ -225,6 +226,9 @@ namespace OgretmenAjanda.Api.Data
                         ""Id"" TEXT NOT NULL PRIMARY KEY,
                         ""SchoolId"" TEXT NOT NULL,
                         ""SinavAdi"" TEXT NOT NULL,
+                        ""SinavTuru"" TEXT NOT NULL DEFAULT 'SERBEST',
+                        ""BagliTytSinavId"" TEXT,
+                        ""VarsayilanTytPuani"" REAL NOT NULL DEFAULT 150.0,
                         ""UygulamaTarihi"" TEXT NOT NULL,
                         ""YanlisDogruyuGotururSayisi"" REAL NOT NULL DEFAULT 4.0,
                         ""HedefSiniflar"" TEXT,
@@ -245,11 +249,66 @@ namespace OgretmenAjanda.Api.Data
 
             try
             {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikFormlar"" ADD COLUMN ""AdSoyadAyriMi"" INTEGER NOT NULL DEFAULT 0;");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikFormlar"" ADD COLUMN ""SoyadBaslangic"" INTEGER;");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikFormlar"" ADD COLUMN ""SoyadUzunluk"" INTEGER;");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikSinavlar"" ADD COLUMN ""SinavTuru"" TEXT NOT NULL DEFAULT 'SERBEST';");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikSinavlar"" ADD COLUMN ""BagliTytSinavId"" TEXT;");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikSinavlar"" ADD COLUMN ""VarsayilanTytPuani"" REAL NOT NULL DEFAULT 150.0;");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikFormDersleri"" ADD COLUMN ""DersGrubu"" TEXT;");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikSinavDersleri"" ADD COLUMN ""DersGrubu"" TEXT;");
+            }
+            catch { }
+
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""OptikSinavSonucDersleri"" ADD COLUMN ""DersGrubu"" TEXT;");
+            }
+            catch { }
+
+            try
+            {
                 await context.Database.ExecuteSqlRawAsync(@"
                     CREATE TABLE IF NOT EXISTS ""OptikSinavDersleri"" (
                         ""Id"" TEXT NOT NULL PRIMARY KEY,
                         ""OptikSinavId"" TEXT NOT NULL,
                         ""DersAdi"" TEXT NOT NULL,
+                        ""DersGrubu"" TEXT,
                         ""SoruSayisi"" INTEGER NOT NULL DEFAULT 20,
                         ""Katsayi"" REAL NOT NULL DEFAULT 1.0,
                         ""SiraNo"" INTEGER NOT NULL DEFAULT 1,
@@ -317,6 +376,7 @@ namespace OgretmenAjanda.Api.Data
                         ""Id"" TEXT NOT NULL PRIMARY KEY,
                         ""OptikSinavSonucId"" TEXT NOT NULL,
                         ""DersAdi"" TEXT NOT NULL,
+                        ""DersGrubu"" TEXT,
                         ""DogruSayisi"" INTEGER NOT NULL DEFAULT 0,
                         ""YanlisSayisi"" INTEGER NOT NULL DEFAULT 0,
                         ""BosSayisi"" INTEGER NOT NULL DEFAULT 0,

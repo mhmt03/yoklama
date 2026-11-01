@@ -85,7 +85,7 @@ export async function saveSchoolSnapshotToStorage(schoolId: string, snapshot: Sc
     await AsyncStorage.setItem(getSnapshotStorageKey(schoolId), JSON.stringify(snapshot));
     await AsyncStorage.setItem(getSyncTimeStorageKey(schoolId), snapshot.syncedAt || new Date().toISOString());
   } catch (err) {
-    console.warn('saveSchoolSnapshotToStorage error:', err);
+    // console.warn('saveSchoolSnapshotToStorage error:', err);
   }
 }
 
@@ -103,7 +103,7 @@ export async function patchLocalSchoolSnapshot(
     };
     await saveSchoolSnapshotToStorage(schoolId, updated);
   } catch (err) {
-    console.warn('patchLocalSchoolSnapshot error:', err);
+    // console.warn('patchLocalSchoolSnapshot error:', err);
   }
 }
 
@@ -113,7 +113,7 @@ export async function loadSchoolSnapshotFromStorage(schoolId: string): Promise<S
     if (!raw) return null;
     return JSON.parse(raw);
   } catch (err) {
-    console.warn('loadSchoolSnapshotFromStorage error:', err);
+    // console.warn('loadSchoolSnapshotFromStorage error:', err);
     return null;
   }
 }
@@ -135,7 +135,7 @@ export async function fetchAndCacheSchoolSnapshot(schoolId: string): Promise<Sch
     }
     return null;
   } catch (err) {
-    console.warn('fetchAndCacheSchoolSnapshot error:', err);
+    // console.warn('fetchAndCacheSchoolSnapshot error:', err);
     return null;
   }
 }

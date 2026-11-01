@@ -29,7 +29,7 @@ export async function getSavedInstitution(): Promise<InstitutionInfo | null> {
       }
     }
   } catch (e) {
-    console.warn('AsyncStorage kurum bilgisi okunamadı:', e);
+    // console.warn('AsyncStorage kurum bilgisi okunamadı:', e);
   }
 
   // 2. SQLite app_settings fallback
@@ -49,7 +49,7 @@ export async function getSavedInstitution(): Promise<InstitutionInfo | null> {
       }
     }
   } catch (dbErr) {
-    console.warn('SQLite kurum bilgisi okunamadı:', dbErr);
+    // console.warn('SQLite kurum bilgisi okunamadı:', dbErr);
   }
 
   return null;
@@ -71,7 +71,7 @@ export async function saveInstitution(info: InstitutionInfo): Promise<void> {
   try {
     await AsyncStorage.setItem(INSTITUTION_KEY, jsonStr);
   } catch (e) {
-    console.warn('AsyncStorage kurum bilgisi kaydedilemedi:', e);
+    // console.warn('AsyncStorage kurum bilgisi kaydedilemedi:', e);
   }
 
   try {
@@ -81,7 +81,7 @@ export async function saveInstitution(info: InstitutionInfo): Promise<void> {
       jsonStr
     );
   } catch (dbErr) {
-    console.warn('SQLite kurum bilgisi kaydedilemedi:', dbErr);
+    // console.warn('SQLite kurum bilgisi kaydedilemedi:', dbErr);
   }
 }
 
@@ -92,7 +92,7 @@ export async function clearSavedInstitution(): Promise<void> {
   try {
     await AsyncStorage.removeItem(INSTITUTION_KEY);
   } catch (e) {
-    console.warn('Kurum bilgisi silinemedi:', e);
+    // console.warn('Kurum bilgisi silinemedi:', e);
   }
 
   try {

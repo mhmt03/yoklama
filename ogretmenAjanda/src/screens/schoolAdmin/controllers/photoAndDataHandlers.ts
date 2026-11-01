@@ -382,7 +382,7 @@ export function createPhotoAndDataHandlers(ctx: SchoolAdminCtx) {
                     } as any);
                   }
                 } catch (bErr) {
-                  console.warn('Fotoğraf base64 okuma hatası:', stdNo, bErr);
+                  // console.warn('Fotoğraf base64 okuma hatası:', stdNo, bErr);
                 }
               }
 
@@ -972,7 +972,7 @@ export function createPhotoAndDataHandlers(ctx: SchoolAdminCtx) {
         });
         selectedSchool.dailyLessonHours = newHours;
       } catch (e) {
-        console.warn('Failed to update school dailyLessonHours:', e);
+        // console.warn('Failed to update school dailyLessonHours:', e);
       }
       loadScheduleStats(newHours);
     }
@@ -1024,7 +1024,7 @@ export function createPhotoAndDataHandlers(ctx: SchoolAdminCtx) {
         setCachedUnreadCount(0);
       }
     } catch (e: any) {
-      console.log('Mesajlar yüklenirken hata:', e);
+      // console.log('Mesajlar yüklenirken hata:', e);
     } finally {
       setLoadingMessages(false);
     }
@@ -1217,7 +1217,7 @@ export function createPhotoAndDataHandlers(ctx: SchoolAdminCtx) {
             }));
           } catch { }
         } catch (localErr) {
-          console.warn('Yerel okul güncelleme uyarısı:', localErr);
+          // console.warn('Yerel okul güncelleme uyarısı:', localErr);
         }
 
         Alert.alert('Başarılı', `"${editSchoolName.trim()}" okul bilgileri güncellendi.`);
@@ -1275,7 +1275,7 @@ export function createPhotoAndDataHandlers(ctx: SchoolAdminCtx) {
                     }));
                   } catch { }
                 } catch (localErr) {
-                  console.warn('Yerel okul silme uyarısı:', localErr);
+                  // console.warn('Yerel okul silme uyarısı:', localErr);
                 }
 
                 setEditModalVisible(false);

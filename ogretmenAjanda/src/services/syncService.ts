@@ -77,7 +77,7 @@ export async function uploadOptimizedStudentPhoto(
     }
     return null;
   } catch (error) {
-    console.warn('Fotoğraf yükleme hatası:', error);
+    // console.warn('Fotoğraf yükleme hatası:', error);
     return null;
   }
 }

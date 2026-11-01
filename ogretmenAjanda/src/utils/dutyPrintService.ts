@@ -295,7 +295,7 @@ export function printDutyAssignments(options: DutyPrintOptions): boolean {
           try {
             printWin.print();
           } catch (e) {
-            console.warn('Otomatik print çağrısı engellendi, kullanıcı butona basabilir.', e);
+            // console.warn('Otomatik print çağrısı engellendi, kullanıcı butona basabilir.', e);
           }
         }, 500);
         return true;

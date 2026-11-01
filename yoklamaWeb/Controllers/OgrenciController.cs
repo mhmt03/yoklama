@@ -402,7 +402,75 @@ namespace yoklamaWeb.Controllers
         {
             return _context.Ogrenciler.Any(e => e.OgrenciNo == id);
         }
-            // GET: /Ogrenci/Siniflar
+            // GET: /Ogrenci/ExportToExcel
+        [HttpGet]
+        public async Task<IActionResult> ExportToExcel()
+        {
+            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            using var package = new ExcelPackage();
+            var worksheet = package.Workbook.Worksheets.Add("Öğrenci Listesi");
+
+            // Başlıklar (ImportExcel şablonu ile tam uyumlu formatta)
+            var headers = new[] { "Öğrenci No", "Adı Soyadı", "Sınıf", "Şube", "Sınav Katılımı", "Alanı" };
+            for (int i = 0; i < headers.Length; i++)
+            {
+                var cell = worksheet.Cells[1, i + 1];
+                cell.Value = headers[i];
+                cell.Style.Font.Bold = true;
+                cell.Style.Fill.PatternType = OfficeOpenXml.Style.ExcelFillStyle.Solid;
+                cell.Style.Fill.BackgroundColor.SetColor(System.Drawing.Color.FromArgb(44, 62, 80));
+                cell.Style.Font.Color.SetColor(System.Drawing.Color.White);
+                cell.Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+            }
+
+            var ogrenciler = await _context.Ogrenciler.ToListAsync();
+            ogrenciler = ogrenciler
+                .OrderBy(o => int.TryParse(o.SinifDuzeyi, out var s) ? s : 999)
+                .ThenBy(o => o.Sube)
+                .ThenBy(o => int.TryParse(o.OgrenciNo, out var n) ? n : 999999)
+                .ToList();
+
+            int row = 2;
+            foreach (var o in ogrenciler)
+            {
+                worksheet.Cells[row, 1].Value = o.OgrenciNo;
+                worksheet.Cells[row, 1].Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+
+                worksheet.Cells[row, 2].Value = o.AdSoyad;
+                worksheet.Cells[row, 2].Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Left;
+
+                worksheet.Cells[row, 3].Value = o.SinifDuzeyi;
+                worksheet.Cells[row, 3].Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+
+                worksheet.Cells[row, 4].Value = o.Sube;
+                worksheet.Cells[row, 4].Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+
+                worksheet.Cells[row, 5].Value = o.SinavlaraKatilacak ? "Evet" : "Hayır";
+                worksheet.Cells[row, 5].Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+
+                worksheet.Cells[row, 6].Value = string.IsNullOrWhiteSpace(o.Alan) ? "YOK" : o.Alan;
+                worksheet.Cells[row, 6].Style.HorizontalAlignment = OfficeOpenXml.Style.ExcelHorizontalAlignment.Center;
+
+                row++;
+            }
+
+            if (row > 2)
+            {
+                var tableRange = worksheet.Cells[1, 1, row - 1, headers.Length];
+                tableRange.Style.Border.Top.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.Style.Border.Bottom.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.Style.Border.Left.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.Style.Border.Right.Style = OfficeOpenXml.Style.ExcelBorderStyle.Thin;
+                tableRange.AutoFilter = true;
+            }
+
+            worksheet.Cells[worksheet.Dimension.Address].AutoFitColumns();
+
+            var fileName = $"Ogrenci_Listesi_{DateTime.Now:yyyyMMdd_HHmm}.xlsx";
+            return File(package.GetAsByteArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+
+        // GET: /Ogrenci/Siniflar
         public async Task<IActionResult> Siniflar()
         {
             var siniflar = await _context.Siniflar.ToListAsync();

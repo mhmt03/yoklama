@@ -10,6 +10,7 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -77,7 +78,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
           setIsEditingKurum(true);
         }
       } catch (e) {
-        console.warn('Kurum bilgisi yüklenemedi:', e);
+        // console.warn('Kurum bilgisi yüklenemedi:', e);
       } finally {
         setInstitutionLoading(false);
       }
@@ -433,7 +434,7 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
             await syncYearlyPlansFromSchool({ providedSchoolCode: targetSchoolCode });
           }
         } catch (syncErr) {
-          console.warn('Auto-sync on teacher login error:', syncErr);
+          // console.warn('Auto-sync on teacher login error:', syncErr);
         }
 
         setShowTeacherLoginModal(false);
@@ -589,13 +590,50 @@ export const RoleSelectScreen: React.FC<RoleSelectScreenProps> = ({ onRoleSelect
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8 }}>
           <View style={styles.brandMetaBadge}>
             <Ionicons name="sparkles-outline" size={12} color="#4F46E5" />
-            <Text style={styles.brandMetaEmail}>v1.0.10</Text>
+            <Text style={styles.brandMetaEmail}>v2.0.0</Text>
           </View>
           <View style={styles.brandMetaBadge}>
             <Ionicons name="mail-outline" size={12} color="#4F46E5" />
             <Text style={styles.brandMetaEmail}>gundoner@yahoo.com</Text>
           </View>
         </View>
+
+        {/* Mobil APK İndir Butonu */}
+        <TouchableOpacity
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            alignSelf: 'center',
+            backgroundColor: '#ECFDF5',
+            borderWidth: 1.5,
+            borderColor: '#10B981',
+            borderRadius: 24,
+            paddingHorizontal: 16,
+            paddingVertical: 7,
+            marginTop: 10,
+            gap: 8,
+          }}
+          onPress={() => {
+            const apkUrl = 'http://ogretmenajanda.runasp.net/api/apk';
+            try {
+              if (typeof window !== 'undefined' && window.open) {
+                window.open(apkUrl, '_blank');
+              } else {
+                Linking.openURL(apkUrl);
+              }
+            } catch {
+              Linking.openURL(apkUrl);
+            }
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="logo-android" size={18} color="#059669" />
+          <Text style={{ fontSize: 13, fontWeight: '800', color: '#065F46' }}>
+            Mobil Uygulamayı İndir (Android APK v2.0)
+          </Text>
+          <Ionicons name="cloud-download-outline" size={16} color="#059669" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.contentWrap} showsVerticalScrollIndicator={false}>

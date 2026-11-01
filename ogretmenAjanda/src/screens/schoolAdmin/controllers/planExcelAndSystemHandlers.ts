@@ -411,6 +411,34 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
     );
   };
 
+  const handleClearAllStudentPhotos = () => {
+    if (!selectedSchool) return;
+    Alert.alert(
+      'Fotoğrafları Temizle',
+      `"${selectedSchool.name}" okulundaki öğrencilerin kayıtlı TÜM FOTOĞRAFLARI silinecektir. Öğrenci listeleri ve sistem kayıtları korunur, yalnızca vesikalık fotoğraflar kaldırılır. Emin misiniz?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Fotoğrafları Temizle',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await apiRequest<{ clearedCount: number; message: string }>(
+              `Uploads/clear-student-photos?schoolId=${selectedSchool.id}`,
+              'POST',
+              { schoolId: selectedSchool.id }
+            );
+            if (res.success) {
+              Alert.alert('Başarılı 🎉', res.data?.message || 'Öğrenci fotoğrafları başarıyla temizlendi.');
+              loadStudents(selectedSchool.id);
+            } else {
+              Alert.alert('Hata', res.error || 'Fotoğraflar temizlenemedi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleDeleteAllStudents = () => {
     if (!selectedSchool) return;
     Alert.alert(
@@ -1255,6 +1283,7 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
     handleClearCurrentTeacherSchedule,
     handleDeleteAllTeachers,
     handleDeleteAllStudents,
+    handleClearAllStudentPhotos,
     handleOpenEditLesson,
     handleSaveLessonEdit,
     handlePickYearlyPlanFile,

@@ -65,7 +65,7 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
 
   const handleLogout = () => {
     const doLogout = async () => {
-      console.log('[SideDrawer] Öğretmen oturumu kapatılıyor...');
+      // console.log('[SideDrawer] Öğretmen oturumu kapatılıyor...');
       await logoutUserRole();
       onRoleChanged(null);
       onClose();
@@ -294,6 +294,25 @@ export const SideDrawer: React.FC<SideDrawerProps> = ({
                     <Text style={styles.menuItemSub}>Defter konusu, yoklama ve hızlı ödev</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.menuItem, { backgroundColor: '#EFF6FF', borderRadius: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#BFDBFE' }]}
+                  onPress={() => navigateToScreen('TeacherOptikResults')}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.menuIconWrap, { backgroundColor: '#DBEAFE' }]}>
+                    <Ionicons name="analytics" size={18} color="#2563EB" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.menuItemTitle, { color: '#1E40AF', fontWeight: '800' }]}>
+                      🎯 Optik Sınav Sonuçları & Analiz
+                    </Text>
+                    <Text style={[styles.menuItemSub, { color: '#1D4ED8' }]}>
+                      Sınav sonuçları, karne dökümü ve branş analizleri
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#2563EB" />
                 </TouchableOpacity>
 
                 <TouchableOpacity

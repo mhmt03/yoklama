@@ -82,7 +82,7 @@ export async function optimizeStudentPhoto(uri: string): Promise<OptimizedImageR
       wasOptimized: true,
     };
   } catch (error) {
-    console.warn('Görsel optimize edilirken hata oluştu, orijinal kullanılıyor:', error);
+    // console.warn('Görsel optimize edilirken hata oluştu, orijinal kullanılıyor:', error);
     return {
       uri,
       width: 300,

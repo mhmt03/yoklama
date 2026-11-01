@@ -38,7 +38,7 @@ export const SchoolThemeProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const active = await getActiveSchool();
       setActiveSchool(active);
     } catch (e) {
-      console.warn('Error loading active school theme:', e);
+      // console.warn('Error loading active school theme:', e);
     }
   }, []);
 

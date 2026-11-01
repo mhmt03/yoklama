@@ -54,7 +54,7 @@ export async function clearLocalDatabase(): Promise<{ success: boolean; message:
           await FileSystem.deleteAsync(photoDir, { idempotent: true });
         }
       } catch (fsErr) {
-        console.warn('Fotoğraf önbelleği temizleme uyarısı:', fsErr);
+        // console.warn('Fotoğraf önbelleği temizleme uyarısı:', fsErr);
       }
     }
 

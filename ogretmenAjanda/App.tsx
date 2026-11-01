@@ -46,6 +46,7 @@ import { SchoolAdminScreen } from './src/screens/SchoolAdminScreen';
 import { ClassCockpitScreen } from './src/screens/ClassCockpitScreen';
 import { MessagesScreen } from './src/screens/MessagesScreen';
 import { ExamPlannerScreen } from './src/screens/ExamPlannerScreen';
+import { TeacherOptikResultsScreen } from './src/screens/TeacherOptikResultsScreen';
 import { requestNotificationPermission } from './src/services/notificationPermissionService';
 
 
@@ -186,7 +187,7 @@ function AppContent() {
       setCurrentRole(role);
       setActiveSchool(school);
     } catch (e) {
-      console.warn('Error loading role/school:', e);
+      // console.warn('Error loading role/school:', e);
     } finally {
       setRoleLoaded(true);
     }
@@ -300,6 +301,7 @@ function AppContent() {
           <Stack.Screen name="ExamPlanner" component={ExamPlannerScreen} />
           <Stack.Screen name="ClassCockpit" component={ClassCockpitScreen} />
           <Stack.Screen name="Messages" component={MessagesScreen} />
+          <Stack.Screen name="TeacherOptikResults" component={TeacherOptikResultsScreen} />
         </Stack.Navigator>
       </NavigationContainer>
 
@@ -329,7 +331,7 @@ export default function App() {
       try {
         await activateDefaultSchoolOnStartup();
       } catch (err) {
-        console.warn('Default school activation failed:', err);
+        // console.warn('Default school activation failed:', err);
       }
       setDbReady(true);
     } catch (e: any) {
@@ -365,7 +367,7 @@ export default function App() {
         }
       }
     } catch (err) {
-      console.warn('Reset storage failed:', err);
+      // console.warn('Reset storage failed:', err);
       if (typeof window !== 'undefined') window.location.reload();
     }
   };

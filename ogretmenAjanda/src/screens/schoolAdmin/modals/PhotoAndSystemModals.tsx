@@ -84,9 +84,12 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
     handleDeleteSchool,
     handleOpenAdminCredentials,
     setLicenseModalVisible,
+    activeTab,
     setActiveTab,
     allSchoolSchedules,
     loadAllSchedules,
+    scheduleStats,
+    loadScheduleStats,
     dutiesList,
     loadDuties,
     loadAuditLogs,
@@ -990,14 +993,14 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
         onRequestClose={() => setPhotoPickerVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxWidth: 640, width: '95%', maxHeight: '85%', padding: 0, overflow: 'hidden' }]}>
+          <View style={[styles.modalContent, { maxWidth: 780, width: '95%', maxHeight: '85%', padding: 0, overflow: 'hidden' }]}>
             {/* Başlık */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#F8FAFC' }}>
               <View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Ionicons name="images" size={18} color="#4F46E5" />
                   <Text style={{ fontSize: 16, fontWeight: '800', color: '#0F172A' }}>
-                    PDF Fotoğraf Galerisi
+                    PDF / Belge Fotoğraf Galerisi
                   </Text>
                 </View>
                 <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
@@ -1042,7 +1045,16 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                     const pg = String(p.pageNumber || '');
                     const det = String(p.detectedNumber || '').toLowerCase();
                     const detNm = String(p.detectedName || '').toLowerCase();
-                    return no.includes(q) || pg.includes(q) || det.includes(q) || detNm.includes(q);
+                    const stdNm = String(p.matchedStudent?.fullName || '').toLowerCase();
+                    const stdNo = String(p.matchedStudent?.student_number || '').toLowerCase();
+                    return (
+                      no.includes(q) ||
+                      pg.includes(q) ||
+                      det.includes(q) ||
+                      detNm.includes(q) ||
+                      stdNm.includes(q) ||
+                      stdNo.includes(q)
+                    );
                   })
                   .map((pItem: any, pIdx: any) => (
                     <TouchableOpacity
@@ -1050,7 +1062,7 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                       activeOpacity={0.7}
                       onPress={() => handleAssignPhotoToTarget(pItem)}
                       style={{
-                        width: 100,
+                        width: 125,
                         backgroundColor: '#fff',
                         borderRadius: 10,
                         padding: 6,
@@ -1066,26 +1078,48 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                       <Image
                         source={{ uri: pItem.tempUri }}
                         style={{
-                          width: 86,
-                          height: 110,
+                          width: 110,
+                          height: 130,
                           borderRadius: 6,
                           backgroundColor: '#E2E8F0',
                         }}
                         resizeMode="cover"
                       />
-                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#0F172A', marginTop: 4 }}>
-                        #{pItem.index + 1}
-                      </Text>
-                      {pItem.pageNumber ? (
-                        <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#6366F1' }}>
-                          Sayfa {pItem.pageNumber}
-                        </Text>
-                      ) : null}
-                      {pItem.detectedNumber ? (
-                        <Text style={{ fontSize: 9, color: '#059669', fontWeight: '700' }} numberOfLines={1}>
-                          No: {pItem.detectedNumber}
-                        </Text>
-                      ) : null}
+                      <View style={{ width: '100%', marginTop: 5, alignItems: 'center' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingHorizontal: 2 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#0F172A' }}>
+                            #{pItem.index + 1}
+                          </Text>
+                          {pItem.pageNumber ? (
+                            <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#6366F1' }}>
+                              S.{pItem.pageNumber}
+                            </Text>
+                          ) : null}
+                        </View>
+                        {pItem.detectedNumber ? (
+                          <Text style={{ fontSize: 10.5, color: '#059669', fontWeight: '800', marginTop: 1 }} numberOfLines={1}>
+                            No: {pItem.detectedNumber}
+                          </Text>
+                        ) : null}
+                        {pItem.detectedName ? (
+                          <Text style={{ fontSize: 9.5, color: '#334155', fontWeight: '700', textAlign: 'center', marginTop: 1 }} numberOfLines={1}>
+                            {pItem.detectedName}
+                          </Text>
+                        ) : null}
+                        {pItem.matchedStudent ? (
+                          <View style={{ backgroundColor: '#ECFDF5', paddingHorizontal: 4, paddingVertical: 1.5, borderRadius: 4, marginTop: 3, borderWidth: 0.5, borderColor: '#A7F3D0', maxWidth: '100%' }}>
+                            <Text style={{ fontSize: 8.5, color: '#047857', fontWeight: '700', textAlign: 'center' }} numberOfLines={1}>
+                              ✓ {pItem.matchedStudent.fullName}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={{ backgroundColor: '#FEF2F2', paddingHorizontal: 4, paddingVertical: 1.5, borderRadius: 4, marginTop: 3, borderWidth: 0.5, borderColor: '#FECACA' }}>
+                            <Text style={{ fontSize: 8.5, color: '#DC2626', fontWeight: '600' }}>
+                              Eşleşmedi
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </TouchableOpacity>
                   ))}
               </View>
@@ -1281,25 +1315,51 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} style={{ marginTop: 8 }}>
-              {/* 0. Aktif Okulu Değiştir */}
+              {/* ==================== GRUP 1: ÖLÇME, SINAV & DEĞERLENDİRME ==================== */}
+              <View style={{ paddingHorizontal: 10, paddingTop: 6, paddingBottom: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#4F46E5', letterSpacing: 0.8 }}>
+                  🎯 ÖLÇME, SINAV & DEĞERLENDİRME MERKEZİ
+                </Text>
+              </View>
+
+              {/* 1.1 Optik Sınav Okuma & Konu-Kazanım Analizi */}
               <TouchableOpacity
-                style={styles.hamburgerMenuItem}
+                style={[
+                  styles.hamburgerMenuItem,
+                  {
+                    backgroundColor: activeTab === 'optik' ? '#E0E7FF' : '#EEF2FF',
+                    borderRadius: 12,
+                    paddingVertical: 12,
+                    marginBottom: 6,
+                    borderWidth: activeTab === 'optik' ? 1 : 0,
+                    borderColor: '#6366F1',
+                  },
+                ]}
                 onPress={() => {
                   setMenuDrawerVisible(false);
-                  setSchoolSelectModalVisible(true);
+                  setActiveTab('optik');
                 }}
               >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
-                  <Ionicons name="swap-horizontal" size={18} color="#4F46E5" />
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#E0E7FF' }]}>
+                  <Ionicons name="scan" size={20} color="#4F46E5" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>Aktif Okulu Değiştir</Text>
-                  <Text style={styles.hamburgerMenuSub}>{schools.length > 0 ? `${schools.length} kayıtlı okul arasında geçiş yapın` : 'Okul seçimi yapın'}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.hamburgerMenuLabel, { color: '#4338CA', fontWeight: '800' }]}>
+                      Optik Sınav & Konu Analizi
+                    </Text>
+                    <View style={{ backgroundColor: '#4F46E5', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF' }}>OPTİK</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.hamburgerMenuSub, { color: '#4F46E5' }]}>
+                    FMT/TXT optik okuma, deneme değerlendirme, Excel/PDF ve kazanım karnesi
+                  </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                <Ionicons name="chevron-forward" size={16} color="#4F46E5" />
               </TouchableOpacity>
 
-              {/* 0.1 Yazılı Sınav Oturma Planı (Kelebek & Salon Dağıtımı) */}
+              {/* 1.2 Yazılı & Deneme Sınavı Oturma Planı (Kelebek & Salon Dağıtımı) */}
               <TouchableOpacity
                 style={[styles.hamburgerMenuItem, { backgroundColor: '#F5F3FF', borderRadius: 12, paddingVertical: 12 }]}
                 onPress={() => {
@@ -1317,20 +1377,242 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={[styles.hamburgerMenuLabel, { color: '#6D28D9', fontWeight: '800' }]}>
-                      Yazılı Oturma Planı
+                      Yazılı & Deneme Oturma Planı
                     </Text>
                     <View style={{ backgroundColor: '#7C3AED', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF' }}>YENİ</Text>
+                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF' }}>KELEBEK</Text>
                     </View>
                   </View>
                   <Text style={[styles.hamburgerMenuSub, { color: '#7C3AED' }]}>
-                    Kelebek dağıtım, salon ve ders saati gözetmen planı
+                    Kelebek sınav ve kademe bazlı deneme salon/gözetmen dağıtımı
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={16} color="#7C3AED" />
               </TouchableOpacity>
 
-              {/* 1. Yetki & Erişim Yönetimi (Sadece Kurum Admini) */}
+              <View style={styles.hamburgerMenuDivider} />
+
+              {/* ==================== GRUP 2: DERS PROGRAMI, DENETİM & CANLI TAKİP ==================== */}
+              <View style={{ paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#0F766E', letterSpacing: 0.8 }}>
+                  📅 DERS PROGRAMI, DENETİM & CANLI TAKİP
+                </Text>
+              </View>
+
+              {/* 2.1 Program & Doğruluk Denetimi */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  activeTab === 'schedule' && { backgroundColor: '#F0FDFA', borderRadius: 12 },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('schedule');
+                  if (allSchoolSchedules.length === 0) {
+                    loadAllSchedules();
+                  }
+                  if (!scheduleStats && typeof loadScheduleStats === 'function') {
+                    loadScheduleStats();
+                  }
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#CCFBF1' }]}>
+                  <Ionicons name="calendar" size={18} color="#0D9488" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.hamburgerMenuLabel, { color: '#0F766E', fontWeight: '700' }]}>
+                    Program & Doğruluk Denetimi
+                  </Text>
+                  <Text style={styles.hamburgerMenuSub}>
+                    Haftalık ders programı matrisi, çakışma ve eksik ders kontrolü
+                  </Text>
+                </View>
+                {scheduleStats && scheduleStats.conflictsCount > 0 ? (
+                  <View style={[styles.hamburgerMenuTag, { backgroundColor: '#EF4444' }]}>
+                    <Text style={[styles.hamburgerMenuTagText, { color: '#FFFFFF' }]}>
+                      {scheduleStats.conflictsCount} Çakışma
+                    </Text>
+                  </View>
+                ) : (
+                  <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                )}
+              </TouchableOpacity>
+
+              {/* 2.2 Canlı Konum, Boş Ders Radarı & Nöbet */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  activeTab === 'radar' && { backgroundColor: '#F0FDF4', borderRadius: 12 },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('radar');
+                  if (allSchoolSchedules.length === 0) {
+                    loadAllSchedules();
+                  }
+                  if (dutiesList.length === 0) {
+                    loadDuties();
+                  }
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#DCFCE7' }]}>
+                  <Ionicons name="compass" size={18} color="#16A34A" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Canlı Konum & Boş Ders Radarı</Text>
+                  <Text style={styles.hamburgerMenuSub}>
+                    Personel nerede, şubede kim var, anlık boş dersler ve nöbetçiler
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 2.3 Nöbetçi Öğretmen & Telafi Atama */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  activeTab === 'duty_assignment' && { backgroundColor: '#FFFBEB', borderRadius: 12 },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('duty_assignment');
+                  if (dutiesList.length === 0) {
+                    loadDuties();
+                  }
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="shield-half" size={18} color="#D97706" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Nöbetçi & Ders Görevlendirme</Text>
+                  <Text style={styles.hamburgerMenuSub}>
+                    Nöbet çizelgesi yönetimi ve boş geçen derslere görevlendirme
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              <View style={styles.hamburgerMenuDivider} />
+
+              {/* ==================== GRUP 3: İLETİŞİM, RAPORLAR & DENETİM ==================== */}
+              <View style={{ paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#0369A1', letterSpacing: 0.8 }}>
+                  📊 İLETİŞİM, RAPORLAR & İZLEME
+                </Text>
+              </View>
+
+              {/* 3.1 Okul Mesajları */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  activeTab === 'messages' && { backgroundColor: '#F0F9FF', borderRadius: 12 },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('messages');
+                  loadSchoolMessages();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#E0F2FE' }]}>
+                  <Ionicons name="chatbubbles" size={18} color="#0284C7" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Okul İçi Mesajlar & Duyurular</Text>
+                  <Text style={styles.hamburgerMenuSub}>Öğretmenlere duyuru ve anlık bildirim iletin</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 3.2 Raporlar */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  activeTab === 'reports' && { backgroundColor: '#FFFBEB', borderRadius: 12 },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('reports');
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="stats-chart" size={18} color="#B45309" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Raporlar & İstatistikler</Text>
+                  <Text style={styles.hamburgerMenuSub}>Yoklama, devamsızlık ve katılım grafikleri</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 3.3 Denetim Logları */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  activeTab === 'logs' && { backgroundColor: '#F8FAFC', borderRadius: 12 },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('logs');
+                  loadAuditLogs();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#F1F5F9' }]}>
+                  <Ionicons name="document-text" size={18} color="#475569" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Denetim Logları</Text>
+                  <Text style={styles.hamburgerMenuSub}>Kullanıcı işlem ve güvenlik kayıtları</Text>
+                </View>
+                {logStats.total > 0 ? (
+                  <View style={styles.hamburgerMenuTag}>
+                    <Text style={styles.hamburgerMenuTagText}>{logStats.total}</Text>
+                  </View>
+                ) : (
+                  <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+                )}
+              </TouchableOpacity>
+
+              <View style={styles.hamburgerMenuDivider} />
+
+              {/* ==================== GRUP 4: VERİ YEDEKLEME, KURUM & SİSTEM AYARLARI ==================== */}
+              <View style={{ paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#475569', letterSpacing: 0.8 }}>
+                  ⚙️ VERİ YEDEKLEME, KURUM & SİSTEM AYARLARI
+                </Text>
+              </View>
+
+              {/* 4.1 Veritabanı Yedekleme & Geri Yükleme */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  {
+                    backgroundColor: activeTab === 'backup' ? '#CFFAFE' : '#ECFEFF',
+                    borderRadius: 12,
+                    paddingVertical: 11,
+                    marginBottom: 4,
+                  },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('backup');
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#CFFAFE' }]}>
+                  <Ionicons name="cloud-download" size={20} color="#0891B2" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.hamburgerMenuLabel, { color: '#0E7490', fontWeight: '800' }]}>
+                    Veritabanı Yedekleme & Geri Yükleme
+                  </Text>
+                  <Text style={[styles.hamburgerMenuSub, { color: '#0891B2' }]}>
+                    Okul verilerini yedekleyin, indirin veya geri yükleyin
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#0891B2" />
+              </TouchableOpacity>
+
+              {/* 4.2 Yetki & Erişim Yönetimi (Sadece Kurum Admini) */}
               {!isStaff && (
                 <TouchableOpacity
                   style={styles.hamburgerMenuItem}
@@ -1350,7 +1632,48 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 </TouchableOpacity>
               )}
 
-              {/* 1.1 Okul Bilgilerini Düzenle (Sadece Kurum Admini) */}
+              {/* 4.3 AI & API Ayarları */}
+              <TouchableOpacity
+                style={[
+                  styles.hamburgerMenuItem,
+                  activeTab === 'ai_settings' && { backgroundColor: '#EEF2FF', borderRadius: 12 },
+                ]}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setActiveTab('ai_settings');
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="hardware-chip" size={18} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>AI & API Ayarları</Text>
+                  <Text style={styles.hamburgerMenuSub}>Gemini API anahtarı, model ve kota durumu</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 4.4 Aktif Okulu Değiştir */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setSchoolSelectModalVisible(true);
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
+                  <Ionicons name="swap-horizontal" size={18} color="#4F46E5" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Aktif Okulu Değiştir</Text>
+                  <Text style={styles.hamburgerMenuSub}>
+                    {schools.length > 0 ? `${schools.length} kayıtlı okul arasında geçiş yapın` : 'Okul seçimi yapın'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 4.5 Okul Bilgilerini Düzenle (Sadece Kurum Admini) */}
               {!isStaff && (
                 <TouchableOpacity
                   style={styles.hamburgerMenuItem}
@@ -1372,7 +1695,7 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 </TouchableOpacity>
               )}
 
-              {/* 2. Yeni Okul Ekle (Sadece yetkili) */}
+              {/* 4.6 Yeni Okul Ekle (Sadece yetkili) */}
               {!isStaff && (
                 <TouchableOpacity
                   style={styles.hamburgerMenuItem}
@@ -1392,7 +1715,43 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 </TouchableOpacity>
               )}
 
-              {/* 2.1 Okulu Sil (Sadece yetkili ve birden fazla okul varsa) */}
+              {/* 4.7 İdareci & Şifre Yönetimi */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  handleOpenAdminCredentials();
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                  <Ionicons name="key" size={18} color="#D97706" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>İdareci Şifre Değiştir</Text>
+                  <Text style={styles.hamburgerMenuSub}>Yönetim paneli giriş şifrenizi yenileyin</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 4.8 Müşteri & Lisans Bilgileri */}
+              <TouchableOpacity
+                style={styles.hamburgerMenuItem}
+                onPress={() => {
+                  setMenuDrawerVisible(false);
+                  setLicenseModalVisible(true);
+                }}
+              >
+                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EDE9FE' }]}>
+                  <Ionicons name="ribbon" size={18} color="#7C3AED" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hamburgerMenuLabel}>Müşteri & Lisans Detayları</Text>
+                  <Text style={styles.hamburgerMenuSub}>Müşteri No, İlişki ID ve Lisans durumu</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
+              </TouchableOpacity>
+
+              {/* 4.9 Okulu Sil (Sadece yetkili ve birden fazla okul varsa) */}
               {!isStaff && schools.length > 1 && (
                 <TouchableOpacity
                   style={styles.hamburgerMenuItem}
@@ -1414,151 +1773,16 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 </TouchableOpacity>
               )}
 
-              {/* 3. İdareci & Şifre Yönetimi */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  handleOpenAdminCredentials();
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEF3C7' }]}>
-                  <Ionicons name="key" size={18} color="#D97706" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>İdareci Şifre Değiştir</Text>
-                  <Text style={styles.hamburgerMenuSub}>Yönetim paneli giriş şifrenizi yenileyin</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
-              </TouchableOpacity>
-
-              {/* 4. Müşteri & Lisans Bilgileri (Derine taşınan alan) */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  setLicenseModalVisible(true);
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EDE9FE' }]}>
-                  <Ionicons name="shield-checkmark" size={18} color="#7C3AED" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>Müşteri & Lisans Detayları</Text>
-                  <Text style={styles.hamburgerMenuSub}>Müşteri No, İlişki ID ve Lisans durumu</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
-              </TouchableOpacity>
-
               <View style={styles.hamburgerMenuDivider} />
 
-              {/* Canlı Konum, Boş Ders Radarı & Nöbet */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  setActiveTab('radar');
-                  if (allSchoolSchedules.length === 0) {
-                    loadAllSchedules();
-                  }
-                  if (dutiesList.length === 0) {
-                    loadDuties();
-                  }
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#F0FDF4' }]}>
-                  <Ionicons name="compass" size={18} color="#16A34A" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>Canlı Konum & Boş Ders Radarı</Text>
-                  <Text style={styles.hamburgerMenuSub}>Personel nerede, şubede kim var, anlık boş dersler ve nöbetçiler</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
-              </TouchableOpacity>
+              {/* ==================== GRUP 5: GÖRÜNÜM & OTURUM ==================== */}
+              <View style={{ paddingHorizontal: 10, paddingTop: 4, paddingBottom: 4 }}>
+                <Text style={{ fontSize: 10, fontWeight: '800', color: '#64748B', letterSpacing: 0.8 }}>
+                  🚪 GÖRÜNÜM & OTURUM İŞLEMLERİ
+                </Text>
+              </View>
 
-              <View style={styles.hamburgerMenuDivider} />
-
-              {/* 5. Denetim Logları */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  setActiveTab('logs');
-                  loadAuditLogs();
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#F1F5F9' }]}>
-                  <Ionicons name="document-text" size={18} color="#475569" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>Denetim Logları</Text>
-                  <Text style={styles.hamburgerMenuSub}>Kullanıcı işlem ve güvenlik kayıtları</Text>
-                </View>
-                {logStats.total > 0 && (
-                  <View style={styles.hamburgerMenuTag}>
-                    <Text style={styles.hamburgerMenuTagText}>{logStats.total}</Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              {/* 6. Okul Mesajları */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  setActiveTab('messages');
-                  loadSchoolMessages();
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#E0F2FE' }]}>
-                  <Ionicons name="chatbubbles" size={18} color="#0284C7" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>Okul İçi Mesajlar</Text>
-                  <Text style={styles.hamburgerMenuSub}>Öğretmenlere duyuru ve bildirim iletin</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
-              </TouchableOpacity>
-
-              {/* 7. Raporlar */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  setActiveTab('reports');
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#FEF3C7' }]}>
-                  <Ionicons name="stats-chart" size={18} color="#B45309" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>Raporlar & İstatistikler</Text>
-                  <Text style={styles.hamburgerMenuSub}>Yoklama ve katılım grafikleri</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
-              </TouchableOpacity>
-
-              {/* 8. AI & API Ayarları */}
-              <TouchableOpacity
-                style={styles.hamburgerMenuItem}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  setActiveTab('ai_settings');
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#EEF2FF' }]}>
-                  <Ionicons name="hardware-chip" size={18} color="#4F46E5" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hamburgerMenuLabel}>AI & API Ayarları</Text>
-                  <Text style={styles.hamburgerMenuSub}>Gemini API anahtarı, model ve kota durumu</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
-              </TouchableOpacity>
-
-              <View style={styles.hamburgerMenuDivider} />
-
-              {/* 9. Rol Değiştir: Öğretmen Moduna Geç */}
+              {/* 5.1 Rol Değiştir: Öğretmen Moduna Geç */}
               <TouchableOpacity
                 style={styles.hamburgerMenuItem}
                 onPress={() => {
@@ -1576,7 +1800,7 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 <Ionicons name="chevron-forward" size={16} color="#CBD5E1" />
               </TouchableOpacity>
 
-              {/* 10. Çıkış Yap / Rol Seçimine Dön */}
+              {/* 5.2 Çıkış Yap / Rol Seçimine Dön */}
               <TouchableOpacity
                 style={[styles.hamburgerMenuItem, { marginBottom: 16 }]}
                 onPress={() => {
