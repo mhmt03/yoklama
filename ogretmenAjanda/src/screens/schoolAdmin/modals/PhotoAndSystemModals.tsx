@@ -1582,35 +1582,37 @@ export function PhotoAndSystemModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 </Text>
               </View>
 
-              {/* 4.1 Veritabanı Yedekleme & Geri Yükleme */}
-              <TouchableOpacity
-                style={[
-                  styles.hamburgerMenuItem,
-                  {
-                    backgroundColor: activeTab === 'backup' ? '#CFFAFE' : '#ECFEFF',
-                    borderRadius: 12,
-                    paddingVertical: 11,
-                    marginBottom: 4,
-                  },
-                ]}
-                onPress={() => {
-                  setMenuDrawerVisible(false);
-                  setActiveTab('backup');
-                }}
-              >
-                <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#CFFAFE' }]}>
-                  <Ionicons name="cloud-download" size={20} color="#0891B2" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.hamburgerMenuLabel, { color: '#0E7490', fontWeight: '800' }]}>
-                    Veritabanı Yedekleme & Geri Yükleme
-                  </Text>
-                  <Text style={[styles.hamburgerMenuSub, { color: '#0891B2' }]}>
-                    Okul verilerini yedekleyin, indirin veya geri yükleyin
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={16} color="#0891B2" />
-              </TouchableOpacity>
+              {/* 4.1 Veritabanı Yedekleme & Geri Yükleme (Yalnızca Okul Admini / Kurum Yetkilisi) */}
+              {!isStaff && (
+                <TouchableOpacity
+                  style={[
+                    styles.hamburgerMenuItem,
+                    {
+                      backgroundColor: activeTab === 'backup' ? '#CFFAFE' : '#ECFEFF',
+                      borderRadius: 12,
+                      paddingVertical: 11,
+                      marginBottom: 4,
+                    },
+                  ]}
+                  onPress={() => {
+                    setMenuDrawerVisible(false);
+                    setActiveTab('backup');
+                  }}
+                >
+                  <View style={[styles.hamburgerMenuIconWrap, { backgroundColor: '#CFFAFE' }]}>
+                    <Ionicons name="cloud-download" size={20} color="#0891B2" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.hamburgerMenuLabel, { color: '#0E7490', fontWeight: '800' }]}>
+                      Veritabanı Yedekleme & Geri Yükleme
+                    </Text>
+                    <Text style={[styles.hamburgerMenuSub, { color: '#0891B2' }]}>
+                      Okul verilerini yedekleyin, indirin veya geri yükleyin
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#0891B2" />
+                </TouchableOpacity>
+              )}
 
               {/* 4.2 Yetki & Erişim Yönetimi (Sadece Kurum Admini) */}
               {!isStaff && (

@@ -2582,8 +2582,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
               />
             )}
 
-            {/* VERİTABANI YEDEKLEME & GERİ YÜKLEME SEKMESİ */}
-            {activeTab === 'backup' && (
+            {/* VERİTABANI YEDEKLEME & GERİ YÜKLEME SEKMESİ (Yalnızca Okul Admini / Kurum Yetkilisi) */}
+            {activeTab === 'backup' && !isStaff && (
               <BackupModuleView
                 schoolId={selectedSchool?.id}
                 schoolName={selectedSchool?.name}
