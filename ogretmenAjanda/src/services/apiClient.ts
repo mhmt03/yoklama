@@ -129,6 +129,35 @@ export async function clearAuthSession(): Promise<void> {
   await AsyncStorage.removeItem('active_teacher_name').catch(() => { });
 }
 
+export function isJwtExpired(token: string | null | undefined): boolean {
+  if (!token || token === 'offline_token') return true;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    let base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4) {
+      base64 += '=';
+    }
+    let decoded = '';
+    if (typeof atob === 'function') {
+      decoded = atob(base64);
+    } else {
+      const globalBuffer = (globalThis as any)?.Buffer;
+      if (globalBuffer) {
+        decoded = globalBuffer.from(base64, 'base64').toString('binary');
+      }
+    }
+    if (!decoded) return false;
+    const payload = JSON.parse(decoded);
+    if (payload.exp && typeof payload.exp === 'number') {
+      return Date.now() >= (payload.exp - 30) * 1000;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 // Genel API İstek Yöneticisi
 export async function apiRequest<T = any>(
   endpoint: string,
@@ -145,6 +174,17 @@ export async function apiRequest<T = any>(
 
     const headers: Record<string, string> = {};
     if (token && token !== 'offline_token') {
+      if (isJwtExpired(token)) {
+        await clearAuthSession();
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          await AsyncStorage.removeItem('@ogretmen_ajanda_user_role').catch(() => {});
+          try { window.dispatchEvent(new CustomEvent('session-expired')); } catch {}
+        }
+        return {
+          success: false,
+          error: 'Sunucu oturumunuzun süresi doldu (401). Lütfen tekrar giriş yapınız.',
+        };
+      }
       headers['Authorization'] = `Bearer ${token}`;
     }
 
@@ -182,9 +222,15 @@ export async function apiRequest<T = any>(
         console.error(`[API HATA ${response.status}] ${method} ${url}:`, data?.message || data?.rawText || 'Detaysız yanıt');
       }
       if (response.status === 401) {
+        // Oturum süresi dolmuş veya token geçersiz
+        await clearAuthSession();
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          await AsyncStorage.removeItem('@ogretmen_ajanda_user_role').catch(() => {});
+          try { window.dispatchEvent(new CustomEvent('session-expired')); } catch {}
+        }
         return {
           success: false,
-          error: data.message || 'Sunucu oturumunuz doğrulanamadı veya süresi doldu (401). Lütfen Okul Admini olarak tekrar giriş yapınız.',
+          error: data.message || 'Sunucu oturumunuz doğrulanamadı veya süresi doldu (401). Lütfen tekrar giriş yapınız.',
         };
       }
       return {

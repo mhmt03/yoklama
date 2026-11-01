@@ -22,7 +22,8 @@ import { Colors } from './src/theme/colors';
 import { SchoolThemeProvider, useSchoolTheme } from './src/context/SchoolThemeContext';
 import { DrawerProvider, useDrawer } from './src/context/DrawerContext';
 import { SideDrawer } from './src/components/SideDrawer';
-import { getActiveUserRole, setActiveUserRole, UserRole } from './src/utils/roleService';
+import { getActiveUserRole, setActiveUserRole, logoutUserRole, UserRole } from './src/utils/roleService';
+import { getAuthToken, clearAuthSession, isJwtExpired } from './src/services/apiClient';
 import { checkForAppUpdate } from './src/services/appUpdateService';
 
 // Screens
@@ -180,6 +181,18 @@ function AppContent() {
   const loadRoleAndSchool = async () => {
     try {
       const role = await getActiveUserRole();
+      const token = await getAuthToken();
+
+      // İdare rollerinde (admin, staff) geçerli bir JWT token bulunamazsa veya süresi dolmuşsa doğrudan giriş ekranına yönlendir
+      if ((role === 'admin' || role === 'staff') && (!token || token === 'offline_token' || isJwtExpired(token))) {
+        await logoutUserRole();
+        await clearAuthSession();
+        setCurrentRole(null);
+        setActiveSchool(null);
+        setRoleLoaded(true);
+        return;
+      }
+
       if (role === 'teacher') {
         await activateDefaultSchoolOnStartup();
       }
@@ -195,7 +208,16 @@ function AppContent() {
 
   useEffect(() => {
     loadRoleAndSchool();
+
+    const onSessionExpired = async () => {
+      await logoutUserRole();
+      await clearAuthSession();
+      setCurrentRole(null);
+      setActiveSchool(null);
+    };
+
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.addEventListener('session-expired', onSessionExpired);
       if (window.location.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
         window.location.replace('https:' + window.location.href.substring(window.location.protocol.length));
         return;
@@ -205,6 +227,12 @@ function AppContent() {
       requestNotificationPermission();
       checkForAppUpdate(true);
     }, 1200);
+
+    return () => {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.removeEventListener('session-expired', onSessionExpired);
+      }
+    };
   }, []);
 
   const handleRoleChange = async (newRole: UserRole | null) => {
