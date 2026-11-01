@@ -15,7 +15,9 @@ export const getPlatformDefaultApiUrl = (): string => {
         // Yerel web geliştirme (localhost:8081): Yerel .NET API'sine bağlan (localhost:5079)
         return 'http://localhost:5079/api';
       }
-      return `${window.location.origin}/api`;
+      // Production web: her zaman https:// kullan (IIS HTTP->HTTPS yönlendirmesinde Authorization başlığı silinmesini önler)
+      const proto = window.location.protocol === 'https:' ? 'https:' : (hostname.includes('runasp.net') || hostname.includes('siteasp.net') ? 'https:' : window.location.protocol);
+      return `${proto}//${window.location.host}/api`;
     }
     return 'http://localhost:5079/api';
   }
@@ -81,8 +83,8 @@ export interface UserSession {
 export async function getBaseApiUrl(): Promise<string> {
   const customUrl = await AsyncStorage.getItem(API_URL_KEY);
   let url = customUrl || getPlatformDefaultApiUrl();
-  // HTTP -> HTTPS otomatik yükseltme (Sunucu 307 yönlendirmesinde Authorization başlığı düşmesini önler)
-  if (url.startsWith('http://ogretmenajanda.runasp.net')) {
+  // HTTP -> HTTPS otomatik yükseltme (Sunucu 307/301 yönlendirmesinde Authorization başlığı düşmesini önler)
+  if (url.startsWith('http://') && !url.includes('localhost') && !url.includes('127.0.0.1') && !url.includes('10.0.2.2') && !url.includes(':5079')) {
     url = url.replace('http://', 'https://');
   }
   return url;
@@ -142,7 +144,7 @@ export async function apiRequest<T = any>(
     const url = `${baseUrl.replace(/\/+$/, '')}/${endpoint.replace(/^\/+/, '')}`;
 
     const headers: Record<string, string> = {};
-    if (token) {
+    if (token && token !== 'offline_token') {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
