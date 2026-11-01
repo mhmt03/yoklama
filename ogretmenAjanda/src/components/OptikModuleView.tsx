@@ -336,6 +336,10 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
     }
   }, [selectedExamId, activeSubTab, mode, loadExamAnalyticsAndResults]);
 
+  // Değerlendirme modalında aktif kullanılan optik form şablonu
+  const selectedFormForEval =
+    forms.find((f: any) => f.id === (evalFormId || evalExam?.optikFormId || forms[0]?.id)) || forms[0];
+
   // Görünürlük Anahtarı Güncelleme
   const handleToggleVisibility = async (
     exam: any,
@@ -1230,7 +1234,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
       const overridesList = Object.values(evalRowOverrides);
       const res = await apiRequest<any>('Optik/evaluate', 'POST', {
         sinavId: evalExam.id,
-        formId: evalFormId || undefined,
+        formId: evalFormId || evalExam?.optikFormId || selectedFormForEval?.id || undefined,
         txtContent: evalTxtContent,
         saveResults,
         numarasizlariDahilEt: true,
@@ -2283,6 +2287,20 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                           </Text>
                         </View>
                       )}
+                      <View
+                        style={{
+                          backgroundColor: '#F0FDF4',
+                          borderWidth: 1,
+                          borderColor: '#BBF7D0',
+                          paddingHorizontal: 7,
+                          paddingVertical: 2,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#15803D' }}>
+                          📋 Şablon: {forms.find((f: any) => f.id === exam.optikFormId)?.formAdi || forms[0]?.formAdi || 'Varsayılan'}
+                        </Text>
+                      </View>
                     </View>
                     <Text style={styles.examMeta}>
                       📅 {new Date(exam.uygulamaTarihi).toLocaleDateString('tr-TR')} · 👥 Katılımcı: {exam.participantCount} Öğrenci · 📈 Ort. Net: {exam.averageNet}
@@ -4505,6 +4523,50 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                 </View>
               </View>
 
+              {/* Eşleştirilecek Optik Form Şablonu Seçimi */}
+              <View style={{ marginTop: 10, marginBottom: 8, padding: 10, backgroundColor: '#EFF6FF', borderRadius: 10, borderWidth: 1, borderColor: '#BFDBFE' }}>
+                <Text style={[styles.inputLabel, { color: '#1E40AF', marginBottom: 4 }]}>
+                  📋 Sınav İçin Varsayılan Optik Form Şablonu (Koordinat Haritası):
+                </Text>
+                <Text style={{ fontSize: 11, color: '#3B82F6', marginBottom: 8 }}>
+                  Optik TXT dosyası okutulurken öğrenci no, ad soyad, şube ve ders cevaplarının hangi sütun koordinatlarından okunacağını belirler.
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                  {forms.map((f: any) => {
+                    const isSelected = (editingExam.optikFormId || forms[0]?.id) === f.id;
+                    return (
+                      <TouchableOpacity
+                        key={f.id}
+                        style={[
+                          styles.sortPill,
+                          isSelected && { backgroundColor: '#2563EB', borderColor: '#1D4ED8' },
+                          {
+                            paddingHorizontal: 12,
+                            paddingVertical: 6,
+                            backgroundColor: isSelected ? '#2563EB' : '#FFFFFF',
+                            borderWidth: 1,
+                            borderColor: isSelected ? '#1D4ED8' : '#CBD5E1',
+                          },
+                        ]}
+                        onPress={() => {
+                          setEditingExam((p: any) => ({ ...p, optikFormId: f.id }));
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.sortPillText,
+                            { color: isSelected ? '#FFFFFF' : '#1E293B', fontWeight: isSelected ? '800' : '600' },
+                          ]}
+                        >
+                          {isSelected ? '☑️ ' : '⬜ '}
+                          {f.formAdi} ({f.dersler?.length || 0} Ders)
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, flexWrap: 'wrap', gap: 8 }}>
                 <Text style={styles.sectionHeading}>🔑 Dersler, Katsayılar ve Kitapçık Cevap Anahtarları</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -4806,6 +4868,142 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
             </View>
 
             <ScrollView style={{ marginTop: 10 }}>
+              {/* KULLANILAN OPTİK FORM ŞABLONU SEÇİCİ */}
+              <View
+                style={{
+                  backgroundColor: '#F0FDF4',
+                  borderWidth: 1,
+                  borderColor: '#BBF7D0',
+                  borderRadius: 10,
+                  padding: 10,
+                  marginBottom: 10,
+                }}
+              >
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 6,
+                    marginBottom: 6,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#166534' }}>
+                      📋 Çözümleme İçin Kullanılan Optik Şablon:
+                    </Text>
+                    {selectedFormForEval && (
+                      <View
+                        style={{
+                          backgroundColor: '#DCFCE7',
+                          paddingHorizontal: 8,
+                          paddingVertical: 2,
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: '#86EFAC',
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#15803D' }}>
+                          {selectedFormForEval.formAdi}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 11, color: '#16A34A' }}>
+                    TXT satırlarını bu şablonun koordinatlarına göre parçalar (seçimi değiştirebilirsiniz)
+                  </Text>
+                </View>
+
+                {/* Şablon Seçim Butonları */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {forms.map((f: any) => {
+                    const isSelected = (evalFormId || evalExam?.optikFormId || forms[0]?.id) === f.id;
+                    return (
+                      <TouchableOpacity
+                        key={f.id}
+                        onPress={() => {
+                          setEvalFormId(f.id);
+                          setEvalPreviewResults(null);
+                        }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 5,
+                          backgroundColor: isSelected ? '#16A34A' : '#FFFFFF',
+                          borderWidth: 1,
+                          borderColor: isSelected ? '#15803D' : '#CBD5E1',
+                          borderRadius: 8,
+                          paddingHorizontal: 10,
+                          paddingVertical: 6,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 11.5,
+                            fontWeight: isSelected ? '800' : '600',
+                            color: isSelected ? '#FFFFFF' : '#1E293B',
+                          }}
+                        >
+                          {isSelected ? '☑️ ' : '⬜ '}
+                          {f.formAdi}
+                        </Text>
+                        <View
+                          style={{
+                            backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#F1F5F9',
+                            paddingHorizontal: 5,
+                            paddingVertical: 1,
+                            borderRadius: 4,
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 9.5,
+                              fontWeight: '700',
+                              color: isSelected ? '#FFFFFF' : '#64748B',
+                            }}
+                          >
+                            {f.dersler?.length || 0} Ders
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Seçili Şablonun Canlı Koordinat Özeti */}
+                {selectedFormForEval && (
+                  <View
+                    style={{
+                      marginTop: 8,
+                      paddingTop: 6,
+                      borderTopWidth: 1,
+                      borderTopColor: '#DCFCE7',
+                      flexDirection: 'row',
+                      flexWrap: 'wrap',
+                      gap: 10,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, color: '#166534' }}>
+                      <Text style={{ fontWeight: '700' }}>Öğr. No:</Text> Sütun {selectedFormForEval.numaraBaslangic} ({selectedFormForEval.numaraUzunluk} hane)
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#166534' }}>
+                      <Text style={{ fontWeight: '700' }}>Ad Soyad:</Text> Sütun {selectedFormForEval.adSoyadBaslangic} ({selectedFormForEval.adSoyadUzunluk} hane)
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#166534' }}>
+                      <Text style={{ fontWeight: '700' }}>Şube:</Text> Sütun {selectedFormForEval.sinifBaslangic} ({selectedFormForEval.sinifUzunluk} hane)
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#166534' }}>
+                      <Text style={{ fontWeight: '700' }}>Kitapçık:</Text> Sütun {selectedFormForEval.kitapcikTuruBaslangic || '-'}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#166534' }}>
+                      <Text style={{ fontWeight: '700' }}>Dersler:</Text>{' '}
+                      {selectedFormForEval.dersler?.map((d: any) => `${d.dersAdi} (Sütun ${d.baslangicSutun})`).join(', ') || 'Tanımsız'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
                 <TouchableOpacity style={styles.primaryBtn} onPress={handlePickOpticalTxtFile}>
                   <Text style={styles.primaryBtnText}>📂 Bilgisayardan / Cihazdan .TXT / .DAT Seç</Text>
