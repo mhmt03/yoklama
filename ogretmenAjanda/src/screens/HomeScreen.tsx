@@ -44,6 +44,11 @@ import {
   TeacherProctorDutyItem,
 } from '../database/operations/examPlannerOperations';
 import {
+  fetchMySubstitutions,
+  DutySubstitutionItem,
+  getTodayDateStr,
+} from '../services/dutySubstitutionService';
+import {
   getCurrentTopicForClass,
   getSurroundingTopicsForLesson,
   LessonTopicSurroundingInfo,
@@ -118,6 +123,7 @@ export const HomeScreen: React.FC = () => {
   const [currentExamAlert, setCurrentExamAlert] = useState<any | null>(null);
 
   const [teacherProctorDuties, setTeacherProctorDuties] = useState<TeacherProctorDutyItem[]>([]);
+  const [myDutySubstitutions, setMyDutySubstitutions] = useState<DutySubstitutionItem[]>([]);
 
   const [serverSchoolId, setServerSchoolId] = useState<string | undefined>(undefined);
   const [optikModalVisible, setOptikModalVisible] = useState(false);
@@ -465,14 +471,28 @@ export const HomeScreen: React.FC = () => {
         loadData(currentDay);
       });
       fetchUnreadMessageCount();
+
+      // Nöbetçi telafi görevlerini anlık sorgula (veri eşitleme gerektirmeden)
+      const querySubstitutions = async () => {
+        try {
+          const tDate = getTodayDateStr();
+          const list = await fetchMySubstitutions(tDate, teacherDisplayName || undefined);
+          if (list !== null) {
+            setMyDutySubstitutions(list);
+          }
+        } catch { }
+      };
+      querySubstitutions();
+
       const interval = setInterval(() => {
         setCurrentTime(getCurrentTimeString());
         getActiveAndTodayLessons(showAllSchoolsSchedule ? 'all' : undefined).then(async (info: any) => {
           setLessonInfo(info);
         });
-      }, 30000); // 30 sec tick
+        querySubstitutions();
+      }, 25000); // 25 sn anlık canlı kontrol
       return () => clearInterval(interval);
-    }, [showAllSchoolsSchedule])
+    }, [showAllSchoolsSchedule, teacherDisplayName])
   );
 
   useEffect(() => {
@@ -841,9 +861,88 @@ export const HomeScreen: React.FC = () => {
           </View>
         )}
 
-        
+        {/* 🛡️ BUGÜNKÜ NÖBETÇİ DERS GÖREVLENDİRMELERİ KARTI (ANLIK CANLI GÜNCELLENİR) */}
+        {myDutySubstitutions.length > 0 && (
+          <View style={[styles.proctorDutyContainer, { borderColor: '#F59E0B' }]}>
+            <View style={styles.proctorDutyHeaderRow}>
+              <View style={[styles.proctorDutyBadge, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}>
+                <Ionicons name="shield" size={15} color="#D97706" />
+                <Text style={[styles.proctorDutyBadgeText, { color: '#B45309' }]}>
+                  BUGÜNKÜ NÖBETÇİ DERS GÖREVLERİNİZ
+                </Text>
+              </View>
+              <View style={{ backgroundColor: '#D97706', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: '#FFFFFF' }}>
+                  {myDutySubstitutions.length} Ders Atandı
+                </Text>
+              </View>
+            </View>
 
-        {/* 🚨 TÜM GÜN EKRANDA UYARI KARTI (Günün Kritik Ajanda / Hatırlatma Notları) */}
+            {myDutySubstitutions.map((sub: DutySubstitutionItem) => (
+              <View
+                key={sub.id}
+                style={[
+                  styles.proctorDutyCard,
+                  {
+                    backgroundColor: '#FFFBEB',
+                    borderColor: '#FCD34D',
+                    borderLeftWidth: 4,
+                    borderLeftColor: '#D97706',
+                  },
+                ]}
+              >
+                <View style={styles.proctorDutyCardLeft}>
+                  <View style={[styles.proctorIconWrap, { backgroundColor: '#FEF3C7' }]}>
+                    <Ionicons name="school" size={22} color="#D97706" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={styles.proctorRowTop}>
+                      <Text style={[styles.proctorExamTitle, { color: '#92400E' }]} numberOfLines={2}>
+                        ⏰ {sub.lessonHour}. Ders: {sub.className || 'Şube'} — {sub.lessonName || 'Ders'}
+                      </Text>
+                      <View style={[styles.proctorTodayBadge, { backgroundColor: '#D97706' }]}>
+                        <Text style={styles.proctorTodayBadgeText}>NÖBET GÖREVİ</Text>
+                      </View>
+                    </View>
+
+                    <View style={{ marginTop: 6, gap: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FEE2E2', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                          <Ionicons name="person-remove" size={12} color="#DC2626" />
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#B91C1C' }}>
+                            Dolduracağı Öğretmen: {sub.absentTeacherName}
+                          </Text>
+                        </View>
+
+                        {sub.dutyPlace ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ECFDF5', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
+                            <Ionicons name="location" size={11} color="#059669" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>
+                              {sub.dutyPlace}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      {sub.absenceReason ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                          <Ionicons name="information-circle" size={13} color="#D97706" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#B45309' }}>
+                            Gelmeme Sebebi: <Text style={{ fontWeight: '500', fontStyle: 'italic', color: '#78350F' }}>{sub.absenceReason}</Text>
+                          </Text>
+                        </View>
+                      ) : (
+                        <Text style={{ fontSize: 10, color: '#92400E', fontStyle: 'italic', marginTop: 2 }}>
+                          (İdare tarafından gelmeme sebebi belirtilmedi)
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
         {todayAlertItems.length > 0 && (
           <View style={styles.alertBannerContainer}>
             {todayAlertItems.map((alertItem: any) => (

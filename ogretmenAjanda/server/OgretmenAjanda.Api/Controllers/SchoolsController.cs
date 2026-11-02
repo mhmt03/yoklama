@@ -1739,6 +1739,239 @@ namespace OgretmenAjanda.Api.Controllers
         }
 
         // ---------------------------------------------------------
+        // GÜNLÜK NÖBETÇİ DERS GÖREVLENDİRMELERİ (Gelmeyen Öğretmen ➔ Nöbetçi)
+        // ---------------------------------------------------------
+        private static string NormalizePersonName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+            var s = name.Trim().Replace("İ", "i").Replace("I", "ı");
+            s = s.ToLower(new System.Globalization.CultureInfo("tr-TR"));
+            return System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+        }
+
+        private static bool IsSamePerson(string? a, string? b)
+        {
+            var n1 = NormalizePersonName(a);
+            var n2 = NormalizePersonName(b);
+            if (n1.Length == 0 || n2.Length == 0) return false;
+            if (n1 == n2) return true;
+            return n1.Contains(n2) || n2.Contains(n1);
+        }
+
+        private bool IsStudentOrParent =>
+            string.Equals(CurrentUserRole, UserRoles.Student, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(CurrentUserRole, UserRoles.Parent, StringComparison.OrdinalIgnoreCase);
+
+        private static object MapSubstitution(DutySubstitution s) => new
+        {
+            id = s.Id.ToString(),
+            schoolId = s.SchoolId.ToString(),
+            date = s.Date,
+            dayOfWeek = s.DayOfWeek,
+            lessonHour = s.LessonHour,
+            className = s.ClassName ?? "",
+            lessonName = s.LessonName ?? "",
+            absentTeacherName = s.AbsentTeacherName,
+            absenceReason = s.AbsenceReason ?? "",
+            substituteTeacherName = s.SubstituteTeacherName,
+            dutyPlace = s.DutyPlace ?? "",
+            updatedAt = s.UpdatedAt
+        };
+
+        private static string? ReadJsonString(System.Text.Json.JsonElement el, string camel, string pascal)
+        {
+            if (el.TryGetProperty(camel, out var v) || el.TryGetProperty(pascal, out v))
+            {
+                if (v.ValueKind == System.Text.Json.JsonValueKind.String) return v.GetString();
+                if (v.ValueKind == System.Text.Json.JsonValueKind.Number) return v.GetRawText();
+            }
+            return null;
+        }
+
+        private static int ReadJsonInt(System.Text.Json.JsonElement el, string camel, string pascal, int fallback)
+        {
+            if (el.TryGetProperty(camel, out var v) || el.TryGetProperty(pascal, out v))
+            {
+                if (v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetInt32(out var n)) return n;
+                if (v.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(v.GetString(), out var m)) return m;
+            }
+            return fallback;
+        }
+
+        private static string? CleanText(string? s, int maxLen)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            var t = s.Trim();
+            return t.Length > maxLen ? t.Substring(0, maxLen) : t;
+        }
+
+        // Okul idaresi: Seçilen tarihteki tüm görevlendirmeler
+        [HttpGet("{schoolId}/substitutions")]
+        public async Task<IActionResult> GetSubstitutions(Guid schoolId, [FromQuery] string? date)
+        {
+            if (IsStudentOrParent) return Forbid();
+            var q = _context.DutySubstitutions.AsNoTracking().Where(s => s.SchoolId == schoolId);
+            if (!string.IsNullOrWhiteSpace(date)) q = q.Where(s => s.Date == date.Trim());
+            var list = await q.OrderBy(s => s.LessonHour).ThenBy(s => s.AbsentTeacherName).ToListAsync();
+            return Ok(new { success = true, data = list.Select(MapSubstitution) });
+        }
+
+        // Okul idaresi: Bir ders saatine nöbetçi ata (aynı slot için mevcut atamanın yerine geçer)
+        [HttpPost("{schoolId}/substitutions")]
+        public async Task<IActionResult> SaveSubstitution(Guid schoolId, [FromBody] System.Text.Json.JsonElement body)
+        {
+            if (IsStudentOrParent) return Forbid();
+
+            var date = CleanText(ReadJsonString(body, "date", "Date"), 20);
+            var absent = CleanText(ReadJsonString(body, "absentTeacherName", "AbsentTeacherName"), 120);
+            var substitute = CleanText(ReadJsonString(body, "substituteTeacherName", "SubstituteTeacherName"), 120);
+            if (date == null || absent == null || substitute == null)
+                return BadRequest(new { success = false, message = "Tarih, gelmeyen öğretmen ve nöbetçi öğretmen zorunludur." });
+
+            int lessonHour = ReadJsonInt(body, "lessonHour", "LessonHour", 1);
+            int dayOfWeek = ReadJsonInt(body, "dayOfWeek", "DayOfWeek", 1);
+            var className = CleanText(ReadJsonString(body, "className", "ClassName"), 50);
+            var lessonName = CleanText(ReadJsonString(body, "lessonName", "LessonName"), 150);
+            var reason = CleanText(ReadJsonString(body, "absenceReason", "AbsenceReason"), 300);
+            var dutyPlace = CleanText(ReadJsonString(body, "dutyPlace", "DutyPlace"), 100);
+
+            var sameSlot = (await _context.DutySubstitutions
+                    .Where(s => s.SchoolId == schoolId && s.Date == date && s.LessonHour == lessonHour)
+                    .ToListAsync())
+                .Where(s => NormalizePersonName(s.AbsentTeacherName) == NormalizePersonName(absent) &&
+                            (s.ClassName ?? "") == (className ?? ""))
+                .ToList();
+
+            var entity = sameSlot.FirstOrDefault();
+            if (sameSlot.Count > 1) _context.DutySubstitutions.RemoveRange(sameSlot.Skip(1));
+
+            if (entity == null)
+            {
+                entity = new DutySubstitution
+                {
+                    Id = Guid.NewGuid(),
+                    SchoolId = schoolId,
+                    Date = date,
+                    CreatedAt = DateTime.UtcNow
+                };
+                await _context.DutySubstitutions.AddAsync(entity);
+            }
+
+            entity.DayOfWeek = dayOfWeek;
+            entity.LessonHour = lessonHour;
+            entity.ClassName = className;
+            entity.LessonName = lessonName;
+            entity.AbsentTeacherName = absent;
+            entity.AbsenceReason = reason;
+            entity.SubstituteTeacherName = substitute;
+            entity.DutyPlace = dutyPlace;
+            entity.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            await LogActionAsync(schoolId, "DUTY_SUBSTITUTION_SAVED", "DutySubstitution", entity.Id.ToString(),
+                $"{date} {lessonHour}. ders ({className}) {absent} yerine {substitute} görevlendirildi.");
+
+            return Ok(new { success = true, data = MapSubstitution(entity) });
+        }
+
+        // Okul idaresi: Görevlendirmeyi kaldır
+        [HttpDelete("{schoolId}/substitutions/{id}")]
+        public async Task<IActionResult> DeleteSubstitution(Guid schoolId, Guid id)
+        {
+            if (IsStudentOrParent) return Forbid();
+            var entity = await _context.DutySubstitutions.FirstOrDefaultAsync(s => s.Id == id && s.SchoolId == schoolId);
+            if (entity != null)
+            {
+                _context.DutySubstitutions.Remove(entity);
+                await _context.SaveChangesAsync();
+            }
+            return Ok(new { success = true });
+        }
+
+        // Okul idaresi: Gelmeyen öğretmenin o günkü tüm görevlendirmelerindeki gelmeme nedenini güncelle
+        [HttpPut("{schoolId}/substitutions/reason")]
+        public async Task<IActionResult> UpdateSubstitutionReason(Guid schoolId, [FromBody] System.Text.Json.JsonElement body)
+        {
+            if (IsStudentOrParent) return Forbid();
+            var date = CleanText(ReadJsonString(body, "date", "Date"), 20);
+            var absent = CleanText(ReadJsonString(body, "absentTeacherName", "AbsentTeacherName"), 120);
+            var reason = CleanText(ReadJsonString(body, "absenceReason", "AbsenceReason"), 300);
+            if (date == null || absent == null)
+                return BadRequest(new { success = false, message = "Tarih ve gelmeyen öğretmen zorunludur." });
+
+            var normAbsent = NormalizePersonName(absent);
+            var rows = (await _context.DutySubstitutions
+                    .Where(s => s.SchoolId == schoolId && s.Date == date)
+                    .ToListAsync())
+                .Where(s => NormalizePersonName(s.AbsentTeacherName) == normAbsent)
+                .ToList();
+
+            foreach (var r in rows)
+            {
+                r.AbsenceReason = reason;
+                r.UpdatedAt = DateTime.UtcNow;
+            }
+            if (rows.Count > 0) await _context.SaveChangesAsync();
+            return Ok(new { success = true, updated = rows.Count });
+        }
+
+        // Öğretmen: Kendisine atanmış nöbetçi ders görevleri (anlık sorgulama için hafif uç nokta)
+        [HttpGet("substitutions/mine")]
+        public async Task<IActionResult> GetMySubstitutions([FromQuery] string? date, [FromQuery] string? teacherName, [FromQuery] string? schoolId)
+        {
+            if (IsStudentOrParent) return Ok(new { success = true, data = Array.Empty<object>() });
+
+            var targetDate = CleanText(date, 20) ?? DateTime.Now.ToString("yyyy-MM-dd");
+            var user = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == CurrentUserId);
+
+            var names = new List<string>();
+            if (!string.IsNullOrWhiteSpace(user?.FullName)) names.Add(user!.FullName);
+            if (!string.IsNullOrWhiteSpace(teacherName)) names.Add(teacherName!);
+            if (names.Count == 0) return Ok(new { success = true, data = Array.Empty<object>() });
+
+            var q = _context.DutySubstitutions.AsNoTracking().Where(s => s.Date == targetDate);
+
+            if (!string.IsNullOrWhiteSpace(schoolId) && Guid.TryParse(schoolId, out var sid))
+            {
+                q = q.Where(s => s.SchoolId == sid);
+            }
+            else if (user != null && CurrentUserRole != UserRoles.SuperAdmin)
+            {
+                var schoolIds = new List<Guid>();
+                if (user.SchoolId.HasValue) schoolIds.Add(user.SchoolId.Value);
+                if (!string.IsNullOrEmpty(user.AssignedSchoolIdsJson))
+                {
+                    try
+                    {
+                        var parsed = System.Text.Json.JsonSerializer.Deserialize<List<string>>(user.AssignedSchoolIdsJson);
+                        if (parsed != null)
+                            foreach (var p in parsed)
+                                if (Guid.TryParse(p, out var g) && !schoolIds.Contains(g)) schoolIds.Add(g);
+                    }
+                    catch { }
+                }
+                if (schoolIds.Count == 0 && (!string.IsNullOrEmpty(user.CustomerId) || !string.IsNullOrEmpty(user.RelationId)))
+                {
+                    var cid = user.CustomerId;
+                    var rid = user.RelationId;
+                    schoolIds = await _context.Schools.AsNoTracking()
+                        .Where(s => (!string.IsNullOrEmpty(cid) && s.CustomerId == cid) || (!string.IsNullOrEmpty(rid) && s.RelationId == rid))
+                        .Select(s => s.Id)
+                        .ToListAsync();
+                }
+                if (schoolIds.Count > 0) q = q.Where(s => schoolIds.Contains(s.SchoolId));
+            }
+
+            var rows = (await q.ToListAsync())
+                .Where(s => names.Any(n => IsSamePerson(n, s.SubstituteTeacherName)))
+                .OrderBy(s => s.LessonHour)
+                .Select(MapSubstitution)
+                .ToList();
+
+            return Ok(new { success = true, date = targetDate, data = rows });
+        }
+
+        // ---------------------------------------------------------
         // OKUL TAM ANLIK GÖRÜNTÜSÜ (OFFLINE-FIRST / SNAPSHOT SYNC)
         // ---------------------------------------------------------
         [HttpGet("{schoolId}/snapshot")]

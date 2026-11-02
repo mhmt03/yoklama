@@ -254,6 +254,12 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const [hiddenDutyTeachersBySlot, setHiddenDutyTeachersBySlot] = useState<Record<string, string[]>>({});
 
+  // Gelmeyen öğretmen adı -> gelmeme nedeni (isteğe bağlı)
+  const [absentReasons, setAbsentReasons] = useState<Record<string, string>>({});
+
+  // Sunucuya kaydedilmiş günlük nöbetçi ders görevlendirmeleri (seçili gün/tarih için)
+  const [dutySubstitutions, setDutySubstitutions] = useState<any[]>([]);
+
   const [editingCounselorClass, setEditingCounselorClass] = useState<string>('');
 
   const [savingCounselorClass, setSavingCounselorClass] = useState<boolean>(false);
@@ -1488,6 +1494,10 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setAbsentTeacherSearch,
     hiddenDutyTeachersBySlot,
     setHiddenDutyTeachersBySlot,
+    absentReasons,
+    setAbsentReasons,
+    dutySubstitutions,
+    setDutySubstitutions,
     editingCounselorClass,
     setEditingCounselorClass,
     savingCounselorClass,

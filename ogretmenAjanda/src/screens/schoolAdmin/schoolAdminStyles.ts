@@ -182,6 +182,8 @@ export interface SchoolAdminCtx {
   setAbsentTeachers: StateSetter;
   setAbsentTeacherSearch: StateSetter;
   setHiddenDutyTeachersBySlot: StateSetter;
+  setAbsentReasons: StateSetter;
+  setDutySubstitutions: StateSetter;
   setEditingCounselorClass: StateSetter;
   setSavingCounselorClass: StateSetter;
   setSelectedAdminStudent: StateSetter;
@@ -504,6 +506,8 @@ export interface SchoolAdminCtx {
   absentTeachers: string[];
   absentTeacherSearch: string;
   hiddenDutyTeachersBySlot: Record<string, string[]>;
+  absentReasons: Record<string, string>;
+  dutySubstitutions: any[];
   editingCounselorClass: string;
   savingCounselorClass: boolean;
   selectedAdminStudent: any;

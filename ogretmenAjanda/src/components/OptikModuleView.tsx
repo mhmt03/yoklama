@@ -212,6 +212,8 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
   // Sınav Tanımlama / Düzenleme Modalı
   const [examModalVisible, setExamModalVisible] = useState(false);
   const [pendingExcelKazanimlar, setPendingExcelKazanimlar] = useState<any[]>([]);
+  // Toplu Cevap Anahtarı Yapıştırma & Dağıtma Textbox state'leri (Kitapçık türü bazında örn: { A: '...', B: '...' })
+  const [bulkAnswerKeyInputs, setBulkAnswerKeyInputs] = useState<Record<string, string>>({});
   const [editingExam, setEditingExam] = useState<any>({
     id: undefined,
     sinavAdi: '',
@@ -2307,7 +2309,14 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                       {exam.sinavTuru && exam.sinavTuru !== 'SERBEST' ? ` · 🏆 Ort. Puan: ${exam.averageScore}` : ''}
                     </Text>
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+                  {/* Mobilde ekran dışına taşmasın diye butonlar yatay kaydırılabilir */}
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    nestedScrollEnabled
+                    style={{ maxWidth: '100%', flexGrow: 0 }}
+                    contentContainerStyle={{ flexDirection: 'row', gap: 6, paddingRight: 4 }}
+                  >
                     <TouchableOpacity
                       style={[styles.smallActionBtn, { backgroundColor: '#2563EB' }]}
                       onPress={() => handleOpenEvalModal(exam)}
@@ -2363,7 +2372,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                     >
                       <Text style={[styles.smallActionBtnText, { color: '#DC2626' }]}>🗑️</Text>
                     </TouchableOpacity>
-                  </View>
+                  </ScrollView>
                 </View>
 
                 {/* 3 Temel Görünürlük ve Yetki Anahtarı */}
@@ -4615,6 +4624,162 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                   </Text>
                 </View>
               )}
+
+              {/* ⚡ HIZLI VE TOPLU CEVAP ANAHTARI YAPIŞTIRIP DAĞITMA KUTULARI */}
+              {(() => {
+                const activeTurler = (editingExam.kitapcikTurleri || 'A,B')
+                  .split(',')
+                  .map((s: string) => s.trim().toUpperCase())
+                  .filter(Boolean);
+                if (activeTurler.length === 0) activeTurler.push('A');
+
+                const totalExamQuestions = (editingExam.dersler || []).reduce(
+                  (sum: number, d: any) => sum + (Number(d.soruSayisi) || 0),
+                  0
+                );
+
+                const handleDistributeBulkKey = (bType: string) => {
+                  const rawInput = bulkAnswerKeyInputs[bType] || '';
+                  // Boşlukları, satır sonlarını ve tab karakterlerini temizle
+                  const cleaned = rawInput.replace(/\s+/g, '').toUpperCase();
+                  if (!cleaned) {
+                    showAlert('Uyarı', `Lütfen ${bType} kitapçığı için yapıştırılacak cevap anahtarı metnini giriniz.`);
+                    return;
+                  }
+
+                  let currentOffset = 0;
+                  const newDersler = (editingExam.dersler || []).map((d: any) => {
+                    const qCount = Number(d.soruSayisi) || 0;
+                    const chunk = cleaned.slice(currentOffset, currentOffset + qCount);
+                    currentOffset += qCount;
+                    return {
+                      ...d,
+                      [`cevapAnahtari${bType}`]: chunk,
+                    };
+                  });
+
+                  setEditingExam((p: any) => ({ ...p, dersler: newDersler }));
+
+                  if (cleaned.length < totalExamQuestions) {
+                    showAlert(
+                      'Kısmi Dağıtıldı ⚠️',
+                      `Yapıştırılan metin ${cleaned.length} karakter. Sınav toplam ${totalExamQuestions} soru olduğu için son ders(ler)e eksik karakter aktarıldı.`
+                    );
+                  } else if (cleaned.length > totalExamQuestions) {
+                    showAlert(
+                      'Dağıtıldı ✅',
+                      `${totalExamQuestions} soru derslere tam dağıtıldı. Metindeki fazla kalan ${cleaned.length - totalExamQuestions} karakter göz ardı edildi.`
+                    );
+                  } else {
+                    showAlert(
+                      'Başarılı ✅',
+                      `${bType} kitapçığı için ${cleaned.length} soruluk cevap anahtarı soru sayılarına göre derslere başarıyla dağıtıldı!`
+                    );
+                  }
+                };
+
+                return (
+                  <View
+                    style={{
+                      backgroundColor: '#F8FAFC',
+                      borderRadius: 10,
+                      borderWidth: 1.5,
+                      borderColor: '#CBD5E1',
+                      padding: 12,
+                      marginBottom: 12,
+                      marginTop: 4,
+                      gap: 10,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#1E293B' }}>
+                          ⚡ Toplu Cevap Anahtarı Yapıştır & Dağıt
+                        </Text>
+                        <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#4338CA' }}>
+                            Toplam: {totalExamQuestions} Soru
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={{ fontSize: 11, color: '#64748B' }}>
+                        Tüm sınav anahtarını tek seferde yapıştırın; otomatik boşlukları temizler ve derslerin soru sayılarına göre böler.
+                      </Text>
+                    </View>
+
+                    <View style={{ gap: 8 }}>
+                      {activeTurler.map((bType: string) => {
+                        const currentInput = bulkAnswerKeyInputs[bType] || '';
+                        const cleanLen = currentInput.replace(/\s+/g, '').length;
+                        return (
+                          <View
+                            key={`bulk_${bType}`}
+                            style={{
+                              backgroundColor: '#FFFFFF',
+                              borderRadius: 8,
+                              borderWidth: 1,
+                              borderColor: '#E2E8F0',
+                              padding: 8,
+                              gap: 6,
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155' }}>
+                                📖 {bType} Kitapçığı Tüm Sınav Anahtarı
+                              </Text>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: cleanLen === totalExamQuestions && totalExamQuestions > 0 ? '#16A34A' : '#64748B' }}>
+                                Karakter: {cleanLen} / {totalExamQuestions}
+                              </Text>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                              <TextInput
+                                style={[
+                                  styles.textInput,
+                                  {
+                                    flex: 1,
+                                    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                                    fontSize: 12,
+                                    backgroundColor: '#F8FAFC',
+                                    height: 38,
+                                    paddingVertical: 6,
+                                  },
+                                ]}
+                                value={currentInput}
+                                autoCapitalize="characters"
+                                placeholder={`Örn: ABCDABCD... (${totalExamQuestions} soru yapıştırın, boşluklar temizlenir)`}
+                                onChangeText={(t) => {
+                                  setBulkAnswerKeyInputs((prev) => ({
+                                    ...prev,
+                                    [bType]: t,
+                                  }));
+                                }}
+                              />
+                              <TouchableOpacity
+                                style={{
+                                  backgroundColor: '#4F46E5',
+                                  paddingHorizontal: 14,
+                                  paddingVertical: 9,
+                                  borderRadius: 8,
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 4,
+                                }}
+                                onPress={() => handleDistributeBulkKey(bType)}
+                              >
+                                <Ionicons name="git-merge-outline" size={14} color="#FFFFFF" />
+                                <Text style={{ fontSize: 12, fontWeight: '800', color: '#FFFFFF' }}>
+                                  Dağıt
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                );
+              })()}
 
               {(editingExam.dersler || []).map((d: any, idx: number) => (
                 <View key={idx} style={styles.lessonKeyCard}>

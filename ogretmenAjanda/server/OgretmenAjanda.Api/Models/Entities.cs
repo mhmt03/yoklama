@@ -492,6 +492,48 @@ namespace OgretmenAjanda.Api.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     }
 
+    /// <summary>
+    /// Günlük nöbetçi ders görevlendirmesi: Gelmeyen öğretmenin belirli bir ders saatine
+    /// yerine giren nöbetçi öğretmen ataması (gelmeme nedeni ile birlikte).
+    /// </summary>
+    public class DutySubstitution
+    {
+        [Key]
+        public Guid Id { get; set; } = Guid.NewGuid();
+
+        [Required]
+        public Guid SchoolId { get; set; }
+
+        [Required, MaxLength(20)]
+        public string Date { get; set; } = string.Empty; // YYYY-MM-DD
+
+        public int DayOfWeek { get; set; } = 1; // 1=Pazartesi ... 5=Cuma
+
+        public int LessonHour { get; set; } = 1;
+
+        [MaxLength(50)]
+        public string? ClassName { get; set; }
+
+        [MaxLength(150)]
+        public string? LessonName { get; set; }
+
+        [Required, MaxLength(120)]
+        public string AbsentTeacherName { get; set; } = string.Empty;
+
+        [MaxLength(300)]
+        public string? AbsenceReason { get; set; }
+
+        [Required, MaxLength(120)]
+        public string SubstituteTeacherName { get; set; } = string.Empty;
+
+        [MaxLength(100)]
+        public string? DutyPlace { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    }
+
     public class ExamHall
     {
         [Key]

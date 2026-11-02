@@ -60,6 +60,9 @@ namespace OgretmenAjanda.Api.Services
             var duties = await context.TeacherDuties.Where(d => d.SchoolId == schoolId).ToListAsync();
             context.TeacherDuties.RemoveRange(duties);
 
+            var substitutions = await context.DutySubstitutions.Where(d => d.SchoolId == schoolId).ToListAsync();
+            context.DutySubstitutions.RemoveRange(substitutions);
+
             var students = await context.Students.Where(st => st.SchoolId == schoolId).ToListAsync();
             context.Students.RemoveRange(students);
 
@@ -273,6 +276,11 @@ namespace OgretmenAjanda.Api.Services
                 .Where(d => !activeSchoolSet.Contains(d.SchoolId))
                 .ToListAsync();
             context.TeacherDuties.RemoveRange(orphanDuties);
+
+            var orphanSubstitutions = await context.DutySubstitutions
+                .Where(d => !activeSchoolSet.Contains(d.SchoolId))
+                .ToListAsync();
+            context.DutySubstitutions.RemoveRange(orphanSubstitutions);
 
             // 7. Hiçbir aktif okula bağlı olmayan YETİM sınıfları ve dersleri temizle
             var orphanClasses = await context.SchoolClasses

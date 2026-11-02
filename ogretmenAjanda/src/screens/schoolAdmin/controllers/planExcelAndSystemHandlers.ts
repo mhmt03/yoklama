@@ -74,6 +74,7 @@ import {
   isSameTeacher,
 } from '../../../utils/counselorService';
 import { printDutyAssignments, DutyPrintSlot } from '../../../utils/dutyPrintService';
+import { getDutyDateForWeekday } from '../../../services/dutySubstitutionService';
 import { SchoolAdminCtx } from '../schoolAdminStyles';
 
 export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
@@ -138,6 +139,8 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
     dutyAssignDay,
     dutiesList,
     hiddenDutyTeachersBySlot,
+    absentReasons,
+    dutySubstitutions,
     setTeacherScheduleModalVisible,
     normalizeTeacherMatch,
     setTeacherScheduleItems,
@@ -777,21 +780,36 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
 
       const classNameText = slotItem.className || (slotItem.grade && slotItem.section ? `${slotItem.grade}-${slotItem.section}` : slotItem.grade || slotItem.section || '—');
 
+      // Gelmeme nedeni: seçim listesindeki öğretmen adına göre (isteğe bağlı)
+      const reasonKey = Object.keys(absentReasons || {}).find((k) => isSameTeacher(k, slotItem.teacherName));
+      const absenceReason = reasonKey ? String(absentReasons[reasonKey] || '').trim() : '';
+
+      // Bu ders saatine sunucuda kayıtlı kesin nöbetçi ataması varsa çizelgede yalnızca o yazılır
+      const assigned = (dutySubstitutions || []).find((sub: any) =>
+        Number(sub.lessonHour) === lHour &&
+        isSameTeacher(sub.absentTeacherName, slotItem.teacherName) &&
+        String(sub.className || '') === String(classNameText || '')
+      );
+
       return {
         lessonHour: lHour,
         className: classNameText,
         lessonName: slotItem.lessonName || 'Ders',
         absentTeacherName: slotItem.teacherName,
-        assignedTeachers: visibleDutyTeachers.map((d: any) => ({
-          teacherName: d.teacherName,
-          dutyPlace: d.dutyPlace || 'Nöbet Alanı',
-        })),
+        absenceReason,
+        assignedTeachers: assigned
+          ? [{ teacherName: assigned.substituteTeacherName, dutyPlace: assigned.dutyPlace || 'Nöbet Alanı' }]
+          : visibleDutyTeachers.map((d: any) => ({
+              teacherName: d.teacherName,
+              dutyPlace: d.dutyPlace || 'Nöbet Alanı',
+            })),
       };
     });
 
     const printed = printDutyAssignments({
       schoolName: selectedSchool?.name || 'Okul Müdürlüğü',
       dayName,
+      dateStr: getDutyDateForWeekday(dutyAssignDay).split('-').reverse().join('.'),
       slots,
     });
 

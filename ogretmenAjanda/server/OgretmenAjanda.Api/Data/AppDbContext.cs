@@ -23,6 +23,7 @@ namespace OgretmenAjanda.Api.Data
         public DbSet<SchoolClass> SchoolClasses => Set<SchoolClass>();
         public DbSet<SchoolLesson> SchoolLessons => Set<SchoolLesson>();
         public DbSet<TeacherDuty> TeacherDuties => Set<TeacherDuty>();
+        public DbSet<DutySubstitution> DutySubstitutions => Set<DutySubstitution>();
         public DbSet<ExamHall> ExamHalls => Set<ExamHall>();
         public DbSet<WrittenExam> WrittenExams => Set<WrittenExam>();
         public DbSet<ExamSeating> ExamSeatings => Set<ExamSeating>();

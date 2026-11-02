@@ -69,6 +69,30 @@ namespace OgretmenAjanda.Api.Data
             }
             catch { }
 
+            // Günlük nöbetçi ders görevlendirmeleri (gelmeyen öğretmen -> nöbetçi öğretmen)
+            try
+            {
+                await context.Database.ExecuteSqlRawAsync(@"
+                    CREATE TABLE IF NOT EXISTS ""DutySubstitutions"" (
+                        ""Id"" TEXT NOT NULL PRIMARY KEY,
+                        ""SchoolId"" TEXT NOT NULL,
+                        ""Date"" TEXT NOT NULL,
+                        ""DayOfWeek"" INTEGER NOT NULL DEFAULT 1,
+                        ""LessonHour"" INTEGER NOT NULL DEFAULT 1,
+                        ""ClassName"" TEXT,
+                        ""LessonName"" TEXT,
+                        ""AbsentTeacherName"" TEXT NOT NULL,
+                        ""AbsenceReason"" TEXT,
+                        ""SubstituteTeacherName"" TEXT NOT NULL,
+                        ""DutyPlace"" TEXT,
+                        ""CreatedAt"" TEXT NOT NULL,
+                        ""UpdatedAt"" TEXT NOT NULL
+                    );
+                ");
+            }
+            catch { }
+            try { await context.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS \"IX_DutySubstitutions_School_Date\" ON \"DutySubstitutions\" (\"SchoolId\", \"Date\");"); } catch { }
+
             try
             {
                 await context.Database.ExecuteSqlRawAsync(@"

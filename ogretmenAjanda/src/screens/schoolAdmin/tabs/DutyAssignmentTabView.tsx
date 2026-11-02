@@ -25,6 +25,13 @@ import {
   isSameTeacher,
 } from '../../../utils/counselorService';
 import { SchoolAdminCtx } from '../schoolAdminStyles';
+import {
+  fetchSchoolSubstitutions,
+  saveSubstitution,
+  deleteSubstitution,
+  updateSubstitutionReason,
+  getDutyDateForWeekday,
+} from '../../../services/dutySubstitutionService';
 
 export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
   const {
@@ -39,8 +46,105 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
     allSchoolSchedules,
     dutiesList,
     hiddenDutyTeachersBySlot,
-    setHiddenDutyTeachersBySlot
+    setHiddenDutyTeachersBySlot,
+    absentReasons,
+    setAbsentReasons,
+    dutySubstitutions,
+    setDutySubstitutions,
+    selectedSchool,
   } = ctx;
+
+  const targetDateStr = useMemo(() => {
+    return getDutyDateForWeekday(dutyAssignDay);
+  }, [dutyAssignDay]);
+
+  // Seçili okul ve gün değiştikçe sunucudaki görevlendirmeleri yükle
+  useEffect(() => {
+    let isMounted = true;
+    if (selectedSchool?.id) {
+      fetchSchoolSubstitutions(selectedSchool.id, targetDateStr).then((list) => {
+        if (isMounted) {
+          setDutySubstitutions(list || []);
+          if (list && list.length > 0) {
+            setAbsentReasons((prev: any) => {
+              const updated = { ...prev };
+              list.forEach((sub: any) => {
+                if (sub.absentTeacherName && sub.absenceReason && !updated[sub.absentTeacherName]) {
+                  updated[sub.absentTeacherName] = sub.absenceReason;
+                }
+              });
+              return updated;
+            });
+          }
+        }
+      });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedSchool?.id, targetDateStr]);
+
+  const handleToggleAssignDuty = async (
+    slotItem: any,
+    lHour: number,
+    classNameText: string,
+    dutyTeacher: { teacherName: string; dutyPlace: string }
+  ) => {
+    if (!selectedSchool?.id) {
+      Alert.alert('Uyarı', 'Lütfen önce aktif bir okul seçiniz.');
+      return;
+    }
+
+    const currentReason = (absentReasons && absentReasons[slotItem.teacherName]) || '';
+    const existing = (dutySubstitutions || []).find((s: any) =>
+      Number(s.lessonHour) === lHour &&
+      isSameTeacher(s.absentTeacherName, slotItem.teacherName) &&
+      String(s.className || '') === String(classNameText || '')
+    );
+
+    if (existing && isSameTeacher(existing.substituteTeacherName, dutyTeacher.teacherName)) {
+      const ok = await deleteSubstitution(selectedSchool.id, existing.id);
+      if (ok) {
+        setDutySubstitutions((prev: any[]) => prev.filter((s) => s.id !== existing.id));
+      }
+    } else {
+      const res = await saveSubstitution(selectedSchool.id, {
+        date: targetDateStr,
+        dayOfWeek: dutyAssignDay,
+        lessonHour: lHour,
+        className: classNameText,
+        lessonName: slotItem.lessonName || 'Ders',
+        absentTeacherName: slotItem.teacherName,
+        absenceReason: currentReason,
+        substituteTeacherName: dutyTeacher.teacherName,
+        dutyPlace: dutyTeacher.dutyPlace || 'Genel Nöbet',
+      });
+      if (res.success && res.data) {
+        setDutySubstitutions((prev: any[]) => {
+          const filtered = prev.filter((s) =>
+            !(
+              Number(s.lessonHour) === lHour &&
+              isSameTeacher(s.absentTeacherName, slotItem.teacherName) &&
+              String(s.className || '') === String(classNameText || '')
+            )
+          );
+          return [...filtered, res.data];
+        });
+      } else {
+        Alert.alert('Hata', res.error || 'Nöbetçi görevlendirmesi kaydedilemedi.');
+      }
+    }
+  };
+
+  const handleChangeReason = (teacherName: string, reasonText: string) => {
+    setAbsentReasons((prev: any) => ({
+      ...prev,
+      [teacherName]: reasonText,
+    }));
+    if (selectedSchool?.id) {
+      updateSubstitutionReason(selectedSchool.id, targetDateStr, teacherName, reasonText);
+    }
+  };
 
   return (
     <View style={{ gap: 14 }}>
@@ -237,45 +341,77 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {list.map((t: any) => {
                             const isAbsent = absentTeachers.includes(t.fullName);
+                            const reasonVal = (absentReasons && absentReasons[t.fullName]) || '';
                             return (
-                              <TouchableOpacity
+                              <View
                                 key={t.id || t.fullName}
                                 style={{
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  gap: 8,
                                   backgroundColor: isAbsent ? '#FEF2F2' : '#FFFFFF',
                                   borderWidth: 1.5,
                                   borderColor: isAbsent ? '#EF4444' : '#E2E8F0',
-                                  paddingHorizontal: 10,
-                                  paddingVertical: 7,
                                   borderRadius: 8,
-                                  minWidth: 160,
-                                }}
-                                onPress={() => {
-                                  setAbsentTeachers((prev: any) =>
-                                    prev.includes(t.fullName)
-                                      ? prev.filter((name: any) => name !== t.fullName)
-                                      : [...prev, t.fullName]
-                                  );
+                                  padding: 8,
+                                  minWidth: 180,
+                                  flex: 1,
+                                  maxWidth: 260,
                                 }}
                               >
-                                <Ionicons
-                                  name={isAbsent ? 'checkbox' : 'square-outline'}
-                                  size={18}
-                                  color={isAbsent ? '#EF4444' : '#94A3B8'}
-                                />
-                                <View style={{ flex: 1 }}>
-                                  <Text style={{ fontSize: 12, fontWeight: '800', color: isAbsent ? '#DC2626' : '#1E293B' }} numberOfLines={1}>
-                                    {t.fullName}
-                                  </Text>
-                                  {t.branch && (
-                                    <Text style={{ fontSize: 10, color: isAbsent ? '#B91C1C' : '#64748B' }} numberOfLines={1}>
-                                      {t.branch}
+                                <TouchableOpacity
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 8,
+                                  }}
+                                  onPress={() => {
+                                    setAbsentTeachers((prev: any) =>
+                                      prev.includes(t.fullName)
+                                        ? prev.filter((name: any) => name !== t.fullName)
+                                        : [...prev, t.fullName]
+                                    );
+                                  }}
+                                >
+                                  <Ionicons
+                                    name={isAbsent ? 'checkbox' : 'square-outline'}
+                                    size={18}
+                                    color={isAbsent ? '#EF4444' : '#94A3B8'}
+                                  />
+                                  <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '800', color: isAbsent ? '#DC2626' : '#1E293B' }} numberOfLines={1}>
+                                      {t.fullName}
                                     </Text>
-                                  )}
-                                </View>
-                              </TouchableOpacity>
+                                    {t.branch && (
+                                      <Text style={{ fontSize: 10, color: isAbsent ? '#B91C1C' : '#64748B' }} numberOfLines={1}>
+                                        {t.branch}
+                                      </Text>
+                                    )}
+                                  </View>
+                                </TouchableOpacity>
+
+                                {/* Seçildiğinde altında açılan isteğe bağlı Gelmeme Nedeni kutucuğu */}
+                                {isAbsent && (
+                                  <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#FECACA' }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#991B1B', marginBottom: 2 }}>
+                                      Gelmeme Nedeni (İsteğe bağlı):
+                                    </Text>
+                                    <TextInput
+                                      style={{
+                                        backgroundColor: '#FFFFFF',
+                                        borderWidth: 1,
+                                        borderColor: '#FCA5A5',
+                                        borderRadius: 6,
+                                        paddingHorizontal: 8,
+                                        paddingVertical: 4,
+                                        fontSize: 11,
+                                        color: '#0F172A',
+                                      }}
+                                      placeholder="Örn: Raporlu, İzinli, Görevli..."
+                                      placeholderTextColor="#94A3B8"
+                                      value={reasonVal}
+                                      onChangeText={(text) => handleChangeReason(t.fullName, text)}
+                                    />
+                                  </View>
+                                )}
+                              </View>
                             );
                           })}
                         </View>
@@ -416,13 +552,37 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                     <Text style={{ fontSize: 12, fontWeight: '700', color: '#9F1239' }}>
                                       ❌ Gelmeyen: {slotItem.teacherName}
                                     </Text>
+                                    {((absentReasons && absentReasons[slotItem.teacherName]) || '') ? (
+                                      <View style={{ backgroundColor: '#FFE4E6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginTop: 4, alignSelf: 'flex-start' }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#BE123C' }}>
+                                          ⚠️ Sebep: {absentReasons[slotItem.teacherName]}
+                                        </Text>
+                                      </View>
+                                    ) : null}
                                   </View>
 
-                                  <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#FFE4E6', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                    <Ionicons name="arrow-forward-circle" size={14} color="#E11D48" />
-                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#E11D48' }}>
-                                      Yerine Nöbetçi Görevlendirilecek ➔
-                                    </Text>
+                                  <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#FFE4E6', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 }}>
+                                      <Ionicons name="arrow-forward-circle" size={14} color="#E11D48" />
+                                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#E11D48' }}>
+                                        Yerine Nöbetçi Görevlendirilecek ➔
+                                      </Text>
+                                    </View>
+                                    {(() => {
+                                      const slotAssigned = (dutySubstitutions || []).find((sub: any) =>
+                                        Number(sub.lessonHour) === lHour &&
+                                        isSameTeacher(sub.absentTeacherName, slotItem.teacherName) &&
+                                        String(sub.className || '') === String(classNameText || '')
+                                      );
+                                      if (!slotAssigned) return null;
+                                      return (
+                                        <View style={{ backgroundColor: '#DCFCE7', borderWidth: 1, borderColor: '#86EFAC', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                                          <Text style={{ fontSize: 10, fontWeight: '800', color: '#15803D' }}>
+                                            ✓ Atandı: {slotAssigned.substituteTeacherName}
+                                          </Text>
+                                        </View>
+                                      );
+                                    })()}
                                   </View>
                                 </View>
 
@@ -476,67 +636,95 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                       showsHorizontalScrollIndicator={false}
                                       contentContainerStyle={{ gap: 8, paddingVertical: 2 }}
                                     >
-                                      {visibleDutyTeachers.map((d: any, dIdx: any) => (
-                                        <View
-                                          key={d.teacherName + '_' + dIdx}
-                                          style={{
-                                            backgroundColor: '#FFFFFF',
-                                            borderWidth: 1.5,
-                                            borderColor: '#86EFAC',
-                                            borderRadius: 8,
-                                            padding: 8,
-                                            minWidth: 145,
-                                            maxWidth: 180,
-                                            justifyContent: 'space-between',
-                                            elevation: 1,
-                                            shadowColor: '#000',
-                                            shadowOffset: { width: 0, height: 1 },
-                                            shadowOpacity: 0.05,
-                                            shadowRadius: 2,
-                                          }}
-                                        >
-                                          {/* Üst Satır: Öğretmen Adı ve Minik Göz Simgesi */}
-                                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-                                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#0F172A', flex: 1 }} numberOfLines={1}>
-                                              {d.teacherName}
-                                            </Text>
-                                            {/* 👁️ Minik Göz Simgesi (Tıklayınca Gizle / Sağa At) */}
+                                      {visibleDutyTeachers.map((d: any, dIdx: any) => {
+                                        const isAssigned = (dutySubstitutions || []).some((sub: any) =>
+                                          Number(sub.lessonHour) === lHour &&
+                                          isSameTeacher(sub.absentTeacherName, slotItem.teacherName) &&
+                                          String(sub.className || '') === String(classNameText || '') &&
+                                          isSameTeacher(sub.substituteTeacherName, d.teacherName)
+                                        );
+
+                                        return (
+                                          <View
+                                            key={d.teacherName + '_' + dIdx}
+                                            style={{
+                                              backgroundColor: isAssigned ? '#ECFDF5' : '#FFFFFF',
+                                              borderWidth: isAssigned ? 2 : 1.5,
+                                              borderColor: isAssigned ? '#059669' : '#86EFAC',
+                                              borderRadius: 8,
+                                              padding: 8,
+                                              minWidth: 155,
+                                              maxWidth: 190,
+                                              justifyContent: 'space-between',
+                                              elevation: isAssigned ? 2 : 1,
+                                              shadowColor: '#000',
+                                              shadowOffset: { width: 0, height: 1 },
+                                              shadowOpacity: 0.05,
+                                              shadowRadius: 2,
+                                            }}
+                                          >
+                                            {/* Üst Satır: Öğretmen Adı ve Minik Göz Simgesi */}
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                                              <Text style={{ fontSize: 12, fontWeight: '800', color: isAssigned ? '#065F46' : '#0F172A', flex: 1 }} numberOfLines={1}>
+                                                {d.teacherName}
+                                              </Text>
+                                              {/* 👁️ Minik Göz Simgesi (Tıklayınca Gizle / Sağa At) */}
+                                              <TouchableOpacity
+                                                onPress={() => {
+                                                  setHiddenDutyTeachersBySlot((prev: any) => {
+                                                    const curr = prev[slotKey] || [];
+                                                    return { ...prev, [slotKey]: [...curr, d.teacherName] };
+                                                  });
+                                                }}
+                                                hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                                style={{
+                                                  backgroundColor: '#EEF2FF',
+                                                  padding: 3,
+                                                  borderRadius: 6,
+                                                  borderWidth: 1,
+                                                  borderColor: '#C7D2FE',
+                                                }}
+                                                accessibilityLabel="Kartı gizle / en sağa at"
+                                              >
+                                                <Ionicons name="eye-off-outline" size={13} color="#4F46E5" />
+                                              </TouchableOpacity>
+                                            </View>
+
+                                            <View style={{ marginTop: 6 }}>
+                                              <View style={{ backgroundColor: isAssigned ? '#D1FAE5' : '#DCFCE7', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
+                                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#166534' }} numberOfLines={1}>
+                                                  📍 {d.dutyPlace}
+                                                </Text>
+                                              </View>
+                                            </View>
+
+                                            {/* Görevlendir Butonu */}
                                             <TouchableOpacity
-                                              onPress={() => {
-                                                setHiddenDutyTeachersBySlot((prev: any) => {
-                                                  const curr = prev[slotKey] || [];
-                                                  return { ...prev, [slotKey]: [...curr, d.teacherName] };
-                                                });
-                                              }}
-                                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                                              onPress={() => handleToggleAssignDuty(slotItem, lHour, classNameText, d)}
                                               style={{
-                                                backgroundColor: '#EEF2FF',
-                                                padding: 3,
+                                                marginTop: 8,
+                                                paddingVertical: 5,
+                                                paddingHorizontal: 8,
                                                 borderRadius: 6,
-                                                borderWidth: 1,
-                                                borderColor: '#C7D2FE',
+                                                backgroundColor: isAssigned ? '#059669' : '#4F46E5',
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: 4,
                                               }}
-                                              accessibilityLabel="Kartı gizle / en sağa at"
                                             >
-                                              <Ionicons name="eye-off-outline" size={13} color="#4F46E5" />
+                                              <Ionicons
+                                                name={isAssigned ? 'checkmark-circle' : 'person-add-outline'}
+                                                size={13}
+                                                color="#FFFFFF"
+                                              />
+                                              <Text style={{ fontSize: 10, fontWeight: '800', color: '#FFFFFF' }}>
+                                                {isAssigned ? 'Görevlendirildi (Kaldır)' : 'Bu Dersi Ata'}
+                                              </Text>
                                             </TouchableOpacity>
                                           </View>
-
-                                          <View style={{ marginTop: 6 }}>
-                                            <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
-                                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#166534' }} numberOfLines={1}>
-                                                📍 {d.dutyPlace}
-                                              </Text>
-                                            </View>
-                                          </View>
-
-                                          <View style={{ marginTop: 8, paddingTop: 4, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
-                                            <Text style={{ fontSize: 9, color: '#15803D', fontWeight: '800' }}>
-                                              ✓ Bu saat dersi BOŞ
-                                            </Text>
-                                          </View>
-                                        </View>
-                                      ))}
+                                        );
+                                      })}
                                     </ScrollView>
                                   )}
                                 </View>

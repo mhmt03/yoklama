@@ -177,8 +177,8 @@ export async function apiRequest<T = any>(
       if (isJwtExpired(token)) {
         await clearAuthSession();
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          await AsyncStorage.removeItem('@ogretmen_ajanda_user_role').catch(() => {});
-          try { window.dispatchEvent(new CustomEvent('session-expired')); } catch {}
+          await AsyncStorage.removeItem('@ogretmen_ajanda_user_role').catch(() => { });
+          try { window.dispatchEvent(new CustomEvent('session-expired')); } catch { }
         }
         return {
           success: false,
@@ -225,8 +225,8 @@ export async function apiRequest<T = any>(
         // Oturum süresi dolmuş veya token geçersiz
         await clearAuthSession();
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          await AsyncStorage.removeItem('@ogretmen_ajanda_user_role').catch(() => {});
-          try { window.dispatchEvent(new CustomEvent('session-expired')); } catch {}
+          await AsyncStorage.removeItem('@ogretmen_ajanda_user_role').catch(() => { });
+          try { window.dispatchEvent(new CustomEvent('session-expired')); } catch { }
         }
         return {
           success: false,

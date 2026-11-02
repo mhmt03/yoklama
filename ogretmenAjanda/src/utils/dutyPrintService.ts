@@ -8,6 +8,7 @@ export interface DutyPrintSlot {
   className: string;
   lessonName: string;
   absentTeacherName: string;
+  absenceReason?: string; // Gelmeme nedeni (isteğe bağlı)
   assignedTeachers: {
     teacherName: string;
     dutyPlace: string;
@@ -23,6 +24,8 @@ export interface DutyPrintOptions {
 }
 
 export function generateDutyAssignmentHtml(options: DutyPrintOptions): string {
+  const escapeHtml = (s?: string) =>
+    String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const { schoolName, dayName, slots, dateStr, directorName } = options;
   const todayStr = dateStr || new Date().toLocaleDateString('tr-TR', {
     day: '2-digit',
@@ -46,7 +49,7 @@ export function generateDutyAssignmentHtml(options: DutyPrintOptions): string {
             <td style="text-align: center; font-weight: bold; width: 60px;">${slot.lessonHour}. Ders</td>
             <td style="text-align: center; font-weight: 600; width: 80px;">${slot.className || '—'}</td>
             <td style="text-align: left; font-weight: 500;">${slot.lessonName || '—'}</td>
-            <td style="text-align: left; color: #991B1B; font-weight: 600;">${slot.absentTeacherName}</td>
+            <td style="text-align: left; color: #991B1B; font-weight: 600;">${escapeHtml(slot.absentTeacherName)}${slot.absenceReason ? `<div style="font-size: 10px; font-weight: 500; color: #475569; font-style: italic; margin-top: 2px;">(${escapeHtml(slot.absenceReason)})</div>` : ''}</td>
             <td style="text-align: left; font-weight: 700; color: #0F172A;">${assignedNames}</td>
             <td style="text-align: center; font-size: 11px;">${dutyPlaces}</td>
             <td style="text-align: center; width: 100px;"></td>
