@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,12 @@ import {
   findLessonResultForStudent,
   readTextWithEncodingAutoDetect,
 } from './optik/optikExportAndExcelHelpers';
+
+export const parseColInput = (val: any, defaultVal = 0): number => {
+  if (val === '' || val === null || val === undefined) return defaultVal;
+  const num = parseInt(String(val), 10);
+  return isNaN(num) ? defaultVal : num;
+};
 
 export interface OptikModuleViewProps {
   schoolId?: string;
@@ -264,6 +270,10 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
   }>({ unmatchedCount: 0, nameMismatchCount: 0, missingBookletCount: 0 });
   const [evalSearchQuery, setEvalSearchQuery] = useState<string>('');
 
+  // Değerlendirme ekranında anlık şablon parametresi düzenleme
+  const [evalCustomParams, setEvalCustomParams] = useState<any>(null);
+  const [isEvalParamsOpen, setIsEvalParamsOpen] = useState(false);
+
   // Öğrenci Kodlama ve Detay Düzenleme Modalı (Önizleme Satırı Detayı)
   const [studentDetailModalVisible, setStudentDetailModalVisible] = useState(false);
   const [editingStudentRow, setEditingStudentRow] = useState<any | null>(null);
@@ -341,6 +351,105 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
   // Değerlendirme modalında aktif kullanılan optik form şablonu
   const selectedFormForEval =
     forms.find((f: any) => f.id === (evalFormId || evalExam?.optikFormId || forms[0]?.id)) || forms[0];
+
+  // TXT içeriğindeki ilk veri satırı (canlı parametre önizleme kesiti için)
+  const evalFirstLine = useMemo(() => {
+    if (!evalTxtContent) return '';
+    const lines = evalTxtContent.split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => l.trim().length > 0);
+    return lines[0] || '';
+  }, [evalTxtContent]);
+
+  // Seçili şablon veya modal değiştiğinde dinamik parametre state'ini senkronize et
+  useEffect(() => {
+    if (selectedFormForEval) {
+      const rawNumBas = selectedFormForEval.numaraBaslangic ?? 0;
+      const rawAdBas = selectedFormForEval.adSoyadBaslangic ?? 5;
+      const rawNumUz = selectedFormForEval.numaraUzunluk ?? 5;
+      // 0/1 kayması kontrolü (numBas == 1 iken adBas <= numUz ise açıkça 0-tabanlıdır)
+      const correctedNumBas = (rawNumBas === 1 && rawAdBas > 0 && rawAdBas <= rawNumUz) ? 0 : rawNumBas;
+
+      setEvalCustomParams({
+        id: selectedFormForEval.id,
+        schoolId: selectedFormForEval.schoolId,
+        formAdi: selectedFormForEval.formAdi,
+        numaraBaslangic: correctedNumBas,
+        numaraUzunluk: selectedFormForEval.numaraUzunluk ?? 5,
+        adSoyadBaslangic: selectedFormForEval.adSoyadBaslangic ?? 5,
+        adSoyadUzunluk: selectedFormForEval.adSoyadUzunluk ?? 20,
+        sinifBaslangic: selectedFormForEval.sinifBaslangic ?? 25,
+        sinifUzunluk: selectedFormForEval.sinifUzunluk ?? 4,
+        kitapcikTuruBaslangic: selectedFormForEval.kitapcikTuruBaslangic ?? 29,
+        kitapcikTuruUzunluk: selectedFormForEval.kitapcikTuruUzunluk ?? 1,
+        dersler: (selectedFormForEval.dersler || []).map((d: any, idx: number) => ({
+          dersAdi: d.dersAdi,
+          dersGrubu: d.dersGrubu || '',
+          baslangicSutun: d.baslangicSutun ?? 0,
+          karakterSayisi: d.karakterSayisi ?? 20,
+          siraNo: d.siraNo || idx + 1,
+        })),
+      });
+    }
+  }, [selectedFormForEval?.id, evalModalVisible]);
+
+  // Değerlendirme parametre önizleme kesiti
+  const sliceEvalLine = (start: any, len: any) => {
+    const rawLine = evalFirstLine || selectedFormForEval?.sampleLine || sampleLine || '';
+    if (!rawLine) return '— (Veri yok)';
+    const s = Math.max(0, parseInt(String(start ?? 0), 10) || 0);
+    const l = Math.max(1, parseInt(String(len ?? 1), 10) || 1);
+    if (s >= rawLine.length) return '(dışında)';
+    const cut = rawLine.substring(s, s + l);
+    return cut.length > 0 ? cut : '(boş)';
+  };
+
+  // Düzenlenen parametreleri kalıcı olarak şablona kaydetme
+  const handleSaveEvalCustomParams = async () => {
+    if (!evalCustomParams || !selectedFormForEval) return;
+    setActionLoading(true);
+    try {
+      const activeSid = effectiveSchoolId || schoolId;
+      const payload = {
+        id: selectedFormForEval.id,
+        schoolId: selectedFormForEval.schoolId || activeSid,
+        formAdi: (evalCustomParams.formAdi || selectedFormForEval.formAdi).trim(),
+        numaraBaslangic: Math.max(0, parseColInput(evalCustomParams.numaraBaslangic, 0)),
+        numaraUzunluk: Math.max(1, parseColInput(evalCustomParams.numaraUzunluk, 5)),
+        adSoyadBaslangic: Math.max(0, parseColInput(evalCustomParams.adSoyadBaslangic, 5)),
+        adSoyadUzunluk: Math.max(1, parseColInput(evalCustomParams.adSoyadUzunluk, 20)),
+        adSoyadAyriMi: !!selectedFormForEval.adSoyadAyriMi,
+        soyadBaslangic: selectedFormForEval.soyadBaslangic,
+        soyadUzunluk: selectedFormForEval.soyadUzunluk,
+        sinifBaslangic: Math.max(0, parseColInput(evalCustomParams.sinifBaslangic, 25)),
+        sinifUzunluk: Math.max(0, parseColInput(evalCustomParams.sinifUzunluk, 4)),
+        kitapcikTuruBaslangic: evalCustomParams.kitapcikTuruBaslangic != null
+          ? parseColInput(evalCustomParams.kitapcikTuruBaslangic, 29)
+          : null,
+        kitapcikTuruUzunluk: evalCustomParams.kitapcikTuruUzunluk != null
+          ? parseColInput(evalCustomParams.kitapcikTuruUzunluk, 1)
+          : null,
+        sampleLine: evalFirstLine || selectedFormForEval.sampleLine || null,
+        dersler: (evalCustomParams.dersler || []).map((d: any, idx: number) => ({
+          dersAdi: String(d.dersAdi || '').trim(),
+          dersGrubu: d.dersGrubu ? String(d.dersGrubu).trim() : null,
+          baslangicSutun: Math.max(0, parseColInput(d.baslangicSutun, 0)),
+          karakterSayisi: Math.max(1, parseColInput(d.karakterSayisi, 1)),
+          siraNo: d.siraNo || idx + 1,
+        })),
+      };
+
+      const res = await apiRequest<any>('Optik/forms', 'POST', payload);
+      if (res.success) {
+        showAlert('Şablon Güncellendi 💾', `"${payload.formAdi}" şablonu yeni parametrelerle başarıyla kaydedildi.`);
+        await loadInitialData();
+      } else {
+        showAlert('Hata', res.error || 'Şablon parametreleri kaydedilemedi.');
+      }
+    } catch (err: any) {
+      showAlert('Hata', err.message || 'Şablon parametreleri kaydedilemedi.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Görünürlük Anahtarı Güncelleme
   const handleToggleVisibility = async (
@@ -490,9 +599,9 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
         .map((d: any, i: number) => ({
           dersAdi: String(d.dersAdi || '').trim(),
           dersGrubu: d.dersGrubu ? String(d.dersGrubu).trim() : null,
-          baslangicSutun: parseInt(String(d.baslangicSutun || '1'), 10) || 1,
-          karakterSayisi: parseInt(String(d.karakterSayisi || '20'), 10) || 20,
-          siraNo: parseInt(String(d.siraNo || i + 1), 10) || i + 1,
+          baslangicSutun: parseColInput(d.baslangicSutun, 0),
+          karakterSayisi: Math.max(1, parseColInput(d.karakterSayisi, 20)),
+          siraNo: parseColInput(d.siraNo, i + 1),
         }))
         .filter((d: any) => d.dersAdi.length > 0);
 
@@ -500,26 +609,26 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
         id: safeId,
         schoolId: activeSid || undefined,
         formAdi: editingForm.formAdi.trim(),
-        numaraBaslangic: parseInt(String(editingForm.numaraBaslangic || '1'), 10) || 1,
-        numaraUzunluk: parseInt(String(editingForm.numaraUzunluk || '5'), 10) || 5,
-        adSoyadBaslangic: parseInt(String(editingForm.adSoyadBaslangic || '6'), 10) || 6,
-        adSoyadUzunluk: parseInt(String(editingForm.adSoyadUzunluk || '20'), 10) || 20,
+        numaraBaslangic: Math.max(0, parseColInput(editingForm.numaraBaslangic, 0)),
+        numaraUzunluk: Math.max(1, parseColInput(editingForm.numaraUzunluk, 5)),
+        adSoyadBaslangic: Math.max(0, parseColInput(editingForm.adSoyadBaslangic, 5)),
+        adSoyadUzunluk: Math.max(1, parseColInput(editingForm.adSoyadUzunluk, 20)),
         adSoyadAyriMi: Boolean(editingForm.adSoyadAyriMi),
         soyadBaslangic:
-          editingForm.adSoyadAyriMi && editingForm.soyadBaslangic
-            ? parseInt(String(editingForm.soyadBaslangic), 10) || null
+          editingForm.adSoyadAyriMi && editingForm.soyadBaslangic != null
+            ? parseColInput(editingForm.soyadBaslangic, 15)
             : null,
         soyadUzunluk:
-          editingForm.adSoyadAyriMi && editingForm.soyadUzunluk
-            ? parseInt(String(editingForm.soyadUzunluk), 10) || null
+          editingForm.adSoyadAyriMi && editingForm.soyadUzunluk != null
+            ? parseColInput(editingForm.soyadUzunluk, 10)
             : null,
-        sinifBaslangic: parseInt(String(editingForm.sinifBaslangic || '26'), 10) || 26,
-        sinifUzunluk: parseInt(String(editingForm.sinifUzunluk ?? '4'), 10) || 0,
-        kitapcikTuruBaslangic: editingForm.kitapcikTuruBaslangic
-          ? parseInt(String(editingForm.kitapcikTuruBaslangic), 10) || null
+        sinifBaslangic: Math.max(0, parseColInput(editingForm.sinifBaslangic, 25)),
+        sinifUzunluk: Math.max(0, parseColInput(editingForm.sinifUzunluk, 4)),
+        kitapcikTuruBaslangic: editingForm.kitapcikTuruBaslangic != null
+          ? parseColInput(editingForm.kitapcikTuruBaslangic, 29)
           : null,
-        kitapcikTuruUzunluk: editingForm.kitapcikTuruUzunluk
-          ? parseInt(String(editingForm.kitapcikTuruUzunluk), 10) || 1
+        kitapcikTuruUzunluk: editingForm.kitapcikTuruUzunluk != null
+          ? Math.max(1, parseColInput(editingForm.kitapcikTuruUzunluk, 1))
           : null,
         fmtRawContent: editingForm.fmtRawContent || fmtRawInput || null,
         sampleLine: editingForm.sampleLine || null,
@@ -1243,6 +1352,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
         selectedClasses: evalFilterClassesEnabled && activeClasses.length > 0 ? activeClasses : undefined,
         excludedLineIndices: customExcludedLines ?? evalExcludedLines,
         rowOverrides: overridesList.length > 0 ? overridesList : undefined,
+        dinamikForm: evalCustomParams || undefined,
       });
 
       if (res.success && res.data) {
@@ -5136,7 +5246,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                   })}
                 </View>
 
-                {/* Seçili Şablonun Canlı Koordinat Özeti */}
+                {/* Seçili Şablon Parametre Ayarları & Açılabilir Düzenleyici */}
                 {selectedFormForEval && (
                   <View
                     style={{
@@ -5144,27 +5254,487 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                       paddingTop: 6,
                       borderTopWidth: 1,
                       borderTopColor: '#DCFCE7',
-                      flexDirection: 'row',
-                      flexWrap: 'wrap',
-                      gap: 10,
                     }}
                   >
-                    <Text style={{ fontSize: 11, color: '#166534' }}>
-                      <Text style={{ fontWeight: '700' }}>Öğr. No:</Text> Sütun {selectedFormForEval.numaraBaslangic} ({selectedFormForEval.numaraUzunluk} hane)
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#166534' }}>
-                      <Text style={{ fontWeight: '700' }}>Ad Soyad:</Text> Sütun {selectedFormForEval.adSoyadBaslangic} ({selectedFormForEval.adSoyadUzunluk} hane)
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#166534' }}>
-                      <Text style={{ fontWeight: '700' }}>Şube:</Text> Sütun {selectedFormForEval.sinifBaslangic} ({selectedFormForEval.sinifUzunluk} hane)
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#166534' }}>
-                      <Text style={{ fontWeight: '700' }}>Kitapçık:</Text> Sütun {selectedFormForEval.kitapcikTuruBaslangic || '-'}
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#166534' }}>
-                      <Text style={{ fontWeight: '700' }}>Dersler:</Text>{' '}
-                      {selectedFormForEval.dersler?.map((d: any) => `${d.dersAdi} (Sütun ${d.baslangicSutun})`).join(', ') || 'Tanımsız'}
-                    </Text>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: 8,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, minWidth: 200 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: '#166534' }}>
+                          ⚙️ Form Parametreleri & Canlı Kesit:
+                        </Text>
+                        <View
+                          style={{
+                            backgroundColor: '#FEF3C7',
+                            paddingHorizontal: 6,
+                            paddingVertical: 1,
+                            borderRadius: 4,
+                            borderWidth: 1,
+                            borderColor: '#FCD34D',
+                          }}
+                        >
+                          <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#92400E' }}>
+                            {isEvalParamsOpen ? 'Düzenleniyor ✏️' : 'Canlı Ayarlanabilir'}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => setIsEvalParamsOpen((prev) => !prev)}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 4,
+                          backgroundColor: isEvalParamsOpen ? '#DCFCE7' : '#FFFFFF',
+                          paddingHorizontal: 9,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: '#86EFAC',
+                          cursor: 'pointer' as any,
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803D' }}>
+                          {isEvalParamsOpen ? 'Parametre Panelini Kapat 🔼' : '⚙️ Parametreleri Düzenle & Test Et 🔽'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Parametre Özet Satırı */}
+                    <View
+                      style={{
+                        marginTop: 5,
+                        flexDirection: 'row',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, color: '#166534' }}>
+                        <Text style={{ fontWeight: '700' }}>Öğr. No:</Text> Sütun {evalCustomParams?.numaraBaslangic ?? selectedFormForEval.numaraBaslangic} ({evalCustomParams?.numaraUzunluk ?? selectedFormForEval.numaraUzunluk} krk)
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#166534' }}>
+                        <Text style={{ fontWeight: '700' }}>Ad Soyad:</Text> Sütun {evalCustomParams?.adSoyadBaslangic ?? selectedFormForEval.adSoyadBaslangic} ({evalCustomParams?.adSoyadUzunluk ?? selectedFormForEval.adSoyadUzunluk} krk)
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#166534' }}>
+                        <Text style={{ fontWeight: '700' }}>Şube:</Text> Sütun {evalCustomParams?.sinifBaslangic ?? selectedFormForEval.sinifBaslangic} ({evalCustomParams?.sinifUzunluk ?? selectedFormForEval.sinifUzunluk} krk)
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#166534' }}>
+                        <Text style={{ fontWeight: '700' }}>Kitapçık:</Text> Sütun {evalCustomParams?.kitapcikTuruBaslangic ?? selectedFormForEval.kitapcikTuruBaslangic ?? '-'}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#166534' }}>
+                        <Text style={{ fontWeight: '700' }}>Dersler:</Text>{' '}
+                        {(evalCustomParams?.dersler || selectedFormForEval.dersler)?.map((d: any) => `${d.dersAdi} (${d.baslangicSutun})`).join(', ') || 'Tanımsız'}
+                      </Text>
+                    </View>
+
+                    {/* Açılabilir Detaylı Parametre Düzenleme Kartı */}
+                    {isEvalParamsOpen && evalCustomParams && (
+                      <View
+                        style={{
+                          marginTop: 10,
+                          backgroundColor: '#F8FAFC',
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: '#CBD5E1',
+                          padding: 10,
+                        }}
+                      >
+                        <Text style={{ fontSize: 11, color: '#475569', marginBottom: 8, lineHeight: 16 }}>
+                          💡 <Text style={{ fontWeight: '700' }}>Canlı Ayar Rehberi:</Text> Parametreleri doğrudan kutucuktan veya <Text style={{ fontWeight: '700' }}>[-1] / [+1]</Text> butonlarıyla kaydırabilirsiniz. Alttaki <Text style={{ fontWeight: '700', color: '#16A34A' }}>[Kesit]</Text> kutucuğu TXT dosyanızın 1. satırından ne okunduğunu anında gösterir. Değerlendirmeyi deneyip beğendiğinizde <Text style={{ fontWeight: '700', color: '#15803D' }}>Parametreleri Şablona Kaydet</Text> butonuna basarak kalıcı hale getirebilirsiniz.
+                        </Text>
+
+                        {evalFirstLine ? (
+                          <View style={{ marginBottom: 10, backgroundColor: '#FFFFFF', padding: 7, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>
+                              📄 TXT 1. Satırı Örneği (Canlı Kesit Referansı):
+                            </Text>
+                            <Text
+                              style={{
+                                fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                                fontSize: 11,
+                                color: '#0F172A',
+                                marginTop: 2,
+                              }}
+                              numberOfLines={1}
+                            >
+                              {evalFirstLine.substring(0, 100)}
+                            </Text>
+                          </View>
+                        ) : null}
+
+                        {/* Parametre Giriş Grid'i */}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {/* 1. Numara */}
+                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                              👤 Öğrenci Numarası
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraBaslangic: Math.max(0, (p.numaraBaslangic || 0) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.numaraBaslangic ?? 0)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, numaraBaslangic: parseColInput(t, 0) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraBaslangic: (p.numaraBaslangic || 0) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraUzunluk: Math.max(1, (p.numaraUzunluk || 5) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.numaraUzunluk ?? 5)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, numaraUzunluk: Math.max(1, parseColInput(t, 5)) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraUzunluk: (p.numaraUzunluk || 5) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                                [{sliceEvalLine(evalCustomParams.numaraBaslangic, evalCustomParams.numaraUzunluk)}]
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* 2. Ad Soyad */}
+                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                              📛 Ad Soyad
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadBaslangic: Math.max(0, (p.adSoyadBaslangic || 0) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.adSoyadBaslangic ?? 5)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, adSoyadBaslangic: parseColInput(t, 5) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadBaslangic: (p.adSoyadBaslangic || 0) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadUzunluk: Math.max(1, (p.adSoyadUzunluk || 20) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.adSoyadUzunluk ?? 20)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, adSoyadUzunluk: Math.max(1, parseColInput(t, 20)) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadUzunluk: (p.adSoyadUzunluk || 20) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                                [{sliceEvalLine(evalCustomParams.adSoyadBaslangic, evalCustomParams.adSoyadUzunluk)}]
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* 3. Sınıf / Şube */}
+                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                              🏫 Sınıf / Şube
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifBaslangic: Math.max(0, (p.sinifBaslangic || 0) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.sinifBaslangic ?? 25)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, sinifBaslangic: parseColInput(t, 25) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifBaslangic: (p.sinifBaslangic || 0) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifUzunluk: Math.max(0, (p.sinifUzunluk || 4) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.sinifUzunluk ?? 4)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, sinifUzunluk: parseColInput(t, 4) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifUzunluk: (p.sinifUzunluk || 4) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                                [{sliceEvalLine(evalCustomParams.sinifBaslangic, evalCustomParams.sinifUzunluk)}]
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* 4. Kitapçık */}
+                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                              📖 Kitapçık Türü
+                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruBaslangic: Math.max(0, (p.kitapcikTuruBaslangic || 0) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.kitapcikTuruBaslangic ?? 29)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruBaslangic: parseColInput(t, 29) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruBaslangic: (p.kitapcikTuruBaslangic || 0) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+
+                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruUzunluk: Math.max(1, (p.kitapcikTuruUzunluk || 1) - 1) }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                              </TouchableOpacity>
+                              <TextInput
+                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                keyboardType="numeric"
+                                value={String(evalCustomParams.kitapcikTuruUzunluk ?? 1)}
+                                onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruUzunluk: Math.max(1, parseColInput(t, 1)) }))}
+                              />
+                              <TouchableOpacity
+                                onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruUzunluk: (p.kitapcikTuruUzunluk || 1) + 1 }))}
+                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                              >
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                                [{sliceEvalLine(evalCustomParams.kitapcikTuruBaslangic, evalCustomParams.kitapcikTuruUzunluk)}]
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/* Ders Sütunları Listesi */}
+                        <View style={{ marginTop: 10 }}>
+                          <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B', marginBottom: 4 }}>
+                            📚 Ders Sütunları ve Soru Sayıları
+                          </Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                            {(evalCustomParams.dersler || []).map((d: any, dIdx: number) => (
+                              <View
+                                key={dIdx}
+                                style={{
+                                  backgroundColor: '#FFFFFF',
+                                  padding: 7,
+                                  borderRadius: 7,
+                                  borderWidth: 1,
+                                  borderColor: '#E2E8F0',
+                                  minWidth: 190,
+                                  flex: 1,
+                                }}
+                              >
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}>
+                                  {d.dersAdi}
+                                </Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 }}>
+                                  <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      const arr = [...evalCustomParams.dersler];
+                                      arr[dIdx] = { ...arr[dIdx], baslangicSutun: Math.max(0, (arr[dIdx].baslangicSutun || 0) - 1) };
+                                      setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
+                                    }}
+                                    style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                  >
+                                    <Text style={{ fontSize: 9.5, fontWeight: '700' }}>-1</Text>
+                                  </TouchableOpacity>
+                                  <TextInput
+                                    style={[styles.compactNumInput, { width: 40, textAlign: 'center', height: 24, fontSize: 10.5 }]}
+                                    keyboardType="numeric"
+                                    value={String(d.baslangicSutun ?? 0)}
+                                    onChangeText={(t) => {
+                                      const arr = [...evalCustomParams.dersler];
+                                      arr[dIdx] = { ...arr[dIdx], baslangicSutun: parseColInput(t, 0) };
+                                      setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
+                                    }}
+                                  />
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      const arr = [...evalCustomParams.dersler];
+                                      arr[dIdx] = { ...arr[dIdx], baslangicSutun: (arr[dIdx].baslangicSutun || 0) + 1 };
+                                      setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
+                                    }}
+                                    style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                  >
+                                    <Text style={{ fontSize: 9.5, fontWeight: '700' }}>+1</Text>
+                                  </TouchableOpacity>
+
+                                  <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Soru:</Text>
+                                  <TextInput
+                                    style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 24, fontSize: 10.5 }]}
+                                    keyboardType="numeric"
+                                    value={String(d.karakterSayisi ?? 20)}
+                                    onChangeText={(t) => {
+                                      const arr = [...evalCustomParams.dersler];
+                                      arr[dIdx] = { ...arr[dIdx], karakterSayisi: Math.max(1, parseColInput(t, 20)) };
+                                      setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
+                                    }}
+                                  />
+                                </View>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                                  <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                                  <Text
+                                    style={{
+                                      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                                      fontSize: 10,
+                                      fontWeight: '700',
+                                      color: '#2563EB',
+                                      backgroundColor: '#EFF6FF',
+                                      paddingHorizontal: 4,
+                                      borderRadius: 3,
+                                      borderWidth: 1,
+                                      borderColor: '#BFDBFE',
+                                    }}
+                                    numberOfLines={1}
+                                  >
+                                    [{sliceEvalLine(d.baslangicSutun, d.karakterSayisi)}]
+                                  </Text>
+                                </View>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+
+                        {/* Parametre Aksiyon Butonları */}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}>
+                          <TouchableOpacity
+                            style={[styles.smallActionBtn, { backgroundColor: '#EFF6FF', borderColor: '#93C5FD', cursor: 'pointer' as any }]}
+                            onPress={() => handleRunEvaluation(false)}
+                            disabled={actionLoading}
+                          >
+                            <Text style={[styles.smallActionBtnText, { color: '#1D4ED8', fontWeight: '800' }]}>
+                              🔎 Bu Parametrelerle Çözümle & Önizle
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.smallActionBtn, { backgroundColor: '#DCFCE7', borderColor: '#86EFAC', cursor: 'pointer' as any }]}
+                            onPress={handleSaveEvalCustomParams}
+                            disabled={actionLoading}
+                          >
+                            <Text style={[styles.smallActionBtnText, { color: '#15803D', fontWeight: '800' }]}>
+                              💾 Parametreleri Şablona Kaydet
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[styles.smallActionBtn, { backgroundColor: '#F1F5F9', borderColor: '#CBD5E1', cursor: 'pointer' as any }]}
+                            onPress={() => {
+                              if (selectedFormForEval) {
+                                setEvalCustomParams({
+                                  id: selectedFormForEval.id,
+                                  schoolId: selectedFormForEval.schoolId,
+                                  formAdi: selectedFormForEval.formAdi,
+                                  numaraBaslangic: selectedFormForEval.numaraBaslangic ?? 0,
+                                  numaraUzunluk: selectedFormForEval.numaraUzunluk ?? 5,
+                                  adSoyadBaslangic: selectedFormForEval.adSoyadBaslangic ?? 5,
+                                  adSoyadUzunluk: selectedFormForEval.adSoyadUzunluk ?? 20,
+                                  sinifBaslangic: selectedFormForEval.sinifBaslangic ?? 25,
+                                  sinifUzunluk: selectedFormForEval.sinifUzunluk ?? 4,
+                                  kitapcikTuruBaslangic: selectedFormForEval.kitapcikTuruBaslangic ?? 29,
+                                  kitapcikTuruUzunluk: selectedFormForEval.kitapcikTuruUzunluk ?? 1,
+                                  dersler: (selectedFormForEval.dersler || []).map((d: any, idx: number) => ({
+                                    dersAdi: d.dersAdi,
+                                    dersGrubu: d.dersGrubu || '',
+                                    baslangicSutun: d.baslangicSutun ?? 0,
+                                    karakterSayisi: d.karakterSayisi ?? 20,
+                                    siraNo: d.siraNo || idx + 1,
+                                  })),
+                                });
+                                showAlert('Sıfırlandı ↩️', 'Parametreler şablonun orijinal kayıtlı değerlerine geri döndürüldü.');
+                              }
+                            }}
+                          >
+                            <Text style={[styles.smallActionBtnText, { color: '#475569' }]}>
+                              ↩️ Orijinal Değerlere Sıfırla
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
                   </View>
                 )}
               </View>

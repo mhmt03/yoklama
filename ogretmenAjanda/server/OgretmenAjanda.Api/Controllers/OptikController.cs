@@ -929,6 +929,22 @@ namespace OgretmenAjanda.Api.Controllers
             int? kitBas = req.DinamikForm != null ? req.DinamikForm.KitapcikTuruBaslangic : form!.KitapcikTuruBaslangic;
             int? kitUz = req.DinamikForm != null ? req.DinamikForm.KitapcikTuruUzunluk : form!.KitapcikTuruUzunluk;
 
+            // 0-tabanlı vs 1-tabanlı ve 0/1 uyuşmazlığı düzeltmesi:
+            // 1. Eğer numBas == 1 iken AdSoyad 5 veya daha küçük bir sütundan başlıyorsa (örn: numBas=1, numUz=5, adBas=5):
+            // 1 + 5 = 6 > 5 olduğundan, numara başlangıcı açıkça 0. karakterdir (0/1 kayması düzeltilir).
+            if (numBas == 1 && adBas > 0 && adBas <= numUz)
+            {
+                numBas = 0;
+            }
+
+            // 2. Eğer tüm form tutarlı şekilde 1-tabanlı tanımlanmışsa (numBas >= 1 ve adBas >= numBas + numUz):
+            // 1. sütun string içinde 0. indekse denk gelir (1-tabanlı -> 0-tabanlı dönüşüm).
+            bool isAll1Based = numBas >= 1 && adBas >= numBas + numUz;
+            int effNumBas = isAll1Based ? Math.Max(0, numBas - 1) : Math.Max(0, numBas);
+            int effAdBas = isAll1Based ? Math.Max(0, adBas - 1) : Math.Max(0, adBas);
+            int effSinifBas = isAll1Based && sinifBas > 0 ? Math.Max(0, sinifBas - 1) : Math.Max(0, sinifBas);
+            int? effKitBas = kitBas.HasValue ? (isAll1Based && kitBas.Value > 0 ? Math.Max(0, kitBas.Value - 1) : Math.Max(0, kitBas.Value)) : null;
+
             var formDersList = req.DinamikForm != null && req.DinamikForm.Dersler.Any()
                 ? req.DinamikForm.Dersler.Select(d => new OptikFormDers
                 {
@@ -999,14 +1015,14 @@ namespace OgretmenAjanda.Api.Controllers
                 if (string.IsNullOrWhiteSpace(rawLine)) continue;
                 var line = rawLine.TrimEnd('\r', '\n');
 
-                string ogrenciNo = SubstringSafe(line, numBas, numUz).Trim();
-                string rawSinif = SubstringSafe(line, sinifBas, sinifUz).Trim();
-                string rawAdSoyad = SubstringSafe(line, adBas, adUz).Trim();
+                string ogrenciNo = SubstringSafe(line, effNumBas, numUz).Trim();
+                string rawSinif = SubstringSafe(line, effSinifBas, sinifUz).Trim();
+                string rawAdSoyad = SubstringSafe(line, effAdBas, adUz).Trim();
 
                 string kitapcik = "A";
-                if (kitBas.HasValue && kitUz.HasValue && kitUz.Value > 0)
+                if (effKitBas.HasValue && kitUz.HasValue && kitUz.Value > 0)
                 {
-                    var okunanKit = SubstringSafe(line, kitBas.Value, kitUz.Value).Trim().ToUpperInvariant();
+                    var okunanKit = SubstringSafe(line, effKitBas.Value, kitUz.Value).Trim().ToUpperInvariant();
                     if (okunanKit == "A" || okunanKit == "B" || okunanKit == "C" || okunanKit == "D")
                         kitapcik = okunanKit;
                 }
@@ -1060,7 +1076,8 @@ namespace OgretmenAjanda.Api.Controllers
 
                     if (formDers == null) continue;
 
-                    string ogrCevaplar = SubstringSafe(line, formDers.BaslangicSutun, formDers.KarakterSayisi).ToUpperInvariant();
+                    int effDersBas = isAll1Based && formDers.BaslangicSutun > 0 ? formDers.BaslangicSutun - 1 : formDers.BaslangicSutun;
+                    string ogrCevaplar = SubstringSafe(line, effDersBas, formDers.KarakterSayisi).ToUpperInvariant();
                     ogrCevaplar = ogrCevaplar.PadRight(sinavDers.SoruSayisi, ' ');
 
                     string anahtar = sinavDers.CevapAnahtariA ?? string.Empty;
