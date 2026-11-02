@@ -876,6 +876,16 @@ namespace OgretmenAjanda.Api.Controllers
         // 4. OPTİK DOSYA OKUMA VE DEĞERLENDİRME MOTORU (/api/Optik/evaluate)
         // =====================================================================
 
+        public class RowOverrideDto
+        {
+            public int LineIndex { get; set; }
+            public string? OgrenciNo { get; set; }
+            public string? AdSoyad { get; set; }
+            public string? Sinif { get; set; }
+            public string? KitapcikTuru { get; set; }
+            public Dictionary<string, string>? DersCevaplari { get; set; }
+        }
+
         public class EvaluateOptikRequest
         {
             public Guid SinavId { get; set; }
@@ -884,9 +894,59 @@ namespace OgretmenAjanda.Api.Controllers
             public bool SaveResults { get; set; } = true;
             public bool SinifFiltresiUygula { get; set; } = false;
             public bool NumarasizlariDahilEt { get; set; } = true;
+            public List<int>? ExcludedLineIndices { get; set; }
+            public List<RowOverrideDto>? RowOverrides { get; set; }
+            public List<string>? SelectedClasses { get; set; }
             public Dictionary<string, string>? DersEslesmeleri { get; set; }
             public SaveOptikFormDto? DinamikForm { get; set; }
             public bool OptikFormuGuncelle { get; set; } = false;
+        }
+
+        private class EvaluatedRowMeta
+        {
+            public int LineIndex { get; set; }
+            public string RawOgrenciNo { get; set; } = string.Empty;
+            public string RawAdSoyad { get; set; } = string.Empty;
+            public string RawSinif { get; set; } = string.Empty;
+            public Student? MatchedStudent { get; set; }
+            public Student? SuggestedStudent { get; set; }
+            public bool HasMissingBooklet { get; set; }
+            public OptikSinavSonuc Sonuc { get; set; } = null!;
+        }
+
+        private static string NormalizeStudentNumber(string? no)
+        {
+            if (string.IsNullOrWhiteSpace(no)) return string.Empty;
+            var trimmed = no.Trim();
+            var withoutZeros = trimmed.TrimStart('0');
+            return string.IsNullOrEmpty(withoutZeros) ? "0" : withoutZeros;
+        }
+
+        private static string NormalizeStudentName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+            var s = name.Trim().ToUpperInvariant()
+                .Replace('İ', 'I')
+                .Replace('ı', 'I')
+                .Replace('Ğ', 'G')
+                .Replace('ğ', 'G')
+                .Replace('Ü', 'U')
+                .Replace('ü', 'U')
+                .Replace('Ş', 'S')
+                .Replace('ş', 'S')
+                .Replace('Ö', 'O')
+                .Replace('ö', 'O')
+                .Replace('Ç', 'C')
+                .Replace('ç', 'C');
+            return System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+        }
+
+        private static bool NamesRoughlyMatch(string? name1, string? name2)
+        {
+            if (string.IsNullOrWhiteSpace(name1) || string.IsNullOrWhiteSpace(name2)) return true;
+            var n1 = NormalizeStudentName(name1);
+            var n2 = NormalizeStudentName(name2);
+            return n1 == n2 || n1.Contains(n2) || n2.Contains(n1);
         }
 
         [HttpPost("evaluate")]
@@ -988,15 +1048,16 @@ namespace OgretmenAjanda.Api.Controllers
                 .ToListAsync();
 
             var studentByNo = new Dictionary<string, Student>(StringComparer.OrdinalIgnoreCase);
+            var studentByNormNo = new Dictionary<string, Student>(StringComparer.OrdinalIgnoreCase);
             foreach (var st in schoolStudents)
             {
                 if (!string.IsNullOrWhiteSpace(st.StudentNumber))
                 {
                     var rawNo = st.StudentNumber.Trim();
                     studentByNo[rawNo] = st;
-                    var trimmed = rawNo.TrimStart('0');
-                    if (!string.IsNullOrEmpty(trimmed))
-                        studentByNo[trimmed] = st;
+                    var normNo = NormalizeStudentNumber(rawNo);
+                    if (!string.IsNullOrEmpty(normNo))
+                        studentByNormNo[normNo] = st;
                 }
             }
 
@@ -1011,47 +1072,102 @@ namespace OgretmenAjanda.Api.Controllers
             double totalPossibleWeightedNet = orderedSinavDersler.Sum(d => d.SoruSayisi * (d.Katsayi > 0 ? d.Katsayi : 1.0));
             if (totalPossibleWeightedNet <= 0) totalPossibleWeightedNet = 100;
 
-            var lines = req.TxtContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var rawLines = req.TxtContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
             var evaluatedResults = new List<OptikSinavSonuc>();
+            var evalMetaList = new List<EvaluatedRowMeta>();
+            var overrideMap = req.RowOverrides?.ToDictionary(o => o.LineIndex, o => o);
+            var excludedSet = req.ExcludedLineIndices != null ? req.ExcludedLineIndices.ToHashSet() : new HashSet<int>();
 
-            foreach (var rawLine in lines)
+            for (int lineIdx = 0; lineIdx < rawLines.Length; lineIdx++)
             {
+                var rawLine = rawLines[lineIdx];
                 if (string.IsNullOrWhiteSpace(rawLine)) continue;
+                if (excludedSet.Contains(lineIdx)) continue;
+
                 var line = rawLine.TrimEnd('\r', '\n');
 
-                string ogrenciNo = SubstringSafe(line, effNumBas, numUz).Trim();
-                string rawSinif = SubstringSafe(line, effSinifBas, sinifUz).Trim();
-                string rawAdSoyad = SubstringSafe(line, effAdBas, adUz).Trim();
+                string readRawOgrNo = SubstringSafe(line, effNumBas, numUz).Trim();
+                string readRawSinif = SubstringSafe(line, effSinifBas, sinifUz).Trim();
+                string readRawAdSoyad = SubstringSafe(line, effAdBas, adUz).Trim();
 
-                string kitapcik = "A";
-                if (effKitBas.HasValue && kitUz.HasValue && kitUz.Value > 0)
+                string readRawKitapcik = effKitBas.HasValue && kitUz.HasValue && kitUz.Value > 0
+                    ? SubstringSafe(line, effKitBas.Value, kitUz.Value).Trim().ToUpperInvariant()
+                    : "";
+
+                bool hasMissingBooklet = readRawKitapcik != "A" && readRawKitapcik != "B" && readRawKitapcik != "C" && readRawKitapcik != "D";
+                string kitapcik = hasMissingBooklet ? "A" : readRawKitapcik;
+
+                string ogrenciNo = readRawOgrNo;
+                string rawAdSoyad = readRawAdSoyad;
+                string rawSinif = readRawSinif;
+
+                RowOverrideDto? rowOv = null;
+                if (overrideMap != null && overrideMap.TryGetValue(lineIdx, out rowOv))
                 {
-                    var okunanKit = SubstringSafe(line, effKitBas.Value, kitUz.Value).Trim().ToUpperInvariant();
-                    if (okunanKit == "A" || okunanKit == "B" || okunanKit == "C" || okunanKit == "D")
-                        kitapcik = okunanKit;
+                    if (!string.IsNullOrWhiteSpace(rowOv.OgrenciNo)) ogrenciNo = rowOv.OgrenciNo.Trim();
+                    if (!string.IsNullOrWhiteSpace(rowOv.AdSoyad)) rawAdSoyad = rowOv.AdSoyad.Trim();
+                    if (!string.IsNullOrWhiteSpace(rowOv.Sinif)) rawSinif = rowOv.Sinif.Trim();
+                    if (!string.IsNullOrWhiteSpace(rowOv.KitapcikTuru))
+                    {
+                        var kUpper = rowOv.KitapcikTuru.Trim().ToUpperInvariant();
+                        if (kUpper == "A" || kUpper == "B" || kUpper == "C" || kUpper == "D")
+                        {
+                            kitapcik = kUpper;
+                            hasMissingBooklet = false;
+                        }
+                    }
                 }
 
+                // Öğrenciyi numaraya göre bul (hem ham hem başta 0'lar atılmış versiyon)
                 Student? matchedStudent = null;
                 if (!string.IsNullOrEmpty(ogrenciNo))
                 {
-                    if (!studentByNo.TryGetValue(ogrenciNo, out matchedStudent))
+                    var cleanNo = ogrenciNo.Trim();
+                    var normNo = NormalizeStudentNumber(cleanNo);
+
+                    if (!studentByNo.TryGetValue(cleanNo, out matchedStudent))
                     {
-                        var trimmed = ogrenciNo.TrimStart('0');
-                        if (!string.IsNullOrEmpty(trimmed))
-                            studentByNo.TryGetValue(trimmed, out matchedStudent);
+                        studentByNormNo.TryGetValue(normNo, out matchedStudent);
+                    }
+                }
+
+                // Eşleşmediyse isimden öneri bul
+                Student? suggestedStudent = null;
+                if (matchedStudent == null && !string.IsNullOrWhiteSpace(rawAdSoyad))
+                {
+                    var normName = NormalizeStudentName(rawAdSoyad);
+                    if (!string.IsNullOrEmpty(normName) && normName.Length >= 3)
+                    {
+                        suggestedStudent = schoolStudents.FirstOrDefault(st =>
+                            !string.IsNullOrWhiteSpace(st.FullName) &&
+                            NormalizeStudentName(st.FullName) == normName);
+
+                        if (suggestedStudent == null)
+                        {
+                            suggestedStudent = schoolStudents.FirstOrDefault(st =>
+                                !string.IsNullOrWhiteSpace(st.FullName) &&
+                                (NormalizeStudentName(st.FullName).Contains(normName) || normName.Contains(NormalizeStudentName(st.FullName))));
+                        }
                     }
                 }
 
                 if (matchedStudent == null && !req.NumarasizlariDahilEt)
                     continue;
 
-                string finalNo = matchedStudent != null ? matchedStudent.StudentNumber : (string.IsNullOrEmpty(ogrenciNo) ? $"OPT-{evaluatedResults.Count + 1}" : ogrenciNo);
+                string finalNo = matchedStudent != null ? matchedStudent.StudentNumber : (string.IsNullOrEmpty(ogrenciNo) ? $"OPT-{lineIdx + 1}" : ogrenciNo);
                 string finalAd = matchedStudent != null ? matchedStudent.FullName : (string.IsNullOrWhiteSpace(rawAdSoyad) ? "Bilinmeyen Öğrenci" : rawAdSoyad);
                 string finalSinif = matchedStudent != null
                     ? FormatClassDisplay(matchedStudent.Grade, matchedStudent.Section, rawSinif)
                     : FormatClassDisplay("", "", rawSinif);
 
-                if (req.SinifFiltresiUygula && cleanHedefSiniflar.Count > 0)
+                // Şube filtresi kontrolü
+                if (req.SelectedClasses != null && req.SelectedClasses.Any())
+                {
+                    var normFinal = NormalizeClassKey(finalSinif);
+                    if (!req.SelectedClasses.Any(sc => NormalizeClassKey(sc) == normFinal))
+                        continue;
+                }
+                else if (req.SinifFiltresiUygula && cleanHedefSiniflar.Count > 0)
                 {
                     var normSinif = NormalizeClassKey(finalSinif);
                     if (!cleanHedefSiniflar.Contains(normSinif))
@@ -1082,6 +1198,12 @@ namespace OgretmenAjanda.Api.Controllers
 
                     int effDersBas = isAll1Based && formDers.BaslangicSutun > 0 ? formDers.BaslangicSutun - 1 : formDers.BaslangicSutun;
                     string ogrCevaplar = SubstringSafe(line, effDersBas, formDers.KarakterSayisi).ToUpperInvariant();
+
+                    if (rowOv != null && rowOv.DersCevaplari != null && rowOv.DersCevaplari.TryGetValue(sinavDers.DersAdi, out var ovAns) && !string.IsNullOrWhiteSpace(ovAns))
+                    {
+                        ogrCevaplar = ovAns.ToUpperInvariant();
+                    }
+
                     ogrCevaplar = ogrCevaplar.PadRight(sinavDers.SoruSayisi, ' ');
 
                     string anahtar = sinavDers.CevapAnahtariA ?? string.Empty;
@@ -1170,6 +1292,17 @@ namespace OgretmenAjanda.Api.Controllers
                 }
 
                 evaluatedResults.Add(sonuc);
+                evalMetaList.Add(new EvaluatedRowMeta
+                {
+                    LineIndex = lineIdx,
+                    RawOgrenciNo = readRawOgrNo,
+                    RawAdSoyad = readRawAdSoyad,
+                    RawSinif = readRawSinif,
+                    MatchedStudent = matchedStudent,
+                    SuggestedStudent = suggestedStudent,
+                    HasMissingBooklet = hasMissingBooklet,
+                    Sonuc = sonuc
+                });
             }
 
             // Okul ve Sınıf Sıralamalarını (Dereceleri) Hesapla
@@ -1215,6 +1348,46 @@ namespace OgretmenAjanda.Api.Controllers
                 await _context.SaveChangesAsync();
             }
 
+            var resultsPayload = evalMetaList.Select(m => new
+            {
+                id = m.Sonuc.Id,
+                lineIndex = m.LineIndex,
+                studentId = m.Sonuc.StudentId,
+                ogrenciNo = m.Sonuc.OgrenciNo,
+                adSoyad = m.Sonuc.AdSoyad,
+                sinif = m.Sonuc.Sinif,
+                kitapcikTuru = m.Sonuc.KitapcikTuru,
+                toplamDogru = m.Sonuc.ToplamDogru,
+                toplamYanlis = m.Sonuc.ToplamYanlis,
+                toplamBos = m.Sonuc.ToplamBos,
+                toplamNet = m.Sonuc.ToplamNet,
+                puan = m.Sonuc.Puan,
+                okulSirasi = m.Sonuc.OkulSirasi,
+                sinifSirasi = m.Sonuc.SinifSirasi,
+                orijinalSatir = m.Sonuc.OrijinalSatir,
+                rawOgrenciNo = m.RawOgrenciNo,
+                rawAdSoyad = m.RawAdSoyad,
+                rawSinif = m.RawSinif,
+                isMatchedInDb = m.MatchedStudent != null,
+                dbStudentName = m.MatchedStudent?.FullName,
+                dbStudentClass = m.MatchedStudent != null ? $"{m.MatchedStudent.Grade}{m.MatchedStudent.Section}" : null,
+                isNameMismatch = m.MatchedStudent != null && !NamesRoughlyMatch(m.MatchedStudent.FullName, m.RawAdSoyad),
+                hasMissingBooklet = m.HasMissingBooklet,
+                suggestedStudentNo = m.SuggestedStudent?.StudentNumber,
+                suggestedStudentName = m.SuggestedStudent?.FullName,
+                suggestedStudentClass = m.SuggestedStudent != null ? $"{m.SuggestedStudent.Grade}{m.SuggestedStudent.Section}" : null,
+                dersSonuclari = m.Sonuc.DersSonuclari.Select(d => new
+                {
+                    d.DersAdi,
+                    d.DogruSayisi,
+                    d.YanlisSayisi,
+                    d.BosSayisi,
+                    d.Net,
+                    d.OgrenciCevaplari,
+                    d.CevapAnahtari
+                }).ToList()
+            }).ToList();
+
             return Ok(new
             {
                 success = true,
@@ -1224,9 +1397,13 @@ namespace OgretmenAjanda.Api.Controllers
                     : $"{evaluatedResults.Count} satır önizleme olarak değerlendirildi.",
                 totalEvaluated = evaluatedResults.Count,
                 matchedInDbCount = evaluatedResults.Count(r => r.StudentId.HasValue),
+                unmatchedCount = resultsPayload.Count(r => !r.isMatchedInDb),
+                nameMismatchCount = resultsPayload.Count(r => r.isNameMismatch),
+                missingBookletCount = resultsPayload.Count(r => r.hasMissingBooklet),
+                availableClasses = resultsPayload.Select(r => r.sinif).Where(s => !string.IsNullOrEmpty(s)).Distinct().OrderBy(s => s).ToList(),
                 averageNet = evaluatedResults.Count > 0 ? Math.Round(evaluatedResults.Average(r => r.ToplamNet), 2) : 0,
                 averageScore = evaluatedResults.Count > 0 ? Math.Round(evaluatedResults.Average(r => r.Puan), 2) : 0,
-                results = evaluatedResults.OrderBy(r => r.OkulSirasi).ToList()
+                results = resultsPayload
             });
         }
 

@@ -280,10 +280,15 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
     missingBookletCount: number;
   }>({ unmatchedCount: 0, nameMismatchCount: 0, missingBookletCount: 0 });
   const [evalSearchQuery, setEvalSearchQuery] = useState<string>('');
+  const [evalCardSort, setEvalCardSort] = useState<'TXT' | 'NAME' | 'NO' | 'RANK'>('TXT');
+  const [searchingStudentForLine, setSearchingStudentForLine] = useState<number | null>(null);
+  const [studentSearchTerm, setStudentSearchTerm] = useState<string>('');
+  const [schoolStudents, setSchoolStudents] = useState<any[]>([]);
 
   // Değerlendirme ekranında anlık şablon parametresi düzenleme
   const [evalCustomParams, setEvalCustomParams] = useState<any>(null);
   const [isEvalParamsOpen, setIsEvalParamsOpen] = useState(false);
+  const [isDetailParamsOpen, setIsDetailParamsOpen] = useState(false);
 
   // Öğrenci Kodlama ve Detay Düzenleme Modalı (Önizleme Satırı Detayı)
   const [studentDetailModalVisible, setStudentDetailModalVisible] = useState(false);
@@ -304,11 +309,14 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
       const examsEndpoint = queryStr ? `Optik/exams?${queryStr}` : 'Optik/exams';
       const formsEndpoint = schoolQuery ? `Optik/forms?${schoolQuery}` : 'Optik/forms';
 
-      const [examsRes, formsRes] = await Promise.all([
+      const [examsRes, formsRes, stuRes] = await Promise.all([
         apiRequest<any[]>(examsEndpoint, 'GET'),
         mode === 'admin'
           ? apiRequest<any[]>(formsEndpoint, 'GET')
           : Promise.resolve({ success: true, data: [] }),
+        activeSid
+          ? apiRequest<any[]>(`schools/${activeSid}/students`, 'GET')
+          : Promise.resolve({ success: false, data: [] } as any),
       ]);
 
       if (examsRes.success && Array.isArray(examsRes.data)) {
@@ -319,6 +327,9 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
       }
       if (formsRes.success && Array.isArray(formsRes.data)) {
         setForms(formsRes.data);
+      }
+      if (stuRes?.success && Array.isArray(stuRes.data)) {
+        setSchoolStudents(stuRes.data);
       }
     } finally {
       setLoading(false);
@@ -403,11 +414,18 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
   }, [selectedFormForEval?.id, evalModalVisible]);
 
   // Değerlendirme parametre önizleme kesiti
-  const sliceEvalLine = (start: any, len: any) => {
-    const rawLine = evalFirstLine || selectedFormForEval?.sampleLine || sampleLine || '';
+  const sliceEvalLine = (start: any, len: any, customLine?: string) => {
+    const rawLine = customLine || evalFirstLine || selectedFormForEval?.sampleLine || sampleLine || '';
     if (!rawLine) return '— (Veri yok)';
-    const s = Math.max(0, parseInt(String(start ?? 0), 10) || 0);
+    const rawS = parseInt(String(start ?? 0), 10) || 0;
     const l = Math.max(1, parseInt(String(len ?? 1), 10) || 1);
+
+    const is1Based =
+      evalCustomParams &&
+      evalCustomParams.numaraBaslangic >= 1 &&
+      evalCustomParams.adSoyadBaslangic >= evalCustomParams.numaraBaslangic + evalCustomParams.numaraUzunluk;
+
+    const s = is1Based && rawS > 0 ? rawS - 1 : Math.max(0, rawS);
     if (s >= rawLine.length) return '(dışında)';
     const cut = rawLine.substring(s, s + l);
     return cut.length > 0 ? cut : '(boş)';
@@ -1123,6 +1141,12 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
     setEvalExcludedLines([]);
     setEvalRowOverrides({});
     setEvalDiagCounts({ unmatchedCount: 0, nameMismatchCount: 0, missingBookletCount: 0 });
+    const activeSid = effectiveSchoolId || schoolId;
+    if (schoolStudents.length === 0 && activeSid) {
+      apiRequest<any[]>(`schools/${activeSid}/students`, 'GET').then((r) => {
+        if (r.success && Array.isArray(r.data)) setSchoolStudents(r.data);
+      });
+    }
     setEvalModalVisible(true);
   };
 
@@ -1831,7 +1855,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                   ✏️ Öğrenci Kodlama & Detay Düzenleme
                 </Text>
                 <Text style={styles.modalLargeSub}>
-                  Satır #{Number(row.lineIndex ?? 0) + 1} · {row.adSoyad || 'Öğrenci'} ({row.sinif || 'Şubesiz'})
+                  📄 TXT Satırı: #{Number(row.lineIndex ?? 0) + 1} · 🏆 Sınav Derecesi: #{row.okulSirasi ?? '-'} · {row.adSoyad || 'Öğrenci'} ({row.sinif || 'Şubesiz'})
                 </Text>
               </View>
               <TouchableOpacity
@@ -1844,7 +1868,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
 
             <ScrollView style={{ marginTop: 10, paddingRight: 4 }}>
               {/* Orijinal Optik Satır */}
-              <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, marginBottom: 12 }}>
+              <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 8, padding: 8, marginBottom: 10 }}>
                 <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569', marginBottom: 4 }}>
                   📄 Orijinal Optik TXT Satırı:
                 </Text>
@@ -1853,6 +1877,181 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                     {row.orijinalSatir || 'Satır verisi bulunamadı.'}
                   </Text>
                 </ScrollView>
+              </View>
+
+              {/* Optik Şablon Parametrelerini Doğrudan Bu Ekranda Gör & Düzenle & Kaydet */}
+              <View style={{ backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, padding: 10, marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}
+                    onPress={() => setIsDetailParamsOpen(!isDetailParamsOpen)}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: '#1E3A8A' }}>
+                      📐 Optik Form Şablon Parametreleri ({selectedFormForEval?.formAdi || 'Şablon'})
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#2563EB', fontWeight: '700' }}>
+                      {isDetailParamsOpen ? '▲ Gizle' : '▼ Parametreleri Düzenle'}
+                    </Text>
+                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity
+                      style={[styles.smallActionBtn, { backgroundColor: '#EFF6FF', borderColor: '#93C5FD', paddingVertical: 3 }]}
+                      onPress={async () => {
+                        await handleSaveEvalCustomParams();
+                        await handleRunEvaluation(false);
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#1D4ED8' }}>
+                        💾 Şablona Kaydet
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {isDetailParamsOpen && evalCustomParams && (
+                  <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0' }}>
+                    <Text style={{ fontSize: 10.5, color: '#475569', marginBottom: 8 }}>
+                      💡 Sütun başlangıçlarını ve uzunluklarını bu öğrencinin orijinal satırına göre ayarlayabilir, kaydedip anında test edebilirsiniz.
+                    </Text>
+
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {/* Numara */}
+                      <View style={{ flex: 1, minWidth: 200, backgroundColor: '#FFFFFF', padding: 6, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                        <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#1E293B' }}>👤 Öğrenci Numarası</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 }}>
+                          <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.numaraBaslangic ?? 0)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, numaraBaslangic: parseColInput(t, 0) }))}
+                          />
+                          <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.numaraUzunluk ?? 5)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, numaraUzunluk: parseColInput(t, 5) }))}
+                          />
+                        </View>
+                        <Text style={{ fontSize: 10, color: '#047857', fontWeight: '700', marginTop: 3 }}>
+                          Kesit: [{sliceEvalLine(evalCustomParams.numaraBaslangic, evalCustomParams.numaraUzunluk, row.orijinalSatir)}]
+                        </Text>
+                      </View>
+
+                      {/* Ad Soyad */}
+                      <View style={{ flex: 1, minWidth: 200, backgroundColor: '#FFFFFF', padding: 6, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                        <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#1E293B' }}>📝 Ad Soyad</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 }}>
+                          <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.adSoyadBaslangic ?? 5)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, adSoyadBaslangic: parseColInput(t, 5) }))}
+                          />
+                          <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.adSoyadUzunluk ?? 20)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, adSoyadUzunluk: parseColInput(t, 20) }))}
+                          />
+                        </View>
+                        <Text style={{ fontSize: 10, color: '#047857', fontWeight: '700', marginTop: 3 }}>
+                          Kesit: [{sliceEvalLine(evalCustomParams.adSoyadBaslangic, evalCustomParams.adSoyadUzunluk, row.orijinalSatir)}]
+                        </Text>
+                      </View>
+
+                      {/* Şube */}
+                      <View style={{ flex: 1, minWidth: 200, backgroundColor: '#FFFFFF', padding: 6, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                        <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#1E293B' }}>🏫 Sınıf / Şube</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 }}>
+                          <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.sinifBaslangic ?? 25)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, sinifBaslangic: parseColInput(t, 25) }))}
+                          />
+                          <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.sinifUzunluk ?? 4)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, sinifUzunluk: parseColInput(t, 4) }))}
+                          />
+                        </View>
+                        <Text style={{ fontSize: 10, color: '#047857', fontWeight: '700', marginTop: 3 }}>
+                          Kesit: [{sliceEvalLine(evalCustomParams.sinifBaslangic, evalCustomParams.sinifUzunluk, row.orijinalSatir)}]
+                        </Text>
+                      </View>
+
+                      {/* Kitapçık */}
+                      <View style={{ flex: 1, minWidth: 200, backgroundColor: '#FFFFFF', padding: 6, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                        <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#1E293B' }}>📖 Kitapçık Türü</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 }}>
+                          <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.kitapcikTuruBaslangic ?? 29)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruBaslangic: parseColInput(t, 29) }))}
+                          />
+                          <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
+                          <TextInput
+                            style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                            keyboardType="numeric"
+                            value={String(evalCustomParams.kitapcikTuruUzunluk ?? 1)}
+                            onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruUzunluk: parseColInput(t, 1) }))}
+                          />
+                        </View>
+                        <Text style={{ fontSize: 10, color: '#047857', fontWeight: '700', marginTop: 3 }}>
+                          Kesit: [{sliceEvalLine(evalCustomParams.kitapcikTuruBaslangic, evalCustomParams.kitapcikTuruUzunluk, row.orijinalSatir)}]
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Ders Koordinatları */}
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B', marginTop: 8, marginBottom: 4 }}>
+                      📚 Ders Cevap Alanları:
+                    </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {(evalCustomParams.dersler || []).map((d: any, dIdx: number) => (
+                        <View key={dIdx} style={{ flex: 1, minWidth: 160, backgroundColor: '#FFFFFF', padding: 6, borderRadius: 6, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                          <Text style={{ fontSize: 10.5, fontWeight: '700', color: '#0F172A' }}>{d.dersAdi}</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 3 }}>
+                            <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
+                            <TextInput
+                              style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                              keyboardType="numeric"
+                              value={String(d.baslangicSutun ?? 0)}
+                              onChangeText={(t) => {
+                                const arr = [...evalCustomParams.dersler];
+                                arr[dIdx] = { ...arr[dIdx], baslangicSutun: parseColInput(t, 0) };
+                                setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
+                              }}
+                            />
+                            <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Krk:</Text>
+                            <TextInput
+                              style={[styles.compactNumInput, { width: 38, textAlign: 'center', height: 24, fontSize: 11 }]}
+                              keyboardType="numeric"
+                              value={String(d.karakterSayisi ?? 20)}
+                              onChangeText={(t) => {
+                                const arr = [...evalCustomParams.dersler];
+                                arr[dIdx] = { ...arr[dIdx], karakterSayisi: parseColInput(t, 20) };
+                                setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
+                              }}
+                            />
+                          </View>
+                          <Text style={{ fontSize: 10, color: '#047857', fontWeight: '700', marginTop: 2 }}>
+                            Kesit: [{sliceEvalLine(d.baslangicSutun, d.karakterSayisi, row.orijinalSatir)}]
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
               </View>
 
               {/* Öğrenci Temel Bilgileri */}
@@ -5994,23 +6193,40 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
               </View>
 
               <Text style={styles.inputLabel}>
-                Optik Veri Satırları ({evalTxtContent ? evalTxtContent.split(/\r?\n/).filter((x) => x.trim()).length : 0} Öğrenci Satırı):
+                Optik Veri Satırları ({evalTxtContent ? evalTxtContent.split(/\r?\n/).filter((x) => x.trim()).length : 0} Öğrenci Satırı - Sağa Kaydırılabilir):
               </Text>
-              <TextInput
-                style={[
-                  styles.textInput,
-                  {
-                    height: evalPreviewResults ? 95 : 140,
-                    textAlignVertical: 'top',
-                    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-                    fontSize: 11,
-                  },
-                ]}
-                multiline
-                value={evalTxtContent}
-                onChangeText={setEvalTxtContent}
-                placeholder="Optik okuyucudan alınan TXT/DAT satırlarını buraya yapıştırın veya yukarıdan dosya seçin..."
-              />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={true}
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#CBD5E1',
+                  borderRadius: 8,
+                  backgroundColor: '#FFFFFF',
+                  marginBottom: 8,
+                }}
+              >
+                <TextInput
+                  style={[
+                    styles.textInput,
+                    {
+                      minWidth: 1400,
+                      height: evalPreviewResults ? 95 : 140,
+                      textAlignVertical: 'top',
+                      fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+                      fontSize: 11,
+                      borderWidth: 0,
+                    },
+                    { whiteSpace: 'pre' } as any,
+                  ]}
+                  multiline
+                  // @ts-ignore
+                  wrap="off"
+                  value={evalTxtContent}
+                  onChangeText={setEvalTxtContent}
+                  placeholder="Optik okuyucudan alınan TXT/DAT satırlarını buraya yapıştırın veya yukarıdan dosya seçin..."
+                />
+              </ScrollView>
 
               {/* ÖN DEĞERLENDİRME, SORUNLU ÖĞRENCİ TESPİTİ, SATIR ÜZERİNDE DÜZELTME VE SİLME TABLOSU */}
               {evalPreviewResults && (
@@ -6074,10 +6290,13 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                     const unmatchedList = evalPreviewResults.filter((r) => !r.isMatchedInDb);
                     const nameMismatchList = evalPreviewResults.filter((r) => r.isNameMismatch);
 
-                    const displayedPreviewRows = evalPreviewResults.filter((r) => {
+                    const filteredPreviewRows = evalPreviewResults.filter((r) => {
                       if (evalSearchQuery.trim()) {
                         const q = evalSearchQuery.trim().toLowerCase();
-                        const matchNo = String(r.ogrenciNo || '').toLowerCase().includes(q);
+                        const qNo0 = q.replace(/^0+/, '');
+                        const rNo = String(r.ogrenciNo || '').toLowerCase();
+                        const rNo0 = rNo.replace(/^0+/, '');
+                        const matchNo = rNo.includes(q) || (qNo0.length > 0 && rNo0.includes(qNo0));
                         const matchName = String(r.adSoyad || '').toLowerCase().includes(q);
                         const matchClass = String(r.sinif || '').toLowerCase().includes(q);
                         const matchBooklet = String(r.kitapcikTuru || '').toLowerCase() === q;
@@ -6087,6 +6306,24 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                       if (evalPreviewFilter === 'UNMATCHED') return !r.isMatchedInDb;
                       if (evalPreviewFilter === 'NAME_MISMATCH') return r.isNameMismatch;
                       return true;
+                    });
+
+                    const displayedPreviewRows = [...filteredPreviewRows].sort((a, b) => {
+                      if (evalCardSort === 'TXT') {
+                        return (Number(a.lineIndex) || 0) - (Number(b.lineIndex) || 0);
+                      }
+                      if (evalCardSort === 'NAME') {
+                        return String(a.adSoyad || '').localeCompare(String(b.adSoyad || ''), 'tr');
+                      }
+                      if (evalCardSort === 'NO') {
+                        const noA = parseInt(String(a.ogrenciNo || '0').replace(/\D/g, ''), 10) || 0;
+                        const noB = parseInt(String(b.ogrenciNo || '0').replace(/\D/g, ''), 10) || 0;
+                        return noA - noB;
+                      }
+                      if (evalCardSort === 'RANK') {
+                        return (a.okulSirasi || 9999) - (b.okulSirasi || 9999);
+                      }
+                      return 0;
                     });
 
                     return (
@@ -6107,7 +6344,8 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                           )}
                         </View>
 
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 6 }}>
+                        {/* Filtre Sekmeleri */}
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 4 }}>
                           <TouchableOpacity
                             style={[
                               styles.sortPill,
@@ -6172,6 +6410,45 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                           </TouchableOpacity>
                         </View>
 
+                        {/* Sıralama Sekmeleri */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, marginVertical: 6, paddingVertical: 4, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>Kart Sıralaması:</Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                            <TouchableOpacity
+                              style={[styles.sortPill, evalCardSort === 'TXT' && styles.sortPillActive]}
+                              onPress={() => setEvalCardSort('TXT')}
+                            >
+                              <Text style={[styles.sortPillText, evalCardSort === 'TXT' && { color: '#FFF' }]}>
+                                📄 TXT Satır Sırası
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.sortPill, evalCardSort === 'NAME' && styles.sortPillActive]}
+                              onPress={() => setEvalCardSort('NAME')}
+                            >
+                              <Text style={[styles.sortPillText, evalCardSort === 'NAME' && { color: '#FFF' }]}>
+                                🔤 Ada Göre (A-Z)
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.sortPill, evalCardSort === 'NO' && styles.sortPillActive]}
+                              onPress={() => setEvalCardSort('NO')}
+                            >
+                              <Text style={[styles.sortPillText, evalCardSort === 'NO' && { color: '#FFF' }]}>
+                                🔢 Numaraya Göre
+                              </Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.sortPill, evalCardSort === 'RANK' && styles.sortPillActive]}
+                              onPress={() => setEvalCardSort('RANK')}
+                            >
+                              <Text style={[styles.sortPillText, evalCardSort === 'RANK' && { color: '#FFF' }]}>
+                                🏆 Sınav Derecesine Göre
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+
                         {displayedPreviewRows.length === 0 ? (
                           <Text style={{ padding: 12, color: '#64748B', fontSize: 12, textAlign: 'center' }}>
                             Bu filtrede sorunlu öğrenci kaydı bulunmuyor. ✅
@@ -6181,6 +6458,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                             <ScrollView nestedScrollEnabled={true}>
                               {displayedPreviewRows.map((r) => {
                                 const hasIssue = r.hasMissingBooklet || !r.isMatchedInDb || r.isNameMismatch;
+                                const isSearchingThis = searchingStudentForLine === r.lineIndex;
                                 return (
                                   <View
                                     key={r.lineIndex ?? r.id}
@@ -6195,8 +6473,8 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                                     {/* Durum Rozetleri ve Öneri */}
                                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#475569' }}>
-                                          Satır #{Number(r.lineIndex ?? 0) + 1} · Derece: #{r.okulSirasi}
+                                        <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#1E293B' }}>
+                                          📄 TXT Satırı: #{Number(r.lineIndex ?? 0) + 1} · 🏆 Sınav Derecesi: #{r.okulSirasi ?? '-'}
                                         </Text>
 
                                         {r.isMatchedInDb ? (
@@ -6227,6 +6505,26 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                                           </View>
                                         )}
 
+                                        {/* Sistemden Öğrenci Seçme / Ada Göre Aratma Butonu */}
+                                        <TouchableOpacity
+                                          style={[
+                                            styles.smallActionBtn,
+                                            { backgroundColor: '#F0FDF4', borderColor: '#86EFAC', paddingVertical: 3 },
+                                          ]}
+                                          onPress={() => {
+                                            if (isSearchingThis) {
+                                              setSearchingStudentForLine(null);
+                                            } else {
+                                              setSearchingStudentForLine(r.lineIndex);
+                                              setStudentSearchTerm(r.adSoyad || '');
+                                            }
+                                          }}
+                                        >
+                                          <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#15803D' }}>
+                                            {isSearchingThis ? '✕ Aramayı Kapat' : '🔍 Sistemden Öğrenci Seç (Ada Göre Arat)'}
+                                          </Text>
+                                        </TouchableOpacity>
+
                                         {!r.isMatchedInDb && r.suggestedStudentNo && (
                                           <TouchableOpacity
                                             style={[styles.smallActionBtn, { backgroundColor: '#DBEAFE', paddingVertical: 3 }]}
@@ -6249,6 +6547,105 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                                         {r.toplamDogru}D · {r.toplamYanlis}Y · {r.toplamBos}B = {r.toplamNet} Net ({r.puan} Puan)
                                       </Text>
                                     </View>
+
+                                    {/* Inline Sistem Öğrenci Arama ve Bağlama Kutusu */}
+                                    {isSearchingThis && (
+                                      <View
+                                        style={{
+                                          backgroundColor: '#F8FAFC',
+                                          borderWidth: 1,
+                                          borderColor: '#86EFAC',
+                                          borderRadius: 8,
+                                          padding: 8,
+                                          marginBottom: 8,
+                                        }}
+                                      >
+                                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#166534', marginBottom: 4 }}>
+                                          🔍 Sistemdeki Kayıtlı Öğrencilerden Seç (İsim veya Numaraya Göre):
+                                        </Text>
+                                        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                                          <TextInput
+                                            style={[styles.textInput, { flex: 1, height: 32, fontSize: 12 }]}
+                                            placeholder="Öğrenci adı, soyadı veya numarası yazın..."
+                                            value={studentSearchTerm}
+                                            onChangeText={setStudentSearchTerm}
+                                            autoFocus={true}
+                                          />
+                                          <TouchableOpacity
+                                            style={[styles.smallActionBtn, { paddingVertical: 4 }]}
+                                            onPress={() => setSearchingStudentForLine(null)}
+                                          >
+                                            <Text style={{ fontSize: 11, color: '#64748B' }}>✕ Kapat</Text>
+                                          </TouchableOpacity>
+                                        </View>
+
+                                        {/* Eşleşen Sonuçlar */}
+                                        {(() => {
+                                          const term = studentSearchTerm.trim().toLowerCase();
+                                          const termNorm = term.replace(/^0+/, '');
+                                          const filteredStudents = schoolStudents
+                                            .filter((st: any) => {
+                                              if (!term) return true;
+                                              const sName = String(st.fullName || '').toLowerCase();
+                                              const sNo = String(st.studentNumber || '').toLowerCase();
+                                              const sNoNorm = sNo.replace(/^0+/, '');
+                                              const sClass = `${st.grade || ''}${st.section || ''}`.toLowerCase();
+                                              return (
+                                                sName.includes(term) ||
+                                                sNo.includes(term) ||
+                                                (termNorm.length > 0 && sNoNorm.includes(termNorm)) ||
+                                                sClass.includes(term)
+                                              );
+                                            })
+                                            .slice(0, 10);
+
+                                          if (filteredStudents.length === 0) {
+                                            return (
+                                              <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontStyle: 'italic' }}>
+                                                "{studentSearchTerm}" ile eşleşen öğrenci bulunamadı.
+                                              </Text>
+                                            );
+                                          }
+
+                                          return (
+                                            <View style={{ marginTop: 6, maxHeight: 140 }}>
+                                              <ScrollView nestedScrollEnabled={true}>
+                                                {filteredStudents.map((st: any) => (
+                                                  <TouchableOpacity
+                                                    key={st.id || st.studentNumber}
+                                                    style={{
+                                                      paddingVertical: 5,
+                                                      paddingHorizontal: 8,
+                                                      borderBottomWidth: 1,
+                                                      borderBottomColor: '#E2E8F0',
+                                                      flexDirection: 'row',
+                                                      justifyContent: 'space-between',
+                                                      alignItems: 'center',
+                                                      backgroundColor: '#FFFFFF',
+                                                    }}
+                                                    onPress={() => {
+                                                      handleUpdatePreviewRowOverride(r.lineIndex, {
+                                                        ogrenciNo: st.studentNumber,
+                                                        adSoyad: st.fullName,
+                                                        sinif: `${st.grade || ''}${st.section || ''}`.trim(),
+                                                      });
+                                                      setSearchingStudentForLine(null);
+                                                    }}
+                                                  >
+                                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}>
+                                                      {st.studentNumber} - {st.fullName} ({st.grade ? `${st.grade}/${st.section}` : 'Şubesiz'})
+                                                    </Text>
+                                                    <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#15803D' }}>
+                                                      Bu Öğrenciyi Ata ↵
+                                                    </Text>
+                                                  </TouchableOpacity>
+                                                ))}
+                                              </ScrollView>
+                                            </View>
+                                          );
+                                        })()}
+                                      </View>
+                                    )}
 
                                     {/* Satır Üzerinde Düzeltme Inputları (Öğr No, Ad Soyad, Sınıf, Kitapçık Seçici, Sil) */}
                                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
