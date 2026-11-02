@@ -243,6 +243,17 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
       { dersAdi: 'Fizik', soruSayisi: 10, katsayi: 1.0, siraNo: 3, cevapAnahtariA: 'ABCDABCDAB', cevapAnahtariB: 'BCDABCDABA' },
     ],
   });
+  const [draggedLessonIdx, setDraggedLessonIdx] = useState<number | null>(null);
+
+  const moveExamLesson = (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0) return;
+    const list = [...(editingExam.dersler || [])];
+    if (fromIdx >= list.length || toIdx >= list.length) return;
+    const [moved] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, moved);
+    const reindexed = list.map((item, i) => ({ ...item, siraNo: i + 1 }));
+    setEditingExam((prev: any) => ({ ...prev, dersler: reindexed }));
+  };
 
   // Konu & Kazanım Düzenleme Modalı
   const [kazanimModalVisible, setKazanimModalVisible] = useState(false);
@@ -902,8 +913,13 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
     setActionLoading(true);
     try {
       const isAyt = (editingExam.sinavTuru || '').toUpperCase().startsWith('AYT');
+      const cleanDersler = (editingExam.dersler || []).map((d: any, idx: number) => ({
+        ...d,
+        siraNo: idx + 1,
+      }));
       const res = await apiRequest<any>('Optik/exams', 'POST', {
         ...editingExam,
+        dersler: cleanDersler,
         schoolId,
         bagliTytSinavId: isAyt && editingExam.bagliTytSinavId ? editingExam.bagliTytSinavId : null,
         varsayilanTytPuani: isAyt ? Number(editingExam.varsayilanTytPuani) || 150 : 150,
@@ -1503,7 +1519,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
   function renderStudentReportModal() {
     const stu = reportModalData?.student;
     const ex = reportModalData?.exam;
-    const lessons = reportModalData?.lessons || [];
+    const lessons = [...(reportModalData?.lessons || [])].sort((a: any, b: any) => (a.siraNo || 0) - (b.siraNo || 0));
     const kazanimlar = reportModalData?.kazanimAnalizi || [];
 
     return (
@@ -2066,7 +2082,9 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
   // Sınavdaki derslerin sıralı listesini belirle
   const activeExamObj = exams.find((e) => e.id === selectedExamId) || examResultsMeta;
   const examLessonNames: string[] = React.useMemo(() => {
-    const fromMeta = (examResultsMeta?.dersler || activeExamObj?.dersler || [])
+    const rawDersler = [...(examResultsMeta?.dersler || activeExamObj?.dersler || [])];
+    rawDersler.sort((a: any, b: any) => (a.siraNo || 0) - (b.siraNo || 0));
+    const fromMeta = rawDersler
       .map((d: any) => d.dersAdi)
       .filter(Boolean);
     if (fromMeta.length > 0) return Array.from(new Set(fromMeta));
@@ -2463,8 +2481,10 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                     <TouchableOpacity
                       style={[styles.smallActionBtn, { backgroundColor: '#F1F5F9', borderColor: '#CBD5E1' }]}
                       onPress={() => {
+                        const sortedDersler = [...(exam.dersler || [])].sort((a: any, b: any) => (a.siraNo || 0) - (b.siraNo || 0));
                         setEditingExam({
                           ...exam,
+                          dersler: sortedDersler,
                           sinavTuru: exam.sinavTuru || 'SERBEST',
                           bagliTytSinavId: exam.bagliTytSinavId || null,
                           varsayilanTytPuani: exam.varsayilanTytPuani ?? 150,
@@ -4892,7 +4912,148 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
               })()}
 
               {(editingExam.dersler || []).map((d: any, idx: number) => (
-                <View key={idx} style={styles.lessonKeyCard}>
+                <View
+                  key={d.id || `exam-lesson-${idx}`}
+                  // @ts-ignore
+                  draggable={true}
+                  // @ts-ignore
+                  onDragStart={(e: any) => {
+                    if (e?.dataTransfer) {
+                      e.dataTransfer.setData('text/plain', String(idx));
+                      e.dataTransfer.effectAllowed = 'move';
+                    }
+                    setDraggedLessonIdx(idx);
+                  }}
+                  // @ts-ignore
+                  onDragOver={(e: any) => {
+                    if (e?.preventDefault) e.preventDefault();
+                  }}
+                  // @ts-ignore
+                  onDrop={(e: any) => {
+                    if (e?.preventDefault) e.preventDefault();
+                    const fromIdx =
+                      draggedLessonIdx !== null
+                        ? draggedLessonIdx
+                        : parseInt(e?.dataTransfer?.getData('text/plain'), 10);
+                    if (!isNaN(fromIdx) && fromIdx !== idx) {
+                      moveExamLesson(fromIdx, idx);
+                    }
+                    setDraggedLessonIdx(null);
+                  }}
+                  style={[
+                    styles.lessonKeyCard,
+                    draggedLessonIdx === idx && { opacity: 0.5, borderColor: '#6366F1', borderWidth: 2 },
+                  ]}
+                >
+                  {/* Kart Üst Sıralama & Yönetim Başlığı */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {/* Sürükle ve Sıra Rozeti */}
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          backgroundColor: '#EEF2FF',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: '#C7D2FE',
+                        }}
+                      >
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#4338CA', marginRight: 4 }}>
+                          ⋮⋮ Ders Sırası:
+                        </Text>
+                        <TextInput
+                          style={{
+                            minWidth: 32,
+                            paddingVertical: 1,
+                            paddingHorizontal: 4,
+                            fontSize: 12,
+                            fontWeight: '800',
+                            color: '#1E1B4B',
+                            backgroundColor: '#FFFFFF',
+                            borderWidth: 1,
+                            borderColor: '#A5B4FC',
+                            borderRadius: 4,
+                            textAlign: 'center',
+                          }}
+                          keyboardType="numeric"
+                          defaultValue={String(idx + 1)}
+                          key={`sira-${idx}-${editingExam.dersler?.length}`}
+                          onBlur={(e) => {
+                            const val = parseInt((e.nativeEvent as any).text, 10);
+                            if (!isNaN(val) && val >= 1 && val <= (editingExam.dersler || []).length) {
+                              moveExamLesson(idx, val - 1);
+                            }
+                          }}
+                          onSubmitEditing={(e) => {
+                            const val = parseInt(e.nativeEvent.text, 10);
+                            if (!isNaN(val) && val >= 1 && val <= (editingExam.dersler || []).length) {
+                              moveExamLesson(idx, val - 1);
+                            }
+                          }}
+                        />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#6366F1', marginLeft: 3 }}>
+                          / {(editingExam.dersler || []).length}
+                        </Text>
+                      </View>
+
+                      {/* Yukarı / Aşağı Taşıma Okları */}
+                      <View style={{ flexDirection: 'row', gap: 4 }}>
+                        <TouchableOpacity
+                          disabled={idx === 0}
+                          style={{
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            backgroundColor: idx === 0 ? '#F8FAFC' : '#E0E7FF',
+                            borderRadius: 5,
+                            borderWidth: 1,
+                            borderColor: idx === 0 ? '#E2E8F0' : '#C7D2FE',
+                            opacity: idx === 0 ? 0.35 : 1,
+                          }}
+                          onPress={() => moveExamLesson(idx, idx - 1)}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#3730A3' }}>▲ Yukarı</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          disabled={idx === (editingExam.dersler || []).length - 1}
+                          style={{
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            backgroundColor: idx === (editingExam.dersler || []).length - 1 ? '#F8FAFC' : '#E0E7FF',
+                            borderRadius: 5,
+                            borderWidth: 1,
+                            borderColor: idx === (editingExam.dersler || []).length - 1 ? '#E2E8F0' : '#C7D2FE',
+                            opacity: idx === (editingExam.dersler || []).length - 1 ? 0.35 : 1,
+                          }}
+                          onPress={() => moveExamLesson(idx, idx + 1)}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '800', color: '#3730A3' }}>▼ Aşağı</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        backgroundColor: '#FEF2F2',
+                        borderRadius: 5,
+                        borderWidth: 1,
+                        borderColor: '#FECACA',
+                      }}
+                      onPress={() => {
+                        const arr = editingExam.dersler
+                          .filter((_: any, i: number) => i !== idx)
+                          .map((item: any, i: number) => ({ ...item, siraNo: i + 1 }));
+                        setEditingExam((p: any) => ({ ...p, dersler: arr }));
+                      }}
+                    >
+                      <Text style={{ color: '#DC2626', fontWeight: '800', fontSize: 11 }}>🗑️ Dersi Sil</Text>
+                    </TouchableOpacity>
+                  </View>
+
                   <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginBottom: 6 }}>
                     <View style={{ flex: 2 }}>
                       <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B', marginBottom: 2 }}>Ders Adı</Text>
@@ -4950,15 +5111,6 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                         />
                       </View>
                     )}
-                    <TouchableOpacity
-                      style={{ marginTop: 14 }}
-                      onPress={() => {
-                        const arr = editingExam.dersler.filter((_: any, i: number) => i !== idx);
-                        setEditingExam((p: any) => ({ ...p, dersler: arr }));
-                      }}
-                    >
-                      <Text style={{ color: '#DC2626', fontWeight: '700', paddingHorizontal: 6 }}>✕</Text>
-                    </TouchableOpacity>
                   </View>
 
                   {/* Aktif Kitapçık Türlerine Göre Cevap Anahtarı Girişleri */}
@@ -5051,7 +5203,9 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
             </View>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 8, maxHeight: 40 }}>
-              {(kazanimExam?.dersler || []).map((d: any) => (
+              {[...(kazanimExam?.dersler || [])]
+                .sort((a: any, b: any) => (a.siraNo || 0) - (b.siraNo || 0))
+                .map((d: any) => (
                 <TouchableOpacity
                   key={d.dersAdi}
                   style={[styles.classFilterChip, kazanimSelectedLesson === d.dersAdi && styles.classFilterChipActive]}

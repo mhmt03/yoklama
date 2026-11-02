@@ -617,7 +617,7 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
   const pagesHtml = reportsList
     .map((rep, idx) => {
       const stu = rep.student || {};
-      const lessons = rep.lessons || [];
+      const lessons = [...(rep.lessons || [])].sort((a: any, b: any) => (a.siraNo || 0) - (b.siraNo || 0));
       const kazanimlar = rep.kazanimAnalizi || [];
       const recentExamsList = Array.isArray(rep.recentExams) && rep.recentExams.length > 0 ? rep.recentExams : [];
 

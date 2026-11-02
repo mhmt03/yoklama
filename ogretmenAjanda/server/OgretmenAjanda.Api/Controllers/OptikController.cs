@@ -523,6 +523,7 @@ namespace OgretmenAjanda.Api.Controllers
                 object? myResultDto = null;
                 if (myRes != null)
                 {
+                    var eLessonOrderMap = e.Dersler.ToDictionary(d => NormalizeLessonKey(d.DersAdi), d => d.SiraNo);
                     myResultDto = new
                     {
                         id = myRes.Id,
@@ -539,14 +540,16 @@ namespace OgretmenAjanda.Api.Controllers
                         sinifSirasi = e.ShowRankingToStudents ? (int?)myRes.SinifSirasi : null,
                         toplamKatilimci = e.ShowRankingToStudents ? (int?)myRes.ToplamKatilimci : null,
                         sinifKatilimci = e.ShowRankingToStudents ? (int?)myRes.SinifKatilimci : null,
-                        dersSonuclari = myRes.DersSonuclari.Select(d => new
-                        {
-                            d.DersAdi,
-                            d.DogruSayisi,
-                            d.YanlisSayisi,
-                            d.BosSayisi,
-                            net = Math.Round(d.Net, 2)
-                        }).ToList()
+                        dersSonuclari = myRes.DersSonuclari
+                            .OrderBy(d => eLessonOrderMap.TryGetValue(NormalizeLessonKey(d.DersAdi), out var s) ? s : 999)
+                            .Select(d => new
+                            {
+                                d.DersAdi,
+                                d.DogruSayisi,
+                                d.YanlisSayisi,
+                                d.BosSayisi,
+                                net = Math.Round(d.Net, 2)
+                            }).ToList()
                     };
                 }
 
@@ -687,12 +690,13 @@ namespace OgretmenAjanda.Api.Controllers
                         DersGrubu = string.IsNullOrWhiteSpace(d.DersGrubu) ? null : d.DersGrubu.Trim(),
                         SoruSayisi = Math.Max(1, d.SoruSayisi),
                         Katsayi = d.Katsayi > 0 ? d.Katsayi : 1.0,
-                        SiraNo = d.SiraNo > 0 ? d.SiraNo : sira++,
+                        SiraNo = d.SiraNo > 0 ? d.SiraNo : sira,
                         CevapAnahtariA = (d.CevapAnahtariA ?? string.Empty).Trim().ToUpperInvariant(),
                         CevapAnahtariB = string.IsNullOrWhiteSpace(d.CevapAnahtariB) ? null : d.CevapAnahtariB.Trim().ToUpperInvariant(),
                         CevapAnahtariC = string.IsNullOrWhiteSpace(d.CevapAnahtariC) ? null : d.CevapAnahtariC.Trim().ToUpperInvariant(),
                         CevapAnahtariD = string.IsNullOrWhiteSpace(d.CevapAnahtariD) ? null : d.CevapAnahtariD.Trim().ToUpperInvariant()
                     });
+                    sira++;
                 }
 
                 await _context.OptikSinavDersleri.AddRangeAsync(newExamDersler);
@@ -1459,6 +1463,8 @@ namespace OgretmenAjanda.Api.Controllers
 
             bool hideRanking = (caller.role == UserRoles.Student || caller.role == UserRoles.Parent) && !sinav.ShowRankingToStudents;
 
+            var lessonOrderMap = sinav.Dersler.ToDictionary(d => NormalizeLessonKey(d.DersAdi), d => d.SiraNo);
+
             var formatted = results.Select(r => new
             {
                 r.Id,
@@ -1478,6 +1484,7 @@ namespace OgretmenAjanda.Api.Controllers
                 sinifKatilimci = hideRanking ? (int?)null : r.SinifKatilimci,
                 dersSonuclari = r.DersSonuclari
                     .Where(d => teacherLessons == null || DoesLessonMatchTeacher(d.DersAdi, teacherLessons))
+                    .OrderBy(d => lessonOrderMap.TryGetValue(NormalizeLessonKey(d.DersAdi), out var s) ? s : 999)
                     .Select(d => new
                     {
                         d.DersAdi,
@@ -1499,7 +1506,16 @@ namespace OgretmenAjanda.Api.Controllers
                     sinav.IsPublishedToStudents,
                     sinav.ShowRankingToStudents,
                     sinav.IsVisibleToTeachers,
-                    sinav.HasKazanimAnalysis
+                    sinav.HasKazanimAnalysis,
+                    dersler = sinav.Dersler.OrderBy(d => d.SiraNo).Select(d => new
+                    {
+                        d.Id,
+                        d.DersAdi,
+                        d.DersGrubu,
+                        d.SoruSayisi,
+                        d.Katsayi,
+                        d.SiraNo
+                    }).ToList()
                 },
                 teacherFiltered = caller.role == UserRoles.Teacher,
                 teacherClasses = teacherClasses?.ToList(),
@@ -1925,6 +1941,8 @@ namespace OgretmenAjanda.Api.Controllers
                 return new
                 {
                     dersAdi = d.DersAdi,
+                    dersGrubu = d.DersGrubu ?? DetectLessonGroup(d.DersAdi),
+                    siraNo = d.SiraNo,
                     soruSayisi = d.SoruSayisi,
                     dogruSayisi = dogru,
                     yanlisSayisi = yanlis,
@@ -2152,6 +2170,7 @@ namespace OgretmenAjanda.Api.Controllers
                     {
                         dersAdi = d.DersAdi,
                         dersGrubu = d.DersGrubu ?? DetectLessonGroup(d.DersAdi),
+                        siraNo = d.SiraNo,
                         soruSayisi = d.SoruSayisi,
                         dogruSayisi = dogru,
                         yanlisSayisi = yanlis,
