@@ -54,6 +54,9 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
     selectedSchool,
   } = ctx;
 
+  const [manualPickerSlotKey, setManualPickerSlotKey] = useState<string | null>(null);
+  const [manualPickerSearch, setManualPickerSearch] = useState<string>('');
+
   const targetDateStr = useMemo(() => {
     return getDutyDateForWeekday(dutyAssignDay);
   }, [dutyAssignDay]);
@@ -596,29 +599,68 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                   borderRadius: 10,
                                   padding: 12,
                                 }}>
-                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                                       <Ionicons name="shield-checkmark" size={16} color="#16A34A" />
                                       <Text style={{ fontSize: 12, fontWeight: '800', color: '#166534' }}>
                                         Bu Saatte Müsait Nöbetçiler ({visibleDutyTeachers.length})
                                       </Text>
                                     </View>
-                                    {hiddenDutyTeachers.length > 0 && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                      {hiddenDutyTeachers.length > 0 && (
+                                        <TouchableOpacity
+                                          onPress={() => {
+                                            setHiddenDutyTeachersBySlot((prev: any) => {
+                                              const copy = { ...prev };
+                                              delete copy[slotKey];
+                                              return copy;
+                                            });
+                                          }}
+                                          style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}
+                                        >
+                                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#15803D' }}>
+                                            Gizlenenleri Aç ({hiddenDutyTeachers.length})
+                                          </Text>
+                                        </TouchableOpacity>
+                                      )}
                                       <TouchableOpacity
                                         onPress={() => {
-                                          setHiddenDutyTeachersBySlot((prev: any) => {
-                                            const copy = { ...prev };
-                                            delete copy[slotKey];
-                                            return copy;
-                                          });
+                                          if (manualPickerSlotKey === slotKey) {
+                                            setManualPickerSlotKey(null);
+                                            setManualPickerSearch('');
+                                          } else {
+                                            setManualPickerSlotKey(slotKey);
+                                            setManualPickerSearch('');
+                                          }
                                         }}
-                                        style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}
+                                        style={{
+                                          backgroundColor: manualPickerSlotKey === slotKey ? '#EEF2FF' : '#F1F5F9',
+                                          borderWidth: 1,
+                                          borderColor: manualPickerSlotKey === slotKey ? '#6366F1' : '#CBD5E1',
+                                          paddingHorizontal: 7,
+                                          paddingVertical: 2.5,
+                                          borderRadius: 6,
+                                          flexDirection: 'row',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                        }}
                                       >
-                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#15803D' }}>
-                                          Gizlenenleri Aç ({hiddenDutyTeachers.length})
+                                        <Ionicons
+                                          name={manualPickerSlotKey === slotKey ? 'close-circle' : 'person-add-outline'}
+                                          size={12}
+                                          color={manualPickerSlotKey === slotKey ? '#4F46E5' : '#475569'}
+                                        />
+                                        <Text
+                                          style={{
+                                            fontSize: 10,
+                                            fontWeight: '700',
+                                            color: manualPickerSlotKey === slotKey ? '#4F46E5' : '#475569',
+                                          }}
+                                        >
+                                          {manualPickerSlotKey === slotKey ? 'Seçiciyi Kapat' : '➕ Diğer Öğretmen Seç'}
                                         </Text>
                                       </TouchableOpacity>
-                                    )}
+                                    </View>
                                   </View>
 
                                   {visibleDutyTeachers.length === 0 ? (
@@ -726,6 +768,189 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                         );
                                       })}
                                     </ScrollView>
+                                  )}
+
+                                  {/* Mini Liste Açıcı: Dersi Boş Olmayan Nöbetçi veya Nöbetçi Olmayan Öğretmen Seçimi */}
+                                  {manualPickerSlotKey === slotKey && (
+                                    <View
+                                      style={{
+                                        marginTop: 10,
+                                        padding: 10,
+                                        backgroundColor: '#FFFFFF',
+                                        borderWidth: 1.5,
+                                        borderColor: '#818CF8',
+                                        borderRadius: 8,
+                                        gap: 6,
+                                      }}
+                                    >
+                                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <Text style={{ fontSize: 11, fontWeight: '800', color: '#3730A3' }}>
+                                          ➕ Dersi Boş Olmayan Nöbetçi ya da Nöbetçi Olmayan Öğretmen Seçimi
+                                        </Text>
+                                        <TouchableOpacity onPress={() => setManualPickerSlotKey(null)}>
+                                          <Ionicons name="close" size={16} color="#64748B" />
+                                        </TouchableOpacity>
+                                      </View>
+
+                                      <TextInput
+                                        style={{
+                                          backgroundColor: '#F8FAFC',
+                                          borderWidth: 1,
+                                          borderColor: '#C7D2FE',
+                                          borderRadius: 6,
+                                          paddingHorizontal: 8,
+                                          paddingVertical: 4,
+                                          fontSize: 11.5,
+                                          color: '#0F172A',
+                                        }}
+                                        placeholder="Öğretmen adı veya branş filtrele..."
+                                        placeholderTextColor="#94A3B8"
+                                        value={manualPickerSearch}
+                                        onChangeText={setManualPickerSearch}
+                                      />
+
+                                      {(() => {
+                                        const q = manualPickerSearch.trim().toLowerCase();
+                                        const candidates = (sortedTeachers || [])
+                                          .filter((t: any) => {
+                                            const tName = String(t.fullName || t.name || '').trim();
+                                            if (!tName) return false;
+                                            if (isSameTeacher(tName, slotItem.teacherName)) return false;
+                                            if (!q) return true;
+                                            const tBranch = String(t.branch || '').toLowerCase();
+                                            return tName.toLowerCase().includes(q) || tBranch.includes(q);
+                                          })
+                                          .slice(0, 20);
+
+                                        if (candidates.length === 0) {
+                                          return (
+                                            <Text style={{ fontSize: 11, color: '#94A3B8', fontStyle: 'italic', paddingVertical: 4 }}>
+                                              "{manualPickerSearch}" ile eşleşen öğretmen bulunamadı.
+                                            </Text>
+                                          );
+                                        }
+
+                                        return (
+                                          <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled={true}>
+                                            {candidates.map((t: any, cIdx: number) => {
+                                              const tName = String(t.fullName || t.name || '').trim();
+                                              const isAssigned = (dutySubstitutions || []).some(
+                                                (sub: any) =>
+                                                  Number(sub.lessonHour) === lHour &&
+                                                  isSameTeacher(sub.absentTeacherName, slotItem.teacherName) &&
+                                                  String(sub.className || '') === String(classNameText || '') &&
+                                                  isSameTeacher(sub.substituteTeacherName, tName)
+                                              );
+
+                                              const dayDuty = (dutiesList || []).find((d: any) => {
+                                                const dNum = Number(d.dayOfWeek) || 1;
+                                                return dNum === dutyAssignDay && isSameTeacher(d.teacherName, tName);
+                                              });
+
+                                              const busySchedule = (allSchoolSchedules || []).find(
+                                                (s: any) =>
+                                                  Number(s.dayOfWeek) === dutyAssignDay &&
+                                                  Number(s.lessonHour) === lHour &&
+                                                  isSameTeacher(s.teacherName, tName)
+                                              );
+
+                                              let statusBadge = {
+                                                text: '👤 Nöbetçi Değil',
+                                                bg: '#F1F5F9',
+                                                color: '#475569',
+                                                border: '#CBD5E1',
+                                              };
+                                              if (isAssigned) {
+                                                statusBadge = {
+                                                  text: '✓ Bu Saate Atandı',
+                                                  bg: '#DCFCE7',
+                                                  color: '#15803D',
+                                                  border: '#86EFAC',
+                                                };
+                                              } else if (dayDuty && busySchedule) {
+                                                statusBadge = {
+                                                  text: `🛡️ Nöbetçi (${busySchedule.className || 'Derste'})`,
+                                                  bg: '#FEF3C7',
+                                                  color: '#B45309',
+                                                  border: '#FDE68A',
+                                                };
+                                              } else if (dayDuty) {
+                                                statusBadge = {
+                                                  text: `🛡️ Nöbetçi (${dayDuty.dutyPlace || 'Müsait'})`,
+                                                  bg: '#DCFCE7',
+                                                  color: '#15803D',
+                                                  border: '#86EFAC',
+                                                };
+                                              } else if (busySchedule) {
+                                                statusBadge = {
+                                                  text: `⚠️ Derste (${busySchedule.className || 'Dolu'})`,
+                                                  bg: '#FFE4E6',
+                                                  color: '#BE123C',
+                                                  border: '#FDA4AF',
+                                                };
+                                              }
+
+                                              return (
+                                                <View
+                                                  key={tName + '_' + cIdx}
+                                                  style={{
+                                                    paddingVertical: 5,
+                                                    paddingHorizontal: 8,
+                                                    borderBottomWidth: 1,
+                                                    borderBottomColor: '#F1F5F9',
+                                                    flexDirection: 'row',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    gap: 6,
+                                                  }}
+                                                >
+                                                  <View style={{ flex: 1 }}>
+                                                    <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#0F172A' }} numberOfLines={1}>
+                                                      {tName} {t.branch ? `(${t.branch})` : ''}
+                                                    </Text>
+                                                    <View
+                                                      style={{
+                                                        backgroundColor: statusBadge.bg,
+                                                        borderColor: statusBadge.border,
+                                                        borderWidth: 1,
+                                                        paddingHorizontal: 4,
+                                                        paddingVertical: 1,
+                                                        borderRadius: 4,
+                                                        alignSelf: 'flex-start',
+                                                        marginTop: 2,
+                                                      }}
+                                                    >
+                                                      <Text style={{ fontSize: 9.5, fontWeight: '700', color: statusBadge.color }}>
+                                                        {statusBadge.text}
+                                                      </Text>
+                                                    </View>
+                                                  </View>
+
+                                                  <TouchableOpacity
+                                                    onPress={() =>
+                                                      handleToggleAssignDuty(slotItem, lHour, classNameText, {
+                                                        teacherName: tName,
+                                                        dutyPlace: dayDuty?.dutyPlace || 'Özel Görevlendirme',
+                                                      })
+                                                    }
+                                                    style={{
+                                                      backgroundColor: isAssigned ? '#DC2626' : '#4F46E5',
+                                                      paddingHorizontal: 8,
+                                                      paddingVertical: 4,
+                                                      borderRadius: 6,
+                                                    }}
+                                                  >
+                                                    <Text style={{ fontSize: 10, fontWeight: '800', color: '#FFFFFF' }}>
+                                                      {isAssigned ? 'Kaldır' : 'Bu Saate Ata'}
+                                                    </Text>
+                                                  </TouchableOpacity>
+                                                </View>
+                                              );
+                                            })}
+                                          </ScrollView>
+                                        );
+                                      })()}
+                                    </View>
                                   )}
                                 </View>
                               </View>

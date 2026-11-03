@@ -299,6 +299,53 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
   const [tempBooklet, setTempBooklet] = useState('A');
   const [tempRowAnswers, setTempRowAnswers] = useState<Record<string, string>>({});
 
+  const fetchStudentsForSchool = useCallback(async (): Promise<any[]> => {
+    const activeSid = effectiveSchoolId || schoolId;
+    let list: any[] = [];
+    if (activeSid) {
+      // 1. sync/students endpoint'ini dene
+      try {
+        const r1 = await apiRequest<any[]>(`sync/students?schoolId=${activeSid}`, 'GET');
+        if (r1.success && Array.isArray(r1.data) && r1.data.length > 0) {
+          list = r1.data;
+        }
+      } catch {}
+
+      // 2. schools/{activeSid}/students endpoint'ini dene
+      if (list.length === 0) {
+        try {
+          const r2 = await apiRequest<any[]>(`schools/${activeSid}/students`, 'GET');
+          if (r2.success && Array.isArray(r2.data) && r2.data.length > 0) {
+            list = r2.data;
+          }
+        } catch {}
+      }
+    }
+
+    // 3. Yerel SQLite kontrolü
+    if (list.length === 0) {
+      try {
+        const { getAllStudentsWithClass } = await import('../database/operations/studentOperations');
+        const localList = await getAllStudentsWithClass();
+        if (Array.isArray(localList) && localList.length > 0) {
+          list = localList.map((st: any) => ({
+            id: st.id,
+            studentNumber: String(st.student_number || '').trim(),
+            fullName: String(st.name || '').trim(),
+            grade: st.grade_level ? String(st.grade_level) : '',
+            section: st.class_name ? String(st.class_name).replace(/^[0-9]+[-\/]?/, '') : '',
+            className: st.class_name || '',
+          }));
+        }
+      } catch {}
+    }
+
+    if (list.length > 0) {
+      setSchoolStudents(list);
+    }
+    return list;
+  }, [schoolId, effectiveSchoolId]);
+
   const loadInitialData = useCallback(async () => {
     const activeSid = effectiveSchoolId || schoolId;
     setLoading(true);
@@ -309,14 +356,12 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
       const examsEndpoint = queryStr ? `Optik/exams?${queryStr}` : 'Optik/exams';
       const formsEndpoint = schoolQuery ? `Optik/forms?${schoolQuery}` : 'Optik/forms';
 
-      const [examsRes, formsRes, stuRes] = await Promise.all([
+      const [examsRes, formsRes, stuList] = await Promise.all([
         apiRequest<any[]>(examsEndpoint, 'GET'),
         mode === 'admin'
           ? apiRequest<any[]>(formsEndpoint, 'GET')
           : Promise.resolve({ success: true, data: [] }),
-        activeSid
-          ? apiRequest<any[]>(`schools/${activeSid}/students`, 'GET')
-          : Promise.resolve({ success: false, data: [] } as any),
+        fetchStudentsForSchool(),
       ]);
 
       if (examsRes.success && Array.isArray(examsRes.data)) {
@@ -328,13 +373,13 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
       if (formsRes.success && Array.isArray(formsRes.data)) {
         setForms(formsRes.data);
       }
-      if (stuRes?.success && Array.isArray(stuRes.data)) {
-        setSchoolStudents(stuRes.data);
+      if (Array.isArray(stuList) && stuList.length > 0) {
+        setSchoolStudents(stuList);
       }
     } finally {
       setLoading(false);
     }
-  }, [schoolId, effectiveSchoolId, mode, studentNumber, selectedExamId]);
+  }, [schoolId, effectiveSchoolId, mode, studentNumber, selectedExamId, fetchStudentsForSchool]);
 
   useEffect(() => {
     loadInitialData();
@@ -1142,10 +1187,8 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
     setEvalRowOverrides({});
     setEvalDiagCounts({ unmatchedCount: 0, nameMismatchCount: 0, missingBookletCount: 0 });
     const activeSid = effectiveSchoolId || schoolId;
-    if (schoolStudents.length === 0 && activeSid) {
-      apiRequest<any[]>(`schools/${activeSid}/students`, 'GET').then((r) => {
-        if (r.success && Array.isArray(r.data)) setSchoolStudents(r.data);
-      });
+    if (schoolStudents.length === 0) {
+      fetchStudentsForSchool();
     }
     setEvalModalVisible(true);
   };
@@ -1180,9 +1223,9 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
     if (!evalExam || !schoolId) return;
     setActionLoading(true);
     try {
-      const stuRes = await apiRequest<any[]>(`schools/${schoolId}/students`, 'GET');
-      const students = stuRes.success && Array.isArray(stuRes.data) && stuRes.data.length > 0
-        ? stuRes.data.slice(0, 25)
+      const allStu = await fetchStudentsForSchool();
+      const students = Array.isArray(allStu) && allStu.length > 0
+        ? allStu.slice(0, 25)
         : [
             { studentNumber: '101', fullName: 'ALİ YILMAZ', grade: '9', section: 'A' },
             { studentNumber: '102', fullName: 'AYŞE DEMİR', grade: '9', section: 'A' },
@@ -6517,6 +6560,9 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                                             } else {
                                               setSearchingStudentForLine(r.lineIndex);
                                               setStudentSearchTerm(r.adSoyad || '');
+                                              if (schoolStudents.length === 0) {
+                                                fetchStudentsForSchool();
+                                              }
                                             }
                                           }}
                                         >
@@ -6561,7 +6607,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                                         }}
                                       >
                                         <Text style={{ fontSize: 11, fontWeight: '800', color: '#166534', marginBottom: 4 }}>
-                                          🔍 Sistemdeki Kayıtlı Öğrencilerden Seç (İsim veya Numaraya Göre):
+                                          🔍 Sistemdeki Kayıtlı Öğrencilerden Seç ({schoolStudents.length > 0 ? `${schoolStudents.length} kayıtlı öğrenci` : 'yükleniyor...'}):
                                         </Text>
                                         <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
                                           <TextInput
@@ -6581,65 +6627,106 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
 
                                         {/* Eşleşen Sonuçlar */}
                                         {(() => {
-                                          const term = studentSearchTerm.trim().toLowerCase();
-                                          const termNorm = term.replace(/^0+/, '');
+                                          if (schoolStudents.length === 0) {
+                                            return (
+                                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                                                <ActivityIndicator size="small" color="#166534" />
+                                                <Text style={{ fontSize: 11, color: '#166534', fontStyle: 'italic' }}>
+                                                  Kayıtlı öğrenciler yükleniyor, lütfen bekleyin...
+                                                </Text>
+                                              </View>
+                                            );
+                                          }
+
+                                          const normToken = (s: string) =>
+                                            String(s || '')
+                                              .toLocaleLowerCase('tr-TR')
+                                              .replace(/i̇/g, 'i')
+                                              .replace(/ı/g, 'i')
+                                              .replace(/ğ/g, 'g')
+                                              .replace(/ü/g, 'u')
+                                              .replace(/ş/g, 's')
+                                              .replace(/ö/g, 'o')
+                                              .replace(/ç/g, 'c')
+                                              .replace(/[^a-z0-9]/g, '');
+
+                                          const term = studentSearchTerm.trim();
+                                          const termNorm = normToken(term);
+                                          const termDigits = term.replace(/^0+/, '').replace(/\D/g, '');
+
                                           const filteredStudents = schoolStudents
                                             .filter((st: any) => {
                                               if (!term) return true;
-                                              const sName = String(st.fullName || '').toLowerCase();
-                                              const sNo = String(st.studentNumber || '').toLowerCase();
-                                              const sNoNorm = sNo.replace(/^0+/, '');
-                                              const sClass = `${st.grade || ''}${st.section || ''}`.toLowerCase();
-                                              return (
-                                                sName.includes(term) ||
-                                                sNo.includes(term) ||
-                                                (termNorm.length > 0 && sNoNorm.includes(termNorm)) ||
-                                                sClass.includes(term)
-                                              );
+                                              const sName = String(st.fullName || st.name || st.name_surname || st.adSoyad || '');
+                                              const sNo = String(st.studentNumber || st.student_number || st.ogrenciNo || '');
+                                              const sNoDigits = sNo.replace(/^0+/, '').replace(/\D/g, '');
+                                              const sClass = `${st.grade || st.sinif || ''}${st.section || st.sube || ''} ${st.className || ''}`;
+
+                                              const sNameNorm = normToken(sName);
+                                              const sClassNorm = normToken(sClass);
+
+                                              const matchesName = termNorm.length > 0 && sNameNorm.includes(termNorm);
+                                              const matchesClass = termNorm.length > 0 && sClassNorm.includes(termNorm);
+                                              const matchesNo =
+                                                (termDigits.length > 0 && sNoDigits.includes(termDigits)) ||
+                                                (termNorm.length > 0 && normToken(sNo).includes(termNorm));
+
+                                              return matchesName || matchesClass || matchesNo;
                                             })
-                                            .slice(0, 10);
+                                            .slice(0, 15);
 
                                           if (filteredStudents.length === 0) {
                                             return (
                                               <Text style={{ fontSize: 11, color: '#DC2626', marginTop: 6, fontStyle: 'italic' }}>
-                                                "{studentSearchTerm}" ile eşleşen öğrenci bulunamadı.
+                                                "{studentSearchTerm}" ile eşleşen kayıtlı öğrenci bulunamadı.
                                               </Text>
                                             );
                                           }
 
                                           return (
-                                            <View style={{ marginTop: 6, maxHeight: 140 }}>
+                                            <View style={{ marginTop: 6, maxHeight: 150 }}>
                                               <ScrollView nestedScrollEnabled={true}>
-                                                {filteredStudents.map((st: any) => (
-                                                  <TouchableOpacity
-                                                    key={st.id || st.studentNumber}
-                                                    style={{
-                                                      paddingVertical: 5,
-                                                      paddingHorizontal: 8,
-                                                      borderBottomWidth: 1,
-                                                      borderBottomColor: '#E2E8F0',
-                                                      flexDirection: 'row',
-                                                      justifyContent: 'space-between',
-                                                      alignItems: 'center',
-                                                      backgroundColor: '#FFFFFF',
-                                                    }}
-                                                    onPress={() => {
-                                                      handleUpdatePreviewRowOverride(r.lineIndex, {
-                                                        ogrenciNo: st.studentNumber,
-                                                        adSoyad: st.fullName,
-                                                        sinif: `${st.grade || ''}${st.section || ''}`.trim(),
-                                                      });
-                                                      setSearchingStudentForLine(null);
-                                                    }}
-                                                  >
-                                                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}>
-                                                      {st.studentNumber} - {st.fullName} ({st.grade ? `${st.grade}/${st.section}` : 'Şubesiz'})
-                                                    </Text>
-                                                    <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#15803D' }}>
-                                                      Bu Öğrenciyi Ata ↵
-                                                    </Text>
-                                                  </TouchableOpacity>
-                                                ))}
+                                                {filteredStudents.map((st: any) => {
+                                                  const stNo = String(st.studentNumber || st.student_number || st.ogrenciNo || '').trim();
+                                                  const stName = String(st.fullName || st.name || st.name_surname || st.adSoyad || '').trim();
+                                                  const stClass = String(
+                                                    (st.grade && st.section ? `${st.grade}-${st.section}` : '') ||
+                                                    st.className ||
+                                                    `${st.grade || ''}${st.section || ''}` ||
+                                                    'Şubesiz'
+                                                  ).trim();
+
+                                                  return (
+                                                    <TouchableOpacity
+                                                      key={st.id || `${stNo}_${stName}`}
+                                                      style={{
+                                                        paddingVertical: 5,
+                                                        paddingHorizontal: 8,
+                                                        borderBottomWidth: 1,
+                                                        borderBottomColor: '#E2E8F0',
+                                                        flexDirection: 'row',
+                                                        justifyContent: 'space-between',
+                                                        alignItems: 'center',
+                                                        backgroundColor: '#FFFFFF',
+                                                      }}
+                                                      onPress={() => {
+                                                        handleUpdatePreviewRowOverride(r.lineIndex, {
+                                                          ogrenciNo: stNo,
+                                                          adSoyad: stName,
+                                                          sinif: stClass !== 'Şubesiz' ? stClass : '',
+                                                        });
+                                                        setSearchingStudentForLine(null);
+                                                      }}
+                                                    >
+                                                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#0F172A' }}>
+                                                        {stNo ? `${stNo} - ` : ''}{stName} ({stClass})
+                                                      </Text>
+                                                      <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#15803D' }}>
+                                                        Bu Öğrenciyi Ata ↵
+                                                      </Text>
+                                                    </TouchableOpacity>
+                                                  );
+                                                })}
                                               </ScrollView>
                                             </View>
                                           );

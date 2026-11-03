@@ -99,6 +99,7 @@ export const YearlyPlanScreen: React.FC = () => {
   const [loadingExcel, setLoadingExcel] = useState(false);
   const [excelLoadingMsg, setExcelLoadingMsg] = useState('Excel dosyası okunuyor...');
   const [isAiPlanMode, setIsAiPlanMode] = useState(false);
+  const [isTeacherUser, setIsTeacherUser] = useState(false);
 
   // Dynamic Document Column Mapping State
   const [docAnalysis, setDocAnalysis] = useState<DocumentAnalysisResult | null>(null);
@@ -136,6 +137,7 @@ export const YearlyPlanScreen: React.FC = () => {
       const role = ((await getActiveUserRole()) || '').toLowerCase();
       const session = await getActiveUserSession();
       const isTeacher = role === 'teacher' || (session?.role || '').toLowerCase() === 'teacher';
+      setIsTeacherUser(isTeacher);
 
       if (isTeacher) {
         const taught = await getTeacherTaughtLessons();
@@ -1001,14 +1003,16 @@ export const YearlyPlanScreen: React.FC = () => {
       <View style={styles.levelBar}>
         <View style={styles.levelBarHeader}>
           <Text style={styles.levelBarLabel}>Sınıf Düzeyi:</Text>
-          <TouchableOpacity
-            style={styles.manageLevelsBtn}
-            onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'grades' })}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Ionicons name="settings-outline" size={13} color={Colors.primary} />
-            <Text style={styles.manageLevelsBtnText}>Düzeyleri Yönet</Text>
-          </TouchableOpacity>
+          {!isTeacherUser && (
+            <TouchableOpacity
+              style={styles.manageLevelsBtn}
+              onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'grades' })}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="settings-outline" size={13} color={Colors.primary} />
+              <Text style={styles.manageLevelsBtnText}>Düzeyleri Yönet</Text>
+            </TouchableOpacity>
+          )}
         </View>
         <ScrollView
           horizontal={Platform.OS !== 'web'}

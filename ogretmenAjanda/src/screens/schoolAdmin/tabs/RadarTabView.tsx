@@ -59,7 +59,8 @@ export function RadarTabView({ ctx }: { ctx: SchoolAdminCtx }) {
     dutyFilterDay,
     setDutyFilterDay,
     loadingDuties,
-    handleDeleteDuty
+    handleDeleteDuty,
+    handleEditDuty
   } = ctx;
 
   return (
@@ -844,12 +845,20 @@ export function RadarTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                     </Text>
                                   </View>
 
-                                  <TouchableOpacity
-                                    onPress={() => handleDeleteDuty(d.id, d.teacherName)}
-                                    style={{ padding: 8, borderRadius: 8, backgroundColor: '#FEE2E2' }}
-                                  >
-                                    <Ionicons name="trash-outline" size={16} color="#DC2626" />
-                                  </TouchableOpacity>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <TouchableOpacity
+                                      onPress={() => handleEditDuty && handleEditDuty(d)}
+                                      style={{ padding: 8, borderRadius: 8, backgroundColor: '#EFF6FF', marginRight: 6 }}
+                                    >
+                                      <Ionicons name="pencil-outline" size={16} color="#2563EB" />
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                      onPress={() => handleDeleteDuty(d.id, d.teacherName)}
+                                      style={{ padding: 8, borderRadius: 8, backgroundColor: '#FEE2E2' }}
+                                    >
+                                      <Ionicons name="trash-outline" size={16} color="#DC2626" />
+                                    </TouchableOpacity>
+                                  </View>
                                 </View>
                               </View>
                             ))}

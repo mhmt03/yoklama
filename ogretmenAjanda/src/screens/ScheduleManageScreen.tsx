@@ -114,7 +114,15 @@ export const ScheduleManageScreen: React.FC = () => {
   const loadData = async () => {
     try {
       const [role, active] = await Promise.all([getActiveUserRole(), getActiveSchool()]);
-      if (role === 'teacher' && active) {
+      if (role === 'teacher') {
+        Alert.alert(
+          'Yetki Sınırı',
+          'Öğretmen modunda "Tanımlamalar" ekranına erişim izni bulunmamaktadır. Ders saatleri, şubeler ve programlar okul idaresi tarafından merkezi olarak belirlenir.'
+        );
+        navigation.goBack();
+        return;
+      }
+      if ((role as any) === 'teacher' && active) {
         setIsSchoolTeacher(true);
         setActiveSchoolName(active.name);
       } else {
@@ -498,6 +506,10 @@ export const ScheduleManageScreen: React.FC = () => {
 
   // Day-Specific Custom Hours handlers
   const handleActivateCustomDay = async (dayOfWeek: number) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Güne özel ders saatleri okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     const dayName = DAYS_OF_WEEK.find((d) => d.id === dayOfWeek)?.name || 'Bu Gün';
     try {
       await copyStandardSlotsToDay(dayOfWeek);
@@ -512,6 +524,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleResetCustomDay = (dayOfWeek: number) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Güne özel ders saatleri okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     const dayName = DAYS_OF_WEEK.find((d) => d.id === dayOfWeek)?.name || 'Bu Gün';
     Alert.alert(
       'Standart Saatlere Dön',
@@ -535,6 +551,10 @@ export const ScheduleManageScreen: React.FC = () => {
   };
 
   const handleOpenEditDaySlot = (slot: DaySlotInfo) => {
+    if (isSchoolTeacher) {
+      Alert.alert('Yetki Sınırı', 'Okul modundasınız: Güne özel ders saatleri okul idaresi tarafından belirlenmektedir.');
+      return;
+    }
     setEditingDaySlot(slot);
     setDaySlotStartInput(slot.start_time);
     setDaySlotEndInput(slot.end_time);

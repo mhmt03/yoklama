@@ -46,6 +46,8 @@ import { SchoolAdminCtx, styles } from '../schoolAdminStyles';
 export function TeacherAndClassModals({ ctx }: { ctx: SchoolAdminCtx }) {
   const {
     addDutyModalVisible,
+    editingDutyId,
+    setEditingDutyId,
     setAddDutyModalVisible,
     newDutyTeacher,
     setNewDutyTeacher,
@@ -171,15 +173,15 @@ export function TeacherAndClassModals({ ctx }: { ctx: SchoolAdminCtx }) {
 
   return (
     <>
-      <Modal visible={addDutyModalVisible} animationType="slide" transparent onRequestClose={() => setAddDutyModalVisible(false)}>
+      <Modal visible={addDutyModalVisible} animationType="slide" transparent onRequestClose={() => { setAddDutyModalVisible(false); if (setEditingDutyId) setEditingDutyId(null); }}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { maxWidth: 520, width: '92%' }]}>
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Ionicons name="shield-checkmark" size={22} color="#4F46E5" />
-                <Text style={styles.modalTitle}>Yeni Nöbetçi Öğretmen Ekle</Text>
+                <Text style={styles.modalTitle}>{editingDutyId ? 'Nöbetçi Öğretmeni Düzenle' : 'Yeni Nöbetçi Öğretmen Ekle'}</Text>
               </View>
-              <TouchableOpacity onPress={() => setAddDutyModalVisible(false)}>
+              <TouchableOpacity onPress={() => { setAddDutyModalVisible(false); if (setEditingDutyId) setEditingDutyId(null); }}>
                 <Ionicons name="close" size={24} color={Colors.text} />
               </TouchableOpacity>
             </View>
@@ -279,7 +281,7 @@ export function TeacherAndClassModals({ ctx }: { ctx: SchoolAdminCtx }) {
                 ) : (
                   <>
                     <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
-                    <Text style={styles.exportActionBtnText}>Nöbetçiyi Kaydet</Text>
+                    <Text style={styles.exportActionBtnText}>{editingDutyId ? 'Değişiklikleri Güncelle' : 'Nöbetçiyi Kaydet'}</Text>
                   </>
                 )}
               </TouchableOpacity>

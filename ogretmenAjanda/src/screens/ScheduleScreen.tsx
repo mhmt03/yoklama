@@ -51,6 +51,7 @@ import { DaySlotInfo, ScheduleItem, CourseName, ClassItem } from '../types';
 import { pickSchedulePhoto, cropAndRotateSchedulePhoto } from '../utils/photoService';
 
 import { getActiveSchool, School } from '../database/operations/schoolOperations';
+import { getActiveUserRole } from '../utils/roleService';
 import { apiRequest } from '../services/apiClient';
 
 import { ensureGradesAndClassesDefined } from '../utils/setupChecks';
@@ -72,6 +73,7 @@ export const ScheduleScreen: React.FC = () => {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [courses, setCourses] = useState<CourseName[]>([]);
   const [activeSchool, setActiveSchool] = useState<School | null>(null);
+  const [isTeacher, setIsTeacher] = useState(false);
   const [syncingSchedule, setSyncingSchedule] = useState(false);
 
   // Schedule Photo State
@@ -123,7 +125,7 @@ export const ScheduleScreen: React.FC = () => {
 
   const loadData = async () => {
     try {
-      const [daySlots, cls, crs, cDays, currentDayItems, savedPhoto, activeSch] = await Promise.all([
+      const [daySlots, cls, crs, cDays, currentDayItems, savedPhoto, activeSch, userRole] = await Promise.all([
         getSlotsForDay(selectedDay),
         getClasses(),
         getCourses(),
@@ -131,7 +133,9 @@ export const ScheduleScreen: React.FC = () => {
         getScheduleByDay(selectedDay),
         getSchedulePhotoUri(),
         getActiveSchool(),
+        getActiveUserRole(),
       ]);
+      setIsTeacher(userRole === 'teacher');
       setSlots(daySlots);
       setClasses(cls);
       setCourses(crs);
@@ -701,6 +705,7 @@ export const ScheduleScreen: React.FC = () => {
           </TouchableOpacity>
 
           <View style={styles.headerIconButtonsGroup}>
+            {!isTeacher && (
             <TouchableOpacity
               style={styles.actionBtnIcon}
               onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'slots', initialDay: selectedDay })}
@@ -708,6 +713,7 @@ export const ScheduleScreen: React.FC = () => {
             >
               <Ionicons name="settings-outline" size={19} color={Colors.primary} />
             </TouchableOpacity>
+          )}
             <TouchableOpacity
               style={styles.actionBtnIcon}
               onPress={handleExportSchedule}
@@ -792,6 +798,7 @@ export const ScheduleScreen: React.FC = () => {
               {currentDayObj?.name} gününe özel ders saatleri uygulanıyor.
             </Text>
           </View>
+          {!isTeacher && (
           <TouchableOpacity
             style={styles.customBannerBtn}
             onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'slots', initialDay: selectedDay })}
@@ -799,6 +806,7 @@ export const ScheduleScreen: React.FC = () => {
             <Text style={styles.customBannerBtnText}>Saatleri Düzenle</Text>
             <Ionicons name="chevron-forward" size={12} color={Colors.primary} />
           </TouchableOpacity>
+        )}
         </View>
       )}
 
@@ -814,12 +822,14 @@ export const ScheduleScreen: React.FC = () => {
                 onPress={handleSyncScheduleFromSchool}
                 loading={syncingSchedule}
               />
+              {!isTeacher && (
               <Button
                 title="Saatleri Tanımla"
                 size="sm"
                 variant="outline"
                 onPress={() => navigation.navigate('ScheduleManage', { initialTab: 'slots' })}
               />
+            )}
             </View>
           </Card>
         ) : (
@@ -1188,7 +1198,8 @@ export const ScheduleScreen: React.FC = () => {
               </TouchableOpacity>
 
               {/* Option 6: Ders Programını Düzenle & Saatleri Yönet */}
-              <TouchableOpacity
+              {!isTeacher && (
+<TouchableOpacity
                 style={styles.photoOptionCard}
                 onPress={() => {
                   setPhotoMenuVisible(false);
@@ -1207,6 +1218,7 @@ export const ScheduleScreen: React.FC = () => {
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </TouchableOpacity>
+              )}
 
               {/* Option 7: Ders Programını Sıfırla */}
               <TouchableOpacity

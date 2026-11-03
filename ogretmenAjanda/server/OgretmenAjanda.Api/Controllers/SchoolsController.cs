@@ -1104,6 +1104,28 @@ namespace OgretmenAjanda.Api.Controllers
             });
         }
 
+        [HttpGet("{schoolId}/students")]
+        public async Task<IActionResult> GetStudentsBySchool(Guid schoolId)
+        {
+            var students = await _context.Students
+                .Where(s => s.SchoolId == schoolId)
+                .OrderBy(s => s.Grade)
+                .ThenBy(s => s.Section)
+                .ThenBy(s => s.StudentNumber)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.SchoolId,
+                    s.StudentNumber,
+                    s.FullName,
+                    s.Grade,
+                    s.Section,
+                    s.PhotoPath
+                })
+                .ToListAsync();
+            return Ok(students);
+        }
+
         // --- SINIF VE ŞUBE YÖNETİMİ ---
 
         [HttpGet("{schoolId}/classes")]
@@ -1601,6 +1623,54 @@ namespace OgretmenAjanda.Api.Controllers
                 return BadRequest(new { message = "Geçersiz veri formatı." });
             }
 
+            if (dutiesElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                var schoolIdStr = schoolId.ToString();
+                var registeredTeachers = await _context.Users
+                    .Where(u =>
+                        (u.SchoolId == schoolId ||
+                         (!string.IsNullOrEmpty(u.AssignedSchoolIdsJson) && u.AssignedSchoolIdsJson.Contains(schoolIdStr)) ||
+                         (!u.SchoolId.HasValue && (
+                            (!string.IsNullOrEmpty(school.CustomerId) && u.CustomerId == school.CustomerId) ||
+                            (!string.IsNullOrEmpty(school.RelationId) && u.RelationId == school.RelationId)
+                         ))) &&
+                        (u.Role == UserRoles.Teacher || u.Role == UserRoles.Staff)
+                    )
+                    .Select(u => u.FullName)
+                    .ToListAsync();
+
+                if (registeredTeachers.Count > 0)
+                {
+                    var unknownTeachers = new List<string>();
+                    foreach (var item in dutiesElement.EnumerateArray())
+                    {
+                        string tName = "";
+                        if (item.TryGetProperty("teacherName", out var tn) || item.TryGetProperty("TeacherName", out tn))
+                        {
+                            tName = tn.GetString() ?? "";
+                        }
+                        if (string.IsNullOrWhiteSpace(tName)) continue;
+
+                        string norm = NormalizePersonName(tName);
+                        bool exists = registeredTeachers.Any(rt => NormalizePersonName(rt) == norm);
+                        if (!exists && !unknownTeachers.Any(u => NormalizePersonName(u) == norm))
+                        {
+                            unknownTeachers.Add(tName.Trim());
+                        }
+                    }
+
+                    if (unknownTeachers.Count > 0)
+                    {
+                        var sample = string.Join(", ", unknownTeachers.Take(6));
+                        var more = unknownTeachers.Count > 6 ? $" ve {unknownTeachers.Count - 6} kişi daha" : "";
+                        return BadRequest(new
+                        {
+                            message = $"Nöbet listesindeki şu öğretmen(ler) okul öğretmen listesinde bulunamadı: {sample}{more}. İşlem iptal edildi."
+                        });
+                    }
+                }
+            }
+
             if (overwrite)
             {
                 var existing = _context.TeacherDuties.Where(d => d.SchoolId == schoolId);
@@ -1723,6 +1793,41 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             await _context.SaveChangesAsync();
+            return Ok(new { success = true, duty = new { duty.Id, duty.TeacherName, duty.DutyPlace, DayOfWeek = normalizedDay, duty.Date } });
+        }
+
+        [HttpPut("{schoolId}/duties/{dutyId}")]
+        public async Task<IActionResult> UpdateDuty(Guid schoolId, Guid dutyId, [FromBody] System.Text.Json.JsonElement request)
+        {
+            var duty = await _context.TeacherDuties.FirstOrDefaultAsync(d => d.Id == dutyId && d.SchoolId == schoolId);
+            if (duty == null) return NotFound(new { message = "Nöbet kaydı bulunamadı." });
+
+            string teacherName = "";
+            if (request.TryGetProperty("teacherName", out var tn) || request.TryGetProperty("TeacherName", out tn))
+                teacherName = tn.GetString() ?? "";
+
+            if (!string.IsNullOrWhiteSpace(teacherName))
+                duty.TeacherName = teacherName.Trim();
+
+            if (request.TryGetProperty("dutyPlace", out var dp) || request.TryGetProperty("DutyPlace", out dp))
+            {
+                var val = dp.GetString();
+                if (!string.IsNullOrWhiteSpace(val)) duty.DutyPlace = val.Trim();
+            }
+
+            if (request.TryGetProperty("dayOfWeek", out var dw) || request.TryGetProperty("DayOfWeek", out dw))
+            {
+                string dayOfWeek = dw.ValueKind == System.Text.Json.JsonValueKind.Number ? dw.GetInt32().ToString() : (dw.GetString() ?? "1");
+                duty.DayOfWeek = NormalizeDayOfWeekInt(dayOfWeek).ToString();
+            }
+
+            if (request.TryGetProperty("date", out var dt) || request.TryGetProperty("Date", out dt))
+            {
+                duty.Date = dt.GetString()?.Trim();
+            }
+
+            await _context.SaveChangesAsync();
+            int normalizedDay = NormalizeDayOfWeekInt(duty.DayOfWeek ?? "1");
             return Ok(new { success = true, duty = new { duty.Id, duty.TeacherName, duty.DutyPlace, DayOfWeek = normalizedDay, duty.Date } });
         }
 

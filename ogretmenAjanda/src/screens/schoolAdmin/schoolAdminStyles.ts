@@ -734,6 +734,9 @@ export interface SchoolAdminCtx {
   loadingDuties: boolean;
   dutyFilterDay: number;
   addDutyModalVisible: boolean;
+  editingDutyId?: string | null;
+  setEditingDutyId?: (val: string | null) => void;
+  handleEditDuty?: (duty: any) => void;
   newDutyTeacher: string;
   newDutyDay: number;
   newDutyPlace: string;

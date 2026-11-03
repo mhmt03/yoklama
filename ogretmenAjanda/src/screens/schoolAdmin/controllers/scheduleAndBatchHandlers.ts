@@ -78,6 +78,7 @@ import {
 } from '../../../utils/geminiScheduleService';
 import { extractPhotosFromPdf, PdfExtractedStudentPhoto } from '../../../utils/pdfPhotoExtractor';
 import { extractPhotosFromDocx } from '../../../utils/docxPhotoExtractor';
+import { isSameTeacher } from '../../../utils/counselorService';
 import * as XLSX from 'xlsx';
 import {
   SchoolSnapshotData,
@@ -140,7 +141,10 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
     newDutyDay,
     newDutyNotes,
     setAddDutyModalVisible,
+    editingDutyId,
+    setEditingDutyId,
     setNewDutyTeacher,
+    setNewDutyDay,
     setNewDutyPlace,
     setNewDutyNotes,
     setDownloadingDutyTemplate,
@@ -868,6 +872,15 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
     }
   };
 
+  const handleEditDuty = (duty: any) => {
+    if (setEditingDutyId) setEditingDutyId(duty.id);
+    setNewDutyTeacher(duty.teacherName || '');
+    setNewDutyDay(normalizeDayNumber ? normalizeDayNumber(duty.dayOfWeek) : (Number(duty.dayOfWeek) || 1));
+    setNewDutyPlace(duty.dutyPlace || '');
+    setNewDutyNotes(duty.notes || '');
+    setAddDutyModalVisible(true);
+  };
+
   const handleSaveDuty = async () => {
     if (!selectedSchool) return;
     if (!newDutyTeacher.trim()) {
@@ -880,26 +893,43 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
     }
     setSavingDuty(true);
     try {
-      const res = await apiRequest(`schools/${selectedSchool.id}/duties`, 'POST', {
+      const isEdit = !!editingDutyId;
+      const payload: any = {
         teacherName: newDutyTeacher.trim(),
         dayOfWeek: newDutyDay,
         dutyPlace: newDutyPlace.trim(),
         notes: newDutyNotes.trim() || undefined,
-      });
+      };
+      if (isEdit) {
+        payload.id = editingDutyId;
+      }
+
+      const endpoint = isEdit
+        ? `schools/${selectedSchool.id}/duties/${editingDutyId}`
+        : `schools/${selectedSchool.id}/duties`;
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await apiRequest(endpoint, method, payload);
       if (res.success) {
-        Alert.alert('Başarılı', 'Nöbetçi öğretmen başarıyla kaydedildi.');
+        Alert.alert('Başarılı', isEdit ? 'Nöbetçi öğretmen güncellendi.' : 'Nöbetçi öğretmen başarıyla kaydedildi.');
         setAddDutyModalVisible(false);
+        if (setEditingDutyId) setEditingDutyId(null);
         setNewDutyTeacher('');
         setNewDutyPlace('');
         setNewDutyNotes('');
-        const savedItem = (res.data as any) || {
-          id: String(Date.now()),
+        const savedItem = (res.data as any)?.duty || (res.data as any) || {
+          id: editingDutyId || String(Date.now()),
           teacherName: newDutyTeacher.trim(),
           dayOfWeek: newDutyDay,
           dutyPlace: newDutyPlace.trim(),
           notes: newDutyNotes.trim(),
         };
-        const updated = [...dutiesList, savedItem];
+        let updated: any[];
+        if (isEdit) {
+          updated = dutiesList.map((d: any) => (d.id === editingDutyId ? { ...d, ...savedItem, id: editingDutyId } : d));
+        } else {
+          updated = [...dutiesList, savedItem];
+        }
         setDutiesList(updated);
         await patchLocalSchoolSnapshot(selectedSchool.id, { duties: updated });
       } else {
@@ -1125,6 +1155,32 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
       if (batch.length === 0) {
         Alert.alert('Eşleşme Bulunamadı', 'Excel dosyasında nöbetçi öğretmen kaydı algılanamadı. Lütfen "Şablon İndir" ile örnek Excel tablosunu inceleyin.');
         return;
+      }
+
+      // Nöbetçileri Excel ile yüklerken kontrol: Okul öğretmen listesinde olmayan isim varsa uyar ve işlemi iptal et
+      if (Array.isArray(teachers) && teachers.length > 0) {
+        const unknownNames = Array.from(
+          new Set(
+            batch
+              .map((b) => String(b.teacherName || '').trim())
+              .filter(
+                (bName) =>
+                  bName.length > 0 &&
+                  !teachers.some((t: any) => isSameTeacher(t.fullName || t.name || '', bName))
+              )
+          )
+        );
+
+        if (unknownNames.length > 0) {
+          const sampleList = unknownNames.slice(0, 8).map((n) => '• ' + n).join('\n');
+          const remainingCount = unknownNames.length - 8;
+          const moreText = remainingCount > 0 ? ('\n... ve ' + remainingCount + ' kişi daha') : '';
+          Alert.alert(
+            'Bilinmeyen Öğretmen - Yükleme İptal Edildi',
+            'Excel dosyasındaki aşağıdaki ' + unknownNames.length + ' öğretmen ismi okul öğretmen listesinde bulunamadı:\n\n' + sampleList + moreText + '\n\nLütfen öğretmen listesindeki isimlerle birebir aynı olacak şekilde Excel dosyasını kontrol edip tekrar yükleyiniz.'
+          );
+          return;
+        }
       }
 
       const postRes = await apiRequest<any>(`schools/${selectedSchool.id}/duties/batch`, 'POST', {
@@ -1817,6 +1873,7 @@ export function createScheduleAndBatchHandlers(ctx: SchoolAdminCtx) {
     loadDuties,
     handleSaveDuty,
     handleDeleteDuty,
+    handleEditDuty,
     handleDownloadDutyTemplate,
     handlePickAndParseDutyExcel,
     handleExportTeachersExcel,

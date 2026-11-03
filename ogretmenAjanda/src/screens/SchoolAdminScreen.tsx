@@ -839,6 +839,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [dutyFilterDay, setDutyFilterDay] = useState<number>(0);
 
   const [addDutyModalVisible, setAddDutyModalVisible] = useState(false);
+  const [editingDutyId, setEditingDutyId] = useState<string | null>(null);
 
   const [newDutyTeacher, setNewDutyTeacher] = useState<string>('');
 
@@ -1931,6 +1932,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setDutyFilterDay,
     addDutyModalVisible,
     setAddDutyModalVisible,
+    editingDutyId,
+    setEditingDutyId,
     newDutyTeacher,
     setNewDutyTeacher,
     newDutyDay,
