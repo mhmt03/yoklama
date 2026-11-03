@@ -96,7 +96,11 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             var schedules = await _context.ScheduleItems.AsNoTracking()
-                .Where(s => s.SchoolId == schoolId && s.TeacherId == teacherId)
+                .Where(s => s.SchoolId == schoolId && (
+                    s.TeacherId == teacherId ||
+                    (user != null && !string.IsNullOrEmpty(user.FullName) && s.TeacherName == user.FullName) ||
+                    (user != null && !string.IsNullOrEmpty(user.Username) && s.TeacherName == user.Username)
+                ))
                 .ToListAsync();
 
             foreach (var s in schedules)
@@ -1612,6 +1616,10 @@ namespace OgretmenAjanda.Api.Controllers
                 {
                     results = results.Where(r => teacherClasses.Contains(NormalizeClassKey(r.Sinif))).ToList();
                 }
+                else
+                {
+                    results = new List<OptikSinavSonuc>();
+                }
             }
             else if (caller.role == UserRoles.Student || caller.role == UserRoles.Parent)
             {
@@ -1786,8 +1794,10 @@ namespace OgretmenAjanda.Api.Controllers
             }
 
             // Öğretmen ise kendi sınıflarına filtrele (okul genel ortalamasını kıyas için ayrıca tut)
-            var scopedResults = (teacherClasses != null && teacherClasses.Count > 0)
-                ? allResults.Where(r => teacherClasses.Contains(NormalizeClassKey(r.Sinif))).ToList()
+            var scopedResults = (caller.role == UserRoles.Teacher)
+                ? ((teacherClasses != null && teacherClasses.Count > 0)
+                    ? allResults.Where(r => teacherClasses.Contains(NormalizeClassKey(r.Sinif))).ToList()
+                    : new List<OptikSinavSonuc>())
                 : allResults;
 
             int totalStudentsInSchool = await _context.Students.AsNoTracking().CountAsync(s => s.SchoolId == sinav.SchoolId);
@@ -2082,6 +2092,10 @@ namespace OgretmenAjanda.Api.Controllers
             {
                 var scope = await GetTeacherScopeAsync(caller.userId, sinav.SchoolId);
                 teacherLessons = scope.allowedLessons;
+                if (scope.allowedClasses.Count > 0 && !scope.allowedClasses.Contains(NormalizeClassKey(targetResult.Sinif)))
+                {
+                    return StatusCode(403, new { message = "Yalnızca dersine girdiğiniz şubelerdeki öğrencilerin sınav karnelerini görüntüleyebilirsiniz." });
+                }
             }
 
             var classPeers = allResults.Where(r => NormalizeClassKey(r.Sinif) == NormalizeClassKey(targetResult.Sinif)).ToList();
