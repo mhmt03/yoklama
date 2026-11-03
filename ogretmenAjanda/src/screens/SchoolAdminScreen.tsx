@@ -151,7 +151,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
 
   const [selectedSchool, setSelectedSchool] = useState<any>(null);
 
-  const [activeTab, setActiveTab] = useState<AdminTab>('teachers');
+  const [activeTab, setActiveTab] = useState<AdminTab>('radar');
 
   const [loading, setLoading] = useState(true);
 
@@ -297,6 +297,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [selectedLogAction, setSelectedLogAction] = useState<string>('all');
 
   const [selectedLogTime, setSelectedLogTime] = useState<'all' | 'today' | 'last7' | 'month'>('all');
+  const [selectedLogDevice, setSelectedLogDevice] = useState<'all' | 'pc' | 'mobil'>('all');
 
   const [logSearch, setLogSearch] = useState('');
 
@@ -1537,6 +1538,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setSelectedLogAction,
     selectedLogTime,
     setSelectedLogTime,
+    selectedLogDevice,
+    setSelectedLogDevice,
     logSearch,
     setLogSearch,
     exportingLogs,
@@ -2225,275 +2228,275 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
         {activeTab !== 'optik' && (
           <>
             <View style={styles.combinedSchoolCard}>
-          <View style={styles.schoolSelectorHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-              <Ionicons name="business" size={13} color="#4F46E5" />
-              <Text style={styles.schoolSelectorLabel}>
-                {isStaff ? 'YETKİLİ OLDUĞUNUZ OKULLAR' : 'YÖNETTİĞİNİZ OKULLAR'} {schools.length > 0 ? `(${schools.length})` : ''}
-              </Text>
-            </View>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              {!isStaff && selectedSchool && (
-                <>
-                  <TouchableOpacity
-                    onPress={() => handleOpenEditSchool(selectedSchool)}
-                    style={styles.editSchoolSmallBtn}
-                    activeOpacity={0.7}
-                    accessibilityLabel="Seçili Okulu Düzenle"
-                  >
-                    <Ionicons name="pencil" size={12} color="#4F46E5" />
-                    <Text style={styles.editSchoolSmallBtnText}>Düzenle</Text>
-                  </TouchableOpacity>
-                  {schools.length > 1 && (
-                    <TouchableOpacity
-                      onPress={() => handleDeleteSchool(selectedSchool)}
-                      style={styles.deleteSchoolSmallBtn}
-                      activeOpacity={0.7}
-                      accessibilityLabel="Seçili Okulu Sil"
-                    >
-                      <Ionicons name="trash-outline" size={12} color="#DC2626" />
-                      <Text style={styles.deleteSchoolSmallBtnText}>Sil</Text>
-                    </TouchableOpacity>
-                  )}
-                </>
-              )}
-              {!isStaff && (
-                <TouchableOpacity
-                  onPress={() => setCreateModalVisible(true)}
-                  style={styles.addSchoolSmallBtn}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="add-circle" size={12} color="#166534" />
-                  {/* <Text style={styles.addSchoolSmallBtnText}>Yeni Okul</Text> */}
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
-            {schools.map((s: any) => {
-              const isSelected = selectedSchool?.id === s.id;
-              return (
-                <TouchableOpacity
-                  key={s.id}
-                  onPress={() => handleSelectSchool(s)}
-                  style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name={isSelected ? "checkmark-circle" : "business-outline"} size={13} color={isSelected ? "#fff" : "#4F46E5"} />
-                  <Text style={[styles.schoolChipText, isSelected && styles.schoolChipTextSelected]}>
-                    {s.name}
+              <View style={styles.schoolSelectorHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                  <Ionicons name="business" size={13} color="#4F46E5" />
+                  <Text style={styles.schoolSelectorLabel}>
+                    {isStaff ? 'YETKİLİ OLDUĞUNUZ OKULLAR' : 'YÖNETTİĞİNİZ OKULLAR'} {schools.length > 0 ? `(${schools.length})` : ''}
                   </Text>
-                  <View style={[styles.schoolCodeTag, isSelected && styles.schoolCodeTagSelected]}>
-                    <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
-                      {s.code}
-                    </Text>
-                  </View>
-                  {!isStaff && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 2 }}>
+                </View>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  {!isStaff && selectedSchool && (
+                    <>
                       <TouchableOpacity
-                        onPress={(e: any) => {
-                          e.stopPropagation?.();
-                          handleOpenEditSchool(s);
-                        }}
-                        style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#E2E8F0' }}
-                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                        accessibilityLabel={`${s.name} Düzenle`}
+                        onPress={() => handleOpenEditSchool(selectedSchool)}
+                        style={styles.editSchoolSmallBtn}
+                        activeOpacity={0.7}
+                        accessibilityLabel="Seçili Okulu Düzenle"
                       >
-                        <Ionicons name="pencil" size={11} color={isSelected ? '#fff' : '#4F46E5'} />
+                        <Ionicons name="pencil" size={12} color="#4F46E5" />
+                        <Text style={styles.editSchoolSmallBtnText}>Düzenle</Text>
                       </TouchableOpacity>
                       {schools.length > 1 && (
                         <TouchableOpacity
-                          onPress={(e: any) => {
-                            e.stopPropagation?.();
-                            handleDeleteSchool(s);
-                          }}
-                          style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#FEE2E2' }}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                          accessibilityLabel={`${s.name} Sil`}
+                          onPress={() => handleDeleteSchool(selectedSchool)}
+                          style={styles.deleteSchoolSmallBtn}
+                          activeOpacity={0.7}
+                          accessibilityLabel="Seçili Okulu Sil"
                         >
-                          <Ionicons name="trash-outline" size={11} color={isSelected ? '#fff' : '#DC2626'} />
+                          <Ionicons name="trash-outline" size={12} color="#DC2626" />
+                          <Text style={styles.deleteSchoolSmallBtnText}>Sil</Text>
                         </TouchableOpacity>
                       )}
-                    </View>
+                    </>
                   )}
-                </TouchableOpacity>
-              );
-            })}
-            {!isStaff && schools.length === 0 && (
-              <TouchableOpacity
-                onPress={() => setCreateModalVisible(true)}
-                style={[styles.schoolChip, { borderColor: '#166534', backgroundColor: '#F0FDF4' }]}
-              >
-                <Ionicons name="add" size={14} color="#166534" />
-                <Text style={[styles.schoolChipText, { color: '#166534' }]}>Henüz Okul Yok - İlk Okulu Ekle</Text>
-              </TouchableOpacity>
-            )}
-          </ScrollView>
-
-          {/* Entegre Öğretmen Bağlantı Kodu Şeridi */}
-          {selectedSchool && (
-            <View style={[styles.integratedCodeSection, !isStaff && { marginTop: 8 }]}>
-              <View style={styles.integratedCodeLeft}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                  <Ionicons name="key" size={11} color="#4F46E5" />
-                  <Text style={styles.integratedCodeLabel}>ÖĞRETMEN BAĞLANTI KODU</Text>
+                  {!isStaff && (
+                    <TouchableOpacity
+                      onPress={() => setCreateModalVisible(true)}
+                      style={styles.addSchoolSmallBtn}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="add-circle" size={12} color="#166534" />
+                      {/* <Text style={styles.addSchoolSmallBtnText}>Yeni Okul</Text> */}
+                    </TouchableOpacity>
+                  )}
                 </View>
-                <Text style={styles.integratedCodeValue}>{selectedSchool.code}</Text>
               </View>
-              <TouchableOpacity
-                style={styles.integratedCopyBtn}
-                onPress={() => handleCopyCode(selectedSchool.code)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="copy-outline" size={13} color="#4F46E5" />
-                <Text style={styles.integratedCopyBtnText}>Kopyala</Text>
-              </TouchableOpacity>
-            </View>
-          )}
 
-          {/* OFFLINE-FIRST VERİ EŞİTLEME ŞERİDİ */}
-          {selectedSchool && (
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              backgroundColor: '#F8FAFC',
-              borderWidth: 1,
-              borderColor: '#E2E8F0',
-              borderRadius: 10,
-              paddingVertical: 7,
-              paddingHorizontal: 12,
-              marginTop: 6,
-            }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                <Ionicons name="cloud-done-outline" size={16} color="#059669" />
-                <View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
-                      Yerel Çevrimdışı Bellek (0ms Hız)
-                    </Text>
-                    <View style={{ backgroundColor: '#E0E7FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
-                      <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#4338CA' }}>v{CURRENT_APP_VERSION}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.schoolChipsScroll}>
+                {schools.map((s: any) => {
+                  const isSelected = selectedSchool?.id === s.id;
+                  return (
+                    <TouchableOpacity
+                      key={s.id}
+                      onPress={() => handleSelectSchool(s)}
+                      style={[styles.schoolChip, isSelected && styles.schoolChipSelected]}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name={isSelected ? "checkmark-circle" : "business-outline"} size={13} color={isSelected ? "#fff" : "#4F46E5"} />
+                      <Text style={[styles.schoolChipText, isSelected && styles.schoolChipTextSelected]}>
+                        {s.name}
+                      </Text>
+                      <View style={[styles.schoolCodeTag, isSelected && styles.schoolCodeTagSelected]}>
+                        <Text style={[styles.schoolCodeTagText, isSelected && styles.schoolCodeTagTextSelected]}>
+                          {s.code}
+                        </Text>
+                      </View>
+                      {!isStaff && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 2 }}>
+                          <TouchableOpacity
+                            onPress={(e: any) => {
+                              e.stopPropagation?.();
+                              handleOpenEditSchool(s);
+                            }}
+                            style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#E2E8F0' }}
+                            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                            accessibilityLabel={`${s.name} Düzenle`}
+                          >
+                            <Ionicons name="pencil" size={11} color={isSelected ? '#fff' : '#4F46E5'} />
+                          </TouchableOpacity>
+                          {schools.length > 1 && (
+                            <TouchableOpacity
+                              onPress={(e: any) => {
+                                e.stopPropagation?.();
+                                handleDeleteSchool(s);
+                              }}
+                              style={{ padding: 3, borderRadius: 4, backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : '#FEE2E2' }}
+                              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                              accessibilityLabel={`${s.name} Sil`}
+                            >
+                              <Ionicons name="trash-outline" size={11} color={isSelected ? '#fff' : '#DC2626'} />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+                {!isStaff && schools.length === 0 && (
+                  <TouchableOpacity
+                    onPress={() => setCreateModalVisible(true)}
+                    style={[styles.schoolChip, { borderColor: '#166534', backgroundColor: '#F0FDF4' }]}
+                  >
+                    <Ionicons name="add" size={14} color="#166534" />
+                    <Text style={[styles.schoolChipText, { color: '#166534' }]}>Henüz Okul Yok - İlk Okulu Ekle</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+
+              {/* Entegre Öğretmen Bağlantı Kodu Şeridi */}
+              {selectedSchool && (
+                <View style={[styles.integratedCodeSection, !isStaff && { marginTop: 8 }]}>
+                  <View style={styles.integratedCodeLeft}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <Ionicons name="key" size={11} color="#4F46E5" />
+                      <Text style={styles.integratedCodeLabel}>ÖĞRETMEN BAĞLANTI KODU</Text>
                     </View>
+                    <Text style={styles.integratedCodeValue}>{selectedSchool.code}</Text>
                   </View>
-                  <Text style={{ fontSize: 10, color: '#64748B' }}>
-                    Son Eşitleme: {formatSyncTime(lastSyncTime)} • Kod: {CURRENT_VERSION_CODE}
-                  </Text>
+                  <TouchableOpacity
+                    style={styles.integratedCopyBtn}
+                    onPress={() => handleCopyCode(selectedSchool.code)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="copy-outline" size={13} color="#4F46E5" />
+                    <Text style={styles.integratedCopyBtnText}>Kopyala</Text>
+                  </TouchableOpacity>
                 </View>
-              </View>
+              )}
 
-              <TouchableOpacity
-                style={{
+              {/* OFFLINE-FIRST VERİ EŞİTLEME ŞERİDİ */}
+              {selectedSchool && (
+                <View style={{
                   flexDirection: 'row',
                   alignItems: 'center',
-                  gap: 4,
-                  backgroundColor: '#4F46E5',
-                  paddingVertical: 6,
-                  paddingHorizontal: 11,
-                  borderRadius: 7,
-                }}
-                onPress={handleManualSyncSnapshot}
-                disabled={syncingSnapshot}
-                activeOpacity={0.7}
+                  justifyContent: 'space-between',
+                  backgroundColor: '#F8FAFC',
+                  borderWidth: 1,
+                  borderColor: '#E2E8F0',
+                  borderRadius: 10,
+                  paddingVertical: 7,
+                  paddingHorizontal: 12,
+                  marginTop: 6,
+                }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                    <Ionicons name="cloud-done-outline" size={16} color="#059669" />
+                    <View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
+                          Yerel Çevrimdışı Bellek (0ms Hız)
+                        </Text>
+                        <View style={{ backgroundColor: '#E0E7FF', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#4338CA' }}>v{CURRENT_APP_VERSION}</Text>
+                        </View>
+                      </View>
+                      <Text style={{ fontSize: 10, color: '#64748B' }}>
+                        Son Eşitleme: {formatSyncTime(lastSyncTime)} • Kod: {CURRENT_VERSION_CODE}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 4,
+                      backgroundColor: '#4F46E5',
+                      paddingVertical: 6,
+                      paddingHorizontal: 11,
+                      borderRadius: 7,
+                    }}
+                    onPress={handleManualSyncSnapshot}
+                    disabled={syncingSnapshot}
+                    activeOpacity={0.7}
+                  >
+                    {syncingSnapshot ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="sync" size={13} color="#FFFFFF" />
+                    )}
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>
+                      {syncingSnapshot ? 'Eşitleniyor...' : 'Verileri Güncelle'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* Sekme Seçim Çubuğu (Yalnızca Günlük Çekirdek Sekmeler) */}
+            <View style={styles.tabsContainer}>
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'teachers' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('teachers')}
               >
-                {syncingSnapshot ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
-                ) : (
-                  <Ionicons name="sync" size={13} color="#FFFFFF" />
-                )}
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>
-                  {syncingSnapshot ? 'Eşitleniyor...' : 'Verileri Güncelle'}
+                <Ionicons name="people" size={15} color={activeTab === 'teachers' ? '#4F46E5' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'teachers' && styles.tabButtonTextActive]}>
+                  Öğretmenler ({teachers.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'classes' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('classes')}
+              >
+                <Ionicons name="school" size={15} color={activeTab === 'classes' ? '#4F46E5' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'classes' && styles.tabButtonTextActive]}>
+                  Sınıflar ({classes.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'lessons' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('lessons')}
+              >
+                <Ionicons name="book" size={15} color={activeTab === 'lessons' ? '#4F46E5' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'lessons' && styles.tabButtonTextActive]}>
+                  Dersler ({uniqueLessonsCount > 0 ? uniqueLessonsCount : lessons.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'students' && styles.tabButtonActive]}
+                onPress={() => setActiveTab('students')}
+              >
+                <Ionicons name="id-card" size={15} color={activeTab === 'students' ? '#4F46E5' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'students' && styles.tabButtonTextActive]}>
+                  Öğrenciler ({students.length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'radar' && styles.tabButtonActive]}
+                onPress={() => {
+                  tabPressTimestampRef.current = Date.now();
+                  setActiveTab('radar');
+                  if (allSchoolSchedules.length === 0) {
+                    loadAllSchedules();
+                  }
+                  if (dutiesList.length === 0) {
+                    loadDuties();
+                  }
+                }}
+              >
+                <Ionicons name="compass" size={15} color={activeTab === 'radar' ? '#4F46E5' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'radar' && styles.tabButtonTextActive]}>
+                  📍 Canlı Radar & Nöbet
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.tabButton, activeTab === 'duty_assignment' && styles.tabButtonActive]}
+                onPress={() => {
+                  setActiveTab('duty_assignment');
+                  if (allSchoolSchedules.length === 0) {
+                    loadAllSchedules();
+                  }
+                  if (dutiesList.length === 0) {
+                    loadDuties();
+                  }
+                }}
+              >
+                <Ionicons name="shield-checkmark" size={15} color={activeTab === 'duty_assignment' ? '#4F46E5' : '#64748B'} />
+                <Text style={[styles.tabButtonText, activeTab === 'duty_assignment' && styles.tabButtonTextActive]}>
+                  🛡️ Nöbetçi Atama
                 </Text>
               </TouchableOpacity>
             </View>
-          )}
-        </View>
+          </>
+        )}
 
-        {/* Sekme Seçim Çubuğu (Yalnızca Günlük Çekirdek Sekmeler) */}
-        <View style={styles.tabsContainer}>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'teachers' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('teachers')}
-          >
-            <Ionicons name="people" size={15} color={activeTab === 'teachers' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'teachers' && styles.tabButtonTextActive]}>
-              Öğretmenler ({teachers.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'classes' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('classes')}
-          >
-            <Ionicons name="school" size={15} color={activeTab === 'classes' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'classes' && styles.tabButtonTextActive]}>
-              Sınıflar ({classes.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'lessons' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('lessons')}
-          >
-            <Ionicons name="book" size={15} color={activeTab === 'lessons' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'lessons' && styles.tabButtonTextActive]}>
-              Dersler ({uniqueLessonsCount > 0 ? uniqueLessonsCount : lessons.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'students' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('students')}
-          >
-            <Ionicons name="id-card" size={15} color={activeTab === 'students' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'students' && styles.tabButtonTextActive]}>
-              Öğrenciler ({students.length})
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'radar' && styles.tabButtonActive]}
-            onPress={() => {
-              tabPressTimestampRef.current = Date.now();
-              setActiveTab('radar');
-              if (allSchoolSchedules.length === 0) {
-                loadAllSchedules();
-              }
-              if (dutiesList.length === 0) {
-                loadDuties();
-              }
-            }}
-          >
-            <Ionicons name="compass" size={15} color={activeTab === 'radar' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'radar' && styles.tabButtonTextActive]}>
-              📍 Canlı Radar & Nöbet
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'duty_assignment' && styles.tabButtonActive]}
-            onPress={() => {
-              setActiveTab('duty_assignment');
-              if (allSchoolSchedules.length === 0) {
-                loadAllSchedules();
-              }
-              if (dutiesList.length === 0) {
-                loadDuties();
-              }
-            }}
-          >
-            <Ionicons name="shield-checkmark" size={15} color={activeTab === 'duty_assignment' ? '#4F46E5' : '#64748B'} />
-            <Text style={[styles.tabButtonText, activeTab === 'duty_assignment' && styles.tabButtonTextActive]}>
-              🛡️ Nöbetçi Atama
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </>
-    )}
-
-    {/* Hamburger Menüden Açılan Modül Aktifse Gösterilen Bilgi Şeridi */}
+        {/* Hamburger Menüden Açılan Modül Aktifse Gösterilen Bilgi Şeridi */}
         {['schedule', 'optik', 'backup', 'logs', 'messages', 'reports', 'ai_settings'].includes(activeTab) && (
           <View
             style={{

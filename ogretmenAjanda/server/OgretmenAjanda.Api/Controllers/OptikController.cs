@@ -1673,6 +1673,45 @@ namespace OgretmenAjanda.Api.Controllers
                     }).ToList()
             }).ToList();
 
+            if (caller.userId != Guid.Empty)
+            {
+                var threshold = DateTime.UtcNow.AddMinutes(-15);
+                var recent = await _context.AuditLogs.AnyAsync(l =>
+                    l.UserId == caller.userId &&
+                    l.ActionType == "QUERY_EXAM_RESULTS" &&
+                    l.EntityId == id.ToString() &&
+                    l.Timestamp >= threshold
+                );
+                if (!recent)
+                {
+                    var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                    var detailsObj = new
+                    {
+                        device = deviceType,
+                        platform = platformDetail,
+                        examId = id,
+                        examName = sinav.SinavAdi,
+                        sinif,
+                        search
+                    };
+                    await _auditLog.LogAsync(
+                        _context,
+                        sinav.SchoolId,
+                        caller.userId,
+                        caller.userName,
+                        caller.fullName,
+                        caller.role,
+                        "QUERY_EXAM_RESULTS",
+                        "OptikSinav",
+                        id.ToString(),
+                        $"'{sinav.SinavAdi}' optik sınav sonuçları sorgulandı. [{deviceType}]",
+                        System.Text.Json.JsonSerializer.Serialize(detailsObj),
+                        HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                    );
+                    await _context.SaveChangesAsync();
+                }
+            }
+
             return Ok(new
             {
                 exam = new

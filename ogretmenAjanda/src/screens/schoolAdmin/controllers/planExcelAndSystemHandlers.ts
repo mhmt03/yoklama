@@ -19,7 +19,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession, getAuthToken } from '../../../services/apiClient';
+import { apiRequest, DEFAULT_API_URL, clearAuthSession, getActiveUserSession, getAuthToken, getClientDeviceInfo } from '../../../services/apiClient';
 import {
   parseMasterScheduleWithAi,
   saveMasterScheduleToServer,
@@ -170,6 +170,7 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
     selectedLogRole,
     selectedLogAction,
     selectedLogTime,
+    selectedLogDevice,
     logSearch,
     setLogs,
     setLogStats,
@@ -1168,6 +1169,7 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
       const roleF = overrideFilters?.role !== undefined ? overrideFilters.role : selectedLogRole;
       const actionF = overrideFilters?.action !== undefined ? overrideFilters.action : selectedLogAction;
       const timeF = overrideFilters?.time !== undefined ? overrideFilters.time : selectedLogTime;
+      const devF = overrideFilters?.device !== undefined ? overrideFilters.device : selectedLogDevice;
       const searchF = overrideFilters?.search !== undefined ? overrideFilters.search : logSearch;
 
       if (userF && userF !== 'all') {
@@ -1178,6 +1180,9 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
       }
       if (actionF && actionF !== 'all') {
         query += `&actionType=${encodeURIComponent(actionF)}`;
+      }
+      if (devF && devF !== 'all') {
+        query += `&device=${devF}`;
       }
       if (searchF && searchF.trim()) {
         query += `&search=${encodeURIComponent(searchF.trim())}`;
@@ -1220,6 +1225,7 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
       if (selectedLogUser && selectedLogUser !== 'all') query += `&userId=${selectedLogUser}`;
       if (selectedLogRole && selectedLogRole !== 'all') query += `&userRole=${selectedLogRole}`;
       if (selectedLogAction && selectedLogAction !== 'all') query += `&actionType=${encodeURIComponent(selectedLogAction)}`;
+      if (selectedLogDevice && selectedLogDevice !== 'all') query += `&device=${selectedLogDevice}`;
       if (logSearch.trim()) query += `&search=${encodeURIComponent(logSearch.trim())}`;
 
       const now = new Date();
@@ -1235,11 +1241,14 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
 
       const session = await getActiveUserSession();
       const token = await getAuthToken();
+      const devInfo = getClientDeviceInfo();
       const url = `${DEFAULT_API_URL}${query}`;
 
       const response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${token}`,
+          'X-Client-Device': devInfo.device,
+          'X-Client-Platform': devInfo.platform,
         },
       });
 

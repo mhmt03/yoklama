@@ -1348,7 +1348,8 @@ namespace OgretmenAjanda.Api.Controllers
             [FromQuery] string? search,
             [FromQuery] DateTime? startDate,
             [FromQuery] DateTime? endDate,
-            [FromQuery] int limit = 200
+            [FromQuery] int limit = 200,
+            [FromQuery] string? device = null
         )
         {
             var school = await _context.Schools.FindAsync(schoolId);
@@ -1366,7 +1367,8 @@ namespace OgretmenAjanda.Api.Controllers
                 search,
                 startDate,
                 endDate,
-                limit
+                limit,
+                device
             );
 
             return Ok(result);
@@ -1382,7 +1384,8 @@ namespace OgretmenAjanda.Api.Controllers
             [FromQuery] string? actionType = null,
             [FromQuery] string? search = null,
             [FromQuery] DateTime? startDate = null,
-            [FromQuery] DateTime? endDate = null
+            [FromQuery] DateTime? endDate = null,
+            [FromQuery] string? device = null
         )
         {
             var school = await _context.Schools.FindAsync(schoolId);
@@ -1400,7 +1403,8 @@ namespace OgretmenAjanda.Api.Controllers
                 actionType,
                 search,
                 startDate,
-                endDate
+                endDate,
+                device
             );
 
             return File(content, contentType, fileName);
@@ -2033,6 +2037,25 @@ namespace OgretmenAjanda.Api.Controllers
             if (!string.IsNullOrWhiteSpace(user?.FullName)) names.Add(user!.FullName);
             if (!string.IsNullOrWhiteSpace(teacherName)) names.Add(teacherName!);
             if (names.Count == 0) return Ok(new { success = true, data = Array.Empty<object>() });
+
+            // Denetim Günlüğü: Nöbet / Görev sorgusu (15 dakikada en fazla 1 kez)
+            if (user != null && CurrentUserId != Guid.Empty)
+            {
+                var threshold = DateTime.UtcNow.AddMinutes(-15);
+                var recentDutyLog = await _context.AuditLogs.AnyAsync(l =>
+                    l.UserId == CurrentUserId &&
+                    l.ActionType == "QUERY_DUTY" &&
+                    l.Timestamp >= threshold
+                );
+                if (!recentDutyLog)
+                {
+                    var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                    var sidLog = (Guid.TryParse(schoolId, out var parsedSid)) ? (Guid?)parsedSid : user.SchoolId;
+                    var detailsObj = new { device = deviceType, platform = platformDetail, date = targetDate };
+                    await LogActionAsync(sidLog, "QUERY_DUTY", "DutySubstitution", null, $"Nöbetçi görevleri sorgulandı ({targetDate}). [{deviceType}]", System.Text.Json.JsonSerializer.Serialize(detailsObj));
+                    await _context.SaveChangesAsync();
+                }
+            }
 
             var q = _context.DutySubstitutions.AsNoTracking().Where(s => s.Date == targetDate);
 

@@ -158,6 +158,65 @@ export function isJwtExpired(token: string | null | undefined): boolean {
   }
 }
 
+export function getClientDeviceInfo(): { device: 'PC' | 'Mobil'; platform: string } {
+  let device: 'PC' | 'Mobil' = 'PC';
+  let platform = 'PC (Web)';
+
+  if (Platform.OS === 'android') {
+    device = 'Mobil';
+    platform = 'Mobil (Android Uygulaması)';
+  } else if (Platform.OS === 'ios') {
+    device = 'Mobil';
+    platform = 'Mobil (iOS Uygulaması)';
+  } else if (Platform.OS === 'web') {
+    if (typeof navigator !== 'undefined') {
+      const ua = navigator.userAgent || '';
+      const isMobileWeb = /Android|iPhone|iPad|iPod|Mobile|Tablet/i.test(ua);
+      if (isMobileWeb) {
+        device = 'Mobil';
+        if (/Android/i.test(ua)) platform = 'Mobil (Android Web)';
+        else if (/iPhone|iPad|iPod/i.test(ua)) platform = 'Mobil (iOS Web)';
+        else platform = 'Mobil (Mobil Tarayıcı)';
+      } else {
+        device = 'PC';
+        if (/Windows/i.test(ua)) platform = 'PC (Windows Web)';
+        else if (/Macintosh|Mac OS/i.test(ua)) platform = 'PC (macOS Web)';
+        else if (/Linux/i.test(ua)) platform = 'PC (Linux Web)';
+        else platform = 'PC (Web Tarayıcı)';
+      }
+    } else {
+      device = 'PC';
+      platform = 'PC (Web)';
+    }
+  } else if (Platform.OS === 'windows') {
+    device = 'PC';
+    platform = 'PC (Windows Masaüstü)';
+  } else if (Platform.OS === 'macos') {
+    device = 'PC';
+    platform = 'PC (macOS Masaüstü)';
+  }
+
+  return { device, platform };
+}
+
+let lastPingTimestamp = 0;
+export async function pingSessionHeartbeat(): Promise<void> {
+  const now = Date.now();
+  // 15 dakikada en fazla bir kez sinyal gönder
+  if (now - lastPingTimestamp < 15 * 60 * 1000) return;
+
+  const token = await getAuthToken();
+  if (!token || token === 'offline_token' || isJwtExpired(token)) return;
+
+  const session = await getActiveUserSession();
+  if (!session?.userId) return;
+
+  lastPingTimestamp = now;
+  try {
+    await apiRequest('auth/session-ping', 'POST', undefined, false, true);
+  } catch {}
+}
+
 // Genel API İstek Yöneticisi
 export async function apiRequest<T = any>(
   endpoint: string,
@@ -173,6 +232,11 @@ export async function apiRequest<T = any>(
     const url = `${baseUrl.replace(/\/+$/, '')}/${endpoint.replace(/^\/+/, '')}`;
 
     const headers: Record<string, string> = {};
+
+    const devInfo = getClientDeviceInfo();
+    headers['X-Client-Device'] = devInfo.device;
+    headers['X-Client-Platform'] = devInfo.platform;
+
     if (token && token !== 'offline_token') {
       if (isJwtExpired(token)) {
         await clearAuthSession();

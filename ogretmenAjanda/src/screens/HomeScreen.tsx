@@ -76,7 +76,7 @@ import {
 } from '../database/operations/agendaOperations';
 import { School, getSchools, getActiveSchool, setActiveSchool, createSchool, SCHOOL_COLORS, syncAffiliatedSchools, refreshAffiliatedSchoolsFromServer, getDefaultSchoolId, setDefaultSchoolId, activateDefaultSchoolOnStartup } from '../database/operations/schoolOperations';
 import { useSchoolTheme, getOpaqueTint } from '../context/SchoolThemeContext';
-import { getActiveUserSession } from '../services/apiClient';
+import { getActiveUserSession, pingSessionHeartbeat } from '../services/apiClient';
 import { getActiveTeacherName } from '../utils/roleService';
 import { getTeacherTaughtLessons } from '../services/yearlyPlanSyncService';
 import { subscribeUnreadCount, fetchUnreadMessageCount } from '../services/messageNotificationService';
@@ -464,6 +464,7 @@ export const HomeScreen: React.FC = () => {
 
   useFocusEffect(
     useCallback(() => {
+      pingSessionHeartbeat();
       const currentDay = getDayOfWeekIndex();
       setSelectedDay(currentDay);
       setHeroNavTarget(null);

@@ -30,6 +30,8 @@ export function LogsTabView({ ctx }: { ctx: SchoolAdminCtx }) {
     logSearch,
     setLogSearch,
     selectedLogTime,
+    selectedLogDevice,
+    setSelectedLogDevice,
     setSelectedLogTime,
     selectedLogRole,
     setSelectedLogRole,
@@ -153,6 +155,32 @@ export function LogsTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                           }}
                         >
                           <Text style={[styles.logFilterChipText, isSel && styles.logFilterChipTextActive]}>{f.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+
+                {/* Filtre: Cihaz Türü (PC / Mobil) */}
+                <View style={styles.filterSection}>
+                  <Text style={styles.filterSectionLabel}>CİHAZ / PLATFORM:</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChipsRow}>
+                    {[
+                      { id: 'all', label: 'Tüm Cihazlar' },
+                      { id: 'pc', label: '💻 Bilgisayar (PC)' },
+                      { id: 'mobil', label: '📱 Telefon / Mobil' },
+                    ].map((d: any) => {
+                      const isSel = selectedLogDevice === d.id;
+                      return (
+                        <TouchableOpacity
+                          key={d.id}
+                          style={[styles.logFilterChip, isSel && styles.logFilterChipActive]}
+                          onPress={() => {
+                            setSelectedLogDevice(d.id as any);
+                            loadAuditLogs(undefined, { device: d.id });
+                          }}
+                        >
+                          <Text style={[styles.logFilterChipText, isSel && styles.logFilterChipTextActive]}>{d.label}</Text>
                         </TouchableOpacity>
                       );
                     })}
@@ -305,6 +333,23 @@ export function LogsTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                 {displayTitle}
                               </Text>
                             </View>
+                            {item.deviceLabel || item.device ? (
+                              <View style={[
+                                styles.logActionBadge,
+                                {
+                                  backgroundColor: item.device === 'Mobil' ? '#ECFDF5' : item.device === 'PC' ? '#EFF6FF' : '#F1F5F9',
+                                  borderColor: item.device === 'Mobil' ? '#A7F3D0' : item.device === 'PC' ? '#BFDBFE' : '#CBD5E1',
+                                  borderWidth: 1,
+                                }
+                              ]}>
+                                <Text style={[
+                                  styles.logActionBadgeText,
+                                  { color: item.device === 'Mobil' ? '#047857' : item.device === 'PC' ? '#1D4ED8' : '#475569' }
+                                ]}>
+                                  {item.deviceLabel || (item.device === 'Mobil' ? '📱 Mobil' : item.device === 'PC' ? '💻 PC' : item.device)}
+                                </Text>
+                              </View>
+                            ) : null}
                             {item.entityName ? (
                               <View style={{ backgroundColor: '#F8FAFC', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#E2E8F0' }}>
                                 <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '600' }}>
@@ -348,6 +393,12 @@ export function LogsTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                               </View>
                             </View>
 
+                            {item.deviceDetail ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                <Ionicons name={item.device === 'Mobil' ? 'phone-portrait-outline' : 'laptop-outline'} size={11} color="#64748B" />
+                                <Text style={{ fontSize: 10, color: '#475569', fontWeight: '600' }}>{item.deviceDetail}</Text>
+                              </View>
+                            ) : null}
                             {item.ipAddress ? (
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                                 <Ionicons name="globe-outline" size={11} color="#94A3B8" />

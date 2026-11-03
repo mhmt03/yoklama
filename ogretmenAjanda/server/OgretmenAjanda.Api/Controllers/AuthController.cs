@@ -197,10 +197,33 @@ namespace OgretmenAjanda.Api.Controllers
             // Başarılı Kullanıcı Girişi Logu
             try
             {
+                var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
                 var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+
+                // user.SchoolId null ise kurum/ilişki üzerinden okul id'sini tespit et
+                var effectiveSchoolId = user.SchoolId;
+                if (!effectiveSchoolId.HasValue)
+                {
+                    var custId = user.CustomerId ?? school?.CustomerId;
+                    var relId = user.RelationId ?? school?.RelationId;
+                    var fallbackSchool = await _context.Schools.FirstOrDefaultAsync(s =>
+                        (!string.IsNullOrEmpty(custId) && s.CustomerId == custId) ||
+                        (!string.IsNullOrEmpty(relId) && s.RelationId == relId)
+                    );
+                    effectiveSchoolId = fallbackSchool?.Id;
+                }
+
+                var loginDetails = new
+                {
+                    device = deviceType,
+                    platform = platformDetail,
+                    institution = request.InstitutionCode ?? "",
+                    ip = clientIp ?? "local"
+                };
+
                 await _auditLogService.LogAsync(
                     _context,
-                    user.SchoolId,
+                    effectiveSchoolId,
                     user.Id,
                     user.Username,
                     user.FullName,
@@ -208,8 +231,8 @@ namespace OgretmenAjanda.Api.Controllers
                     "LOGIN",
                     "User",
                     user.Id.ToString(),
-                    $"{user.FullName} ({user.Username} - {AuditLogService.GetRoleLabel(user.Role)}) sisteme giriş yaptı.",
-                    $"{{\"institution\": \"{request.InstitutionCode ?? ""}\", \"ip\": \"{clientIp ?? "local"}\"}}",
+                    $"{user.FullName} ({user.Username} - {AuditLogService.GetRoleLabel(user.Role)}) sisteme giriş yaptı. [{deviceType}]",
+                    System.Text.Json.JsonSerializer.Serialize(loginDetails),
                     clientIp
                 );
                 await _context.SaveChangesAsync();
@@ -732,6 +755,73 @@ namespace OgretmenAjanda.Api.Controllers
                 message = "Bilgileriniz başarıyla güncellendi.",
                 username = user.Username
             });
+        }
+
+        // Kullanıcı Oturum Sinyali (Uygulama açıldığında veya oturum devam ettiğinde denetim kaydı)
+        [Authorize]
+        [HttpPost("session-ping")]
+        public async Task<IActionResult> SessionPing()
+        {
+            var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (!Guid.TryParse(userIdStr, out var userId)) return Unauthorized();
+
+            var user = await _context.Users.FindAsync(userId);
+            if (user == null) return NotFound();
+
+            user.LastLoginAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            // Okul ID belirleme
+            var schoolId = user.SchoolId;
+            if (!schoolId.HasValue)
+            {
+                var custId = user.CustomerId;
+                var relId = user.RelationId;
+                var school = await _context.Schools.FirstOrDefaultAsync(s =>
+                    (!string.IsNullOrEmpty(custId) && s.CustomerId == custId) ||
+                    (!string.IsNullOrEmpty(relId) && s.RelationId == relId)
+                );
+                schoolId = school?.Id;
+            }
+
+            // Son 30 dakika içinde LOGIN veya SESSION_ACTIVE kaydı yoksa oturum hareketini logla
+            var threshold = DateTime.UtcNow.AddMinutes(-30);
+            var recentLog = await _context.AuditLogs.AnyAsync(l =>
+                l.UserId == user.Id &&
+                (l.ActionType == "LOGIN" || l.ActionType == "SESSION_ACTIVE") &&
+                l.Timestamp >= threshold
+            );
+
+            if (!recentLog)
+            {
+                var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                var clientIp = HttpContext?.Connection?.RemoteIpAddress?.ToString();
+
+                var detailsObj = new
+                {
+                    device = deviceType,
+                    platform = platformDetail,
+                    ip = clientIp ?? "local"
+                };
+
+                await _auditLogService.LogAsync(
+                    _context,
+                    schoolId,
+                    user.Id,
+                    user.Username,
+                    user.FullName,
+                    user.Role,
+                    "SESSION_ACTIVE",
+                    "User",
+                    user.Id.ToString(),
+                    $"{user.FullName} ({user.Username} - {AuditLogService.GetRoleLabel(user.Role)}) uygulamayı açtı / oturum yeniledi. [{deviceType}]",
+                    System.Text.Json.JsonSerializer.Serialize(detailsObj),
+                    clientIp
+                );
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new { success = true });
         }
     }
 }

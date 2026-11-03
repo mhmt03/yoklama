@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using OgretmenAjanda.Api.Data;
 using OgretmenAjanda.Api.Models;
@@ -36,7 +37,8 @@ namespace OgretmenAjanda.Api.Services
             string? search = null,
             DateTime? startDate = null,
             DateTime? endDate = null,
-            int limit = 200
+            int limit = 200,
+            string? device = null
         );
 
         Task<(byte[] content, string contentType, string fileName)> ExportLogsAsync(
@@ -48,7 +50,8 @@ namespace OgretmenAjanda.Api.Services
             string? actionType = null,
             string? search = null,
             DateTime? startDate = null,
-            DateTime? endDate = null
+            DateTime? endDate = null,
+            string? device = null
         );
     }
 
@@ -133,6 +136,92 @@ namespace OgretmenAjanda.Api.Services
             }
         }
 
+        public static (string DeviceType, string PlatformDetail) DetectClientDevice(HttpRequest? request)
+        {
+            string device = "PC";
+            string platform = "PC (Web)";
+
+            if (request == null) return (device, platform);
+
+            // 1. İstemciden gelen açık başlıklar
+            if (request.Headers.TryGetValue("X-Client-Device", out var devVal) && !string.IsNullOrWhiteSpace(devVal))
+            {
+                var rawDev = devVal.ToString().Trim();
+                if (rawDev.Equals("Mobil", StringComparison.OrdinalIgnoreCase) || rawDev.Equals("Mobile", StringComparison.OrdinalIgnoreCase))
+                    device = "Mobil";
+                else if (rawDev.Equals("PC", StringComparison.OrdinalIgnoreCase))
+                    device = "PC";
+            }
+
+            if (request.Headers.TryGetValue("X-Client-Platform", out var platVal) && !string.IsNullOrWhiteSpace(platVal))
+            {
+                platform = platVal.ToString().Trim();
+                return (device, platform);
+            }
+
+            // 2. User-Agent incelemesi
+            var ua = request.Headers["User-Agent"].ToString() ?? "";
+            if (!string.IsNullOrWhiteSpace(ua))
+            {
+                bool isMobile = ua.Contains("Android", StringComparison.OrdinalIgnoreCase) ||
+                                ua.Contains("iPhone", StringComparison.OrdinalIgnoreCase) ||
+                                ua.Contains("iPad", StringComparison.OrdinalIgnoreCase) ||
+                                ua.Contains("iPod", StringComparison.OrdinalIgnoreCase) ||
+                                ua.Contains("Mobile", StringComparison.OrdinalIgnoreCase) ||
+                                ua.Contains("Tablet", StringComparison.OrdinalIgnoreCase);
+
+                if (isMobile)
+                {
+                    device = "Mobil";
+                    if (ua.Contains("Android", StringComparison.OrdinalIgnoreCase))
+                        platform = "Mobil (Android)";
+                    else if (ua.Contains("iPhone", StringComparison.OrdinalIgnoreCase) || ua.Contains("iPad", StringComparison.OrdinalIgnoreCase))
+                        platform = "Mobil (iOS)";
+                    else
+                        platform = "Mobil Cihaz";
+                }
+                else
+                {
+                    device = "PC";
+                    if (ua.Contains("Windows", StringComparison.OrdinalIgnoreCase))
+                        platform = "PC (Windows)";
+                    else if (ua.Contains("Macintosh", StringComparison.OrdinalIgnoreCase) || ua.Contains("Mac OS", StringComparison.OrdinalIgnoreCase))
+                        platform = "PC (macOS)";
+                    else if (ua.Contains("Linux", StringComparison.OrdinalIgnoreCase))
+                        platform = "PC (Linux)";
+                    else
+                        platform = "PC (Masaüstü)";
+                }
+            }
+
+            return (device, platform);
+        }
+
+        public static (string DeviceType, string PlatformDetail) ExtractDeviceFromDetails(string? detailsJson, string? ipAddress)
+        {
+            if (!string.IsNullOrEmpty(detailsJson))
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(detailsJson);
+                    var root = doc.RootElement;
+                    string? dev = null;
+                    string? plat = null;
+
+                    if (root.TryGetProperty("device", out var dProp)) dev = dProp.GetString();
+                    if (root.TryGetProperty("platform", out var pProp)) plat = pProp.GetString();
+
+                    if (!string.IsNullOrEmpty(dev) || !string.IsNullOrEmpty(plat))
+                    {
+                        var dt = (dev != null && (dev.Equals("Mobil", StringComparison.OrdinalIgnoreCase) || dev.Equals("Mobile", StringComparison.OrdinalIgnoreCase))) ? "Mobil" : (dev != null && dev.Equals("PC", StringComparison.OrdinalIgnoreCase) ? "PC" : "Bilinmiyor");
+                        return (dt, plat ?? dt);
+                    }
+                }
+                catch { }
+            }
+            return ("Bilinmiyor", "Bilinmiyor");
+        }
+
         public async Task<object> GetSchoolLogsAsync(
             AppDbContext context,
             Guid schoolId,
@@ -142,10 +231,55 @@ namespace OgretmenAjanda.Api.Services
             string? search = null,
             DateTime? startDate = null,
             DateTime? endDate = null,
-            int limit = 200
+            int limit = 200,
+            string? device = null
         )
         {
-            var query = context.AuditLogs.Where(l => l.SchoolId == schoolId);
+            var school = await context.Schools.FindAsync(schoolId);
+            var customerId = school?.CustomerId;
+            var relationId = school?.RelationId;
+            var schoolIdStr = schoolId.ToString();
+
+            // Okulla ilişkili tüm kullanıcı ID'lerini bul (öğretmenler dahil)
+            var schoolUserIds = await context.Users
+                .Where(u =>
+                    u.SchoolId == schoolId ||
+                    (school != null && u.Id == school.AdminUserId) ||
+                    (!string.IsNullOrEmpty(u.AssignedSchoolIdsJson) && u.AssignedSchoolIdsJson.Contains(schoolIdStr)) ||
+                    (!u.SchoolId.HasValue && (
+                        (!string.IsNullOrEmpty(customerId) && u.CustomerId == customerId) ||
+                        (!string.IsNullOrEmpty(relationId) && u.RelationId == relationId)
+                    ))
+                )
+                .Select(u => u.Id)
+                .Distinct()
+                .ToListAsync();
+
+            // SchoolId doğrudan okul ID'si olanlar VEYA SchoolId null olup bu okula bağlı olan öğretmenlerin logları
+            var query = context.AuditLogs.Where(l =>
+                l.SchoolId == schoolId ||
+                (l.SchoolId == null && schoolUserIds.Contains(l.UserId))
+            );
+
+            // Cihaz filtresi (PC vs Mobil)
+            if (!string.IsNullOrWhiteSpace(device) && device.ToLowerInvariant() != "all")
+            {
+                var dev = device.Trim().ToLowerInvariant();
+                if (dev == "pc")
+                {
+                    query = query.Where(l =>
+                        (l.DetailsJson != null && (l.DetailsJson.Contains("\"device\":\"PC\"") || l.DetailsJson.Contains("\"device\": \"PC\"") || l.DetailsJson.Contains("\"device\":\"pc\""))) ||
+                        (l.Description != null && l.Description.Contains("[PC]"))
+                    );
+                }
+                else if (dev == "mobil" || dev == "mobile")
+                {
+                    query = query.Where(l =>
+                        (l.DetailsJson != null && (l.DetailsJson.Contains("\"device\":\"Mobil\"") || l.DetailsJson.Contains("\"device\": \"Mobil\"") || l.DetailsJson.Contains("\"device\":\"mobil\""))) ||
+                        (l.Description != null && (l.Description.Contains("[Mobil]") || l.Description.Contains("[Mobile]")))
+                    );
+                }
+            }
 
             // Kullanıcı filtresi
             if (userId.HasValue && userId.Value != Guid.Empty)
@@ -197,7 +331,7 @@ namespace OgretmenAjanda.Api.Services
 
             var todayUtcStart = DateTime.UtcNow.Date;
             var todayCount = await context.AuditLogs
-                .Where(l => l.SchoolId == schoolId && l.Timestamp >= todayUtcStart)
+                .Where(l => (l.SchoolId == schoolId || (l.SchoolId == null && schoolUserIds.Contains(l.UserId))) && l.Timestamp >= todayUtcStart)
                 .CountAsync();
 
             var logs = await query
@@ -251,9 +385,17 @@ namespace OgretmenAjanda.Api.Services
                 }
             }
 
-            // Filtre dropdownları için okuldaki kullanıcılar
+            // Filtre dropdownları için okuldaki kullanıcılar (öğretmenler ve personel dahil)
             var schoolUsers = await context.Users
-                .Where(u => u.SchoolId == schoolId || u.Role == UserRoles.SchoolAdmin)
+                .Where(u =>
+                    u.SchoolId == schoolId ||
+                    (school != null && u.Id == school.AdminUserId) ||
+                    (!string.IsNullOrEmpty(u.AssignedSchoolIdsJson) && u.AssignedSchoolIdsJson.Contains(schoolIdStr)) ||
+                    (!u.SchoolId.HasValue && (
+                        (!string.IsNullOrEmpty(customerId) && u.CustomerId == customerId) ||
+                        (!string.IsNullOrEmpty(relationId) && u.RelationId == relationId)
+                    ))
+                )
                 .Select(u => new
                 {
                     id = u.Id,
@@ -261,11 +403,12 @@ namespace OgretmenAjanda.Api.Services
                     fullName = u.FullName,
                     role = u.Role
                 })
+                .OrderBy(u => u.fullName)
                 .ToListAsync();
 
             // Okulda gerçekleşen tüm işlem türleri listesi
             var distinctActionTypes = await context.AuditLogs
-                .Where(l => l.SchoolId == schoolId)
+                .Where(l => l.SchoolId == schoolId || (l.SchoolId == null && schoolUserIds.Contains(l.UserId)))
                 .Select(l => l.ActionType)
                 .Distinct()
                 .ToListAsync();
@@ -295,6 +438,22 @@ namespace OgretmenAjanda.Api.Services
                     desc = !string.IsNullOrWhiteSpace(l.DetailsJson) ? l.DetailsJson : actionTitle;
                 }
 
+                var (deviceType, platformDetail) = ExtractDeviceFromDetails(l.DetailsJson, l.IpAddress);
+                if (deviceType == "Bilinmiyor")
+                {
+                    if (l.Description != null && (l.Description.Contains("[Mobil]") || l.Description.Contains("[Mobile]")))
+                    {
+                        deviceType = "Mobil";
+                        platformDetail = "Mobil Cihaz";
+                    }
+                    else if (l.Description != null && l.Description.Contains("[PC]"))
+                    {
+                        deviceType = "PC";
+                        platformDetail = "PC (Web)";
+                    }
+                }
+                string deviceLabel = deviceType == "Mobil" ? "📱 Mobil" : (deviceType == "PC" ? "💻 PC" : "❓ Bilinmiyor");
+
                 return new
                 {
                     l.Id,
@@ -310,6 +469,9 @@ namespace OgretmenAjanda.Api.Services
                     entityId = l.EntityId,
                     description = desc,
                     detailsJson = l.DetailsJson,
+                    device = deviceType,
+                    deviceDetail = platformDetail,
+                    deviceLabel = deviceLabel,
                     timestamp = l.Timestamp,
                     localTimeString = logTr.ToString("yyyy-MM-dd HH:mm:ss"),
                     formattedDate = logTr.ToString("dd MMMM yyyy, dddd HH:mm:ss", trCulture),
@@ -337,10 +499,53 @@ namespace OgretmenAjanda.Api.Services
             string? actionType = null,
             string? search = null,
             DateTime? startDate = null,
-            DateTime? endDate = null
+            DateTime? endDate = null,
+            string? device = null
         )
         {
-            var query = context.AuditLogs.Where(l => l.SchoolId == schoolId);
+            var school = await context.Schools.FindAsync(schoolId);
+            var customerId = school?.CustomerId;
+            var relationId = school?.RelationId;
+            var schoolIdStr = schoolId.ToString();
+
+            var schoolUserIds = await context.Users
+                .Where(u =>
+                    u.SchoolId == schoolId ||
+                    (school != null && u.Id == school.AdminUserId) ||
+                    (!string.IsNullOrEmpty(u.AssignedSchoolIdsJson) && u.AssignedSchoolIdsJson.Contains(schoolIdStr)) ||
+                    (!u.SchoolId.HasValue && (
+                        (!string.IsNullOrEmpty(customerId) && u.CustomerId == customerId) ||
+                        (!string.IsNullOrEmpty(relationId) && u.RelationId == relationId)
+                    ))
+                )
+                .Select(u => u.Id)
+                .Distinct()
+                .ToListAsync();
+
+            var query = context.AuditLogs.Where(l =>
+                l.SchoolId == schoolId ||
+                (l.SchoolId == null && schoolUserIds.Contains(l.UserId))
+            );
+
+            // Cihaz filtresi
+            if (!string.IsNullOrWhiteSpace(device) && device.ToLowerInvariant() != "all")
+            {
+                var dev = device.Trim().ToLowerInvariant();
+                if (dev == "pc")
+                {
+                    query = query.Where(l =>
+                        (l.DetailsJson != null && (l.DetailsJson.Contains("\"device\":\"PC\"") || l.DetailsJson.Contains("\"device\": \"PC\"") || l.DetailsJson.Contains("\"device\":\"pc\""))) ||
+                        (l.Description != null && l.Description.Contains("[PC]"))
+                    );
+                }
+                else if (dev == "mobil" || dev == "mobile")
+                {
+                    query = query.Where(l =>
+                        (l.DetailsJson != null && (l.DetailsJson.Contains("\"device\":\"Mobil\"") || l.DetailsJson.Contains("\"device\": \"Mobil\"") || l.DetailsJson.Contains("\"device\":\"mobil\""))) ||
+                        (l.Description != null && (l.Description.Contains("[Mobil]") || l.Description.Contains("[Mobile]")))
+                    );
+                }
+            }
 
             if (userId.HasValue && userId.Value != Guid.Empty)
                 query = query.Where(l => l.UserId == userId.Value);
@@ -395,7 +600,6 @@ namespace OgretmenAjanda.Api.Services
                 }
             }
 
-            var school = await context.Schools.FindAsync(schoolId);
             var schoolName = school?.Name ?? "Okul";
             var trCulture = new System.Globalization.CultureInfo("tr-TR");
 
@@ -405,11 +609,27 @@ namespace OgretmenAjanda.Api.Services
             {
                 var sb = new StringBuilder();
                 sb.Append('\uFEFF'); // UTF-8 BOM
-                sb.AppendLine("Tarih ve Saat (TR);İşlem Başlığı;İşlemi Yapan (Ad Soyad);Kullanıcı Adı;Rol;İşlem Türü;Hedef/Varlık;Açıklama;Detaylar;IP Adresi");
+                sb.AppendLine("Tarih ve Saat (TR);Cihaz;Platform;İşlem Başlığı;İşlemi Yapan (Ad Soyad);Kullanıcı Adı;Rol;İşlem Türü;Hedef/Varlık;Açıklama;Detaylar;IP Adresi");
 
                 foreach (var log in logs)
                 {
                     var trDate = log.Timestamp.AddHours(3).ToString("dd.MM.yyyy HH:mm:ss", trCulture);
+                    var (deviceType, platformDetail) = ExtractDeviceFromDetails(log.DetailsJson, log.IpAddress);
+                    if (deviceType == "Bilinmiyor")
+                    {
+                        if (log.Description != null && (log.Description.Contains("[Mobil]") || log.Description.Contains("[Mobile]")))
+                        {
+                            deviceType = "Mobil";
+                            platformDetail = "Mobil Cihaz";
+                        }
+                        else if (log.Description != null && log.Description.Contains("[PC]"))
+                        {
+                            deviceType = "PC";
+                            platformDetail = "PC (Web)";
+                        }
+                    }
+                    var devLabel = deviceType == "Mobil" ? "Mobil" : (deviceType == "PC" ? "PC" : "Bilinmiyor");
+
                     var title = EscapeCsv(GetActionTitle(log.ActionType));
                     var fName = EscapeCsv(!string.IsNullOrEmpty(log.UserFullName) ? log.UserFullName : (log.UserName ?? "Sistem"));
                     var uName = EscapeCsv(log.UserName ?? "-");
@@ -420,7 +640,7 @@ namespace OgretmenAjanda.Api.Services
                     var details = EscapeCsv(log.DetailsJson ?? "");
                     var ip = EscapeCsv(log.IpAddress ?? "-");
 
-                    sb.AppendLine($"{trDate};{title};{fName};{uName};{role};{action};{entity};{desc};{details};{ip}");
+                    sb.AppendLine($"{trDate};{EscapeCsv(devLabel)};{EscapeCsv(platformDetail)};{title};{fName};{uName};{role};{action};{entity};{desc};{details};{ip}");
                 }
 
                 var bytes = Encoding.UTF8.GetBytes(sb.ToString());
@@ -443,8 +663,25 @@ namespace OgretmenAjanda.Api.Services
                     var title = GetActionTitle(log.ActionType);
                     var userDisplay = !string.IsNullOrEmpty(log.UserFullName) ? log.UserFullName : (log.UserName ?? "Sistem");
 
+                    var (deviceType, platformDetail) = ExtractDeviceFromDetails(log.DetailsJson, log.IpAddress);
+                    if (deviceType == "Bilinmiyor")
+                    {
+                        if (log.Description != null && (log.Description.Contains("[Mobil]") || log.Description.Contains("[Mobile]")))
+                        {
+                            deviceType = "Mobil";
+                            platformDetail = "Mobil Cihaz";
+                        }
+                        else if (log.Description != null && log.Description.Contains("[PC]"))
+                        {
+                            deviceType = "PC";
+                            platformDetail = "PC (Web)";
+                        }
+                    }
+                    string devLabel = deviceType == "Mobil" ? "📱 Mobil" : (deviceType == "PC" ? "💻 PC" : "❓ Bilinmiyor");
+
                     sb.AppendLine($"[{trDate}] {title} ({log.ActionType})");
                     sb.AppendLine($"    İşlemi Yapan : {userDisplay} (Kullanıcı Adı: {log.UserName ?? "-"} | Rol: {GetRoleLabel(log.UserRole)})");
+                    sb.AppendLine($"    Cihaz / Ortam: {devLabel} ({platformDetail})");
                     sb.AppendLine($"    Açıklama     : {log.Description ?? log.ActionType}");
                     sb.AppendLine($"    Hedef/Varlık : {log.EntityName} (ID: {log.EntityId ?? "-"})");
                     if (!string.IsNullOrEmpty(log.DetailsJson))
@@ -500,6 +737,14 @@ namespace OgretmenAjanda.Api.Services
             return actionType.ToUpperInvariant() switch
             {
                 "LOGIN" => "🔑 Sisteme Giriş",
+                "SESSION_ACTIVE" => "🟢 Oturum Yenilendi / Uygulama Açıldı",
+                "QUERY_STUDENTS" => "🔍 Öğrenci Listesi Sorgulandı",
+                "QUERY_SCHEDULE" => "📅 Ders Programı Sorgulandı",
+                "QUERY_DUTY" => "🛡️ Nöbet / Görev Bilgisi Sorgulandı",
+                "QUERY_EXAM_RESULTS" => "📊 Sınav Sonuçları Sorgulandı",
+                "ATTENDANCE_SAVED" => "📋 Yoklama Kaydedildi",
+                "DUTY_ASSIGNED" => "🛡️ Nöbetçi Görevi Atandı",
+                "DUTY_DELETED" => "🗑️ Nöbetçi Görevi Silindi",
                 "TEACHER_CREATED" => "👨‍🏫 Yeni Öğretmen Eklendi",
                 "TEACHER_UPDATED" => "✏️ Öğretmen Bilgisi Güncellendi",
                 "TEACHER_DELETED" => "🗑️ Öğretmen Kadrodan Silindi",

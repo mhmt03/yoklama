@@ -203,6 +203,7 @@ export interface SchoolAdminCtx {
   setSelectedLogRole: StateSetter;
   setSelectedLogAction: StateSetter;
   setSelectedLogTime: StateSetter;
+  setSelectedLogDevice: StateSetter;
   setLogSearch: StateSetter;
   setExportingLogs: StateSetter;
   setExpandedLogId: StateSetter;
@@ -527,6 +528,7 @@ export interface SchoolAdminCtx {
   selectedLogRole: string;
   selectedLogAction: string;
   selectedLogTime: 'all' | 'today' | 'last7' | 'month';
+  selectedLogDevice: 'all' | 'pc' | 'mobil';
   logSearch: string;
   exportingLogs: boolean;
   expandedLogId: string | null;

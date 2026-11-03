@@ -348,6 +348,43 @@ namespace OgretmenAjanda.Api.Controllers
                 })
                 .ToListAsync();
 
+            if (User?.Identity?.IsAuthenticated == true)
+            {
+                var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (Guid.TryParse(userIdStr, out var uId))
+                {
+                    var threshold = DateTime.UtcNow.AddMinutes(-15);
+                    var recent = await _context.AuditLogs.AnyAsync(l =>
+                        l.UserId == uId &&
+                        l.ActionType == "QUERY_STUDENTS" &&
+                        l.Timestamp >= threshold
+                    );
+                    if (!recent)
+                    {
+                        var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                        var targetSchoolId = schoolId ?? students.FirstOrDefault()?.SchoolId;
+                        var detailsObj = new
+                        {
+                            device = deviceType,
+                            platform = platformDetail,
+                            count = students.Count,
+                            grade,
+                            section,
+                            className
+                        };
+                        await LogActionAsync(
+                            targetSchoolId,
+                            "QUERY_STUDENTS",
+                            "Student",
+                            null,
+                            $"Öğrenci listesi sorgulandı ({students.Count} öğrenci). [{deviceType}]",
+                            System.Text.Json.JsonSerializer.Serialize(detailsObj)
+                        );
+                        await _context.SaveChangesAsync();
+                    }
+                }
+            }
+
             return Ok(students);
         }
 
@@ -700,6 +737,36 @@ namespace OgretmenAjanda.Api.Controllers
         public async Task<IActionResult> GetSchedules([FromQuery] Guid schoolId, [FromQuery] string? teacherName)
         {
             var allSchoolItems = await _context.ScheduleItems.Where(s => s.SchoolId == schoolId).ToListAsync();
+
+            if (User?.Identity?.IsAuthenticated == true && CurrentUserId != Guid.Empty)
+            {
+                var threshold = DateTime.UtcNow.AddMinutes(-15);
+                var recent = await _context.AuditLogs.AnyAsync(l =>
+                    l.UserId == CurrentUserId &&
+                    l.ActionType == "QUERY_SCHEDULE" &&
+                    l.Timestamp >= threshold
+                );
+                if (!recent)
+                {
+                    var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                    var detailsObj = new
+                    {
+                        device = deviceType,
+                        platform = platformDetail,
+                        schoolId,
+                        teacher = teacherName ?? CurrentUserName
+                    };
+                    await LogActionAsync(
+                        schoolId,
+                        "QUERY_SCHEDULE",
+                        "Schedule",
+                        null,
+                        $"Ders programı sorgulandı{(teacherName != null ? $" ({teacherName})" : "")}. [{deviceType}]",
+                        System.Text.Json.JsonSerializer.Serialize(detailsObj)
+                    );
+                    await _context.SaveChangesAsync();
+                }
+            }
 
             // Öğretmen rolündeki kullanıcı idareci değilse sadece kendi derslerini alır:
             if (IsTeacher)
