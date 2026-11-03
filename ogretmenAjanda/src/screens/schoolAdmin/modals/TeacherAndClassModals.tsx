@@ -1249,7 +1249,7 @@ export function TeacherAndClassModals({ ctx }: { ctx: SchoolAdminCtx }) {
                           onPress={() => handlePickAndUploadPhoto(selectedAdminStudent)}
                           activeOpacity={0.8}
                         >
-                          <Ionicons name="camera" size={14} color="#fff" />
+                          <Ionicons name="camera" size={18} color="#fff" />
                         </TouchableOpacity>
                       </View>
 

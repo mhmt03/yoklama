@@ -238,6 +238,7 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   const [studentSearch, setStudentSearch] = useState('');
 
   const [selectedClassFilter, setSelectedClassFilter] = useState('all');
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState('all');
 
   const [classFilterModalVisible, setClassFilterModalVisible] = useState(false);
 
@@ -1375,21 +1376,32 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
   }, [teachers, teacherLoginFilter, teacherSearchQuery, teacherSortOrder]);
 
   const filteredStudents = useMemo(() => {
-    const q = studentSearch.toLowerCase();
+    const q = studentSearch.toLowerCase().trim();
     return students.filter((s: any) => {
-      const matchesSearch =
-        s.fullName.toLowerCase().includes(q) ||
-        s.studentNumber.includes(studentSearch);
+      const matchesSearch = !q ||
+        (s.fullName && s.fullName.toLowerCase().includes(q)) ||
+        (s.studentNumber && String(s.studentNumber).includes(q));
 
-      if (selectedClassFilter === 'all') return matchesSearch;
-      return (
-        matchesSearch &&
-        (`${s.grade}-${s.section}` === selectedClassFilter ||
+      if (!matchesSearch) return false;
+
+      // Hızlı Kademe Filtresi (9'lar, 10'lar...)
+      if (selectedGradeFilter && selectedGradeFilter !== 'all') {
+        const sGrade = String(s.grade || '').trim();
+        if (sGrade !== selectedGradeFilter) return false;
+      }
+
+      // Şube Filtresi (9-A, 9-B...)
+      if (selectedClassFilter !== 'all') {
+        const matchesClass =
+          `${s.grade}-${s.section}` === selectedClassFilter ||
           s.className === selectedClassFilter ||
-          (s.grade && s.section && `${s.grade}/${s.section}` === selectedClassFilter))
-      );
+          (s.grade && s.section && `${s.grade}/${s.section}` === selectedClassFilter);
+        if (!matchesClass) return false;
+      }
+
+      return true;
     });
-  }, [students, studentSearch, selectedClassFilter]);
+  }, [students, studentSearch, selectedClassFilter, selectedGradeFilter]);
 
   const ctx: SchoolAdminCtx = {
     navigation,
@@ -1484,6 +1496,8 @@ export function SchoolAdminScreen({ navigation, onRoleChange }: any) {
     setStudentSearch,
     selectedClassFilter,
     setSelectedClassFilter,
+    selectedGradeFilter,
+    setSelectedGradeFilter,
     classFilterModalVisible,
     setClassFilterModalVisible,
     photoUploadingId,

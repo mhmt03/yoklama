@@ -176,6 +176,7 @@ export interface SchoolAdminCtx {
   setShowKeyPassword: StateSetter;
   setStudentSearch: StateSetter;
   setSelectedClassFilter: StateSetter;
+  setSelectedGradeFilter: StateSetter;
   setClassFilterModalVisible: StateSetter;
   setPhotoUploadingId: StateSetter;
   setDutyAssignDay: StateSetter;
@@ -501,6 +502,7 @@ export interface SchoolAdminCtx {
   showKeyPassword: boolean;
   studentSearch: string;
   selectedClassFilter: string;
+  selectedGradeFilter: string;
   classFilterModalVisible: boolean;
   photoUploadingId: string | null;
   dutyAssignDay: number;
@@ -846,6 +848,27 @@ export function generateDefaultTeacherUsername(fullName?: string): string {
 
 export const styles: Record<string, any> = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
+  gradeFilterChip: {
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  gradeFilterChipActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: '#6366F1',
+  },
+  gradeFilterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  gradeFilterChipTextActive: {
+    color: '#4F46E5',
+    fontWeight: '800',
+  },
   classSelectContainer: {
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
@@ -1871,22 +1894,22 @@ export const styles: Record<string, any> = StyleSheet.create({
     alignItems: 'center',
   },
   studentPhotoContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
   studentPhoto: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
   },
   studentPhotoPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#EEF2FF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1894,7 +1917,7 @@ export const styles: Record<string, any> = StyleSheet.create({
     borderColor: '#C7D2FE',
   },
   studentInitials: {
-    fontSize: 15,
+    fontSize: 20,
     fontWeight: '800',
     color: '#4F46E5',
   },
@@ -1903,9 +1926,9 @@ export const styles: Record<string, any> = StyleSheet.create({
     bottom: -2,
     right: -2,
     backgroundColor: '#4F46E5',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
@@ -5860,10 +5883,10 @@ export const styles: Record<string, any> = StyleSheet.create({
   },
   adminDetailPhotoWrap: {
     position: 'relative',
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    borderWidth: 3,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    borderWidth: 4,
     borderColor: '#4F46E5',
     backgroundColor: '#EEF2FF',
     alignItems: 'center',
@@ -5875,31 +5898,31 @@ export const styles: Record<string, any> = StyleSheet.create({
     elevation: 4,
   },
   adminDetailBigPhoto: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
+    width: 192,
+    height: 192,
+    borderRadius: 96,
   },
   adminDetailBigPhotoPlaceholder: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
+    width: 192,
+    height: 192,
+    borderRadius: 96,
     backgroundColor: '#EEF2FF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   adminDetailBigPhotoInitial: {
-    fontSize: 34,
+    fontSize: 60,
     fontWeight: '900',
     color: '#4F46E5',
   },
   adminDetailCameraBadge: {
     position: 'absolute',
-    bottom: 2,
-    right: 2,
+    bottom: 4,
+    right: 4,
     backgroundColor: '#4F46E5',
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,

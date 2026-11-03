@@ -1698,9 +1698,7 @@ namespace OgretmenAjanda.Api.Controllers
                         device = deviceType,
                         platform = platformDetail,
                         examId = id,
-                        examName = sinav.SinavAdi,
-                        sinif,
-                        search
+                        examName = sinav.SinavAdi
                     };
                     await _auditLog.LogAsync(
                         _context,
@@ -1712,7 +1710,7 @@ namespace OgretmenAjanda.Api.Controllers
                         "QUERY_EXAM_RESULTS",
                         "OptikSinav",
                         id.ToString(),
-                        $"'{sinav.SinavAdi}' optik sınav sonuçları sorgulandı. [{deviceType}]",
+                        $"'{sinav.SinavAdi}' sınav istatistikleri incelendi. [{deviceType}]",
                         System.Text.Json.JsonSerializer.Serialize(detailsObj),
                         HttpContext?.Connection?.RemoteIpAddress?.ToString()
                     );
@@ -1997,6 +1995,43 @@ namespace OgretmenAjanda.Api.Controllers
                 .OrderBy(t => t.basariYuzdesi)
                 .ToList();
 
+            if (caller.userId != Guid.Empty)
+            {
+                var threshold = DateTime.UtcNow.AddMinutes(-15);
+                var recent = await _context.AuditLogs.AnyAsync(l =>
+                    l.UserId == caller.userId &&
+                    l.ActionType == "QUERY_EXAM_RESULTS" &&
+                    l.EntityId == id.ToString() &&
+                    l.Timestamp >= threshold
+                );
+                if (!recent)
+                {
+                    var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                    var detailsObj = new
+                    {
+                        device = deviceType,
+                        platform = platformDetail,
+                        examId = id,
+                        examName = sinav.SinavAdi
+                    };
+                    await _auditLog.LogAsync(
+                        _context,
+                        sinav.SchoolId,
+                        caller.userId,
+                        caller.userName,
+                        caller.fullName,
+                        caller.role,
+                        "QUERY_EXAM_RESULTS",
+                        "OptikSinav",
+                        id.ToString(),
+                        $"'{sinav.SinavAdi}' sınav istatistikleri incelendi. [{deviceType}]",
+                        System.Text.Json.JsonSerializer.Serialize(detailsObj),
+                        HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                    );
+                    await _context.SaveChangesAsync();
+                }
+            }
+
             return Ok(new
             {
                 exam = new
@@ -2203,6 +2238,44 @@ namespace OgretmenAjanda.Api.Controllers
                 .OrderBy(k => k.DersAdi)
                 .ThenBy(k => k.basariYuzdesi)
                 .ToList();
+
+            if (caller.userId != Guid.Empty)
+            {
+                var threshold = DateTime.UtcNow.AddMinutes(-15);
+                var recent = await _context.AuditLogs.AnyAsync(l =>
+                    l.UserId == caller.userId &&
+                    l.ActionType == "QUERY_EXAM_RESULTS" &&
+                    l.EntityId == id.ToString() &&
+                    l.Timestamp >= threshold
+                );
+                if (!recent)
+                {
+                    var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                    var detailsObj = new
+                    {
+                        device = deviceType,
+                        platform = platformDetail,
+                        examId = id,
+                        examName = sinav.SinavAdi,
+                        studentKey
+                    };
+                    await _auditLog.LogAsync(
+                        _context,
+                        sinav.SchoolId,
+                        caller.userId,
+                        caller.userName,
+                        caller.fullName,
+                        caller.role,
+                        "QUERY_EXAM_RESULTS",
+                        "OptikSinav",
+                        id.ToString(),
+                        $"'{sinav.SinavAdi}' sınavında {targetResult?.AdSoyad ?? studentKey} karnesi incelendi. [{deviceType}]",
+                        System.Text.Json.JsonSerializer.Serialize(detailsObj),
+                        HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                    );
+                    await _context.SaveChangesAsync();
+                }
+            }
 
             return Ok(new
             {
@@ -2499,6 +2572,44 @@ namespace OgretmenAjanda.Api.Controllers
                     recentExams = recentExams
                 };
             }).ToList();
+
+            if (caller.userId != Guid.Empty)
+            {
+                var threshold = DateTime.UtcNow.AddMinutes(-15);
+                var recent = await _context.AuditLogs.AnyAsync(l =>
+                    l.UserId == caller.userId &&
+                    l.ActionType == "QUERY_EXAM_RESULTS" &&
+                    l.EntityId == id.ToString() &&
+                    l.Timestamp >= threshold
+                );
+                if (!recent)
+                {
+                    var (deviceType, platformDetail) = AuditLogService.DetectClientDevice(Request);
+                    var detailsObj = new
+                    {
+                        device = deviceType,
+                        platform = platformDetail,
+                        examId = id,
+                        examName = sinav.SinavAdi,
+                        sinif = req?.Sinif
+                    };
+                    await _auditLog.LogAsync(
+                        _context,
+                        sinav.SchoolId,
+                        caller.userId,
+                        caller.userName,
+                        caller.fullName,
+                        caller.role,
+                        "QUERY_EXAM_RESULTS",
+                        "OptikSinav",
+                        id.ToString(),
+                        $"'{sinav.SinavAdi}' toplu karneleri alındı. [{deviceType}]",
+                        System.Text.Json.JsonSerializer.Serialize(detailsObj),
+                        HttpContext?.Connection?.RemoteIpAddress?.ToString()
+                    );
+                    await _context.SaveChangesAsync();
+                }
+            }
 
             return Ok(new
             {

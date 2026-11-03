@@ -1327,15 +1327,98 @@ namespace OgretmenAjanda.Api.Controllers
             return Ok(new { message = $"{teachers.Count} adet öğretmen başarıyla silindi." });
         }
 
-        // Toplu İşlemler: Tüm Öğrencileri Sil
-        [HttpDelete("{schoolId}/students/all")]
-        public async Task<IActionResult> DeleteAllStudents(Guid schoolId)
+        public class BulkDeleteStudentsRequest
         {
-            var students = await _context.Students.Where(s => s.SchoolId == schoolId).ToListAsync();
+            public List<Guid>? StudentIds { get; set; }
+        }
+
+        // Toplu İşlemler: Tüm veya Filtreli Öğrencileri Sil (Kademe, Şube veya Tüm Okul)
+        [HttpDelete("{schoolId}/students/all")]
+        public async Task<IActionResult> DeleteAllStudents(
+            Guid schoolId,
+            [FromQuery] string? grade = null,
+            [FromQuery] string? section = null,
+            [FromQuery] string? className = null
+        )
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (school.AdminUserId != CurrentUserId && CurrentUserRole != UserRoles.SuperAdmin)
+                return Forbid();
+
+            var query = _context.Students.Where(s => s.SchoolId == schoolId);
+
+            if (!string.IsNullOrWhiteSpace(grade) && grade != "all")
+            {
+                query = query.Where(s => s.Grade == grade.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(section) && section != "all")
+            {
+                query = query.Where(s => s.Section == section.Trim());
+            }
+
+            if (!string.IsNullOrWhiteSpace(className) && className != "all")
+            {
+                var cleanClass = className.Trim();
+                var parts = cleanClass.Split(new[] { '-', '/', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2)
+                {
+                    var g = parts[0].Trim();
+                    var sec = parts[1].Trim();
+                    query = query.Where(s =>
+                        (s.Grade.ToLower() == g.ToLower() && s.Section.ToLower() == sec.ToLower()) ||
+                        (s.Grade + "-" + s.Section == cleanClass) ||
+                        (s.Grade + "/" + s.Section == cleanClass) ||
+                        (s.Grade + s.Section == cleanClass));
+                }
+                else
+                {
+                    query = query.Where(s =>
+                        s.Section.ToLower() == cleanClass.ToLower() ||
+                        s.Grade.ToLower() == cleanClass.ToLower() ||
+                        (s.Grade + "-" + s.Section == cleanClass));
+                }
+            }
+
+            var students = await query.ToListAsync();
             _context.Students.RemoveRange(students);
             await _context.SaveChangesAsync();
-            await LogActionAsync(schoolId, "ALL_STUDENTS_DELETED", "Student", null, $"{students.Count} adet öğrenci kaydı silindi.");
-            return Ok(new { message = $"{students.Count} adet öğrenci kaydı başarıyla silindi." });
+
+            var desc = (!string.IsNullOrWhiteSpace(className) && className != "all")
+                ? $"{className} şubesindeki {students.Count} adet öğrenci kaydı silindi."
+                : (!string.IsNullOrWhiteSpace(grade) && grade != "all"
+                    ? $"{grade}. kademedeki {students.Count} adet öğrenci kaydı silindi."
+                    : $"{students.Count} adet öğrenci kaydı silindi.");
+
+            await LogActionAsync(schoolId, "ALL_STUDENTS_DELETED", "Student", null, desc);
+            return Ok(new { message = desc, count = students.Count });
+        }
+
+        // Toplu İşlemler: Seçili / Filtreli Öğrencileri ID Listesiyle Sil
+        [HttpPost("{schoolId}/students/bulk-delete")]
+        public async Task<IActionResult> BulkDeleteStudents(Guid schoolId, [FromBody] BulkDeleteStudentsRequest request)
+        {
+            var school = await _context.Schools.FindAsync(schoolId);
+            if (school == null) return NotFound(new { message = "Okul bulunamadı." });
+
+            if (school.AdminUserId != CurrentUserId && CurrentUserRole != UserRoles.SuperAdmin)
+                return Forbid();
+
+            if (request?.StudentIds == null || request.StudentIds.Count == 0)
+                return BadRequest(new { message = "Silinecek öğrenci seçilmedi." });
+
+            var students = await _context.Students
+                .Where(s => s.SchoolId == schoolId && request.StudentIds.Contains(s.Id))
+                .ToListAsync();
+
+            _context.Students.RemoveRange(students);
+            await _context.SaveChangesAsync();
+
+            var desc = $"{students.Count} adet filtrelenmiş öğrenci kaydı silindi.";
+            await LogActionAsync(schoolId, "ALL_STUDENTS_DELETED", "Student", null, desc);
+            return Ok(new { message = desc, count = students.Count });
         }
 
         // 15. Okul İşlem Loglarını Listele (Kullanıcı, Rol, İşlem Türü ve Tarih Filtreli)

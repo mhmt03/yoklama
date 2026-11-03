@@ -147,6 +147,10 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
     setLoadingTeacherSchedule,
     students,
     setStudents,
+    filteredStudents,
+    selectedClassFilter,
+    selectedGradeFilter,
+    studentSearch,
     setTeacherExcelModalVisible,
     setTeacherExcelParsing,
     setParsedExcelTeachers,
@@ -445,26 +449,69 @@ export function createPlanExcelAndSystemHandlers(ctx: SchoolAdminCtx) {
 
   const handleDeleteAllStudents = () => {
     if (!selectedSchool) return;
-    Alert.alert(
-      'Tüm Öğrencileri Sil',
-      `"${selectedSchool.name}" okuluna kayıtlı TÜM ÖĞRENCİLER silinecektir. Emin misiniz?`,
-      [
-        { text: 'Vazgeç', style: 'cancel' },
-        {
-          text: 'Tümünü Sil',
-          style: 'destructive',
-          onPress: async () => {
-            const res = await apiRequest(`schools/${selectedSchool.id}/students/all`, 'DELETE');
-            if (res.success) {
-              Alert.alert('Başarılı', 'Okula kayıtlı tüm öğrenciler silindi.');
-              loadStudents(selectedSchool.id);
-            } else {
-              Alert.alert('Hata', res.error || 'Öğrenciler silinemedi.');
-            }
+
+    const isClassFiltered = selectedClassFilter && selectedClassFilter !== 'all';
+    const isGradeFiltered = selectedGradeFilter && selectedGradeFilter !== 'all';
+    const isSearchFiltered = !!(studentSearch && studentSearch.trim());
+    const isFiltered = isClassFiltered || isGradeFiltered || isSearchFiltered;
+
+    if (isFiltered) {
+      const count = filteredStudents.length;
+      if (count === 0) {
+        Alert.alert('Bilgi', 'Şu anki filtreye uygun silinecek öğrenci bulunmuyor.');
+        return;
+      }
+
+      let filterDesc = '';
+      if (isClassFiltered) filterDesc += `Şube: ${selectedClassFilter} `;
+      if (isGradeFiltered) filterDesc += `Kademe: ${selectedGradeFilter}. Sınıf `;
+      if (isSearchFiltered) filterDesc += `Arama: "${studentSearch.trim()}"`;
+
+      Alert.alert(
+        'Filtrelenen Öğrencileri Sil',
+        `Şu an ekranda listelenen ${count} adet öğrenci silinecektir.\n(${filterDesc.trim()})\n\nBu işlem geri alınamaz. Devam etmek istiyor musunuz?`,
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: `Filtrelenenleri Sil (${count})`,
+            style: 'destructive',
+            onPress: async () => {
+              const studentIds = filteredStudents.map((s: any) => s.id);
+              const res = await apiRequest(`schools/${selectedSchool.id}/students/bulk-delete`, 'POST', {
+                studentIds,
+              });
+              if (res.success) {
+                Alert.alert('Başarılı', `${count} adet filtrelenmiş öğrenci silindi.`);
+                loadStudents(selectedSchool.id);
+              } else {
+                Alert.alert('Hata', res.error || 'Öğrenciler silinemedi.');
+              }
+            },
           },
-        },
-      ]
-    );
+        ]
+      );
+    } else {
+      Alert.alert(
+        'Tüm Öğrencileri Sil',
+        `"${selectedSchool.name}" okuluna kayıtlı TÜM ÖĞRENCİLER (${students.length} öğrenci) silinecektir. Emin misiniz?`,
+        [
+          { text: 'Vazgeç', style: 'cancel' },
+          {
+            text: 'Tümünü Sil',
+            style: 'destructive',
+            onPress: async () => {
+              const res = await apiRequest(`schools/${selectedSchool.id}/students/all`, 'DELETE');
+              if (res.success) {
+                Alert.alert('Başarılı', 'Okula kayıtlı tüm öğrenciler silindi.');
+                loadStudents(selectedSchool.id);
+              } else {
+                Alert.alert('Hata', res.error || 'Öğrenciler silinemedi.');
+              }
+            },
+          },
+        ]
+      );
+    }
   };
 
   const handleOpenEditLesson = (lesson: any) => {
