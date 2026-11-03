@@ -3709,19 +3709,44 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                       examStats.lessonItemAnalyses?.[0]?.sorular ||
                       []
                     ).map((q: any) => {
-                      const totalStudents = (Number(q.dogruSayisi) || 0) + (Number(q.yanlisSayisi) || 0) + (Number(q.bosSayisi) || 0);
-                      const pctDogru = Number(q.dogruYuzdesi) || 0;
-                      const pctYanlis = totalStudents > 0 ? Math.round(((Number(q.yanlisSayisi) || 0) * 1000) / totalStudents) / 10 : 0;
-                      const pctBos = totalStudents > 0 ? Math.round(((Number(q.bosSayisi) || 0) * 1000) / totalStudents) / 10 : 0;
+                      const getOptCount = (secMap: any, optKey: string) => {
+                        if (!secMap) return 0;
+                        const upper = optKey.toUpperCase();
+                        const lower = optKey.toLowerCase();
+                        return Number(secMap[upper] ?? secMap[lower] ?? 0);
+                      };
 
-                      // En Güçlü Çeldirici (Doğru cevap dışındaki en çok işaretlenen şık)
+                      const getEmptyCount = (secMap: any) => {
+                        if (!secMap) return 0;
+                        return Number(secMap.Bos ?? secMap.bos ?? secMap.BOS ?? 0);
+                      };
+
                       const correctKey = String(q.dogruCevapA || '').toUpperCase().trim();
                       const optionsList = ['A', 'B', 'C', 'D', 'E'];
+                      const optCounts: Record<string, number> = {};
+                      let sumOptions = 0;
+                      optionsList.forEach((opt) => {
+                        const c = getOptCount(q.secenekDagilimi, opt);
+                        optCounts[opt] = c;
+                        sumOptions += c;
+                      });
+                      const countBos = getEmptyCount(q.secenekDagilimi) || (Number(q.bosSayisi) || 0);
+
+                      const totalStudents = Math.max(
+                        (Number(q.dogruSayisi) || 0) + (Number(q.yanlisSayisi) || 0) + (Number(q.bosSayisi) || 0),
+                        sumOptions + countBos
+                      );
+
+                      const pctDogru = totalStudents > 0 ? Math.round(((Number(q.dogruSayisi) || 0) * 1000) / totalStudents) / 10 : (Number(q.dogruYuzdesi) || 0);
+                      const pctYanlis = totalStudents > 0 ? Math.round(((Number(q.yanlisSayisi) || 0) * 1000) / totalStudents) / 10 : 0;
+                      const pctBos = totalStudents > 0 ? Math.round((countBos * 1000) / totalStudents) / 10 : 0;
+
+                      // En Güçlü Çeldirici (Doğru cevap dışındaki en çok işaretlenen şık)
                       let topDistractorKey = '';
                       let topDistractorCount = 0;
                       optionsList.forEach((opt) => {
                         if (opt !== correctKey) {
-                          const count = Number(q.secenekDagilimi?.[opt]) || 0;
+                          const count = optCounts[opt];
                           if (count > topDistractorCount) {
                             topDistractorCount = count;
                             topDistractorKey = opt;
@@ -3738,31 +3763,36 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                           style={{
                             backgroundColor: '#FFFFFF',
                             borderRadius: 12,
-                            padding: 12,
-                            marginBottom: 10,
+                            padding: 14,
+                            marginBottom: 12,
                             borderWidth: 1,
                             borderColor: '#E2E8F0',
+                            shadowColor: '#000',
+                            shadowOffset: { width: 0, height: 1 },
+                            shadowOpacity: 0.05,
+                            shadowRadius: 3,
+                            elevation: 1,
                           }}
                         >
                           {/* Üst Başlık Satırı */}
-                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                              <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, flexWrap: 'wrap', gap: 6 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 200 }}>
+                              <View style={{ backgroundColor: '#EEF2FF', paddingHorizontal: 9, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#C7D2FE' }}>
                                 <Text style={{ fontSize: 12, fontWeight: '800', color: '#4F46E5' }}>Soru #{q.soruNo}</Text>
                               </View>
-                              <Text style={{ fontSize: 13, fontWeight: '800', color: '#0F172A', flex: 1 }} numberOfLines={1}>
+                              <Text style={{ fontSize: 13.5, fontWeight: '800', color: '#0F172A', flex: 1 }} numberOfLines={1}>
                                 {q.konuAdi || `Soru #${q.soruNo}`}
                               </Text>
                             </View>
 
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                              <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#BBF7D0' }}>
-                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#166534' }}>
+                              <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#86EFAC' }}>
+                                <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#166534' }}>
                                   Cevap: {correctKey || '-'}
                                 </Text>
                               </View>
-                              <View style={{ backgroundColor: diffBg, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 6 }}>
-                                <Text style={{ fontSize: 11, fontWeight: '800', color: diffColor }}>
+                              <View style={{ backgroundColor: diffBg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: diffColor + '40' }}>
+                                <Text style={{ fontSize: 11.5, fontWeight: '800', color: diffColor }}>
                                   %{pctDogru} ({q.zorlukDuzeyi})
                                 </Text>
                               </View>
@@ -3770,101 +3800,226 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                           </View>
 
                           {q.kazanimAciklamasi ? (
-                            <Text style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
-                              {q.kazanimAciklamasi}
+                            <Text style={{ fontSize: 11.5, color: '#64748B', marginBottom: 8, fontStyle: 'italic' }}>
+                              🎯 {q.kazanimAciklamasi}
                             </Text>
                           ) : null}
 
-                          {/* 📊 Segmented Bar Grafik (Doğru [Yeşil] / Yanlış [Kırmızı] / Boş [Gri]) */}
-                          <View style={{ height: 12, backgroundColor: '#E2E8F0', borderRadius: 6, overflow: 'hidden', flexDirection: 'row', marginVertical: 6 }}>
-                            {pctDogru > 0 && (
-                              <View style={{ width: `${pctDogru}%`, backgroundColor: '#22C55E' }} />
-                            )}
-                            {pctYanlis > 0 && (
-                              <View style={{ width: `${pctYanlis}%`, backgroundColor: '#EF4444' }} />
-                            )}
-                            {pctBos > 0 && (
-                              <View style={{ width: `${pctBos}%`, backgroundColor: '#94A3B8' }} />
-                            )}
-                          </View>
-
-                          {/* Doğru / Yanlış / Boş Sayıları */}
-                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803D' }}>
-                                ✅ Doğru: {q.dogruSayisi} (%{pctDogru})
-                              </Text>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>
-                                ❌ Yanlış: {q.yanlisSayisi} (%{pctYanlis})
-                              </Text>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B' }}>
-                                ⚪ Boş: {q.bosSayisi} (%{pctBos})
+                          {/* 📊 Segmented Genel Başarı Çubuğu (Doğru / Yanlış / Boş) */}
+                          <View style={{ marginVertical: 6 }}>
+                            <View style={{ height: 14, backgroundColor: '#E2E8F0', borderRadius: 7, overflow: 'hidden', flexDirection: 'row' }}>
+                              {pctDogru > 0 && (
+                                <View style={{ width: `${pctDogru}%`, backgroundColor: '#10B981' }} />
+                              )}
+                              {pctYanlis > 0 && (
+                                <View style={{ width: `${pctYanlis}%`, backgroundColor: '#EF4444' }} />
+                              )}
+                              {pctBos > 0 && (
+                                <View style={{ width: `${pctBos}%`, backgroundColor: '#94A3B8' }} />
+                              )}
+                            </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 5, flexWrap: 'wrap', gap: 6 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#15803D' }}>
+                                  ✅ Doğru: {q.dogruSayisi} (%{pctDogru})
+                                </Text>
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#DC2626' }}>
+                                  ❌ Yanlış: {q.yanlisSayisi} (%{pctYanlis})
+                                </Text>
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748B' }}>
+                                  ⚪ Boş: {countBos} (%{pctBos})
+                                </Text>
+                              </View>
+                              <Text style={{ fontSize: 11, fontWeight: '600', color: '#475569' }}>
+                                Toplam: {totalStudents} öğrenci
                               </Text>
                             </View>
-                            <Text style={{ fontSize: 11, color: '#475569' }}>
-                              Toplam: {totalStudents} öğr.
-                            </Text>
                           </View>
 
-                          {/* Şık Dağılımı Rozetleri (Çeldirici Vurgulu) */}
-                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#F1F5F9' }}>
-                            {optionsList.map((opt) => {
-                              const count = Number(q.secenekDagilimi?.[opt]) || 0;
-                              const optPct = totalStudents > 0 ? Math.round((count * 1000) / totalStudents) / 10 : 0;
-                              const isCorrect = opt === correctKey;
-                              const isTopDistractor = !isCorrect && opt === topDistractorKey && count > 0;
+                          {/* 🔬 Şık Dağılımı ve Çeldirici Grafiği */}
+                          <View
+                            style={{
+                              marginTop: 10,
+                              backgroundColor: '#F8FAFC',
+                              borderRadius: 10,
+                              padding: 10,
+                              borderWidth: 1,
+                              borderColor: '#E2E8F0',
+                            }}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 4 }}>
+                              <Text style={{ fontSize: 11.5, fontWeight: '800', color: '#334155' }}>
+                                📊 Şık İşaretlenme Dağılımı ve Çeldirici Grafiği:
+                              </Text>
+                              {topDistractorKey && topDistractorCount > 0 ? (
+                                <View style={{ backgroundColor: '#FEF2F2', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 5, borderWidth: 1, borderColor: '#FCA5A5' }}>
+                                  <Text style={{ fontSize: 10.5, fontWeight: '800', color: '#DC2626' }}>
+                                    ⚠️ En Güçlü Çeldirici: {topDistractorKey} ({topDistractorCount} öğr. - %{totalStudents > 0 ? Math.round((topDistractorCount * 1000) / totalStudents) / 10 : 0})
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
 
-                              return (
-                                <View
-                                  key={opt}
-                                  style={{
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                    paddingHorizontal: 8,
-                                    paddingVertical: 4,
-                                    borderRadius: 6,
-                                    backgroundColor: isCorrect ? '#DCFCE7' : isTopDistractor ? '#FEF2F2' : '#F8FAFC',
-                                    borderWidth: 1,
-                                    borderColor: isCorrect ? '#86EFAC' : isTopDistractor ? '#FCA5A5' : '#E2E8F0',
-                                  }}
-                                >
-                                  <Text
+                            <View style={{ gap: 6 }}>
+                              {optionsList.map((opt) => {
+                                const count = optCounts[opt];
+                                const optPct = totalStudents > 0 ? Math.round((count * 1000) / totalStudents) / 10 : 0;
+                                const isCorrect = opt === correctKey;
+                                const isTopDistractor = !isCorrect && opt === topDistractorKey && count > 0;
+
+                                const barColor = isCorrect
+                                  ? '#10B981'
+                                  : isTopDistractor
+                                  ? '#F43F5E'
+                                  : count > 0
+                                  ? '#6366F1'
+                                  : '#CBD5E1';
+
+                                return (
+                                  <View
+                                    key={opt}
                                     style={{
-                                      fontSize: 11,
-                                      fontWeight: isCorrect || isTopDistractor ? '800' : '600',
-                                      color: isCorrect ? '#166534' : isTopDistractor ? '#991B1B' : '#334155',
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      gap: 8,
+                                      backgroundColor: isCorrect ? '#F0FDF4' : isTopDistractor ? '#FFF1F2' : '#FFFFFF',
+                                      paddingVertical: 5,
+                                      paddingHorizontal: 8,
+                                      borderRadius: 8,
+                                      borderWidth: 1,
+                                      borderColor: isCorrect ? '#BBF7D0' : isTopDistractor ? '#FECDD3' : '#E2E8F0',
                                     }}
                                   >
-                                    {opt}: {count} (%{optPct})
-                                  </Text>
-                                  {isCorrect && (
-                                    <Text style={{ fontSize: 9, fontWeight: '800', color: '#166534' }}>✓ DOĞRU</Text>
-                                  )}
-                                  {isTopDistractor && (
-                                    <Text style={{ fontSize: 9, fontWeight: '800', color: '#DC2626' }}>⚠️ Çeldirici</Text>
-                                  )}
-                                </View>
-                              );
-                            })}
+                                    {/* Şık Harfi Rozeti */}
+                                    <View
+                                      style={{
+                                        width: 26,
+                                        height: 26,
+                                        borderRadius: 13,
+                                        backgroundColor: isCorrect ? '#16A34A' : isTopDistractor ? '#E11D48' : '#F1F5F9',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        borderWidth: 1,
+                                        borderColor: isCorrect ? '#15803D' : isTopDistractor ? '#BE123C' : '#CBD5E1',
+                                      }}
+                                    >
+                                      <Text
+                                        style={{
+                                          fontSize: 12,
+                                          fontWeight: '900',
+                                          color: isCorrect || isTopDistractor ? '#FFFFFF' : '#334155',
+                                        }}
+                                      >
+                                        {opt}
+                                      </Text>
+                                    </View>
 
-                            {/* Boş Bırakanlar Rozeti */}
-                            <View
-                              style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 4,
-                                paddingHorizontal: 8,
-                                paddingVertical: 4,
-                                borderRadius: 6,
-                                backgroundColor: '#F8FAFC',
-                                borderWidth: 1,
-                                borderColor: '#E2E8F0',
-                              }}
-                            >
-                              <Text style={{ fontSize: 11, color: '#64748B' }}>
-                                Boş: {q.secenekDagilimi?.Bos || 0} (%{pctBos})
-                              </Text>
+                                    {/* Görsel İlerleme Çubuğu */}
+                                    <View
+                                      style={{
+                                        flex: 1,
+                                        height: 14,
+                                        backgroundColor: '#F1F5F9',
+                                        borderRadius: 7,
+                                        overflow: 'hidden',
+                                        borderWidth: 0.5,
+                                        borderColor: '#E2E8F0',
+                                      }}
+                                    >
+                                      <View
+                                        style={{
+                                          width: `${Math.min(100, Math.max(optPct, count > 0 ? 3 : 0))}%`,
+                                          height: '100%',
+                                          backgroundColor: barColor,
+                                          borderRadius: 7,
+                                        }}
+                                      />
+                                    </View>
+
+                                    {/* Sayı ve Yüzde Değeri */}
+                                    <View style={{ minWidth: 95, alignItems: 'flex-end' }}>
+                                      <Text
+                                        style={{
+                                          fontSize: 11.5,
+                                          fontWeight: isCorrect || isTopDistractor ? '800' : '700',
+                                          color: isCorrect ? '#15803D' : isTopDistractor ? '#BE123C' : '#334155',
+                                        }}
+                                      >
+                                        {count} öğr. (%{optPct})
+                                      </Text>
+                                    </View>
+
+                                    {/* Etiket */}
+                                    <View style={{ width: 85, alignItems: 'flex-start' }}>
+                                      {isCorrect ? (
+                                        <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4 }}>
+                                          <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#166534' }}>✓ Doğru</Text>
+                                        </View>
+                                      ) : isTopDistractor ? (
+                                        <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 5, paddingVertical: 1.5, borderRadius: 4 }}>
+                                          <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#DC2626' }}>⚠️ Çeldirici</Text>
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                  </View>
+                                );
+                              })}
+
+                              {/* Boş Bırakanlar Çubuğu */}
+                              <View
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  backgroundColor: '#FFFFFF',
+                                  paddingVertical: 5,
+                                  paddingHorizontal: 8,
+                                  borderRadius: 8,
+                                  borderWidth: 1,
+                                  borderColor: '#E2E8F0',
+                                }}
+                              >
+                                <View
+                                  style={{
+                                    width: 26,
+                                    height: 26,
+                                    borderRadius: 13,
+                                    backgroundColor: '#F1F5F9',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    borderWidth: 1,
+                                    borderColor: '#CBD5E1',
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 10, fontWeight: '800', color: '#64748B' }}>Boş</Text>
+                                </View>
+                                <View
+                                  style={{
+                                    flex: 1,
+                                    height: 12,
+                                    backgroundColor: '#F1F5F9',
+                                    borderRadius: 6,
+                                    overflow: 'hidden',
+                                    borderWidth: 0.5,
+                                    borderColor: '#E2E8F0',
+                                  }}
+                                >
+                                  <View
+                                    style={{
+                                      width: `${Math.min(100, Math.max(pctBos, countBos > 0 ? 3 : 0))}%`,
+                                      height: '100%',
+                                      backgroundColor: '#94A3B8',
+                                      borderRadius: 6,
+                                    }}
+                                  />
+                                </View>
+                                <View style={{ minWidth: 95, alignItems: 'flex-end' }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '600', color: '#64748B' }}>
+                                    {countBos} öğr. (%{pctBos})
+                                  </Text>
+                                </View>
+                                <View style={{ width: 85 }} />
+                              </View>
                             </View>
                           </View>
                         </View>
@@ -5530,7 +5685,7 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
       {/* ===================================================================== */}
       <Modal visible={evalModalVisible} transparent animationType="fade" onRequestClose={() => setEvalModalVisible(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalLargeCard, { maxWidth: 960, maxHeight: '94%' }]}>
+          <View style={[styles.modalLargeCard, { width: Platform.OS === 'web' ? '90%' : '96%', maxWidth: Platform.OS === 'web' ? '90%' : 960, maxHeight: '94%' }]}>
             <View style={styles.modalTopBar}>
               <Text style={styles.modalLargeTitle}>🎯 Optik Okuyucu TXT / DAT Değerlendirme ({evalExam?.sinavAdi})</Text>
               <TouchableOpacity style={styles.closeBtn} onPress={() => setEvalModalVisible(false)}>
@@ -5767,216 +5922,216 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                         {/* Parametre Giriş Grid'i */}
                         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                           {/* 1. Numara */}
-                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
-                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                          <View style={{ flex: 1, minWidth: 170, backgroundColor: '#FFFFFF', padding: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
                               👤 Öğrenci Numarası
                             </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+                              <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraBaslangic: Math.max(0, (p.numaraBaslangic || 0) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.numaraBaslangic ?? 0)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, numaraBaslangic: parseColInput(t, 0) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraBaslangic: (p.numaraBaslangic || 0) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
 
-                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraUzunluk: Math.max(1, (p.numaraUzunluk || 5) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.numaraUzunluk ?? 5)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, numaraUzunluk: Math.max(1, parseColInput(t, 5)) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, numaraUzunluk: (p.numaraUzunluk || 5) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
                             </View>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
-                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                              <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 10.5, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
                                 [{sliceEvalLine(evalCustomParams.numaraBaslangic, evalCustomParams.numaraUzunluk)}]
                               </Text>
                             </View>
                           </View>
 
                           {/* 2. Ad Soyad */}
-                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
-                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                          <View style={{ flex: 1, minWidth: 170, backgroundColor: '#FFFFFF', padding: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
                               📛 Ad Soyad
                             </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+                              <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadBaslangic: Math.max(0, (p.adSoyadBaslangic || 0) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.adSoyadBaslangic ?? 5)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, adSoyadBaslangic: parseColInput(t, 5) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadBaslangic: (p.adSoyadBaslangic || 0) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
 
-                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadUzunluk: Math.max(1, (p.adSoyadUzunluk || 20) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.adSoyadUzunluk ?? 20)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, adSoyadUzunluk: Math.max(1, parseColInput(t, 20)) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, adSoyadUzunluk: (p.adSoyadUzunluk || 20) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
                             </View>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
-                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                              <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 10.5, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
                                 [{sliceEvalLine(evalCustomParams.adSoyadBaslangic, evalCustomParams.adSoyadUzunluk)}]
                               </Text>
                             </View>
                           </View>
 
                           {/* 3. Sınıf / Şube */}
-                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
-                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                          <View style={{ flex: 1, minWidth: 170, backgroundColor: '#FFFFFF', padding: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
                               🏫 Sınıf / Şube
                             </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+                              <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifBaslangic: Math.max(0, (p.sinifBaslangic || 0) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.sinifBaslangic ?? 25)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, sinifBaslangic: parseColInput(t, 25) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifBaslangic: (p.sinifBaslangic || 0) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
 
-                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifUzunluk: Math.max(0, (p.sinifUzunluk || 4) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.sinifUzunluk ?? 4)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, sinifUzunluk: parseColInput(t, 4) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, sinifUzunluk: (p.sinifUzunluk || 4) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
                             </View>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
-                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                              <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 10.5, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
                                 [{sliceEvalLine(evalCustomParams.sinifBaslangic, evalCustomParams.sinifUzunluk)}]
                               </Text>
                             </View>
                           </View>
 
                           {/* 4. Kitapçık */}
-                          <View style={{ flex: 1, minWidth: 210, backgroundColor: '#FFFFFF', padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
-                            <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#1E293B' }}>
+                          <View style={{ flex: 1, minWidth: 170, backgroundColor: '#FFFFFF', padding: 7, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#1E293B' }}>
                               📖 Kitapçık Türü
                             </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10.5, color: '#64748B' }}>Başl:</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4, flexWrap: 'wrap' }}>
+                              <Text style={{ fontSize: 10, color: '#64748B' }}>Başl:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruBaslangic: Math.max(0, (p.kitapcikTuruBaslangic || 0) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.kitapcikTuruBaslangic ?? 29)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruBaslangic: parseColInput(t, 29) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruBaslangic: (p.kitapcikTuruBaslangic || 0) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
 
-                              <Text style={{ fontSize: 10.5, color: '#64748B', marginLeft: 6 }}>Uzn:</Text>
+                              <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Uzn:</Text>
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruUzunluk: Math.max(1, (p.kitapcikTuruUzunluk || 1) - 1) }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>-1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                               </TouchableOpacity>
                               <TextInput
-                                style={[styles.compactNumInput, { width: 44, textAlign: 'center', height: 26, fontSize: 11 }]}
+                                style={[styles.compactNumInput, { width: 34, textAlign: 'center', height: 22, fontSize: 11, paddingHorizontal: 2, paddingVertical: 0 }]}
                                 keyboardType="numeric"
                                 value={String(evalCustomParams.kitapcikTuruUzunluk ?? 1)}
                                 onChangeText={(t) => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruUzunluk: Math.max(1, parseColInput(t, 1)) }))}
                               />
                               <TouchableOpacity
                                 onPress={() => setEvalCustomParams((p: any) => ({ ...p, kitapcikTuruUzunluk: (p.kitapcikTuruUzunluk || 1) + 1 }))}
-                                style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                style={{ backgroundColor: '#F1F5F9', width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                               >
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#334155' }}>+1</Text>
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                               </TouchableOpacity>
                             </View>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 5 }}>
-                              <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
-                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 11, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                              <Text style={{ fontSize: 9.5, fontWeight: '700', color: '#64748B' }}>Kesit:</Text>
+                              <Text style={{ fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', fontSize: 10.5, fontWeight: '800', color: '#16A34A', backgroundColor: '#F0FDF4', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: '#BBF7D0' }}>
                                 [{sliceEvalLine(evalCustomParams.kitapcikTuruBaslangic, evalCustomParams.kitapcikTuruUzunluk)}]
                               </Text>
                             </View>
@@ -6013,12 +6168,12 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                                       arr[dIdx] = { ...arr[dIdx], baslangicSutun: Math.max(0, (arr[dIdx].baslangicSutun || 0) - 1) };
                                       setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
                                     }}
-                                    style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                    style={{ backgroundColor: '#F1F5F9', width: 20, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 3, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                                   >
-                                    <Text style={{ fontSize: 9.5, fontWeight: '700' }}>-1</Text>
+                                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>-</Text>
                                   </TouchableOpacity>
                                   <TextInput
-                                    style={[styles.compactNumInput, { width: 40, textAlign: 'center', height: 24, fontSize: 10.5 }]}
+                                    style={[styles.compactNumInput, { width: 32, textAlign: 'center', height: 22, fontSize: 10.5, paddingHorizontal: 1, paddingVertical: 0 }]}
                                     keyboardType="numeric"
                                     value={String(d.baslangicSutun ?? 0)}
                                     onChangeText={(t) => {
@@ -6033,9 +6188,9 @@ export const OptikModuleView: React.FC<OptikModuleViewProps> = ({
                                       arr[dIdx] = { ...arr[dIdx], baslangicSutun: (arr[dIdx].baslangicSutun || 0) + 1 };
                                       setEvalCustomParams((p: any) => ({ ...p, dersler: arr }));
                                     }}
-                                    style={{ backgroundColor: '#F1F5F9', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
+                                    style={{ backgroundColor: '#F1F5F9', width: 20, height: 20, alignItems: 'center', justifyContent: 'center', borderRadius: 3, borderWidth: 1, borderColor: '#CBD5E1', cursor: 'pointer' as any }}
                                   >
-                                    <Text style={{ fontSize: 9.5, fontWeight: '700' }}>+1</Text>
+                                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#334155', lineHeight: 14 }}>+</Text>
                                   </TouchableOpacity>
 
                                   <Text style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>Soru:</Text>

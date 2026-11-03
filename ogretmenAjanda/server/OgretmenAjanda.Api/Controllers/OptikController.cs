@@ -1919,9 +1919,11 @@ namespace OgretmenAjanda.Api.Controllers
                     foreach (var item in dResults)
                     {
                         var dr = item.Ders!;
-                        char cvp = idx < dr.OgrenciCevaplari.Length ? dr.OgrenciCevaplari[idx] : ' ';
+                        char rawCvp = idx < dr.OgrenciCevaplari.Length ? dr.OgrenciCevaplari[idx] : ' ';
+                        char cvp = char.ToUpperInvariant(rawCvp);
                         string keyStr = dr.CevapAnahtari ?? d.CevapAnahtariA ?? "";
-                        char keyChar = idx < keyStr.Length ? keyStr[idx] : ' ';
+                        char rawKey = idx < keyStr.Length ? keyStr[idx] : ' ';
+                        char keyChar = char.ToUpperInvariant(rawKey);
 
                         if (cvp == 'A') optA++;
                         else if (cvp == 'B') optB++;
@@ -1940,7 +1942,7 @@ namespace OgretmenAjanda.Api.Controllers
                     double dogruPct = totalAns > 0 ? Math.Round((cDogru * 100.0) / totalAns, 1) : 0;
                     lessonKazanimMap.TryGetValue(q, out var kDef);
 
-                    char aKeyChar = (q - 1) < (d.CevapAnahtariA?.Length ?? 0) ? d.CevapAnahtariA![q - 1] : '-';
+                    char aKeyChar = (q - 1) < (d.CevapAnahtariA?.Length ?? 0) ? char.ToUpperInvariant(d.CevapAnahtariA![q - 1]) : '-';
 
                     questions.Add(new
                     {
@@ -1953,7 +1955,21 @@ namespace OgretmenAjanda.Api.Controllers
                         bosSayisi = cBos,
                         dogruYuzdesi = dogruPct,
                         zorlukDuzeyi = dogruPct >= 75 ? "Kolay" : (dogruPct >= 45 ? "Orta" : "Zor / Çok Fire Verilen"),
-                        secenekDagilimi = new { A = optA, B = optB, C = optC, D = optD, E = optE, Bos = cBos }
+                        secenekDagilimi = new
+                        {
+                            A = optA,
+                            B = optB,
+                            C = optC,
+                            D = optD,
+                            E = optE,
+                            a = optA,
+                            b = optB,
+                            c = optC,
+                            d = optD,
+                            e = optE,
+                            Bos = cBos,
+                            bos = cBos
+                        }
                     });
                 }
 
@@ -2170,8 +2186,8 @@ namespace OgretmenAjanda.Api.Controllers
                 for (int q = 1; q <= d.SoruSayisi; q++)
                 {
                     int idx = q - 1;
-                    char cvp = idx < ogrCevap.Length ? ogrCevap[idx] : ' ';
-                    char keyChar = idx < anahtar.Length ? anahtar[idx] : ' ';
+                    char cvp = idx < ogrCevap.Length ? char.ToUpperInvariant(ogrCevap[idx]) : ' ';
+                    char keyChar = idx < anahtar.Length ? char.ToUpperInvariant(anahtar[idx]) : ' ';
 
                     string durum = "BOS";
                     if (keyChar == 'X') durum = "IPTAL";

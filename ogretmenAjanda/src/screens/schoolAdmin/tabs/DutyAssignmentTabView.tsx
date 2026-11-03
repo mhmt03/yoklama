@@ -811,16 +811,29 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
 
                                       {(() => {
                                         const q = manualPickerSearch.trim().toLowerCase();
-                                        const candidates = (sortedTeachers || [])
-                                          .filter((t: any) => {
-                                            const tName = String(t.fullName || t.name || '').trim();
-                                            if (!tName) return false;
-                                            if (isSameTeacher(tName, slotItem.teacherName)) return false;
-                                            if (!q) return true;
-                                            const tBranch = String(t.branch || '').toLowerCase();
-                                            return tName.toLowerCase().includes(q) || tBranch.includes(q);
-                                          })
-                                          .slice(0, 20);
+                                        const filtered = (sortedTeachers || []).filter((t: any) => {
+                                          const tName = String(t.fullName || t.name || '').trim();
+                                          if (!tName) return false;
+                                          if (isSameTeacher(tName, slotItem.teacherName)) return false;
+                                          if (!q) return true;
+                                          const tBranch = String(t.branch || '').toLowerCase();
+                                          return tName.toLowerCase().includes(q) || tBranch.includes(q);
+                                        });
+
+                                        // En üstte önce bugün nöbetçi olanlar (alfabetik), sonra nöbetçi olmayanlar (alfabetik)
+                                        const candidates = [...filtered].sort((a: any, b: any) => {
+                                          const aName = String(a.fullName || a.name || '').trim();
+                                          const bName = String(b.fullName || b.name || '').trim();
+                                          const aDuty = (dutiesList || []).some(
+                                            (d: any) => (Number(d.dayOfWeek) || 1) === dutyAssignDay && isSameTeacher(d.teacherName, aName)
+                                          );
+                                          const bDuty = (dutiesList || []).some(
+                                            (d: any) => (Number(d.dayOfWeek) || 1) === dutyAssignDay && isSameTeacher(d.teacherName, bName)
+                                          );
+                                          if (aDuty && !bDuty) return -1;
+                                          if (!aDuty && bDuty) return 1;
+                                          return aName.localeCompare(bName, 'tr');
+                                        });
 
                                         if (candidates.length === 0) {
                                           return (
@@ -831,7 +844,7 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                         }
 
                                         return (
-                                          <ScrollView style={{ maxHeight: 150 }} nestedScrollEnabled={true}>
+                                          <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled={true}>
                                             {candidates.map((t: any, cIdx: number) => {
                                               const tName = String(t.fullName || t.name || '').trim();
                                               const isAssigned = (dutySubstitutions || []).some(
@@ -855,35 +868,35 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                               );
 
                                               let statusBadge = {
-                                                text: '👤 Nöbetçi Değil',
+                                                text: '👤 Nöbetçi Değil • Boş',
                                                 bg: '#F1F5F9',
                                                 color: '#475569',
                                                 border: '#CBD5E1',
                                               };
                                               if (isAssigned) {
                                                 statusBadge = {
-                                                  text: '✓ Bu Saate Atandı',
+                                                  text: `✓ Bu Saate Atandı${dayDuty?.dutyPlace ? ` (${dayDuty.dutyPlace})` : ''}`,
                                                   bg: '#DCFCE7',
                                                   color: '#15803D',
                                                   border: '#86EFAC',
                                                 };
                                               } else if (dayDuty && busySchedule) {
                                                 statusBadge = {
-                                                  text: `🛡️ Nöbetçi (${busySchedule.className || 'Derste'})`,
+                                                  text: `🛡️ Nöbet Yeri: ${dayDuty.dutyPlace || 'Genel'} | ⚠️ Derste (${busySchedule.className || 'Dolu'})`,
                                                   bg: '#FEF3C7',
                                                   color: '#B45309',
                                                   border: '#FDE68A',
                                                 };
                                               } else if (dayDuty) {
                                                 statusBadge = {
-                                                  text: `🛡️ Nöbetçi (${dayDuty.dutyPlace || 'Müsait'})`,
+                                                  text: `🛡️ Nöbet Yeri: ${dayDuty.dutyPlace || 'Genel'} | ✓ Dersi Boş (Müsait)`,
                                                   bg: '#DCFCE7',
                                                   color: '#15803D',
                                                   border: '#86EFAC',
                                                 };
                                               } else if (busySchedule) {
                                                 statusBadge = {
-                                                  text: `⚠️ Derste (${busySchedule.className || 'Dolu'})`,
+                                                  text: `⚠️ Derste (${busySchedule.className || 'Dolu'}) • Nöbetçi Değil`,
                                                   bg: '#FFE4E6',
                                                   color: '#BE123C',
                                                   border: '#FDA4AF',
@@ -905,19 +918,28 @@ export function DutyAssignmentTabView({ ctx }: { ctx: SchoolAdminCtx }) {
                                                   }}
                                                 >
                                                   <View style={{ flex: 1 }}>
-                                                    <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#0F172A' }} numberOfLines={1}>
-                                                      {tName} {t.branch ? `(${t.branch})` : ''}
-                                                    </Text>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                                      <Text style={{ fontSize: 11.5, fontWeight: '700', color: '#0F172A' }}>
+                                                        {tName} {t.branch ? `(${t.branch})` : ''}
+                                                      </Text>
+                                                      {dayDuty ? (
+                                                        <View style={{ backgroundColor: '#DCFCE7', borderColor: '#86EFAC', borderWidth: 1, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                                                          <Text style={{ fontSize: 9.5, fontWeight: '800', color: '#15803D' }}>
+                                                            🛡️ Nöbet: {dayDuty.dutyPlace || 'Tanımlı'}
+                                                          </Text>
+                                                        </View>
+                                                      ) : null}
+                                                    </View>
                                                     <View
                                                       style={{
                                                         backgroundColor: statusBadge.bg,
                                                         borderColor: statusBadge.border,
                                                         borderWidth: 1,
-                                                        paddingHorizontal: 4,
-                                                        paddingVertical: 1,
+                                                        paddingHorizontal: 5,
+                                                        paddingVertical: 1.5,
                                                         borderRadius: 4,
                                                         alignSelf: 'flex-start',
-                                                        marginTop: 2,
+                                                        marginTop: 3,
                                                       }}
                                                     >
                                                       <Text style={{ fontSize: 9.5, fontWeight: '700', color: statusBadge.color }}>

@@ -134,9 +134,9 @@ export const downloadAnswerKeyExcelTemplate = async (editingExam: any) => {
     const dersler = Array.isArray(editingExam?.dersler) && editingExam.dersler.length > 0
       ? editingExam.dersler
       : [
-          { dersAdi: 'Türk Dili ve Edebiyatı', soruSayisi: 20, katsayi: 1.5, cevapAnahtariA: 'ABCDABCDABCDABCDABCD', cevapAnahtariB: 'BCDABCDABCDABCDABCDA' },
-          { dersAdi: 'Matematik', soruSayisi: 20, katsayi: 2.0, cevapAnahtariA: 'ABCDABCDABCDABCDABCD', cevapAnahtariB: 'BCDABCDABCDABCDABCDA' },
-        ];
+        { dersAdi: 'Türk Dili ve Edebiyatı', soruSayisi: 20, katsayi: 1.5, cevapAnahtariA: 'ABCDABCDABCDABCDABCD', cevapAnahtariB: 'BCDABCDABCDABCDABCDA' },
+        { dersAdi: 'Matematik', soruSayisi: 20, katsayi: 2.0, cevapAnahtariA: 'ABCDABCDABCDABCDABCD', cevapAnahtariB: 'BCDABCDABCDABCDABCDA' },
+      ];
 
     // Sayfa 1: Soru Bazlı Dikey Şablon (Hem Cevap Anahtarı Hem Konu/Kazanım Girilebilir!)
     const questionRows: any[] = [];
@@ -673,12 +673,12 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
       const grupOzetleriHtml = grupOzetleriList.length > 0
         ? `<div style="margin:6px 0 10px 0;padding:6px 10px;background:#F8FAFC;border:1px solid #CBD5E1;border-radius:6px;font-size:10px;">
             <b style="color:#1E293B;">🏷️ Ders Grubu Toplamları: </b>` +
-          grupOzetleriList.map((grp: any) =>
-            `<span style="display:inline-block;margin-right:10px;background:#FFF;border:1px solid #E2E8F0;padding:2px 8px;border-radius:4px;">
+        grupOzetleriList.map((grp: any) =>
+          `<span style="display:inline-block;margin-right:10px;background:#FFF;border:1px solid #E2E8F0;padding:2px 8px;border-radius:4px;">
               <b>${escapeHtml(grp.grupAdi)}:</b> ${grp.dogruSayisi}D · ${grp.yanlisSayisi}Y · <b style="color:#1D4ED8;">${grp.net} Net</b> (%${grp.basariYuzdesi})
             </span>`
-          ).join('') +
-          `</div>`
+        ).join('') +
+        `</div>`
         : '';
 
       // 3. Geçmiş Sınavlar Karşılaştırmalı Gelişim Tablosu (karne örnek.pdf Page 1 gibi)
@@ -796,14 +796,13 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
                 </thead>
                 <tbody>
                   ${kazanimlar
-                    .map((k: any) => {
-                      const durumColor =
-                        k.basariYuzdesi >= 75 ? '#15803D' : k.basariYuzdesi >= 50 ? '#B45309' : '#DC2626';
-                      return `<tr>
+            .map((k: any) => {
+              const durumColor =
+                k.basariYuzdesi >= 75 ? '#15803D' : k.basariYuzdesi >= 50 ? '#B45309' : '#DC2626';
+              return `<tr>
                         <td style="border:1px solid #E2E8F0;padding:3px 5px;font-weight:600;">${escapeHtml(k.dersAdi)}</td>
-                        <td style="border:1px solid #E2E8F0;padding:3px 5px;"><b>${escapeHtml(k.konuAdi)}</b>${
-                          k.kazanimAciklamasi ? ` — ${escapeHtml(k.kazanimAciklamasi)}` : ''
-                        }</td>
+                        <td style="border:1px solid #E2E8F0;padding:3px 5px;"><b>${escapeHtml(k.konuAdi)}</b>${k.kazanimAciklamasi ? ` — ${escapeHtml(k.kazanimAciklamasi)}` : ''
+                }</td>
                         <td style="border:1px solid #E2E8F0;padding:3px;text-align:center;">${k.toplamSoru}</td>
                         <td style="border:1px solid #E2E8F0;padding:3px;text-align:center;color:#15803D;font-weight:700;">${k.dogruSayisi}</td>
                         <td style="border:1px solid #E2E8F0;padding:3px;text-align:center;color:#DC2626;font-weight:700;">${k.yanlisSayisi}</td>
@@ -811,8 +810,8 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
                         <td style="border:1px solid #E2E8F0;padding:3px;text-align:center;font-weight:700;color:${durumColor};">%${k.basariYuzdesi}</td>
                         <td style="border:1px solid #E2E8F0;padding:3px;text-align:center;font-weight:700;color:${durumColor};">${escapeHtml(k.durum)}</td>
                       </tr>`;
-                    })
-                    .join('')}
+            })
+            .join('')}
                 </tbody>
               </table>
             </div>`
@@ -875,7 +874,7 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
 
       const isLast = idx === reportsList.length - 1;
       return `<div style="${isLast ? '' : 'page-break-after: always;'}padding:4px 0;">
-        {/* Sayfa 1: Üst Başlık & Öğrenci Bilgileri */}
+        
         <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #1E3A8A;padding-bottom:6px;margin-bottom:8px;">
           <div>
             <div style="font-size:15px;font-weight:800;color:#1E3A8A;">🎓 ${escapeHtml(examName)} — Öğrenci Sınav Karnesi</div>
@@ -889,7 +888,7 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
           </div>
         </div>
 
-        {/* Puan ve Dereceler Özeti */}
+        Puan ve Dereceler Özeti
         <div style="display:flex;gap:8px;margin-bottom:10px;">
           <div style="flex:1;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px;padding:6px;text-align:center;">
             <div style="font-size:15px;font-weight:800;color:#1D4ED8;">${stu.toplamNet} Net</div>
@@ -909,7 +908,7 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
           </div>
         </div>
 
-        {/* 1. Ders Bazlı Performans Tablosu */}
+        Ders Bazlı Performans Tablosu 
         <div style="font-size:11px;font-weight:800;color:#1E3A8A;margin-bottom:4px;">📚 DERS BAZLI PERFORMANS TABLOSU</div>
         <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:8px;">
           <thead>
@@ -933,14 +932,14 @@ export const printOptikStudentReportsPdf = (examInfo: any, reportsList: any[]) =
 
         ${grupOzetleriHtml}
 
-        {/* Son Sınavların Karşılaştırmalı Sonuçları */}
+        Son Sınavların Karşılaştırmalı Sonuçları 
         ${recentExamsHtml}
 
-        {/* Soru ve Cevap Anahtarı Şeridi */}
+        Soru ve Cevap Anahtarı
         <div style="font-size:11px;font-weight:800;color:#1E3A8A;margin-bottom:4px;margin-top:6px;">🔍 SORU VE CEVAP ANAHTARI ŞERİDİ (Üst: Soru No · Orta: Öğrenci Cevabı · Alt: Doğru Cevap)</div>
         ${opticalStripsHtml}
 
-        {/* Sayfa 2: Konu ve Kazanım Analizi (varsa) */}
+        Konu ve Kazanım Analizi (varsa)
         ${page2Html}
       </div>`;
     })
